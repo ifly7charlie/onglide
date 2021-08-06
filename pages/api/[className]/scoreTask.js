@@ -250,6 +250,12 @@ export default async function scoreTask( req, res ) {
 
     // Update the geoJSON with the scored trackline so we can easily display
     // what the pilot has been scored for
+    _foreach( trackers, (tracker,compno) => {
+		// Generate some statistics
+		console.log( "compn:", compno );
+		generateStatistics( tracker, state[compno], points[compno] );
+    });
+
     _foreach( trackers, (pilot) => {
         if( pilot ) {
 			// And form the line
