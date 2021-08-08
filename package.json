@@ -51,6 +51,7 @@
         "react-dom": ">=16.13.1",
         "react-map-gl": ">=5.2.7",
         "react-use-websocket": ">=2.0.3",
+        "sass": "^1.36.0",
         "serverless-mysql": ">=1.5.4",
         "sql-template-strings": ">=2.2.2",
         "swr": ">=0.2.3",
