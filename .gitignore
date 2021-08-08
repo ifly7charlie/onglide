@@ -107,6 +107,8 @@ dist
 
 # Local environment variables
 .env.local
+.env.local*
+.env*.local
 
 # emacs temporary files
 *~
