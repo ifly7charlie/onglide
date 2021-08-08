@@ -1,6 +1,5 @@
 import next from 'next'
 import { useRouter } from 'next/router'
-import dynamic from 'next/dynamic'
 import Head from 'next/head'
 
 // What do we need to render the bootstrap part of the page
@@ -16,13 +15,7 @@ import { useState, useRef } from 'react';
 
 // Helpers for loading contest information etc
 import { useContest, usePilots, useTask, Spinner, Error } from '../lib/loaders.js';
-import { TaskDetails } from '../lib/taskdetails.js';
 import { Nbsp, Icon } from '../lib/htmlhelper.js';
-import { PilotList } from '../lib/pilotlist.js';
-
-// Dynamically load the map as it's big and slow
-const TaskMap  = dynamic(() => import( '../lib/taskmap.js' ),
-                         { loading: () => <Spinner/>});
 
 // And connect to websockets...
 import { OgnFeed } from '../lib/ognfeed.js';
@@ -100,14 +93,9 @@ function CombinePage( props ) {
         className = props.defaultClass;
     }
 
-    // For remote updating of the map
-    const mapRef = useRef(null);
-
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
     const { comp, isLoading, error } = useContest();
-    const { pilots, isLoading: isPLoading, error: isPerror, mutate } =
-          usePilots(className);
 
     // And keep track of who is selected
     const [ selectedCompno, setSelectedCompno ] = useState();
@@ -120,10 +108,8 @@ function CombinePage( props ) {
         bearing: 0,
         pitch: 0
     });
-	
-	// Get our options from _app.js
-	const options = props.options;
 
+	// 
     // And display in progress until they are loaded
     if (isLoading)
         return (<div className="loading">
@@ -152,54 +138,23 @@ function CombinePage( props ) {
 
     // Make sure we have the class object
     const selectedClass = _find( comp.classes,{'class': className} );
-
-	function setCompno(cn) {
-		setSelectedCompno(cn);
-		if(cn&&pilots[cn]) {
-			let pilot = pilots[cn];
-			pilot.follow = true;
-			if( pilot.lat && pilot.lng ) {
-				setViewport( {...viewport, latitude:pilot.lat, longitude:pilot.lng} );
-			}
-		}
-	}
-
-
-    // And the pilot object
-    const selectedPilot = pilots ? pilots[selectedCompno] : undefined;
-
-    return (
+	
+	return (
         <>
             <Head>
                 <title>{comp.competition.name} - {className}</title>
                 <IncludeJavascript/>
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno}/>
-            <Container fluid>
-                <Row>
-                    <Col sm={7}>
-                        <TaskMap vc={className} datecode={selectedClass?selectedClass.datecode:'07C'} selectedPilot={selectedPilot} setSelectedCompno={(x)=>setSelectedCompno(x)}
-								 mapRef={mapRef}
-								 pilots={pilots} options={options} setOptions={props.setOptions}
-								 tz={props.tz}
-								 viewport={viewport} setViewport={setViewport}/>
-                        <OgnFeed vc={className} datecode={selectedClass?selectedClass.datecode:'07C'} selectedPilot={selectedPilot}
-                                 pilots={pilots} mutatePilots={mutate} mapRef={mapRef} tz={props.tz} viewport={viewport} setViewport={setViewport}/>
-                    </Col>
-                    <Col>
-                        <TaskDetails vc={className}/>
-                        {isPLoading &&<><Icon type="plane" spin={true}/> Loading pilots...</>
-                        }
-                        {pilots &&
-                         <PilotList vc={className} pilots={pilots}
-									selectedPilot={selectedPilot}
-									setSelectedCompno={(x)=>setCompno(x)}
-									options={options} setViewport={setViewport}/>
-                        }
-                    </Col>
-                </Row>
-            </Container>
-        </>
+			<div className="resizingContainer" >
+				<OgnFeed vc={className}
+						 tz={props.tz} datecode={selectedClass?selectedClass.datecode:'07C'}
+						 selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno}
+						 viewport={viewport} setViewport={setViewport}
+						 options={props.options} setOptions={props.setOptions}
+				/>
+			</div>
+		</>
     );
 }
 

@@ -364,28 +364,13 @@ async function sendCurrentState(client) {
         return;
     }
 
-    // If there has already been a keepalive then we will resend it to the client
-    const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
-    if( lastKeepAliveMsg ) {
-        client.send( lastKeepAliveMsg );
-    }
+	// Make sure we send the pilots ASAP
+	if( channels[client.ognChannel].lastScores ) {
+        client.send( channels[client.ognChannel].lastScores );
+	}
 
-    // And we will send them info on all the gliders we have a message for
-    const toSend = _filter( gliders, {'class': client.class} );
-    _foreach( toSend, (glider) => {
-        if( 'lastMsg' in glider ) {
-            client.send( glider.lastMsg );
-        }
-    });
-}
-
-//
-// New connection, send it a packet for each glider we are tracking
-async function sendCurrentState(client) {
-    if (client.readyState !== WebSocket.OPEN) {
-        console.log("unable to sendCurrentState not yet open" );
-        return;
-    }
+	// Send them the GeoJSONs, they need to keep this up to date
+	sendGeoJSON( channels[client.ognChannel], client );
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
@@ -403,26 +388,33 @@ async function sendCurrentState(client) {
 }
 
 //
-// New connection, send it a packet for each glider we are tracking
-async function sendCurrentState(client) {
-    if (client.readyState !== WebSocket.OPEN) {
-        console.log("unable to sendCurrentState not yet open" );
-        return;
-    }
+// Send the GeoJSON for all the gliders, used when a new client connects to make
+// sure they have all the tracks. Client keeps it up to datw
+async function sendGeoJSON( channel, client ) {
+    // Fetch the scores for latest date
+    fetch( `http://${process.env.API_HOSTNAME}/api/${channel.className}/geoTracks`)
+        .then( (res) => {
+            // Send to the client
+            if (client.readyState === WebSocket.OPEN) {
+                res.text().then( (txt) => client.send( txt ) );
+            }
+		})
+		.catch(err => {
+            // We still call the callback on an error as we don't want to drop the packet
+            console.error(err);
+        });
 
-    // If there has already been a keepalive then we will resend it to the client
-    const lastKeepAliveMsg = channels[client.ognChannel]?.lastKeepAliveMsg;
-    if( lastKeepAliveMsg ) {
-        client.send( lastKeepAliveMsg );
-    }
-
-    // And we will send them info on all the gliders we have a message for
-    const toSend = _filter( gliders, {'class': client.class} );
-    _foreach( toSend, (glider) => {
-        if( 'lastMsg' in glider ) {
-            client.send( glider.lastMsg );
-        }
-    });
+    fetch( `http://${process.env.API_HOSTNAME}/api/${channel.className}/pilotsGeoTrack`)
+        .then( (res) => {
+            // Send to the client
+            if (client.readyState === WebSocket.OPEN) {
+                res.text().then( (txt) => client.send( txt ) );
+            }
+		})
+		.catch(err => {
+            // We still call the callback on an error as we don't want to drop the packet
+            console.error(err);
+        });
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -447,8 +439,7 @@ async function sendScores() {
 
         // If we have nothing then do nothing...
         if( ! channel.clients.length ) {
-            console.log( `not scoring ${channel.className} as no clients subscribed` );
-            //            return;
+            console.log( `${channel.className}: no clients subscribed` );
         }
 
         // For sending the keepalive
@@ -534,6 +525,7 @@ async function sendScores() {
 
                 // Prepare to send
                 const scoresMsg = JSON.stringify( scores );
+				channel.lastScores = scoresMsg;
 
                 // Send to each client
                 channel.clients.forEach( (client) => {
