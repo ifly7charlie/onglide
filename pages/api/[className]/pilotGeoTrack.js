@@ -37,13 +37,17 @@ export default async function taskHandler( req, res ) {
 	let trackers = await kvs[className]?.get('trackers');
 	const start = (trackers?.[compno]?.utcstart)||0;
 	console.log( compno, start, trackers?.[compno] );
+	
+	let tOffset = parseInt(process.env.NEXT_PUBLIC_TOFFSET)||0;
+	if( tOffset < 0 ) { tOffset += (Date.now())/1000 };
 
     // Get the points
     let points = await db.query(escape`
             SELECT lat, lng, t
               FROM trackpoints
-             WHERE datecode=${datecode} AND compno=${compno} AND class=${className} AND t > ${start}
-             ORDER BY t DESC`);
+             WHERE datecode=${datecode} AND compno=${compno} AND class=${className} AND  t >= ${start}
+               AND ( ${tOffset} = 0 OR t < ${tOffset} )
+            ORDER BY t DESC`);
 
     let trackJSON = {
 	"type": "FeatureCollection",
@@ -94,7 +98,24 @@ export default async function taskHandler( req, res ) {
 	    }
 	);
     }
+
+	let marker = {};
+	if( points && points.length > 0 ) {
+	    marker.features = { 'type': 'Feature',
+						  properties: { 'i': 'dot',
+								'c': compno,
+								'v':(Date.now()/1000-points[0].t>historyLength?'red':'blue'),
+								'x': points[0].a + 'm (' + points[0].g + 'm agl)',
+								't': points[0].t,
+							      },
+						  geometry: { 'type': 'Point',
+							      'coordinates': [points[0].lng,points[0].lat]
+							    }
+						};
+	}
 	
+    res.setHeader('Cache-Control','no-cache');
+
     res.status(200)
-	.json({track:trackJSON});
+	.json({track:trackJSON,marker:marker});
 }

@@ -73,6 +73,9 @@ let ddb = {}; // device_id: { ddb object }
 // APRS connection
 let connection = {};
 
+// Are we offsetting time for replay
+let tOffset = 0;
+
 // Performance counter
 let metrics = { 
     terrainCache: tx2.metric( { name: 'terrain cache', value: () => getCacheSize()}),
@@ -86,7 +89,7 @@ let metrics = {
 // Load the current file & Get the parsed version of the configuration
 const dotenv = require('dotenv').config({ path: '.env.local' })
 const config = dotenv.parsed;
-const readOnly = config.OGN_READ_ONLY == undefined ? false : (!!(parseInt(config.OGN_READ_ONLY)));
+let readOnly = config.OGN_READ_ONLY == undefined ? false : (!!(parseInt(config.OGN_READ_ONLY)));
 
 // Set up background fetching of the competition
 async function main() {
@@ -117,7 +120,13 @@ async function main() {
 
     const FILTER = `r/${location.lt}/${location.lg}/250`;
 
-	console.log( 'Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL ); 
+	tOffset = parseInt(process.env.NEXT_PUBLIC_TOFFSET)||0;
+	if( tOffset > 0 ) { tOffset = Math.floor(tOffset - (Date.now()/1000)) };
+	if( tOffset ) {
+		readOnly = true;
+	}
+	
+	console.log( 'Onglide OGN handler', readOnly ? '(read only)' : '', tOffset ? '(replay)':'', process.env.NEXT_PUBLIC_SITEURL ); 
 
     // Set the altitude offset for launching, this will take time to return
     // so there is a period when location altitude will be wrong for launches
@@ -184,7 +193,9 @@ async function main() {
             const packet = parser.parseaprs(data);
             if( "latitude" in packet && "longitude" in packet &&
                 "comment" in packet && packet.comment?.substr(0,2) == 'id' ) {
-                processPacket( packet );
+				if( ! tOffset ) {
+					processPacket( packet );
+				}
             }
         } else {
             // Server keepalive
@@ -214,8 +225,45 @@ async function main() {
         // Now download the scores and punt them out so we can mutate them into the results
         sendScores();
 
-    }, 30*1000 );
+    }, 10*1000 );
 
+	//
+	if( tOffset ) {
+		console.log( "offset", tOffset, Date.now()/1000 );
+
+		let lastPoint = Math.floor((Date.now()/1000) + tOffset);
+		const datecode = (await mysql.query( 'SELECT datecode FROM compstatus LIMIT 1' ))[0].datecode;
+		
+		setInterval( async function() {
+			const rawpoints = await mysql.query(escape`
+                SELECT compno, class, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
+                  FROM trackpoints
+                 WHERE datecode=${datecode} AND t >= ${lastPoint} AND t < ${lastPoint+1}
+                 ORDER BY t DESC`);
+
+//			if( ! rawpoints.length ) {
+				lastPoint++;
+//			}
+			console.log( "poll, ", lastPoint, tOffset, rawpoints.length );
+			for( const point of rawpoints ) {
+				// How the trackers are indexed into the array, it must include className as compno may not be unique
+				const mergedName = point.class+'_'+point.compno;
+				const aprsPacket = {
+					altitude: point.a,
+					sourceCallsign: `id00${gliders[mergedName]?.trackerid||'000000'}`,
+//					comment: `id00${gliders[mergedName]?.trackerid||'000000'} -000fpm +0.0rot 0.0dB -0,0kHz gps1x1 +0.0dBm`,
+					course: point.b,
+					latitude: point.lat,
+					longitude: point.lng,
+					posresolution: 1.852,
+					speed: point.s,
+					timestamp: point.t,
+				};
+                processPacket( aprsPacket );
+			}
+		},1000);
+	}
+			
     // And every 2.5 minutes we need to update the trackers, and confirm the APRS
     // connection has had some traffic
     setInterval( function() {
@@ -288,7 +336,7 @@ async function updateTrackers() {
     // Get the most recent track point and form a hash of the last point keyed by the same key
     // This could be optimized to only occur the first time it's run
     const lastPointR = await mysql.query(escape `SELECT tp.class className, tp.compno, lat, lng, t, altitude a, agl g FROM trackpoints tp
-                                                  JOIN (select compno, ti.class, max(t) mt FROM trackpoints ti JOIN compstatus cs ON cs.class = ti.class WHERE ti.datecode=cs.datecode GROUP by ti.class, ti.compno) ti
+                                                  JOIN (select compno, ti.class, max(t) mt FROM trackpoints ti JOIN compstatus cs ON cs.class = ti.class WHERE ti.datecode=cs.datecode AND (${tOffset} = 0 OR t < unix_timestamp() + ${tOffset}) GROUP by ti.class, ti.compno) ti
                                                     ON tp.t = ti.mt AND tp.compno = ti.compno AND tp.class = ti.class`);
     const lastPoint = _groupby( lastPointR, (x)=> mergedName(x) );
 
