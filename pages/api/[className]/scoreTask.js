@@ -22,6 +22,7 @@ import _unionby  from 'lodash.unionby'
 // Helpers to deal with sectors and tasks etc.
 import { preprocessSector, sectorGeoJSON, checkIsInTP } from '../../../lib/taskhelper.js';
 import findStart from '../../../lib/scorefindstart.js';
+import generateStatistics from '../../../lib/igcstatistics.js';
 
 //import scoreSpeedTask = '../../../lib/scorespeedtask'
 
@@ -58,7 +59,7 @@ export default async function scoreTask( req, res ) {
 
 
     const now = Date.now();
-    const startProfiling = process.hrtime();
+    const start = process.hrtime.bigint();
 
     // Fetch the tasks, legs, competition rules etc.  Needed for scoring
     // try cache
@@ -103,7 +104,12 @@ export default async function scoreTask( req, res ) {
         // which is handled below
         kvs.set(className+'_task_pilots',{task:task, pilots:pilots}, 600);
     }
-	
+		
+	{
+		const prep = process.hrtime.bigint();
+		console.info(className+' * pilots and task prep, time (elapsed): %d seconds', (Number(prep - start)/ 1000000000.0).toFixed(3));
+	}
+		
 	// last point we fetched
 	const { lastPoint, cachedTaskId } = kvs.get(`${className}_last`)||{lastPoint:0,cachedTaskId:0};
 
@@ -122,6 +128,11 @@ export default async function scoreTask( req, res ) {
     // Group them by comp number, this is quicker than multiple sub queries from the DB
     let newPoints = _groupby( rawpoints, 'compno' );
 
+	{
+		const prep = process.hrtime.bigint();
+		console.info(className+' * points db fetch, time (elapsed): %d seconds [%d rows]', (Number(prep - start)/ 1000000000.0).toFixed(3), rawpoints.length);
+	}
+
     // We need to make sure our cache is valid - this is both to confirm it hasn't
     // gone back in time more than our check interval (for running sample site)
     // and that the taskid hasn't changed (eg from a new contest day)
@@ -135,7 +146,10 @@ export default async function scoreTask( req, res ) {
     }
     kvs.set(`${className}_last`,{lastPoint:newestPoint,cachedTaskId:task.task.taskid})
 
-
+	{
+		const prep = process.hrtime.bigint();
+		console.info(className+' * points cache fetch, time (elapsed): %d seconds', (Number(prep - start)/ 1000000000.0).toFixed(3));
+	}
 
 	// Stored in one key with the points
     let { trackers, state, previousPoints } = (kvs.get(`${className}_scoring`)) || { trackers: {}, state: {}, previousPoints: {}};
@@ -191,8 +205,10 @@ export default async function scoreTask( req, res ) {
 	// from here we need to have a combined array of points, which means an intersection
 	let points = {};
 	_foreach( pilots, (pilot,compno) => {
+		console.log( `----- ${compno} ---- ${previousPoints[compno]?.length||0} ${newPoints[compno]?.length||0}` );
 		trackers[compno].firstOldPoint = undefined;
 		if( previousPoints[compno]?.length && newPoints[compno]?.length ) {
+			console.log( 'merging' );
 			let oldest = newPoints[compno].length-1;
 			const newestold = previousPoints[compno]?.[0]?.t||0;
 			while( oldest >= 0 && newPoints[compno][oldest].t <= newestold ) {
@@ -202,6 +218,9 @@ export default async function scoreTask( req, res ) {
 			if( oldest >= 0 ) {
 				points[compno] = newPoints[compno].slice(0,oldest+1).concat(previousPoints[compno]);
 				trackers[compno].firstOldPoint = oldest;
+				console.log( `merge points ${compno} ${newestold} + ${newPoints[compno][0].t} - ${newPoints[compno][oldest].t} #${oldest}, total:${points[compno].length}`);
+				console.log( points[compno][0].ll );
+				console.log( points[compno][oldest].t, '==',previousPoints[compno][0].t)
 			}
 			else {
 				points[compno] = previousPoints[compno];
@@ -210,9 +229,11 @@ export default async function scoreTask( req, res ) {
 		}
 		else {
 			if( previousPoints[compno]?.length ) {
+				console.log( " previousPoints only" );
 				points[compno] = previousPoints[compno];
 			}
 			else if( newPoints[compno]?.length ) {
+				console.log( " newPoints only" );
 				points[compno] = newPoints[compno];
 				trackers[compno].firstOldPoint = newPoints[compno].length-1;
 			}
@@ -221,7 +242,10 @@ export default async function scoreTask( req, res ) {
 			const nd = new Date((d)*1000);
 			return nd.toISOString().substring(11,11+8);
 		}
+		console.log( "-> most recent: ", twoffset(points[compno]?.[0]?.t||0), ' firstOldPoint:', trackers[compno].firstOldPoint);
 	});
+
+	const prep = process.hrtime.bigint();
 
     // Next step for all types of task is to confirm we have a valid start
     // Note that this happens throughout the flight regardless of how many turnpoints
@@ -256,6 +280,8 @@ export default async function scoreTask( req, res ) {
 		generateStatistics( tracker, state[compno], points[compno] );
     });
 
+	    // Update the geoJSON with the scored trackline so we can easily display
+    // what the pilot has been scored for
     _foreach( trackers, (pilot) => {
         if( pilot ) {
 			// And form the line
@@ -275,16 +301,19 @@ export default async function scoreTask( req, res ) {
     // round
     kvs.set(`${className}_scoring`,{trackers:trackers, state:state, previousPoints:points});
 
-    const profiled = process.hrtime(startProfiling);
-    console.info(className+' * scored, time (elapsed): %d seconds', Math.round(1000*(profiled[0] + (profiled[1] / 1000000000)))/1000 );
+    const end = process.hrtime.bigint();
+    console.info(className+' * scored, prep time (elapsed): %d seconds', (Number(prep - start)/ 1000000000.0).toFixed(3));
+    console.info(className+' * scored, scoring time (elapsed): %d seconds', (Number(end - prep)/ 1000000000.0).toFixed(3));
 
+	if( res ) {
     // How long should it be cached
     res.setHeader('Cache-Control','max-age=60');
 
     // Return the results, this returns basically the same as the pilot
     // API call except it will be enriched with results if we have any
     res.status(200)
-        .json({pilots:trackers});
+       .json({pilots:trackers});
+	}
 }
 
 
