@@ -621,8 +621,8 @@ function processPacket( packet ) {
 	
     // Check to make sure they have moved or that it's been about 10 seconds since the last update
     // this reduces load from stationary gliders on the ground and allows us to track stationary gliders
-    // better
-    const distanceFromLast = glider.lastPoint ? distance( jPoint, glider.lastPoint ) : 0;
+    // better. the 1 ensures that first packet gets picked up after restart
+    const distanceFromLast = glider.lastPoint ? distance( jPoint, glider.lastPoint ) : 1;
     if( distanceFromLast < 0.01 ) {
         if( (packet.timestamp - glider.lastTime) < 10 ) {
             return;
@@ -635,14 +635,15 @@ function processPacket( packet ) {
     if( ! islate ) {
 		glider.lastPoint = jPoint;
 		glider.lastAlt = packet.altitude;
-        glider.lastTime = packet.timestamp;
 
 		if( glider.lastTime - packet.timestamp > 1800 ) {
 			console.log( `${glider.compno} : VERY late flarm packet received, ${(glider.lastTime - packet.timestamp)/60}  minutes earlier than latest packet received for the glider, ignoring` );
 			console.log( packet );
+			glider.lastTime = packet.timestamp;
 			return;
 		}
 		
+        glider.lastTime = packet.timestamp;
     }
 
     // Where are we broadcasting this data
