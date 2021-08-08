@@ -1,13 +1,125 @@
 
+@import 'node_modules/bootstrap/scss/bootstrap.scss';
+
 
 body {
     padding-top: 40px;
     position: relative;
 }
 
+
+.resizingMap {
+	height: 95vh;
+	width: 100vw;
+	position: absolute;
+	min-height: 400px;
+
+}
+.resizingContainer {
+	height: 95vh;
+	width: 100vw;
+	position: relative;
+	z-Index: 10;
+}
+
+// These are tweaks for small screens
+@include media-breakpoint-down(sm) {
+	.resizingMap {
+	}
+	
+	.resultsOverlay {
+//		width: 10000px;
+		left: 0px;
+		height: 150px;
+		top: 0px;
+		overflow-x: auto;
+		overflow-y: clip;
+		position:absolute;
+		display:block;	
+		background-color: rgba(255,255,255,0.7);
+	}
+	
+	.results {
+		font-size: 90%;
+	}
+	
+	.details {
+		left: 0px;
+		bottom: 0px;
+		padding: 2px;
+		width: 100vw;
+		position: absolute;
+		color: black !important;
+		background-color: rgba(255,255,255,0.7);
+	}
+
+	ul.pilots {
+		list-style-type: none;
+		padding: 0px;
+		margin: 0px;
+		display: flex;
+		flex-wrap: none;
+	}
+
+	.navbar {
+		font-size: 50%;
+	}
+	html {
+		height: -webkit-fill-available;
+	}
+}
+
+@include media-breakpoint-up(sm) {
+	.resultsOverlay {
+		top: 55px;
+		right: 15px;
+		display: block;
+		position: absolute;
+		width: 30vw;
+		min-width: 270px;
+		border-radius: 8px;
+		border-style: solid white;
+		background-color: rgba(255,255,255,0.7);
+		box-shadow: 7px 7px 5px rgb(0 0 0 / 30%);
+		padding: 5px;
+		overflow-y: auto;
+		overflow-x: clip;
+		max-height: 40vh;
+	}
+	
+	ul.pilots {
+		width: 100%;
+		list-style-type: none;
+		padding: 0px;
+		margin: 0px;
+		display: flex;
+		flex-wrap: wrap;
+	}
+
+
+	.details {
+		clear: both;
+		right: 15px;
+		bottom: 27px;
+		padding: 20px;
+		position: absolute;
+		color: black !important;
+		background-color: rgba(255,255,255,0.7);
+		box-shadow: 7px 7px 5px rgb(0 0 0 / 30%);
+		border-radius: 8px;
+		border-style: solid white;
+		width: 30vw;	
+		min-width: 270px;
+		max-height: 40vh;
+		overflow-y: auto;
+		overflow-x: clip;
+	}
+}
+
 @media (max-width: 979px) {
     body {
         padding-top: 0px !important;
+		
     }
     .navbar-nav.pull-right { float: none!important; }
 }
@@ -57,12 +169,25 @@ td.small img {
 
 .small-pic {
     margin-left: 1px !important;
+    margin-right: 3px !important;
+    margin-bottom: 5px !important;
+    border: 1px solid #eee;
+    background: white !important;
+    width: 58px;
+    height: 85px;
+    flex-grow: initial;
+    padding-right: 3px;
+    padding-left: 3px;
+/*\
+z-Index: 10;
+
+	margin-left: 1px !important;
     margin-right: 1px !important;
     margin-bottom: 5px !important;
     border: 1px solid #eee;
     background: white !important;
     width:50px;
-    height:85px;
+    height:85px; */
 }
 
 .small-pic > a  {
@@ -219,13 +344,6 @@ td.small img {
     margin-left: 1px;
 }
 
-div.details {
-    clear: both;
-    color: white !important;
-    background-color: grey !important;
-    width: 100%;
-}
-
 
 .small-pic .caption {
     font-weight: bold;
@@ -238,7 +356,7 @@ div.details {
     line-height: 15px;
 }
 
-td.small-pic > img {
+.small-pic > img {
     max-width:50px;
     max-height:50px;
     padding: 0px;
@@ -269,15 +387,10 @@ td.small-pic > img {
 }
 
 
-ul.pilots {
-    list-style-type: none;
-    padding: 0px;
-    margin: 0px;
-}
-
 ul.pilots li {
     display: block;
-    float: left;
+	//    float: left;
+	//flex: 1.1;
 }
 
 .pilots {
@@ -362,3 +475,4 @@ a.selectimage:hover {
         transform:rotate(360deg);
     }
 }
+
