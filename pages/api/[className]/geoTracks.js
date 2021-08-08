@@ -13,6 +13,7 @@ import _mapvalues  from 'lodash.mapvalues'
 
 // How far back in time to do we want to show
 const historyLength = 600;
+const gapLength = 300;
 
 export default async function geoTracks( req, res) {
     const {
@@ -95,7 +96,7 @@ export default async function geoTracks( req, res) {
 					       [{ 'type': 'Feature',
 						  properties: { 'i': 'dot',
 								'c': key,
-								'v':(tOffset-points[0].t>historyLength?'grey':'black'),
+								'v':(tOffset-points[0].t>gapLength?'grey':'black'),
 								'x': points[0].a + 'm (' + points[0].g + 'm agl)',
 								't': points[0].t,
 							      },
