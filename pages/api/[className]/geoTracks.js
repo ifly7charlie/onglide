@@ -24,25 +24,28 @@ export default async function geoTracks( req, res) {
         res.status(404).json({error: "missing parameter(s)"});
         return;
     }
-
-    // We need to figure out what date is needed as this isn't passed in to the webpage
-    const datecode = (await db.query(escape`
+	
+	const datecode = (await db.query(escape`
       SELECT datecode
       FROM compstatus cs
       WHERE cs.class = ${className}
     `))[0].datecode;
 
-    // Only last 10 minutes
-    const latest = (await db.query(escape`
-            SELECT MAX(t) maxt FROM trackpoints
-             WHERE datecode=${datecode} AND class=${className} `))[0].maxt;
+	if( ! datecode ) {
+		console.log( `can't find datecode for ${className}` );
+        res.status(404).json({error: "class not configured correctly"});
+		return;
+	}
 
+	// And see if we have an adjustment, also used to establish 0 point for coordinates
+	let tOffset = parseInt(process.env.NEXT_PUBLIC_TOFFSET)||0;
+	if( tOffset <= 0 ) { tOffset += (Date.now())/1000 };
+	
     // Get the points, last
     let points = await db.query(escape`
             SELECT tp.compno, lat, lng, t, altitude a, agl g FROM trackpoints tp
-              JOIN (select compno, max(t) mt FROM trackpoints ti WHERE ti.datecode=${datecode} AND ti.class=${className} GROUP by ti.compno) ti 
-                ON tp.t > ti.mt - ${historyLength} and tp.compno = ti.compno
-             WHERE tp.datecode=${datecode} AND tp.class=${className} ORDER by t DESC`);
+             WHERE t > ${tOffset-historyLength} AND t < ${tOffset} AND tp.datecode=${datecode} AND tp.class=${className}
+             ORDER by t DESC `);
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
     const grouped = _groupby( points, 'compno' );
@@ -92,7 +95,7 @@ export default async function geoTracks( req, res) {
 					       [{ 'type': 'Feature',
 						  properties: { 'i': 'dot',
 								'c': key,
-								'v':(latest-points[0].t>historyLength?'grey':'black'),
+								'v':(tOffset-points[0].t>historyLength?'grey':'black'),
 								'x': points[0].a + 'm (' + points[0].g + 'm agl)',
 								't': points[0].t,
 							      },
@@ -103,8 +106,8 @@ export default async function geoTracks( req, res) {
 	}
     });
 				   
-    // How long should it be cached - 2 seconds (increase when websockets are working)
-    res.setHeader('Cache-Control','max-age=2');
+    // How long should it be cached
+    res.setHeader('Cache-Control','max-age=1');
 				     
     res.status(200)
 	.json({tracks:trackJSON,locations:locationJSON});
