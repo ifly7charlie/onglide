@@ -41,6 +41,8 @@ const _foreach = require('lodash.foreach');
 const _sortby = require('lodash.sortby');
 const _remove = require('lodash.remove');
 const _groupby = require('lodash.groupby');
+// Score a single pilot
+import scorePilot from  '../lib/scorepilot.js';
 
 // Handle fetching elevation and confirming size of the cache for tiles
 const { getElevationOffset, getCacheSize } = require('../lib/getelevationoffset.js');
@@ -69,6 +71,8 @@ let activeGliders = {}
 
 let unknownTrackers = {}; // All the ones we have seen in launch area but matched or not matched
 let ddb = {}; // device_id: { ddb object }
+
+let scoring = {}; // list of classes, each class has { compno: { trackers, state, and points} }
 
 // APRS connection
 let connection = {};
@@ -310,6 +314,14 @@ async function updateTrackers() {
                                                       };
 
         newchannels.push(channelName(c.class,c.datecode));
+
+		// Make sure we have an entry for the scoring and do a dummy
+		// fetch to get the task prepped and merge the scoring data into the
+		// trackers array
+		if( ! scoring[c.class] ) {
+			scoring[c.class] = { trackers: {}, state: {}, points: {} };
+		}
+		scorePilot( c.class, undefined, scoring[c.class] );
     });
 
     // Cleanup any old channels
@@ -674,21 +686,22 @@ function processPacket( packet ) {
                    async (gl) => {
 					   glider.agl = Math.round(Math.max(packet.altitude-gl,0));
 					   glider.altitude = packet.altitude;
+					   
+					   let message = {
+						   c: glider.compno,
+						   lat: Math.round(packet.latitude*1000000)/1000000,
+						   lng: Math.round(packet.longitude*1000000)/1000000,
+						   a: Math.floor(packet.altitude),
+						   g: glider.agl,
+						   t: packet.timestamp,
+						   b: packet.course,
+						   s: packet.speed,
+						   v: ! islate ? calculateVario( glider, packet.altitude, packet.timestamp ).join(',') : '',
+					   };
 
+					   
                        // If the packet isn't delayed then we should send it out over our websocket
                        if( ! islate ) {
-
-						   let message = {
-							   g: glider.compno,
-							   lat: Math.round(packet.latitude*1000000)/1000000,
-							   lng: Math.round(packet.longitude*1000000)/1000000,
-							   alt: Math.floor(packet.altitude),
-							   agl: glider.agl,
-							   at: packet.timestamp,
-							   t: timeToText(packet.timestamp),
-							   v: calculateVario( glider, packet.altitude, packet.timestamp ).join(','),
-						   };
-
 
                            // Prepare to send
                            const jsonMsg = JSON.stringify( message );
@@ -704,6 +717,25 @@ function processPacket( packet ) {
                            glider.lastMsg = jsonMsg;
                        }
 
+					   let sc = scoring[glider.className];
+					   
+					   // Slice it into the points array	
+					   const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, 't');
+					   sc.points[glider.compno].splice(insertIndex, 0, message);
+
+					   // Now update the indexes for this
+					   if( insertIndex <= sc.trackers[glider.compno].firstOldPoint||0 ) {
+						   console.log( islate ? "late" : "not-late", `inserting at ${insertIndex}` );
+						   sc.trackers[glider.compno].firstOldPoint = (sc.trackers[glider.compno].firstOldPoint||0)+1;
+						   sc.trackers[glider.compno].oldestMerge = sc.trackers[glider.compno].oldestMerge != undefined ?
+							   sc.trackers[glider.compno].oldestMerge + 1 : undefined;
+					   }
+					   else {
+						   console.log( islate ? "late" : "not-late", `inserting at ${insertIndex}, but older than firstOldPoint` );
+						   sc.trackers[glider.compno].outOfOrder = (sc.trackers[glider.compno].outOfOrder||0)+1;
+						   sc.trackers[glider.compno].oldestMerge = Math.max(sc.trackers[glider.compno].oldestMerge||0,insertIndex)
+					   }
+						   
                        // Pop into the database
 					   if( ! readOnly ) {
 						   mysql.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed)
