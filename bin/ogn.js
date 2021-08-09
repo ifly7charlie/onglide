@@ -75,6 +75,7 @@ let connection = {};
 
 // Are we offsetting time for replay
 let tOffset = 0;
+let stepSize = 1;
 
 // Performance counter
 let metrics = { 
@@ -123,6 +124,7 @@ async function main() {
 	tOffset = parseInt(process.env.NEXT_PUBLIC_TOFFSET)||0;
 	if( tOffset > 0 ) { tOffset = Math.floor(tOffset - (Date.now()/1000)) };
 	if( tOffset ) {
+		stepSize = parseInt(process.env.NEXT_PUBLIC_STEPSIZE)||1;
 		readOnly = true;
 	}
 	
@@ -238,11 +240,11 @@ async function main() {
 			const rawpoints = await mysql.query(escape`
                 SELECT compno, class, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
                   FROM trackpoints
-                 WHERE datecode=${datecode} AND t >= ${lastPoint} AND t < ${lastPoint+1}
+                 WHERE datecode=${datecode} AND t >= ${lastPoint} AND t < ${lastPoint+stepSize}
                  ORDER BY t DESC`);
 
 //			if( ! rawpoints.length ) {
-				lastPoint++;
+				lastPoint+=stepSize;
 //			}
 			console.log( "poll, ", lastPoint, tOffset, rawpoints.length );
 			for( const point of rawpoints ) {
