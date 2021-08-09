@@ -286,16 +286,7 @@ CREATE TABLE `pilotresult` (
   `forcetp` int(11) DEFAULT NULL COMMENT 'last turnpoint rounded, used by UI to override when a sector has not been detected due to poor coverage',
   `forcetptime` datetime DEFAULT NULL,
   
-  `turnpoints` int(11) DEFAULT NULL COMMENT 'landout status record, these are from old UI but may be useful in the future',
-  `loLAT` float DEFAULT NULL,
-  `loLONG` float DEFAULT NULL,
-  `loNotes` varchar(6000) DEFAULT NULL,
-  `loReported` datetime DEFAULT NULL,
   `statuschanged` datetime DEFAULT NULL,
-  `loOriginal` time DEFAULT NULL,
-  `loNear` varchar(60) DEFAULT NULL,
-  `gliderok` char(1) DEFAULT '',
-  `youok` char(1) DEFAULT '',
   
   PRIMARY KEY (`class`,`datecode`,`compno`),
   KEY `class` (`class`),
