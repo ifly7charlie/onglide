@@ -4,7 +4,7 @@
  *
  */
 
-import query from '../../../lib/react/db';
+import { query } from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
 
