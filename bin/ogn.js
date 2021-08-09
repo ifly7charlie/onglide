@@ -937,7 +937,7 @@ async function startStatusServer() {
 
 // Handle DEM
 async function withElevation(lt,lg,cb) {
-    getElevationOffset( config, lt, lg, cb );
+    getElevationOffset( lt, lg, cb );
 }
 
 // Display a time as competition time, use 24hr clock (en-GB)
