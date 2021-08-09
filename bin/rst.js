@@ -664,7 +664,7 @@ async function update_contest(contest_name, info) {
 	location.point = point( [location.lt, location.lg] );
 
 	// Calculate elevation so we can do launch calculations from the IGC files
-	getElevationOffset( config, location.lt, location.lg,
+	getElevationOffset( location.lt, location.lg,
 						(agl) => { location.altitude = agl;console.log('SITE Altitude:'+agl) });
 
     if( 0 ) { //keys.deep ) {
