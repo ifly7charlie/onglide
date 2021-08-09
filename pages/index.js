@@ -14,16 +14,16 @@ import NavDropdown from 'react-bootstrap/NavDropdown'
 import { useState, useRef } from 'react';
 
 // Helpers for loading contest information etc
-import { useContest, usePilots, useTask, Spinner, Error } from '../lib/loaders.js';
-import { Nbsp, Icon } from '../lib/htmlhelper.js';
+import { useContest, usePilots, useTask, Spinner, Error } from '../lib/react/loaders.js';
+import { Nbsp, Icon } from '../lib/react/htmlhelper.js';
 
 // And connect to websockets...
-import { OgnFeed } from '../lib/ognfeed.js';
+import { OgnFeed } from '../lib/react/ognfeed.js';
 
 import Router from 'next/router'
 
-const pilotsorting = require('../lib/pilot-sorting.js');
-const db = require('../lib/db')
+import pilotsorting from '../lib/react/pilot-sorting.js';
+import { query } from '../lib/react/db';
 
 import _find from 'lodash.find';
 
@@ -116,7 +116,7 @@ function CombinePage( props ) {
                     <div className="loadinginner"/>
                 </div>) ;
 
-    if (error||!comp.competition)
+    if (error||!comp?.competition)
         return (<div>
                     <div style={{position:'fixed', zIndex:'10', marginLeft:'10px' }}>
                         <h1>
@@ -143,6 +143,7 @@ function CombinePage( props ) {
         <>
             <Head>
                 <title>{comp.competition.name} - {className}</title>
+				<meta name='viewport' content='width=device-width, minimal-ui'/>
                 <IncludeJavascript/>
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno}/>
@@ -162,8 +163,8 @@ function CombinePage( props ) {
 // Determine the default class
 export async function getStaticProps(context) {
 
-	const location = (await db.query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
-    const classes = await db.query('SELECT class FROM classes ORDER BY class');
+	const location = (await query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
+    const classes = await query('SELECT class FROM classes ORDER BY class');
 
     return {
         props: { lat: location?.lt, lng: location?.lg, tzoffset: location?.tzoffset, tz: location?.tz,

@@ -1,10 +1,10 @@
-const db = require('../../lib/db')
-const escape = require('sql-template-strings')
+import { query } from '../../lib/react/db'
+import escape from 'sql-template-strings'
 //import { useRouter } from 'next/router'
 
 export default async function competitionHandler( req, res) {
 
-    const competition = await db.query(escape`
+    const competition = await query(escape`
          SELECT name, 
                 DATE_FORMAT( start, "%M %D" ) start, DATE_FORMAT( end, "%M %D" ) end, 
                 sitename club,
@@ -17,7 +17,7 @@ export default async function competitionHandler( req, res) {
 	console.log( competition.error );
     }
 
-    const classes = await db.query(escape`
+    const classes = await query(escape`
          SELECT c.class, c.classname, c.description, cs.datecode, cs.status
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`);
 

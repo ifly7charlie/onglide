@@ -3,12 +3,12 @@
  * and make it available
  *
  */
-const db = require('../../../lib/db')
-const escape = require('sql-template-strings')
+import { query } from '../../../lib/react/db'
+import escape from 'sql-template-strings'
 import { useRouter } from 'next/router'
 
 
-import LatLong from '../../../lib/LatLong';
+import LatLong from '../../../lib/flightprocessing/LatLong';
 import { point,lineString } from '@turf/helpers';
 import { useKVs } from '../../../lib/kv.js';
 
@@ -20,16 +20,16 @@ import _maxby  from 'lodash.maxby'
 import _unionby  from 'lodash.unionby'
 
 // Helpers to deal with sectors and tasks etc.
-import { preprocessSector, sectorGeoJSON, checkIsInTP } from '../../../lib/taskhelper.js';
-import findStart from '../../../lib/scorefindstart.js';
-import generateStatistics from '../../../lib/igcstatistics.js';
+import { preprocessSector, sectorGeoJSON, checkIsInTP } from '../../../lib/flightprocessing/taskhelper.js';
+import findStart from '../../../lib/flightprocessing/scorefindstart.js';
+import generateStatistics from '../../../lib/flightprocessing/igcstatistics.js';
 
 //import scoreSpeedTask = '../../../lib/scorespeedtask'
 
 // Different scoring techniques
-import scoreAssignedAreaTask from '../../../lib/scoreassignedareatask'
-import scoreSpeedTask from '../../../lib/scorespeedtask'
-import scoreDistanceHandicapTask from '../../../lib/scoredistancehandicaptask'
+import scoreAssignedAreaTask from '../../../lib/flightprocessing/scoreassignedareatask'
+import scoreSpeedTask from '../../../lib/flightprocessing/scorespeedtask'
+import scoreDistanceHandicapTask from '../../../lib/flightprocessing/scoredistancehandicaptask'
 
 // Helper
 const fetcher = url => fetch(url).then(res => res.json());
@@ -118,7 +118,7 @@ export default async function scoreTask( req, res ) {
 
     // Next up we will fetch a list of the pilots and their complete tracks
     // This is going to be a big query
-    let rawpoints = await db.query(escape`
+    let rawpoints = await query(escape`
             SELECT compno, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
               FROM trackpoints
              WHERE datecode=${task.contestday.datecode} AND class=${className} AND t >= ${lastPoint} 

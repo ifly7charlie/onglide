@@ -4,7 +4,7 @@
  *
  */
 
-const db = require('../../../lib/db')
+const db = require('../../../lib/react/db')
 const escape = require('sql-template-strings')
 
 import { useRouter } from 'next/router'
