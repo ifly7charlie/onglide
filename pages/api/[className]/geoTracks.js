@@ -4,8 +4,8 @@
  *
  */
 
-const db = require('../../../lib/db')
-const escape = require('sql-template-strings')
+import { query } from '../../../lib/react/db';
+import escape from 'sql-template-strings';
 
 import { useRouter } from 'next/router'
 import _groupby  from 'lodash.groupby'
@@ -26,7 +26,7 @@ export default async function geoTracks( req, res) {
         return;
     }
 	
-	const datecode = (await db.query(escape`
+	const datecode = (await query(escape`
       SELECT datecode
       FROM compstatus cs
       WHERE cs.class = ${className}
@@ -43,7 +43,7 @@ export default async function geoTracks( req, res) {
 	if( tOffset <= 0 ) { tOffset += (Date.now())/1000 };
 	
     // Get the points, last
-    let points = await db.query(escape`
+    let points = await query(escape`
             SELECT tp.compno, lat, lng, t, altitude a, agl g FROM trackpoints tp
              WHERE t > ${tOffset-historyLength} AND t < ${tOffset} AND tp.datecode=${datecode} AND tp.class=${className}
              ORDER by t DESC `);

@@ -15,10 +15,10 @@ import NavDropdown from 'react-bootstrap/NavDropdown'
 import ButtonGroup from 'react-bootstrap/ButtonGroup'
 import ToggleButton from 'react-bootstrap/ToggleButton'
 
-import { Nbsp, Icon } from '../lib/htmlhelper.js';
+import { Nbsp, Icon } from '../lib/react/htmlhelper.js';
 
-const db = require('../lib/db')
-import { useContest, Spinner } from '../lib/loaders.js';
+import { query } from '../lib/react/db';
+import { useContest, Spinner } from '../lib/react/loaders.js';
 
 import _find from 'lodash.find';
 
@@ -209,7 +209,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 // Determine the default class
 export async function getStaticProps(context) {
 
-	const location = (await db.query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
+	const location = (await query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
     return {
         props: { lat: location?.lt, lng: location?.lg, tzoffset: location?.tzoffset, tz: location?.tz }, // will be passed to the page component as props
     }

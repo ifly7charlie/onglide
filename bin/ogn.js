@@ -5,50 +5,58 @@
 // BSD licence but please if you find bugs send pull request to github
 
 // Import the APRS server
-const { ISSocket } = require( 'js-aprs-is' );
-const { aprsParser } = require( 'js-aprs-fap' );
+import { ISSocket } from 'js-aprs-is';
+import { aprsParser } from  'js-aprs-fap';
 
 // Helper function
-const distance = (require( '@turf/distance' )).default;
-const { point } = require ( '@turf/helpers' );
+import distance from '@turf/distance';
+import { point } from '@turf/helpers';
 
 // And the Websocket
-const WebSocket = require('ws');
+import { WebSocket, WebSocketServer } from 'ws';
 
 // And status display
-const http = require('http');
-const tx2 = require('tx2');
+import http from 'http';
+import tx2 from 'tx2';
 
 console.log(ISSocket);
 
-//const crypto = require('crypto');
+//import crypto from 'crypto';
 
 // Helper
 const fetcher = url => fetch(url).then(res => res.json());
 
 // DB access
-//const db = require('../db')
-const escape = require('sql-template-strings')
-const mysql = require('serverless-mysql')();
-const fetch = require('node-fetch');
+//const db from '../db')
+import escape from 'sql-template-strings';
+import mysql from 'serverless-mysql';
+
+let db = undefined;
+
+import fetch from 'node-fetch';
 
 // lodash
-const _filter = require('lodash.filter');
-const _pick = require('lodash.pick');
-const _map = require('lodash.map');
-const _keyby = require('lodash.keyby');
-const _foreach = require('lodash.foreach');
-const _sortby = require('lodash.sortby');
-const _remove = require('lodash.remove');
-const _groupby = require('lodash.groupby');
+import _filter from 'lodash.filter';
+import _pick from 'lodash.pick';
+import _map from 'lodash.map';
+import _keyby from 'lodash.keyby';
+import _foreach from 'lodash.foreach';
+import _sortby from 'lodash.sortby';
+import _remove from 'lodash.remove';
+import _groupby from 'lodash.groupby';
+import _sortedIndexBy from 'lodash.sortedindexby';
+
 // Score a single pilot
-import scorePilot from  '../lib/scorepilot.js';
+import scorePilot from  '../lib/flightprocessing/scorepilot.js';
+
+import dotenv from 'dotenv';
 
 // Handle fetching elevation and confirming size of the cache for tiles
-const { getElevationOffset, getCacheSize } = require('../lib/getelevationoffset.js');
+import geo from '../lib/getelevationoffset.js';
+const { getElevationOffset, getCacheSize } = geo;
 
 // handle unkownn gliders
-const { capturePossibleLaunchLanding } = require('../lib/launchlanding.js');
+import { capturePossibleLaunchLanding } from '../lib/flightprocessing/launchlanding.js';
 
 
 // Where is the comp based
@@ -92,9 +100,8 @@ let metrics = {
 };
 
 // Load the current file & Get the parsed version of the configuration
-const dotenv = require('dotenv').config({ path: '.env.local' })
-const config = dotenv.parsed;
-let readOnly = config.OGN_READ_ONLY == undefined ? false : (!!(parseInt(config.OGN_READ_ONLY)));
+dotenv.config({ path: '.env.local' })
+let readOnly = process.env.OGN_READ_ONLY == undefined ? false : (!!(parseInt(process.env.OGN_READ_ONLY)));
 
 // Set up background fetching of the competition
 async function main() {
@@ -105,13 +112,13 @@ async function main() {
     }
 
 
-    mysql.config({
-        host: config.MYSQL_HOST,
+    db = mysql( { config:{
+        host: process.env.MYSQL_HOST,
         database: process.env.MYSQL_DATABASE,
-        user: config.MYSQL_USER,
-        password: config.MYSQL_PASSWORD,
+        user: process.env.MYSQL_USER,
+        password: process.env.MYSQL_PASSWORD,
         onError: (e) => { console.log(e); }
-    });
+    }});
 
     // Settings for connecting to the APRS server
     const CALLSIGN = process.env.NEXT_PUBLIC_SITEURL;
@@ -120,7 +127,7 @@ async function main() {
     const PORTNUMBER = 14580;
 
     // Location comes from the competition table in the database
-    location = (await mysql.query( 'SELECT lt,lg,tz FROM competition LIMIT 1' ))[0];
+    location = (await db.query( 'SELECT lt,lg,tz FROM competition LIMIT 1' ))[0];
     location.point = point( [location.lt, location.lg] );
 
     const FILTER = `r/${location.lt}/${location.lg}/250`;
@@ -150,7 +157,7 @@ async function main() {
     let parser = new aprsParser();
 
     // And start our websocket server
-    const wss = new WebSocket.Server({ port: (process.env.WEBSOCKET_PORT||8080) });
+    const wss = new WebSocketServer({ port: (process.env.WEBSOCKET_PORT||8080) });
 
     // What to do when a client connects
     wss.on( 'connection', (ws,req) => {
@@ -238,10 +245,10 @@ async function main() {
 		console.log( "offset", tOffset, Date.now()/1000 );
 
 		let lastPoint = Math.floor((Date.now()/1000) + tOffset);
-		const datecode = (await mysql.query( 'SELECT datecode FROM compstatus LIMIT 1' ))[0].datecode;
+		const datecode = (await db.query( 'SELECT datecode FROM compstatus LIMIT 1' ))[0].datecode;
 		
 		setInterval( async function() {
-			const rawpoints = await mysql.query(escape`
+			const rawpoints = await db.query(escape`
                 SELECT compno, class, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
                   FROM trackpoints
                  WHERE datecode=${datecode} AND t >= ${lastPoint} AND t < ${lastPoint+stepSize}
@@ -295,7 +302,7 @@ main()
 async function updateTrackers() {
 
     // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await mysql.query( 'SELECT class, datecode FROM compstatus' );
+    const classes = await db.query( 'SELECT class, datecode FROM compstatus' );
 
     // Now convert that into the main structure
     function channelName(className,datecode) {
@@ -342,14 +349,14 @@ async function updateTrackers() {
     function mergedName(t) { return t.className+'_'+t.compno; }
 
     // Now get the trackers
-    const cTrackers = await mysql.query( 'select p.compno, p.greg, trackerid, UPPER(concat(t.class,c.datecode)) channel, 0 duplicate, ' +
+    const cTrackers = await db.query( 'select p.compno, p.greg, trackerid, UPPER(concat(t.class,c.datecode)) channel, 0 duplicate, ' +
                                          ' p.class className ' +
                                          ' from pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join compstatus c on c.class=p.class ' +
                                          '   where p.class = c.class' );
 
     // Get the most recent track point and form a hash of the last point keyed by the same key
     // This could be optimized to only occur the first time it's run
-    const lastPointR = await mysql.query(escape `SELECT tp.class className, tp.compno, lat, lng, t, altitude a, agl g FROM trackpoints tp
+    const lastPointR = await db.query(escape `SELECT tp.class className, tp.compno, lat, lng, t, altitude a, agl g FROM trackpoints tp
                                                   JOIN (select compno, ti.class, max(t) mt FROM trackpoints ti JOIN compstatus cs ON cs.class = ti.class WHERE ti.datecode=cs.datecode AND (${tOffset} = 0 OR t < unix_timestamp() + ${tOffset}) GROUP by ti.class, ti.compno) ti
                                                     ON tp.t = ti.mt AND tp.compno = ti.compno AND tp.class = ti.class`);
     const lastPoint = _groupby( lastPointR, (x)=> mergedName(x) );
@@ -385,7 +392,7 @@ async function updateTrackers() {
 
     // identify any competition numbers that may be duplicates and mark them.  This
     // will affect how we match from the DDB
-    const duplicates = await mysql.query( 'SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1' );
+    const duplicates = await db.query( 'SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1' );
     duplicates.forEach( (d) => {
         d.classes.split(',').forEach( (c) => {
             gliders[ c+'_'+d.compno ].duplicate = true;
@@ -526,6 +533,7 @@ async function sendScores() {
 
 
         // Fetch the scores for latest date
+		/*
         fetch( `http://${process.env.API_HOSTNAME}/api/${channel.className}/scoreTask`)
             .then(res => res.json())
             .then( (scores) => {
@@ -601,6 +609,7 @@ async function sendScores() {
                 // We still call the callback on an error as we don't want to drop the packet
                 console.error(err);
             });
+*/
     });
 }
 
@@ -720,7 +729,7 @@ function processPacket( packet ) {
 					   let sc = scoring[glider.className];
 					   
 					   // Slice it into the points array	
-					   const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, 't');
+					   const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, (o) => -o.t);
 					   sc.points[glider.compno].splice(insertIndex, 0, message);
 
 					   // Now update the indexes for this
@@ -738,7 +747,7 @@ function processPacket( packet ) {
 						   
                        // Pop into the database
 					   if( ! readOnly ) {
-						   mysql.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed)
+						   db.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
                                                            ${packet.latitude}, ${packet.longitude}, ${packet.altitude}, ${glider.agl}, ${packet.timestamp}, ${packet.course}, ${packet.speed} )` );
 					   }
@@ -865,7 +874,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 					// glider.trackerid = 'unknown';
 					
 					// if( ! readOnly ) {
-					// 	mysql.transaction()
+					// 	db.transaction()
 					// 		.query( escape`UPDATE tracker SET trackerid = 'unknown' WHERE
                     //                       compno = ${glider.compno} AND class = ${glider.className} limit 1` )
 					// 		.query( escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), 'chgreg', now(), "ognddb" )`)
@@ -882,7 +891,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 			
 			// Save in the database so we will reuse them later ;)
 			if( ! readOnly ) {
-				mysql.transaction()
+				db.transaction()
 					.query( escape`UPDATE tracker SET trackerid = ${flarmId} WHERE
                                       compno = ${match.compno} AND class = ${match.className} AND trackerid="unknown" limit 1` )
 					.query( escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), ${flarmId}, now(), "ognddb" )`)

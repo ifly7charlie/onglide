@@ -4,11 +4,11 @@
  *
  */
 
-const db = require('../../../lib/db')
-const escape = require('sql-template-strings')
+import { query } from '../../../lib/react/db';
+import escape from 'sql-template-strings';
 
 // Helpers to deal with sectors and tasks etc.
-import { preprocessSector, sectorGeoJSON } from '../../../lib/taskhelper.js';
+import { preprocessSector, sectorGeoJSON } from '../../../lib/flightprocessing/taskhelper.js';
 
 import { useRouter } from 'next/router'
 
@@ -23,7 +23,7 @@ export default async function taskHandler( req, res) {
         return;
     }
 
-    let task = await db.query(escape`
+    let task = await query(escape`
       SELECT tasks.*
       FROM tasks, compstatus cs
       WHERE cs.class = ${className} AND tasks.class = cs.class
@@ -37,7 +37,7 @@ export default async function taskHandler( req, res) {
         return;
     }
 
-    let tasklegs = await db.query(escape`
+    let tasklegs = await query(escape`
       SELECT taskleg.*, nname name, 0 altitude
       FROM taskleg
       WHERE taskleg.taskid = ${task[0].taskid}
@@ -71,7 +71,10 @@ export default async function taskHandler( req, res) {
         "features": []
     };
 
-    tasklegs.forEach( (leg) => { geoJSON.features = [].concat( geoJSON.features, [{ 'type': 'Feature', properties: {}, geometry: leg.geoJSON }] ) } );
+    tasklegs.forEach( (leg) => { geoJSON.features = [].concat( geoJSON.features,
+															   [{ 'type': 'Feature',
+																  properties: {},
+																  geometry: leg.geoJSON }] ) } );
 
     const trackLine = {
         "type": "LineString",

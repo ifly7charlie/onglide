@@ -1,6 +1,5 @@
-const db = require('../../../lib/db')
-const escape = require('sql-template-strings')
-import { useRouter } from 'next/router'
+import { query } from '../../../lib/react/db'
+import escape from 'sql-template-strings'
 
 export default async function taskHandler( req, res) {
     const {
@@ -14,7 +13,7 @@ export default async function taskHandler( req, res) {
     }
 
     // this is the pilot results
-    const pilots = await db.query(escape`
+    const pilots = await query(escape`
 	select pilots.class, pilots.compno, 
 		       pr.status dbstatus, datafromscoring,scoredstatus,
 		       UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',start))-(SELECT tzoffset FROM competition) utcstart, start, finish,
@@ -52,10 +51,10 @@ export default async function taskHandler( req, res) {
      `);
 
     if( ! pilots || ! pilots.length ) {
-	console.log( "invalid class" );
-	console.log( pilots );
-	res.status(404).json({error: "invalid class"});
-	return;
+		console.log( "invalid class" );
+		console.log( pilots );
+		res.status(404).json({error: "invalid class"});
+		return;
     }
 
 
