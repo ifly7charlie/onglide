@@ -307,6 +307,8 @@ main()
 // Fetch the trackers from the database
 async function updateTrackers() {
 
+	console.log( "updateTrackers()" );
+
     // Fetch the trackers from the database and the channel they are supposed to be in
     const classes = await db.query( 'SELECT class, datecode FROM compstatus' );
 
@@ -353,8 +355,8 @@ async function updateTrackers() {
 				scoring[c.class].trackers[compno].firstOldPoint = scoring[c.class].points[compno]?.length;
 				await scorePilot( c.class, compno, scoring[c.class] );
 			}
-			generateGeoJSONs( scoring[c.class], tOffset );
 		}
+		generateGeoJSONs( scoring[c.class], tOffset );
     }
 
     // How the trackers are indexed into the array, it must include className as compno may not be unique
@@ -525,7 +527,7 @@ async function sendScores() {
         }
 
         // We only need to mix in the gliders that are active
-        if( channel.activeGliders.length == 0 ) {
+        if( Object.keys(channel.activeGliders).length == 0 && channel.lastScores ) {
             console.log( `${channel.className}: no activity since last scoring so do nothing` );
             return;
         }
@@ -533,58 +535,59 @@ async function sendScores() {
         // Reset for next iteration
         channel.activeGliders = {};
 
-		await _foreach( scores.trackers, async function (tracker) {
-			await scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
+		Promise.all( _map( scores.trackers, (tracker) => 
+			new Promise((resolve) => { scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 ); resolve(); })
+		)).then( () => {
+			
+			// Make a copy that we can tweak
+			const pilots = _clonedeep( scores.trackers );
+			
+			// Get gliders for the class;
+			//              const gliders = _pickby( gliders, (f) => f.className == channel.className );
+			function mergedName(t) { return t.class+'_'+t.compno; }
+			
+			_foreach( pilots, (p,k) => {
+				const glider = gliders[mergedName(p)];
+				if( ! glider ) {
+					console.log( `unable to find glider ${p.compno} in ${p.class}` );
+					return;
+				}
+				
+				// Mix in the last real time information
+				p.altitude = glider.altitude;
+				p.agl = glider.agl;
+				
+				// And check to see if it has moved in the last 5 minutes, if we don't know omit the key
+				if( glider.lastTime ) {
+					p.stationary = (glider.lastTime - glider.lastMoved??glider.lastTime) > 5*60;
+				}
+				
+				// If it is recent then we will also include vario
+				if( (now - glider.lastTime) < 60 && 'lastvario' in glider ) {
+					[ p.lossXsecond,
+					  p.gainXsecond,
+					  p.total,
+					  p.average,
+					  p.Xperiod,
+					  p.min,
+					  p.max ] = glider.lastvario;
+				}
+				
+				p.at = glider.lastTime;
+			});
+			
+		
+			// Prepare to send
+			const scoresMsg = JSON.stringify( { pilots: pilots } );
+			channel.lastScores = scoresMsg;
+		
+			// Send to each client
+			channel.clients.forEach( (client) => {
+				if (client.readyState === WebSocket.OPEN) {
+                    client.send( scoresMsg );
+				}
+			});
 		});
-
-		// Make a copy that we can tweak
-		const pilots = _clonedeep( scores.trackers );
-		
-        // Get gliders for the class;
-        //              const gliders = _pickby( gliders, (f) => f.className == channel.className );
-        function mergedName(t) { return t.class+'_'+t.compno; }
-		
-        _foreach( pilots, (p,k) => {
-            const glider = gliders[mergedName(p)];
-            if( ! glider ) {
-                console.log( `unable to find glider ${p.compno} in ${p.class}` );
-                return;
-            }
-			
-            // Mix in the last real time information
-            p.altitude = glider.altitude;
-            p.agl = glider.agl;
-			
-            // And check to see if it has moved in the last 5 minutes, if we don't know omit the key
-            if( glider.lastTime ) {
-                p.stationary = (glider.lastTime - glider.lastMoved??glider.lastTime) > 5*60;
-            }
-			
-            // If it is recent then we will also include vario
-            if( (now - glider.lastTime) < 60 && 'lastvario' in glider ) {
-                [ p.lossXsecond,
-                  p.gainXsecond,
-                  p.total,
-                  p.average,
-                  p.Xperiod,
-                  p.min,
-                  p.max ] = glider.lastvario;
-            }
-			
-            p.at = glider.lastTime;
-        });
-		
-		
-        // Prepare to send
-        const scoresMsg = JSON.stringify( { pilots: pilots } );
-		channel.lastScores = scoresMsg;
-		
-        // Send to each client
-        channel.clients.forEach( (client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                        client.send( scoresMsg );
-            }
-        });
     });
 }
 
