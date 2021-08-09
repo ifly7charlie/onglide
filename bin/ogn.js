@@ -31,6 +31,8 @@ const fetcher = url => fetch(url).then(res => res.json());
 import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
+import { mergePoint } from '../lib/flightprocessing/incremental.mjs';
+
 let db = undefined;
 
 import fetch from 'node-fetch';
@@ -45,9 +47,11 @@ import _sortby from 'lodash.sortby';
 import _remove from 'lodash.remove';
 import _groupby from 'lodash.groupby';
 import _sortedIndexBy from 'lodash.sortedindexby';
+import _clonedeep from 'lodash.clonedeep';
 
 // Score a single pilot
 import scorePilot from  '../lib/flightprocessing/scorepilot.js';
+import { generateGeoJSONs } from '../lib/flightprocessing/tracks.js';
 
 import dotenv from 'dotenv';
 
@@ -87,6 +91,7 @@ let connection = {};
 
 // Are we offsetting time for replay
 let tOffset = 0;
+let tBase = 0;
 let stepSize = 1;
 
 // Performance counter
@@ -137,6 +142,7 @@ async function main() {
 	if( tOffset ) {
 		stepSize = parseInt(process.env.NEXT_PUBLIC_STEPSIZE)||1;
 		readOnly = true;
+		tBase = Math.floor(tOffset + (Date.now()/1000));
 	}
 	
 	console.log( 'Onglide OGN handler', readOnly ? '(read only)' : '', tOffset ? '(replay)':'', process.env.NEXT_PUBLIC_SITEURL ); 
@@ -311,7 +317,7 @@ async function updateTrackers() {
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels = [];
-    classes.forEach( (c) => {
+	for( const c of classes ) {
         const channel = channels[ channelName(c.class,c.datecode) ];
 
         // Update the saved data with the new values
@@ -326,24 +332,30 @@ async function updateTrackers() {
 		// fetch to get the task prepped and merge the scoring data into the
 		// trackers array
 		if( ! scoring[c.class] ) {
-			scoring[c.class] = { trackers: {}, state: {}, points: {} };
+			scoring[c.class] = { trackers: {}, state: {}, points: {}, geoJSON:{ tracks: {}, fulltracks: {}, locations: {}} };
+			
+			// merge pilots into the tracker array, won't score as no pilot selected
+			await scorePilot( c.class, undefined, scoring[c.class] );
+
+			// Now we will fetch the points for the pilots
+			const rawpoints = await db.query(escape`
+                SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
+                  FROM trackpoints
+                 WHERE datecode=${c.datecode} AND (${tBase} = 0 OR t < ${tBase}) AND class=${c.class}
+                 ORDER BY t DESC`);
+
+	
+			// Group them by comp number, this is quicker than multiple sub queries from the DB
+			scoring[c.class].points = _groupby( rawpoints, 'c' );
+
+			// Score them so we have some data to pass back over websocket
+			for( const compno of Object.keys(scoring[c.class].points) ) {
+				scoring[c.class].trackers[compno].firstOldPoint = scoring[c.class].points[compno]?.length;
+				await scorePilot( c.class, compno, scoring[c.class] );
+			}
+			generateGeoJSONs( scoring[c.class], tOffset );
 		}
-		scorePilot( c.class, undefined, scoring[c.class] );
-    });
-
-    // Cleanup any old channels
-    /*    const oldchannels = _pick( channels, newchannels  );
-          Object.keys(oldchannels).forEach( (c) => {
-          console.log( "closing channel "+c );
-          const oc = channels[ c ];
-          oc.clients.forEach( (client) => {
-          if (client.readyState === WebSocket.OPEN) {
-          client.close( 404, "datecode changed" );
-          }
-          });
-          delete channels[c];
-          }); */
-
+    }
 
     // How the trackers are indexed into the array, it must include className as compno may not be unique
     function mergedName(t) { return t.className+'_'+t.compno; }
@@ -354,13 +366,6 @@ async function updateTrackers() {
                                          ' from pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join compstatus c on c.class=p.class ' +
                                          '   where p.class = c.class' );
 
-    // Get the most recent track point and form a hash of the last point keyed by the same key
-    // This could be optimized to only occur the first time it's run
-    const lastPointR = await db.query(escape `SELECT tp.class className, tp.compno, lat, lng, t, altitude a, agl g FROM trackpoints tp
-                                                  JOIN (select compno, ti.class, max(t) mt FROM trackpoints ti JOIN compstatus cs ON cs.class = ti.class WHERE ti.datecode=cs.datecode AND (${tOffset} = 0 OR t < unix_timestamp() + ${tOffset}) GROUP by ti.class, ti.compno) ti
-                                                    ON tp.t = ti.mt AND tp.compno = ti.compno AND tp.class = ti.class`);
-    const lastPoint = _groupby( lastPointR, (x)=> mergedName(x) );
-
     // Now go through all the gliders and make sure we have linked them
     cTrackers.forEach( (t) => {
 
@@ -369,12 +374,12 @@ async function updateTrackers() {
         gliders[gliderKey] = { ...gliders[gliderKey], ...t, greg: t?.greg?.replace(/[^A-Z0-9]/i,'') };
 
 		// If we have a point but there wasn't one on the glider then we will store this away
-        var lp = lastPoint[gliderKey];
-        if( lp && (gliders[gliderKey].lastTime??0) < lp[0].t ) {
+        var lp = scoring[t.className].points[t.compno];
+        if( lp && lp.length > 0 && (gliders[gliderKey].lastTime??0) < lp[0].t ) {
             console.log(`using db altitudes for ${gliderKey}, ${gliders[gliderKey].lastTime??0} < ${lp[0].t}`);
             gliders[gliderKey] = { ...gliders[gliderKey],
                                    altitude: lp[0].a,
-                                   agl: lp[0].agl,
+                                   agl: lp[0].g,
                                    lastTime: lp[0].t };
         };
 
@@ -460,30 +465,11 @@ async function sendCurrentState(client) {
 // Send the GeoJSON for all the gliders, used when a new client connects to make
 // sure they have all the tracks. Client keeps it up to datw
 async function sendGeoJSON( channel, client ) {
-    // Fetch the scores for latest date
-    fetch( `http://${process.env.API_HOSTNAME}/api/${channel.className}/geoTracks`)
-        .then( (res) => {
-            // Send to the client
-            if (client.readyState === WebSocket.OPEN) {
-                res.text().then( (txt) => client.send( txt ) );
-            }
-		})
-		.catch(err => {
-            // We still call the callback on an error as we don't want to drop the packet
-            console.error(err);
-        });
-
-    fetch( `http://${process.env.API_HOSTNAME}/api/${channel.className}/pilotsGeoTrack`)
-        .then( (res) => {
-            // Send to the client
-            if (client.readyState === WebSocket.OPEN) {
-                res.text().then( (txt) => client.send( txt ) );
-            }
-		})
-		.catch(err => {
-            // We still call the callback on an error as we don't want to drop the packet
-            console.error(err);
-        });
+    if (client.readyState === WebSocket.OPEN) {
+		client.send( JSON.stringify( { tracks: scoring[channel.className].geoJSON.tracks,
+									   locations: scoring[channel.className].geoJSON.locations }));
+		client.send( JSON.stringify( { fulltracks: scoring[channel.className].geoJSON.fulltracks }));
+	}
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -494,7 +480,7 @@ async function sendScores() {
     const now = (new Date()).getTime()/1000;
 
     // For each channel (aka class)
-    Object.values(channels).forEach( (channel) => {
+    Object.values(channels).forEach( async function (channel) {
 
         // Remove any that are still marked as not alive
         const toterminate = _remove( channel.clients, (client) => {
@@ -517,7 +503,7 @@ async function sendScores() {
             "t":timeToText(now),
             "at":now,
             "listeners":channel.clients.length,
-            "airborne":channel.activeGliders.length||0,
+            "airborne":Object.keys(channel.activeGliders)?.length||0,
         };
         const keepAliveMsg = JSON.stringify( keepAlive );
         channel.lastKeepAliveMsg = keepAliveMsg;
@@ -530,86 +516,75 @@ async function sendScores() {
             client.isAlive = false;
             client.ping(function(){});
         });
+		
+		const className = channel.className;
+		const scores = scoring[className];
+        if( ! scores || ! Object.keys(scores.trackers).length ) {
+            console.log( `no pilots scored for ${channel.className}` );
+            return;
+        }
 
+        // We only need to mix in the gliders that are active
+        if( channel.activeGliders.length == 0 ) {
+            console.log( `${channel.className}: no activity since last scoring so do nothing` );
+            return;
+        }
 
-        // Fetch the scores for latest date
-		/*
-        fetch( `http://${process.env.API_HOSTNAME}/api/${channel.className}/scoreTask`)
-            .then(res => res.json())
-            .then( (scores) => {
+        // Reset for next iteration
+        channel.activeGliders = {};
 
-                // Make sure it's scored and sensible
-                if( scores.error ) {
-                    console.log( scores.error );
-                    return;
-                }
+		await _foreach( scores.trackers, async function (tracker) {
+			await scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
+		});
 
-                if( ! scores.pilots || ! Object.keys(scores.pilots).length ) {
-                    console.log( `no pilots scored for ${channel.className}` );
-                    return;
-                }
-
-                // We only need to mix in the gliders that are active
-                if( channel.activeGliders.length == 0 ) {
-                    console.log( `${channel.className}: no activity since last scoring so do nothing` );
-                    return;
-                }
-
-                // Reset for next iteration
-                channel.activeGliders = {};
-
-                // Get gliders for the class;
-                //              const gliders = _pickby( gliders, (f) => f.className == channel.className );
-                function mergedName(t) { return t.class+'_'+t.compno; }
-
-                _foreach( scores.pilots, (p,k) => {
-                    const glider = gliders[mergedName(p)];
-                    if( ! glider ) {
-                        console.log( `unable to find glider ${p.compno} in ${p.class}` );
-                        return;
-                    }
-
-                    // Mix in the last real time information
-                    p.altitude = glider.altitude;
-                    p.agl = glider.agl;
-
-                    // And check to see if it has moved in the last 5 minutes, if we don't know omit the key
-                    if( glider.lastTime ) {
-                        p.stationary = (glider.lastTime - glider.lastMoved??glider.lastTime) > 5*60;
-                    }
-
-                    // If it is recent then we will also include vario
-                    if( (now - glider.lastTime) < 60 && 'lastvario' in glider ) {
-                        [ p.lossXsecond,
-                          p.gainXsecond,
-                          p.total,
-                          p.average,
-                          p.Xperiod,
-                          p.min,
-                          p.max ] = glider.lastvario;
-                    }
-
-                    p.at = glider.lastTime;
-                });
-
-
-                // Prepare to send
-                const scoresMsg = JSON.stringify( scores );
-				channel.lastScores = scoresMsg;
-
-                // Send to each client
-                channel.clients.forEach( (client) => {
-                    if (client.readyState === WebSocket.OPEN) {
+		// Make a copy that we can tweak
+		const pilots = _clonedeep( scores.trackers );
+		
+        // Get gliders for the class;
+        //              const gliders = _pickby( gliders, (f) => f.className == channel.className );
+        function mergedName(t) { return t.class+'_'+t.compno; }
+		
+        _foreach( pilots, (p,k) => {
+            const glider = gliders[mergedName(p)];
+            if( ! glider ) {
+                console.log( `unable to find glider ${p.compno} in ${p.class}` );
+                return;
+            }
+			
+            // Mix in the last real time information
+            p.altitude = glider.altitude;
+            p.agl = glider.agl;
+			
+            // And check to see if it has moved in the last 5 minutes, if we don't know omit the key
+            if( glider.lastTime ) {
+                p.stationary = (glider.lastTime - glider.lastMoved??glider.lastTime) > 5*60;
+            }
+			
+            // If it is recent then we will also include vario
+            if( (now - glider.lastTime) < 60 && 'lastvario' in glider ) {
+                [ p.lossXsecond,
+                  p.gainXsecond,
+                  p.total,
+                  p.average,
+                  p.Xperiod,
+                  p.min,
+                  p.max ] = glider.lastvario;
+            }
+			
+            p.at = glider.lastTime;
+        });
+		
+		
+        // Prepare to send
+        const scoresMsg = JSON.stringify( { pilots: pilots } );
+		channel.lastScores = scoresMsg;
+		
+        // Send to each client
+        channel.clients.forEach( (client) => {
+            if (client.readyState === WebSocket.OPEN) {
                         client.send( scoresMsg );
-                    }
-                });
-
-            })
-            .catch(err => {
-                // We still call the callback on an error as we don't want to drop the packet
-                console.error(err);
-            });
-*/
+            }
+        });
     });
 }
 
@@ -707,6 +682,8 @@ function processPacket( packet ) {
 						   s: packet.speed,
 						   v: ! islate ? calculateVario( glider, packet.altitude, packet.timestamp ).join(',') : '',
 					   };
+					   
+					   let sc = scoring[glider.className];
 
 					   
                        // If the packet isn't delayed then we should send it out over our websocket
@@ -722,28 +699,39 @@ function processPacket( packet ) {
                                }
                            });
 
+						   mergePoint( message, sc );
+						   
                            // Save for reconnects
                            glider.lastMsg = jsonMsg;
-                       }
-
-					   let sc = scoring[glider.className];
+					   }
 					   
 					   // Slice it into the points array	
+					   if( ! sc.points[glider.compno] ) {
+						   sc.points[glider.compno] = [];
+					   }
 					   const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, (o) => -o.t);
 					   sc.points[glider.compno].splice(insertIndex, 0, message);
 
 					   // Now update the indexes for this
-					   if( insertIndex <= sc.trackers[glider.compno].firstOldPoint||0 ) {
-						   console.log( islate ? "late" : "not-late", `inserting at ${insertIndex}` );
-						   sc.trackers[glider.compno].firstOldPoint = (sc.trackers[glider.compno].firstOldPoint||0)+1;
-						   sc.trackers[glider.compno].oldestMerge = sc.trackers[glider.compno].oldestMerge != undefined ?
-							   sc.trackers[glider.compno].oldestMerge + 1 : undefined;
+					   const tracker = sc.trackers[glider.compno];
+					   if( insertIndex <= (sc.trackers[glider.compno]?.firstOldPoint||0) ) {
+						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}` );
+						   tracker.firstOldPoint = (tracker.firstOldPoint||0)+1;
 					   }
 					   else {
-						   console.log( islate ? "late" : "not-late", `inserting at ${insertIndex}, but older than firstOldPoint` );
-						   sc.trackers[glider.compno].outOfOrder = (sc.trackers[glider.compno].outOfOrder||0)+1;
-						   sc.trackers[glider.compno].oldestMerge = Math.max(sc.trackers[glider.compno].oldestMerge||0,insertIndex)
+						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}, but older than firstOldPoint` );
+						   tracker.outOfOrder = (tracker.outOfOrder||0)+1;
 					   }
+					   
+					   if( tracker.oldestMerge && tracker.oldestMerge >= insertIndex ) {
+						   tracker.oldestMerge ++;
+					   }
+					   else {
+						   tracker.oldestMerge = insertIndex+1;
+					   }
+					   
+					   // update the geojson
+//					   mergePoints( sc, glider.compno, insertIndex );
 						   
                        // Pop into the database
 					   if( ! readOnly ) {
