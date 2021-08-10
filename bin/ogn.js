@@ -815,7 +815,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
     if( distanceFromHome < 30 && agl < 1500 ) {
 
 		// Check if it's a possible launch
-		capturePossibleLaunchLanding( flarmId, packet.timestamp, jPoint, agl, (readOnly ? undefined : mysql), 'flarm' );
+		capturePossibleLaunchLanding( flarmId, packet.timestamp, jPoint, agl, (readOnly ? undefined : db), 'flarm' );
 		
         // Store in the unknown list for status display
         unknownTrackers[flarmId] = { firstTime: packet.timestamp, ...unknownTrackers[flarmId], lastTime: packet.timestamp, flarmid: flarmId };
