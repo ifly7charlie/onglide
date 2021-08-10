@@ -723,13 +723,23 @@ function processPacket( packet ) {
 					   if( ! sc.points[glider.compno] ) {
 						   sc.points[glider.compno] = [];
 					   }
+					   
 					   const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, (o) => -o.t);
-					   sc.points[glider.compno].splice(insertIndex, 0, message);
 
+					   // In dense coverage it's not uncommon to get a duplicate packet. We always take the first one we
+					   // have received. The packets may be very different and ideally we would identify problem receivers
+					   // and then choose when to accept their messages or not
+					   if( sc.points[glider.compno][insertIndex].t ==  message.t ) {
+						   return;
+					   }
+
+					   // Actually insert the point into the array
+					   sc.points[glider.compno].splice(insertIndex, 0, message);
+					   
 					   // Now update the indexes for this
 					   const tracker = sc.trackers[glider.compno];
 					   if( insertIndex <= (sc.trackers[glider.compno]?.firstOldPoint||0) ) {
-						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}` );
+						   //						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}` );
 						   tracker.firstOldPoint = (tracker.firstOldPoint||0)+1;
 					   }
 					   else {
