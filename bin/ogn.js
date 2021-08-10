@@ -503,7 +503,7 @@ async function sendScores() {
         const keepAlive = {
             "keepalive":1,
             "t":timeToText(now),
-            "at":now,
+            "at":Math.floor(now),
             "listeners":channel.clients.length,
             "airborne":Object.keys(channel.activeGliders)?.length||0,
         };
