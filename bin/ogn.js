@@ -729,7 +729,7 @@ function processPacket( packet ) {
 					   // In dense coverage it's not uncommon to get a duplicate packet. We always take the first one we
 					   // have received. The packets may be very different and ideally we would identify problem receivers
 					   // and then choose when to accept their messages or not
-					   if( sc.points[glider.compno][insertIndex].t ==  message.t ) {
+					   if( sc.points[glider.compno][insertIndex]?.t ==  message.t ) {
 						   return;
 					   }
 
