@@ -349,14 +349,27 @@ async function updateTrackers() {
 	
 			// Group them by comp number, this is quicker than multiple sub queries from the DB
 			scoring[c.class].points = _groupby( rawpoints, 'c' );
-
-			// Score them so we have some data to pass back over websocket
-			for( const compno of Object.keys(scoring[c.class].points) ) {
-				scoring[c.class].trackers[compno].firstOldPoint = scoring[c.class].points[compno]?.length;
-				await scorePilot( c.class, compno, scoring[c.class] );
-			}
 		}
+
+		// Score them so we have some data to pass back over websocket
+		// This also forces a full rescore by removing state and resetting
+		// firstOldPoint to the end of the points. We don't need to fetch the points as
+		// we have been maintinig a full list in order
+		for( const compno of Object.keys(scoring[c.class].points) ) {
+			scoring[c.class].state[compno] = {}; 
+			scoring[c.class].trackers[compno].firstOldPoint = scoring[c.class].points[compno]?.length;
+			await scorePilot( c.class, compno, scoring[c.class] );
+		}
+
+		// And fully regenerate the GeoJSONs so they include any late points
 		generateGeoJSONs( scoring[c.class], tOffset );
+        channels[ channelName(c.class,c.datecode) ]?.clients?.forEach( (client) => {
+            if (client.readyState === WebSocket.OPEN) {
+                sendGeoJSON( c.class, client );
+            }
+        });
+		
+		
     }
 
     // How the trackers are indexed into the array, it must include className as compno may not be unique
@@ -446,7 +459,7 @@ async function sendCurrentState(client) {
 	}
 
 	// Send them the GeoJSONs, they need to keep this up to date
-	sendGeoJSON( channels[client.ognChannel], client );
+	sendGeoJSON( channels[client.ognChannel].className, client );
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
@@ -466,12 +479,10 @@ async function sendCurrentState(client) {
 //
 // Send the GeoJSON for all the gliders, used when a new client connects to make
 // sure they have all the tracks. Client keeps it up to datw
-async function sendGeoJSON( channel, client ) {
-    if (client.readyState === WebSocket.OPEN) {
-		client.send( JSON.stringify( { tracks: scoring[channel.className].geoJSON.tracks,
-									   locations: scoring[channel.className].geoJSON.locations }));
-		client.send( JSON.stringify( { fulltracks: scoring[channel.className].geoJSON.fulltracks }));
-	}
+async function sendGeoJSON( className, client ) {
+	client.send( JSON.stringify( { tracks: scoring[className].geoJSON.tracks,
+								   locations: scoring[className].geoJSON.locations }));
+	client.send( JSON.stringify( { fulltracks: scoring[className].geoJSON.fulltracks }));
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
