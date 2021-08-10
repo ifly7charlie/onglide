@@ -9,6 +9,7 @@
 const prompts = require('prompts');
 const escape = require('sql-template-strings')
 const mysql = require('serverless-mysql')();
+const mysql_admin = require('serverless-mysql')();
 
 
 // Load the current file
@@ -240,15 +241,12 @@ async function main() {
     console.log( "\nUpdating .env.local" );
 
     const fs = require('fs');
-    const envFile =
+    let envFile =
           `MYSQL_HOST=${response.dbhost}
-MYSQL_DATABASE=${response.database}
 MYSQL_USER=${response.dbuser}
 MYSQL_PASSWORD=${response.dbpw}
 API_HOSTNAME=${wsresponse.apihost}
-NEXT_PUBLIC_WEBSOCKET_HOST=${wsresponse.wshost}
 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${mresponse.key}
-NEXT_PUBLIC_SITEURL=${wsresponse.url}
 NEXT_SCORE_REFRESH_INTERVAL=60000
 `;
 
@@ -257,10 +255,20 @@ NEXT_SCORE_REFRESH_INTERVAL=60000
 STATUS_SERVER_PORT=${8100+wsresponse.portoffset}
 `;
 	}
+    else {
+        envFile += `MYSQL_DATABASE=${response.database}
+NEXT_PUBLIC_WEBSOCKET_HOST=${wsresponse.wshost}
+NEXT_PUBLIC_SITEURL=${wsresponse.url}
+`;
+    }
 
     console.log( envFile );
 
-    fs.renameSync( '.env.local', '.env.backup' );
+    try {
+        fs.renameSync( '.env.local', '.env.backup' );
+    } catch(e) {
+    }
+    
     fs.writeFileSync( '.env.local', envFile, (err) => {
         console.log( "Unable to write file (.env.local)" );
         console.log( err );
@@ -275,6 +283,26 @@ STATUS_SERVER_PORT=${8100+wsresponse.portoffset}
                                    ${ssresponse.ssclient||''}, ${ssresponse.sssecret||''}, ${ssresponse.sscontest_name||''}, 1, ${ssresponse.actuals}, ${wsresponse.portoffset}, ${wsresponse.url} )`)
         .commit();
 
+
+    // If we have an admin set then configure the main table 
+    if( nE.MYSQL_ADMIN_PW && nE.MYSQL_ADMIN_USER ) {
+        // Make sure we can connect
+        mysql_admin.config({
+            host: response.dbhost,
+            database: response.database,
+            user: nE.MYSQL_ADMIN_USER,
+            password: nE.MYSQL_ADMIN_PW,
+        });
+        
+        mysql_admin.connect();
+
+        // Start and end not used yet
+        const urlprefix = wsresponse.url.match(/^([A-Z0-9]+)\./i )[1]||wsresponse.url;
+        await mysql_admin.query( escape`INSERT INTO competitions.comps ( db, portoffset, start, end, site ) 
+                                       VALUES ( ${response.database}, ${wsresponse.portoffset}, now(), '2100-01-01', ${urlprefix} ) 
+                         ON DUPLICATE KEY SET portoffset=values(portoffset), start=values(start), end=values(end), site=values(site)` ); 
+    }
+    
     console.log( "done" );
     process.exit();
 }
