@@ -86,6 +86,21 @@ let ddb = {}; // device_id: { ddb object }
 
 let scoring = {}; // list of classes, each class has { compno: { trackers, state, and points} }
 
+let altitudeOffsetAdjust = 
+    { 'UKBIG': +2,
+      'Alconbury': +2,
+      'Diddles': null,
+      'EGDD': -48,
+      'Brunty': -49,
+      'unknown': 0,
+      'DARLEY': +103,
+      'Kirkbym': +2,
+      'UKDUN2': -2,
+      'RhiwFaw': +191,
+      'Broadmdow': +46,
+      'Chelt': -3,
+    };
+
 // APRS connection
 let connection = {};
 
@@ -614,6 +629,14 @@ function processPacket( packet ) {
     // Flarm ID we use is last 6 characters
     const flarmId = packet.sourceCallsign.slice( packet.sourceCallsign.length - 6 );
 
+    const sender = packet.digipeaters?.pop()?.callsign||'unknown';
+
+    const aoa = altitudeOffsetAdjust[ sender ]||0;
+    if( aoa == null ) {
+        console.log( `ignoring packet from ${sender} as blocked` );
+        return;
+    }
+    const altitude = Math.floor(packet.altitude + aoa);
 
     // Check if the packet is late, based on previous packets for the glider
     const now = (new Date()).getTime()/1000;
@@ -645,8 +668,12 @@ function processPacket( packet ) {
 	
     const islate = ( glider.lastTime > packet.timestamp );
     if( ! islate ) {
+        if( glider.compno == 'CH' ) {
+            console.log( 'CH', sender, altitude, glider.lastAlt, aoa );
+        }
+        
 		glider.lastPoint = jPoint;
-		glider.lastAlt = packet.altitude;
+		glider.lastAlt = altitude;
 
 		if( glider.lastTime - packet.timestamp > 1800 ) {
 			console.log( `${glider.compno} : VERY late flarm packet received, ${(glider.lastTime - packet.timestamp)/60}  minutes earlier than latest packet received for the glider, ignoring` );
@@ -657,6 +684,7 @@ function processPacket( packet ) {
 		
         glider.lastTime = packet.timestamp;
     }
+
 
     // Where are we broadcasting this data
     let channel = channels[glider.channel];
@@ -674,7 +702,7 @@ function processPacket( packet ) {
     channel.activeGliders[glider.compno]=1;
 
     // Capture the fact that we are launching
-    if( packet.altitude - location.altitude > 100 && ! channel.launching ) {
+    if( altitude - location.altitude > 100 && ! channel.launching ) {
         console.log( `Launch detected: ${glider.compno}, class: ${glider.className}`);
         channel.launching = true;
     }
@@ -682,19 +710,19 @@ function processPacket( packet ) {
     // Enrich with elevation and send to everybody, this is async
     withElevation( packet.latitude, packet.longitude,
                    async (gl) => {
-					   glider.agl = Math.round(Math.max(packet.altitude-gl,0));
-					   glider.altitude = packet.altitude;
+					   glider.agl = Math.round(Math.max(altitude-gl,0));
+					   glider.altitude = altitude;
 					   
 					   let message = {
 						   c: glider.compno,
 						   lat: Math.round(packet.latitude*1000000)/1000000,
 						   lng: Math.round(packet.longitude*1000000)/1000000,
-						   a: Math.floor(packet.altitude),
+						   a: altitude,
 						   g: glider.agl,
 						   t: packet.timestamp,
 						   b: packet.course,
 						   s: packet.speed,
-						   v: ! islate ? calculateVario( glider, packet.altitude, packet.timestamp ).join(',') : '',
+						   v: ! islate ? calculateVario( glider, altitude, packet.timestamp ).join(',') : '',
 					   };
 					   
 					   let sc = scoring[glider.className];
@@ -759,9 +787,9 @@ function processPacket( packet ) {
 						   
                        // Pop into the database
 					   if( ! readOnly ) {
-						   db.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed)
+						   db.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
-                                                           ${packet.latitude}, ${packet.longitude}, ${packet.altitude}, ${glider.agl}, ${packet.timestamp}, ${packet.course}, ${packet.speed} )` );
+                                                           ${packet.latitude}, ${packet.longitude}, ${altitude}, ${glider.agl}, ${packet.timestamp}, ${packet.course}, ${packet.speed}, ${sender} )` );
 					   }
                    });
 
