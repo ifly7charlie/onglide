@@ -190,6 +190,7 @@ async function main() {
         ws.ognPeer = req.headers['x-forwarded-for'];
         console.log( `connection received for ${channel} from ${ws.ognPeer}` );
 
+        ws.isAlive = true;
         if( channel in channels ) {
             channels[channel].clients.push( ws );
         }
@@ -198,7 +199,6 @@ async function main() {
             ws.isAlive = false;
         }
 
-        ws.isAlive = true;
         ws.on('pong', () => { ws.isAlive = true });
         ws.on('close', () => { ws.isAlive = false; console.log( `close received from ${ws.ognPeer} ${ws.ognChannel}`); });
 
@@ -463,13 +463,13 @@ async function updateDDB() {
 //
 // New connection, send it a packet for each glider we are tracking
 async function sendCurrentState(client) {
-    if (client.readyState !== WebSocket.OPEN) {
-        console.log("unable to sendCurrentState not yet open" );
+    if (client.readyState !== WebSocket.OPEN && client.isAlive ) {
+        console.log("unable to sendCurrentState not yet open or ! isAlive" );
         return;
     }
 
 	// Make sure we send the pilots ASAP
-	if( channels[client.ognChannel].lastScores ) {
+	if( channels[client.ognChannel]?.lastScores ) {
         client.send( channels[client.ognChannel].lastScores );
 	}
 
