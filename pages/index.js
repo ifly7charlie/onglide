@@ -106,7 +106,10 @@ function CombinePage( props ) {
         longitude: props.lng,
         zoom: 8,
         bearing: 0,
-        pitch: 90
+		minPitch: 0,
+		maxPitch: 80,
+		altitude: 1.5,
+//        pitch: 90
     });
 
 	// 
