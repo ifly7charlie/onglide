@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+message PilotTracks {
+		map<string, PilotTrack> pilots = 1;
+};
+
+
+message PilotTrack {
+		// what pilot
+		required string compno = 1;
+
+		// number of points
+		required uint32 posIndex = 2;
+
+		// epoch time for each point (actually uint32)
+		bytes t = 3;
+
+		// Three tuple of [x,y,z] repeated length times (actually float)
+		bytes positions = 4;
+
+		// Segments in the track line, for broken track drawing (actually uint32)
+		uint32 segmentIndex = 5;
+		bytes indices = 6;
+
+		// Two Uint32 array containing the track segment that is most recent
+		bytes recentIndices = 7;
+
+		// For colouring, all Uint8 arrays one for each point all optional
+		bytes climbRate = 8;
+		bytes airSpeed = 9;
+		bytes altitudeBand = 10;
+		bytes leg = 11;
+};		
+		
+
+		
+		

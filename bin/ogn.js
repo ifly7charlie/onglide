@@ -19,6 +19,9 @@ import { WebSocket, WebSocketServer } from 'ws';
 import http from 'http';
 import tx2 from 'tx2';
 
+import protobuf from 'protobufjs/light.js';
+import { PilotTracks } from '../lib/onglide-protobuf.mjs';
+
 console.log(ISSocket);
 
 //import crypto from 'crypto';
@@ -41,6 +44,7 @@ import fetch from 'node-fetch';
 import _filter from 'lodash.filter';
 import _pick from 'lodash.pick';
 import _map from 'lodash.map';
+import _reduce from 'lodash.reduce';
 import _keyby from 'lodash.keyby';
 import _foreach from 'lodash.foreach';
 import _sortby from 'lodash.sortby';
@@ -457,7 +461,8 @@ async function updateDDB() {
 
             // remove the unknown characters from the registration
             _foreach( ddb, function(entry) { entry.registration = entry?.registration?.replace(/[^A-Z0-9]/i,'') });
-        });
+        })
+		.catch((e)=>{console.log("unable to fetch ddb", e )});
 }
 
 //
@@ -498,6 +503,30 @@ async function sendGeoJSON( className, client ) {
 	client.send( JSON.stringify( { tracks: scoring[className].geoJSON.tracks,
 								   locations: scoring[className].geoJSON.locations }));
 	client.send( JSON.stringify( { fulltracks: scoring[className].geoJSON.fulltracks }));
+
+
+
+	let root = protobuf.Root.fromJSON(PilotTracks);
+	let PT = root.lookupType( "PilotTracks" );
+
+	const toStream = _reduce( scoring[className]?.deck, (result,p,compno) =>
+											  {
+												  result[compno] = {
+													  compno: compno,
+													  positions: new Uint8Array(p.positions.buffer),
+													  indices: new Uint8Array(p.indices.buffer),
+													  t: new Uint8Array(p.t.buffer),
+													  climbRate: p.climbRate.buffer,
+													  recentIndices: new Uint8Array(p.recentIndices.buffer),
+													  posIndex: p.posIndex,
+													  segmentIndex: p.segmentIndex };
+												  return result;
+											  }, {} );
+	
+	let message = PT.create( { pilots: toStream } );
+	let buffer = PT.encode(message).finish();
+	
+	client.send( buffer, { binary: true } );
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -518,7 +547,7 @@ async function sendScores() {
         toterminate.forEach( (client) => {
             console.log( `terminating client ${client.ognChannel} peer ${client.ognPeer}` );
             client.terminate();
-        });;
+        });
 
         // If we have nothing then do nothing...
         if( ! channel.clients.length ) {
