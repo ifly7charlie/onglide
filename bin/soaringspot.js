@@ -370,6 +370,8 @@ async function process_day_task (day,classid,classname,keys) {
     const dbhashrow = (await mysql.query( escape`SELECT hash FROM tasks WHERE datecode=todcode(${date}) AND class=${classid}` ));
 
     if( (dbhashrow && dbhashrow.length > 0) && hash == dbhashrow[0].hash ) {
+        console.log( `${classid} - ${date}: task unchanged` );
+        console.log( hash, dbhashrow[0] );
         return;
     }
     else {
@@ -426,7 +428,7 @@ async function process_day_task (day,classid,classname,keys) {
                 // it must be leading, and 3 or 4 digits long and we will then strip it from the name
                 let tpname = tp.name;
                 let trigraph = tpname.substr(0,3);
-                if( tpname && ([trigraph] = tpname.match( /^([0-9]{1,4})/))) {
+                if( tpname && ([trigraph] = tpname.match( /^([0-9]{1,4})/)||[trigraph])) {
                     tpname = tpname.replace( /^([0-9]{1,4})/, '');
                 }
 
