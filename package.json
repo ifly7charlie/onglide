@@ -60,6 +60,7 @@
         "serverless-mysql": ">=1.5.4",
         "sql-template-strings": ">=2.2.2",
         "stats-incremental": "^1.2.1",
+        "suncalc": "^1.8.0",
         "swr": ">=0.2.3",
         "tabletojson": "^2.0.7",
         "tx2": "^1.0.4",
