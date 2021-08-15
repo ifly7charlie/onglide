@@ -516,7 +516,7 @@ async function sendGeoJSON( className, client ) {
 													  positions: new Uint8Array(p.positions.buffer),
 													  indices: new Uint8Array(p.indices.buffer),
 													  t: new Uint8Array(p.t.buffer),
-													  climbRate: p.climbRate.buffer,
+													  climbRate: new Uint8Array(p.climbRate.buffer),
 													  recentIndices: new Uint8Array(p.recentIndices.buffer),
 													  posIndex: p.posIndex,
 													  segmentIndex: p.segmentIndex };
