@@ -32,15 +32,14 @@ async function main() {
         process.exit(1);
     }
 
-	if( ! pm2.connect(()=>{ console.log("connected to pm2"); }) ) {
-		console.log( "Unable to connect to pm2" );
-	}
-
+async function p() {
 	const databases = process.argv.slice(2);
 	console.log( databases );
 	let stop = false;
 	let dev = false;
 	let fe = false;
+    let next = false;
+    let restart = false;
 
 	for ( db of databases ) {
 
@@ -61,7 +60,23 @@ async function main() {
 			console.log( "front end only, no score fetching process" );
 			continue;
 		}
-		
+
+		if( db == '--next' ) {
+			next = true;
+            fe = true;
+			console.log( "next only" );
+			continue;
+		}
+
+		if( db == '--restart' ) {
+			next = true;
+            fe = true;
+            restart = true;
+			console.log( "next restart only" );
+			continue;
+		}
+
+
 		if( config.MYSQL_DATABASE && config.MYSQL_DATABASE != db ) {
 			console.log( "you have a different database in .env.local, if you want to run multiples from same config file you should remove this" );
 			process.exit(1);
@@ -89,7 +104,7 @@ async function main() {
 
 		// If the config is forcing localhost then we will use that but fix the ports
 		let localhost = false;
-		if( config.NEXT_PUBLIC_SITEURL.match(/localhost/ )) {
+		if( config.NEXT_PUBLIC_SITEURL?.match(/localhost/ )) {
 			domain = 'localhost';
 			localhost = true;
 		}
@@ -112,12 +127,12 @@ async function main() {
 			
 		console.log( `${domain} [${db}]: www ${3000+keys.portoffset}, api ${environment.API_HOSTNAME}, ws ${environment.WEBSOCKET_PORT}` );
 
-		if( keys.type == 'soaringspotkey' ) {
+		if( keys.type != '' ) {
 
 			if( stop ) {
-				pm2.delete( domain+"_scoring" );
-				pm2.delete( domain+"_ogn" );
-				pm2.delete( domain+"_next" );
+				function n() { pm2.delete( domain+"_next", () => process.exit(1) ); }
+				function n2() { pm2.delete( domain+"_ogn", n  ); }
+				pm2.delete( domain+"_scoring", n2 );
 			}
 			else {
 				console.log( "starting" );
@@ -129,7 +144,7 @@ async function main() {
 					if( scoringScript ) {
 						console.log( `  using scoring script ${scoringScript}` );
 						await pm2.start( {
-							script: 'bin/soaringspot.js',
+							script: scoringScript,
 							name: domain+"_scoring",
 							env: environment,
 							restart_delay: 100,
@@ -141,19 +156,21 @@ async function main() {
 						console.log( `   unknown scoring script type ${keys.type}, not fetching scores` );
 					}
 				}
-				
-				await pm2.start( {
-					script: 'bin/ogn.js',
-					name: domain+"_ogn",
-					env: environment,
-					restart_delay: 30000,
-					max_restarts: 1000,
-					autorestart: true,
-					log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-				});
 
+				if( ! next ) {
+				    await pm2.start( {
+					    script: 'bin/ogn.js',
+					    name: domain+"_ogn",
+					    env: environment,
+					    restart_delay: 30000,
+					    max_restarts: 1000,
+					    autorestart: true,
+					    log_date_format: "YYYY-MM-DD HH:mm:ss Z",
+				    });
+                }
+                    
 				function startNext() {
-					pm2.start( {
+                    const args = {
 						script: "./node_modules/.bin/next",
 						name: domain+"_next",
 						args: (dev ? "dev -p " : "start -p ")+(3000+keys.portoffset), 
@@ -161,8 +178,16 @@ async function main() {
 						restart_delay: 30000, // 30 seconds
 						max_restarts: 30,
 						autorestart: true,
+                        updateEnv: true,
 						log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-					}, () => { console.log( "next started" ); process.exit() } );
+					};
+
+                    if( restart ) {
+					    pm2.restart( domain+"_next", args, () => { console.log( "next restarted" ); process.exit() } );
+                    }
+                    else {
+					    pm2.start( args, () => { console.log( "next started" ); process.exit() } );
+                    }
 				}
 
 				
@@ -175,6 +200,10 @@ async function main() {
 			}
 		}
 	}
+}
+
+
+	pm2.connect(()=>{ console.log("connected to pm2"); p(); });
 //	pm2.disconnect();
 //	process.exit();
 }
