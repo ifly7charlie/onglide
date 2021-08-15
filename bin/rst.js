@@ -66,7 +66,7 @@ async function main() {
 
     mysql.config({
         host: config.MYSQL_HOST,
-        database: config.MYSQL_DATABASE,
+        database: process.env.MYSQL_DATABASE||config.MYSQL_DATABASE,
         user: config.MYSQL_USER,
         password: config.MYSQL_PASSWORD
     });
