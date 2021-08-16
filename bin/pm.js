@@ -100,7 +100,8 @@ async function p() {
 			continue;
 		}
 
-		let domain = keys.domain.slice(0, keys.domain.indexOf("."));
+        let domain = config.NEXT_PUBLIC_SITEURL||keys.domain;
+		domain = domain.slice(0, domain.indexOf("."));
 
 		// If the config is forcing localhost then we will use that but fix the ports
 		let localhost = false;
@@ -109,23 +110,25 @@ async function p() {
 			localhost = true;
 		}
 
+        const portOffset = parseInt(config.PORT_OFFSET||keys.portoffset);
+
 		const environment = {
 			'MYSQL_DATABASE': db,
 			SHORT_NAME: domain,
-			NEXT_PUBLIC_SITEURL: keys.domain,
-			NEXT_PUBLIC_WEBSOCKET_HOST: keys.domain,
-			API_HOSTNAME: (config.API_HOSTNAME.slice(0,config.API_HOSTNAME.indexOf(":"))||config.API_HOSTNAME) + ':' + (3000+keys.portoffset),
-			WEBSOCKET_PORT: 8000+keys.portoffset,
-			STATUS_SERVER_PORT: 8100+keys.portoffset
+			NEXT_PUBLIC_SITEURL: config.NEXT_PUBLIC_SITEURL||config.domain,
+			NEXT_PUBLIC_WEBSOCKET_HOST: config.NEXT_PUBLIC_SITEURL||keys.domain,
+			API_HOSTNAME: (config.API_HOSTNAME.slice(0,config.API_HOSTNAME.indexOf(":"))||config.API_HOSTNAME) + ':' + (3000+portOffset),
+			WEBSOCKET_PORT: 8000+portOffset,
+			STATUS_SERVER_PORT: 8100+portOffset
 		};
 
 		if( localhost ) {
 			console.log( '  configuring for localhost usage based on NEXT_PUBLIC_SITEURL in .env.local' );
-			environment.NEXT_PUBLIC_SITEURL = 'localhost:' + (3000+keys.portoffset);
-			environment.NEXT_PUBLIC_WEBSOCKET_HOST = 'localhost:' + (8000+keys.portoffset);
+			environment.NEXT_PUBLIC_SITEURL = 'localhost:' + (3000+portOffset);
+			environment.NEXT_PUBLIC_WEBSOCKET_HOST = 'localhost:' + (8000+portOffset);
 		}
 			
-		console.log( `${domain} [${db}]: www ${3000+keys.portoffset}, api ${environment.API_HOSTNAME}, ws ${environment.WEBSOCKET_PORT}` );
+		console.log( `${domain} [${db}]: www ${3000+portOffset}, api ${environment.API_HOSTNAME}, ws ${environment.WEBSOCKET_PORT}` );
 
 		if( keys.type != '' ) {
 
@@ -173,7 +176,7 @@ async function p() {
                     const args = {
 						script: "./node_modules/.bin/next",
 						name: domain+"_next",
-						args: (dev ? "dev -p " : "start -p ")+(3000+keys.portoffset), 
+						args: (dev ? "dev -p " : "start -p ")+(3000+portOffset), 
 						env: environment,
 						restart_delay: 30000, // 30 seconds
 						max_restarts: 30,
