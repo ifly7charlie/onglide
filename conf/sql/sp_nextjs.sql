@@ -50,8 +50,8 @@ BEGIN
 		-- Get the wind, if 0 then only handicap adjustments happen so no problem for international
 		SELECT winddir, windspeed INTO
 			   Wdir, Wstrength
-			   FROM compstatus cs, tasks t
-			   WHERE cs.class = t.class AND
+			   FROM contestday cd, tasks t
+			   WHERE cd.class = t.class AND
 			         t.taskid = _taskid;
 
 		-- get the turnpoints, CSV list
