@@ -164,13 +164,11 @@ CREATE TABLE `contestday` (
   `results_uploaded` datetime DEFAULT NULL,
   `info` char(255) DEFAULT NULL COMMENT 'Messages output about the task',
   `status` char(1) DEFAULT 'N' COMMENT 'What happened with the day - Y = contest, Z = scrubbed, N = not yet flown',
-  `comments` varchar(600) DEFAULT NULL,
+  `comments` text DEFAULT NULL,
+  `notes` text DEFAULT NULL,
   `igcavailable` char(1) DEFAULT 'N' COMMENT 'Are there any IGC files for this day Y/N',
-  `windspeed` int(11) DEFAULT NULL,
-  `winddir` int(11) DEFAULT NULL,
-  `maxspeed` int(11) DEFAULT '95',
-  `minspeed` int(11) DEFAULT '65',
-  `notes` text,
+  `windspeed` int(11) DEFAULT NULL COMMENT 'Used for UK Scoring script windicapping',
+  `winddir` int(11) DEFAULT NULL COMMENT 'Used for UK Scoring script windicapping',
   PRIMARY KEY (`class`,`datecode`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -429,6 +427,7 @@ CREATE TABLE `tasks` (
   `maxmarkingdistance` float DEFAULT NULL COMMENT 'Distance for lowesthandicapped glider',
   
   `duration` time DEFAULT NULL COMMENT 'AAT time',
+  `earlieststart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
 
   `hash` TEXT DEFAULT NULL COMMENT 'hash of value from soaring spot to prevent redownloading',
   
