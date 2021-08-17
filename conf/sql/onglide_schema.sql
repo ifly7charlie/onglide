@@ -134,9 +134,6 @@ CREATE TABLE `compstatus` (
   `starttime` time DEFAULT NULL COMMENT 'Startline open time',
   `startheight` int(11) DEFAULT '0',
   
-  `winddir` int(11) DEFAULT '0' COMMENT 'Used for windicapping in UK, leave both 0 for no windicapping',
-  `windspeed` int(11) DEFAULT '0' COMMENT 'Used for windicapping in UK, leave both 0 for no windicapping',
-  
   `compdate` date DEFAULT NULL,
   `briefdc` char(4) DEFAULT NULL,
   `grid` char(20) DEFAULT '',
