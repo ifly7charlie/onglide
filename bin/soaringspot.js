@@ -157,7 +157,7 @@ async function update_class(compClass, keys) {
                    VALUES ( ${classid}, ${name.substr(0,29)}, ${name}, ${compClass.type} )
                     ON DUPLICATE KEY UPDATE classname=values(classname), description=values(description),
                                             type=values(type) `);
-
+	
     await mysql.query( escape`insert ignore into compstatus (class) values ( ${classid} )` );
 
     // Make sure we have rows for each day and that compstatus is correct
@@ -191,8 +191,8 @@ async function update_pilots(class_url,classid,classname,keys) {
 
         // Make sure it has a comp number
         if( ! pilot.contestant_number || pilot.contestant_number == '' || !!pilot.contestant_number.match(/(TBA|TBD)/)) {
-            pilot.contestant_number = -(unknowncompno++);
-        }
+			continue;
+		}
 
         // And change handicaps to BGA style
         pilot.handicap = correct_handicap( pilot.handicap );
@@ -546,12 +546,18 @@ async function process_day_scores (day,classid,classname,keys) {
     // It's a big long list of results ;)
     for ( const row of day._embedded['http://api.soaringspot.com/rel/results'] ) {
 
-        const pilot = row._embedded['http://api.soaringspot.com/rel/contestant'].contestant_number.substring(0,4);
+        const pilot = row._embedded['http://api.soaringspot.com/rel/contestant'].contestant_number?.substring(0,4);
         const handicap = correct_handicap( row._embedded['http://api.soaringspot.com/rel/contestant'].handicap );
 
         const start = row.scored_start ? (new Date(row.scored_start)).getTime()/1000 : 0;
         const finish = row.scored_finish ? (new Date(row.scored_finish)).getTime()/1000 : 0;
         const duration = finish && start ? (finish - start) / 3600 : 0;
+
+		// Make sure it has a comp number
+        if( ! pilot || pilot == '' || !!pilot.match(/(TBA|TBD)/)) {
+			continue;
+		}
+
 
         let scoredvals = {};
         if( keys.actuals < 0 ) {
@@ -664,6 +670,22 @@ async function process_day_scores (day,classid,classname,keys) {
 //
 async function update_contest(contest,keys) {
 
+    if( keys.deep ) {
+        // clear it all down, we will load all of this from soaring spot
+        // NOTE: this should not be cleared every time, even though at present it is
+        // TBD!!
+        mysql.transaction()
+            .query( escape`delete from classes` )
+            .query( escape`delete from logindetails where type="P"` )
+            .query( escape`delete from pilots` )
+            .query( escape`delete from pilotresult` )
+            .query( escape`delete from contestday` )
+            .query( escape`delete from compstatus` )
+            .query( escape`delete from taskleg` )
+            .query( escape`delete from tasks` )
+            .commit();
+        console.log('deep update requested, deleted everything');
+    }
 
     // Add a row if we need to
     const count = (await mysql.query( 'SELECT COUNT(*) cnt FROM competition' ));
@@ -720,22 +742,6 @@ async function update_contest(contest,keys) {
         await mysql.query( escape`UPDATE competition set mainwebsite=${url}` );
     }
 
-    if( keys.deep ) {
-        // clear it all down, we will load all of this from soaring spot
-        // NOTE: this should not be cleared every time, even though at present it is
-        // TBD!!
-        mysql.transaction()
-            .query( escape`delete from classes` )
-            .query( escape`delete from logindetails where type="P"` )
-            .query( escape`delete from pilots` )
-            .query( escape`delete from pilotresult` )
-            .query( escape`delete from contestday` )
-            .query( escape`delete from compstatus` )
-            .query( escape`delete from taskleg` )
-            .query( escape`delete from tasks` )
-            .commit();
-        console.log('deep update requested, deleted everything');
-    }
 }
 
 
