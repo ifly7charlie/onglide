@@ -468,7 +468,7 @@ async function updateDDB() {
 //
 // New connection, send it a packet for each glider we are tracking
 async function sendCurrentState(client) {
-    if (client.readyState !== WebSocket.OPEN && client.isAlive ) {
+    if (client.readyState !== WebSocket.OPEN && client.isAlive && channels[client.ognChannel]) {
         console.log("unable to sendCurrentState not yet open or ! isAlive" );
         return;
     }
