@@ -83,7 +83,6 @@ async function doIt() {
 			console.log( "next restart only" );
 			continue;
 		}
-
 		if( process.env.MYSQL_DATABASE && process.env.MYSQL_DATABASE != db ) {
 			console.log( "you have a different database in .env.local, if you want to run multiples from same config file you should remove this" );
 			process.exit(1);
