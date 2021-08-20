@@ -106,7 +106,7 @@ async function doIt() {
 			continue;
 		}
 
-        let domain = config.NEXT_PUBLIC_SITEURL||keys.domain;
+        	let domain = process.env.NEXT_PUBLIC_SITEURL||keys.domain;
 		domain = domain.slice(0, domain.indexOf("."));
 
 		// If the config is forcing localhost then we will use that but fix the ports
@@ -116,7 +116,7 @@ async function doIt() {
 			localhost = true;
 		}
 
-        const portOffset = parseInt(config.PORT_OFFSET||keys.portoffset);
+        const portOffset = parseInt(process.env.PORT_OFFSET||keys.portoffset);
 
 		const environment = {
 			'MYSQL_DATABASE': db,
