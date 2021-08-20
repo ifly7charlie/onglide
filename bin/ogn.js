@@ -35,6 +35,7 @@ import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
 import { mergePoint } from '../lib/flightprocessing/incremental.mjs';
+import { altitudeOffsetAdjust } from '../lib/offsets.js';
 
 let db = undefined;
 
@@ -90,20 +91,6 @@ let ddb = {}; // device_id: { ddb object }
 
 let scoring = {}; // list of classes, each class has { compno: { trackers, state, and points} }
 
-let altitudeOffsetAdjust = 
-    { 'UKBIG': +2,
-      'Alconbury': +2,
-      'Diddles': null,
-      'EGDD': -48,
-      'Brunty': -49,
-      'unknown': 0,
-      'DARLEY': +103,
-      'Kirkbym': +2,
-      'UKDUN2': -2,
-      'RhiwFaw': +191,
-      'Broadmdow': +46,
-      'Chelt': -3,
-    };
 
 // APRS connection
 let connection = {};
