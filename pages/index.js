@@ -170,7 +170,7 @@ export async function getStaticProps(context) {
     const classes = await query('SELECT class FROM classes ORDER BY class');
 
     return {
-        props: { lat: location?.lt, lng: location?.lg, tzoffset: location?.tzoffset, tz: location?.tz,
+        props: { lat: location?.lt||51, lng: location?.lg||0, tzoffset: location?.tzoffset||0, tz: location?.tz||'Etc/UTC',
 				 defaultClass: classes && classes.length > 0 ? classes[0].class : '' }, // will be passed to the page component as props
     }
 }
