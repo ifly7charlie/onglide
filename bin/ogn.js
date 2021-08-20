@@ -55,7 +55,7 @@ import _clonedeep from 'lodash.clonedeep';
 
 // Score a single pilot
 import scorePilot from  '../lib/flightprocessing/scorepilot.js';
-import { generateGeoJSONs } from '../lib/flightprocessing/tracks.js';
+import { generatePilotTracks } from '../lib/flightprocessing/tracks.js';
 
 import dotenv from 'dotenv';
 
@@ -381,10 +381,10 @@ async function updateTrackers() {
 		}
 
 		// And fully regenerate the GeoJSONs so they include any late points
-		generateGeoJSONs( scoring[c.class], tOffset );
+		generatePilotTracks( scoring[c.class], tOffset );
         channels[ channelName(c.class,c.datecode) ]?.clients?.forEach( (client) => {
             if (client.readyState === WebSocket.OPEN) {
-                sendGeoJSON( c.class, client );
+                sendPilotTracks( c.class, client );
             }
         });
 		
@@ -479,7 +479,7 @@ async function sendCurrentState(client) {
 	}
 
 	// Send them the GeoJSONs, they need to keep this up to date
-	sendGeoJSON( channels[client.ognChannel].className, client );
+	sendPilotTracks( channels[client.ognChannel].className, client );
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
@@ -499,13 +499,7 @@ async function sendCurrentState(client) {
 //
 // Send the GeoJSON for all the gliders, used when a new client connects to make
 // sure they have all the tracks. Client keeps it up to datw
-async function sendGeoJSON( className, client ) {
-	client.send( JSON.stringify( { tracks: scoring[className].geoJSON.tracks,
-								   locations: scoring[className].geoJSON.locations }));
-	client.send( JSON.stringify( { fulltracks: scoring[className].geoJSON.fulltracks }));
-
-
-
+async function sendPilotTracks( className, client ) {
 	let root = protobuf.Root.fromJSON(PilotTracks);
 	let PT = root.lookupType( "PilotTracks" );
 
