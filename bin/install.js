@@ -253,6 +253,7 @@ NEXT_SCORE_REFRESH_INTERVAL=60000
 	if( wsresponse.portoffset != 0 ) {
 		envFile += `WEBSOCKET_PORT=${8000+wsresponse.portoffset}
 STATUS_SERVER_PORT=${8100+wsresponse.portoffset}
+PORT_OFFSET=${wsresponse.portoffset}
 `;
 	}
     else {
