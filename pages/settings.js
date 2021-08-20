@@ -152,6 +152,28 @@ function SettingsPage( { options, setOptions, tz } ) {
 						<br/>
 						<Row>
 							<Col sm={3}>
+								Map Type
+							</Col>
+							<Col>
+								<ButtonGroup toggle type="radio" name="mapType">
+									{['satellite with terrain','road with terrain', 'satellite without terrain', 'road without terrain'].map((radio, idx) => (
+										<ToggleButton
+											key={idx}
+											variant="secondary"
+											type="radio"
+											value={idx}
+											checked={(idx === options.mapType)}
+											onChange={(e) => setOptions( {...options, mapType: idx })}
+										>
+											{radio}
+										</ToggleButton>
+									))}
+								</ButtonGroup>
+							</Col>
+						</Row>
+						<br/>
+						<Row>
+							<Col sm={3}>
 								Rain Radar
 							</Col>
 							<Col>
