@@ -455,7 +455,7 @@ async function updateDDB() {
 //
 // New connection, send it a packet for each glider we are tracking
 async function sendCurrentState(client) {
-    if (client.readyState !== WebSocket.OPEN && client.isAlive && channels[client.ognChannel]) {
+    if (client.readyState !== WebSocket.OPEN || !client.isAlive || !channels[client.ognChannel]) {
         console.log("unable to sendCurrentState not yet open or ! isAlive" );
         return;
     }
@@ -736,6 +736,10 @@ function processPacket( packet ) {
 					   };
 					   
 					   let sc = scoring[glider.className];
+
+					   if( ! sc ) {
+						   return;
+					   }
 
 					   
                        // If the packet isn't delayed then we should send it out over our websocket
