@@ -177,19 +177,7 @@ async function doIt() {
 					    log_date_format: "YYYY-MM-DD HH:mm:ss Z",
 				    });
                 }
-
-				if( ! next ) {
-				    await pm2.start( {
-					    script: 'bin/ogn.js',
-					    name: domain+"_ogn",
-					    env: environment,
-					    restart_delay: 30000,
-					    max_restarts: 1000,
-					    autorestart: true,
-					    log_date_format: "YYYY-MM-DD HH:mm:ss Z",
-				    });
-                }
-                    
+                
 				function startNext() {
                     const args = {
 						script: "./node_modules/.bin/next",
