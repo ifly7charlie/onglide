@@ -30,7 +30,7 @@ const { capturePossibleLaunchLanding, checkForOGNMatches, processIGC } = require
 
 
 const _groupby = require('lodash.groupby');
-const _forEach = require('lodash.forEach');
+const _forEach = require('lodash.foreach');
 const _reduce = require('lodash.reduce');
 
 // DB access
