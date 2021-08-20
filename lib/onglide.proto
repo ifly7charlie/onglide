@@ -15,12 +15,13 @@ message PilotTrack {
 		// epoch time for each point (actually uint32)
 		bytes t = 3;
 
-		// Three tuple of [x,y,z] repeated length times (actually float)
+		// Three tuple of [lat,lng,alt] repeated length times (actually float) (and the height above ground)
 		bytes positions = 4;
 
 		// Segments in the track line, for broken track drawing (actually uint32)
 		uint32 segmentIndex = 5;
 		bytes indices = 6;
+		bytes agl = 12; // int16
 
 		// Two Uint32 array containing the track segment that is most recent
 		bytes recentIndices = 7;
