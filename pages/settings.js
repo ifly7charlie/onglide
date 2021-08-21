@@ -156,7 +156,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 							</Col>
 							<Col>
 								<ButtonGroup toggle type="radio" name="mapType">
-									{['North Up','Next Turnpoint Up'].map((radio, idx) => (
+									{['North Up','Next Turnpoint Up',"Don't Change"].map((radio, idx) => (
 										<ToggleButton
 											key={idx}
 											variant="secondary"
