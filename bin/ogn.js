@@ -269,7 +269,7 @@ async function main() {
 //			if( ! rawpoints.length ) {
 				lastPoint+=stepSize;
 //			}
-			console.log( "poll, ", lastPoint, tOffset, rawpoints.length );
+			console.log( "poll, ", lastPoint, tOffset, rawpoints.length, _map( rawpoints, (p) => p.compno ).join(',') );
 			for( const point of rawpoints ) {
 				// How the trackers are indexed into the array, it must include className as compno may not be unique
 				const mergedName = point.class+'_'+point.compno;
