@@ -19,6 +19,7 @@ import { Nbsp, Icon } from '../lib/react/htmlhelper.js';
 
 import { query } from '../lib/react/db';
 import { useContest, Spinner } from '../lib/react/loaders.js';
+import cookies from 'next-cookies';
 
 import _find from 'lodash.find';
 
@@ -81,6 +82,12 @@ function SettingsPage( { options, setOptions, tz } ) {
     // if the className matches
     const { comp, isLoading, error } = useContest();
 
+	function setOptionsAndCookie( o ) {
+		document.cookie = `options=${JSON.stringify(o)}; path=/`;
+		setOptions(o);
+	}
+	console.log(options);
+
     // And display in progress until they are loaded
     if (isLoading)
         return (<div className="loading">
@@ -122,13 +129,6 @@ function SettingsPage( { options, setOptions, tz } ) {
                         </h1>
 
 						<Row>
-							<Col>
-								These settings are just for this session!
-							</Col>
-						</Row>
-						<hr/>
-
-						<Row>
 							<Col sm={3}>
 								Display Units
 							</Col>
@@ -141,7 +141,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 											type="radio"
 											value={idx}
 											checked={(idx === options.units)}
-											onChange={(e) => setOptions( {...options, units: idx })}
+											onChange={(e) => setOptionsAndCookie( {...options, units: idx })}
 										>
 											{radio}
 										</ToggleButton>
@@ -163,7 +163,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 											type="radio"
 											value={idx}
 											checked={(idx === options.taskUp)}
-											onChange={(e) => setOptions( {...options, taskUp: idx })}
+											onChange={(e) => setOptionsAndCookie( {...options, taskUp: idx })}
 										>
 											{radio}
 										</ToggleButton>
@@ -185,7 +185,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 											type="radio"
 											value={idx}
 											checked={(idx === options.mapType)}
-											onChange={(e) => setOptions( {...options, mapType: idx })}
+											onChange={(e) => setOptionsAndCookie( {...options, mapType: idx })}
 										>
 											{radio}
 										</ToggleButton>
@@ -207,7 +207,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 											type="radio"
 											value={radio}
 											checked={(idx === (options.rainRadarAdvance+1))}
-											onChange={(e) => setOptions( {...options, rainRadarAdvance: idx-1, rainRadar: idx > 0 })}
+											onChange={(e) => setOptionsAndCookie( {...options, rainRadarAdvance: idx-1, rainRadar: idx > 0 })}
 										>
 											{radio}
 										</ToggleButton>
@@ -239,7 +239,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 								<hr/>
 								Onglide is an open source project (<Link href="http://igcrankings.fai.org">https://github.com/glidernet/onglide</Link>) written in Javascript (Next.js/Bootstrap/Mapbox) and contributions and bug fixes are always welcome! And yes there are plenty of bugs - this was written under various tents at gliding competitions.<br/>
 								<hr/>
-								Onglide does not use any cookies except to pass the mapbox token to mapbox. This cookie is 'Strictly necessary' according to the ePrivacy directive.
+								Onglide does not use any cookies except to pass the mapbox token to mapbox and to store your settings. These cookies are 'Strictly necessary' for the site to function according to the ePrivacy directive.
 							</Col>
 						</Row>
 					</Col>
@@ -251,12 +251,13 @@ function SettingsPage( { options, setOptions, tz } ) {
 
 //
 // Determine the default class
-export async function getStaticProps(context) {
-
+export async function getServerSideProps(context) {
 	const location = (await query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
+
     return {
-        props: { lat: location?.lt, lng: location?.lg, tzoffset: location?.tzoffset, tz: location?.tz }, // will be passed to the page component as props
-    }
+        props: { lat: location?.lt||51, lng: location?.lg||0, tzoffset: location?.tzoffset||0, tz: location?.tz||'Etc/UTC',
+				 options: cookies(context).options || { rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 0, taskUp: 1 }}
+	};
 }
 
 export default SettingsPage;
