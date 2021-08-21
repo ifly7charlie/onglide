@@ -499,6 +499,7 @@ async function sendPilotTracks( className, client ) {
 													  t: new Uint8Array(p.t.buffer),
 													  climbRate: new Uint8Array(p.climbRate.buffer),
 													  recentIndices: new Uint8Array(p.recentIndices.buffer),
+													  agl: new Uint8Array(p.agl.buffer),
 													  posIndex: p.posIndex,
 													  segmentIndex: p.segmentIndex };
 												  return result;
