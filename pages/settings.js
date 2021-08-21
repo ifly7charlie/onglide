@@ -149,8 +149,30 @@ function SettingsPage( { options, setOptions, tz } ) {
 								</ButtonGroup>
 							</Col>
 						</Row>
-						<br/>
+						<hr/>
 						<Row>
+							<Col sm={3}>
+								Map orientation when following
+							</Col>
+							<Col>
+								<ButtonGroup toggle type="radio" name="mapType">
+									{['North Up','Next Turnpoint Up'].map((radio, idx) => (
+										<ToggleButton
+											key={idx}
+											variant="secondary"
+											type="radio"
+											value={idx}
+											checked={(idx === options.taskUp)}
+											onChange={(e) => setOptions( {...options, taskUp: idx })}
+										>
+											{radio}
+										</ToggleButton>
+									))}
+								</ButtonGroup>
+							</Col>
+						</Row>
+						<Row>
+						<br/>
 							<Col sm={3}>
 								Map Type
 							</Col>
