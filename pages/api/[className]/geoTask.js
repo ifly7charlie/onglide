@@ -10,6 +10,10 @@ import escape from 'sql-template-strings';
 // Helpers to deal with sectors and tasks etc.
 import { preprocessSector, sectorGeoJSON } from '../../../lib/flightprocessing/taskhelper.js';
 
+import bbox from '@turf/bbox';
+
+import _reduce from 'lodash/reduce'
+
 import { useRouter } from 'next/router'
 
 export default async function taskHandler( req, res) {
@@ -67,24 +71,38 @@ export default async function taskHandler( req, res) {
 
 
     let geoJSON = {
-        "type": "FeatureCollection",
-        "features": []
+        type: 'FeatureCollection',
+        features: []
     };
 
     tasklegs.forEach( (leg) => { geoJSON.features = [].concat( geoJSON.features,
-															   [{ 'type': 'Feature',
-																  properties: {},
+															   [{ type: 'Feature',
+																  properties: { leg: leg.legno },
 																  geometry: leg.geoJSON }] ) } );
 
-    const trackLine = {
-        "type": "LineString",
-        "coordinates": tasklegs.map( (leg) => { return [ leg.ll.dlong(), leg.ll.dlat() ] } ),
-    };
+	let trackLineGeoJSON = {
+		type: 'FeatureCollection',
+		features: []
+	};
+	
+	trackLineGeoJSON.features =
+		_reduce( tasklegs, (accumulate,leg,index) => { if( index+1 < tasklegs.length ) {
+			accumulate.push(
+				{type:"Feature",
+				 properties: { leg: leg.legno+1 },
+				 geometry: {
+					 type: "LineString",
+					 coordinates: [[ leg.ll.dlong(), leg.ll.dlat() ],[ tasklegs[index+1].ll.dlong(), tasklegs[index+1].ll.dlat()]]
+				 }
+				});
+		}
+			return accumulate;
+		}, []);
 
     // How long should it be cached
     res.setHeader('Cache-Control','max-age=600');
 
     // And we succeeded - here is the json
     res.status(200)
-        .json({tp:geoJSON, track:trackLine});
+        .json({tp:geoJSON, track:trackLineGeoJSON});
 }
