@@ -147,6 +147,15 @@ body {
     }
 }
 
+.legs {
+	border: 1px solid grey;
+	width: 100%;
+}
+
+.legs thead {
+    font-weight: bold;
+}	
+
 .doclearboth:after {
     content:"";
     display:table;
