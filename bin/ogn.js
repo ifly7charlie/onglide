@@ -169,8 +169,28 @@ async function main() {
     let parser = new aprsParser();
 
     // And start our websocket server
-    const wss = new WebSocketServer({ port: (process.env.WEBSOCKET_PORT||8080) });
-
+    const wss = new WebSocketServer({
+		port: (process.env.WEBSOCKET_PORT||8080),
+		perMessageDeflate: {
+			zlibDeflateOptions: {
+				// See zlib defaults.
+				chunkSize: 1024,
+				memLevel: 7,
+				level: 3
+			},
+			zlibInflateOptions: {
+				chunkSize: 10 * 1024
+			},
+			// Other options settable:
+			clientNoContextTakeover: true, // Defaults to negotiated value.
+			serverNoContextTakeover: true, // Defaults to negotiated value.
+			serverMaxWindowBits: 10, // Defaults to negotiated value.
+			// Below options specified as default values.
+			concurrencyLimit: 10, // Limits zlib concurrency for perf.
+			threshold: 16384 // Size (in bytes) below which messages
+			// should not be compressed.
+		}});
+	
     // What to do when a client connects
     wss.on( 'connection', (ws,req) => {
 
@@ -494,12 +514,12 @@ async function sendPilotTracks( className, client ) {
 											  {
 												  result[compno] = {
 													  compno: compno,
-													  positions: new Uint8Array(p.positions.buffer),
-													  indices: new Uint8Array(p.indices.buffer),
-													  t: new Uint8Array(p.t.buffer),
-													  climbRate: new Uint8Array(p.climbRate.buffer),
+													  positions: new Uint8Array(p.positions.buffer,0,p.posIndex*3*8),
+													  indices: new Uint8Array(p.indices.buffer,0,p.segmentIndex*4),
+													  t: new Uint8Array(p.t.buffer,0,p.posIndex*4),
+													  climbRate: new Uint8Array(p.climbRate.buffer,0,p.posIndex),
 													  recentIndices: new Uint8Array(p.recentIndices.buffer),
-													  agl: new Uint8Array(p.agl.buffer),
+													  agl: new Uint8Array(p.agl.buffer,0,p.posIndex*2),
 													  posIndex: p.posIndex,
 													  segmentIndex: p.segmentIndex };
 												  return result;
