@@ -178,7 +178,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 							</Col>
 							<Col>
 								<ButtonGroup toggle type="radio" name="mapType">
-									{['satellite with terrain','road with terrain', 'satellite without terrain', 'road without terrain'].map((radio, idx) => (
+									{['3D satellite','3D road', '2D satellite', '2D road'].map((radio, idx) => (
 										<ToggleButton
 											key={idx}
 											variant="secondary"
