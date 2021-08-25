@@ -514,7 +514,7 @@ async function sendPilotTracks( className, client ) {
 											  {
 												  result[compno] = {
 													  compno: compno,
-													  positions: new Uint8Array(p.positions.buffer,0,p.posIndex*3*8),
+													  positions: new Uint8Array(p.positions.buffer,0,p.posIndex*3*4),
 													  indices: new Uint8Array(p.indices.buffer,0,p.segmentIndex*4),
 													  t: new Uint8Array(p.t.buffer,0,p.posIndex*4),
 													  climbRate: new Uint8Array(p.climbRate.buffer,0,p.posIndex),
