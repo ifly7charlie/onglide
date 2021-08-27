@@ -620,9 +620,9 @@ async function process_day_scores (day,classid,classname,keys) {
             // check the file to check tracking details
             let { igcavailable } = (await mysql_db.query( escape`SELECT igcavailable FROM pilotresult
                                                               WHERE datecode=todcode(${date}) and compno=${pilot} and class=${classid}` ))[0];			
-            if( (igcavailable||'Y') == 'N' ) {
+            if( (igcavailable||'Y') == 'N' && row?._links?.["http://api.soaringspot.com/rel/flight"]) {
 				console.log( date, pilot, igcavailable );
-				await processIGC( classid, pilot, location.altitude, date, row._links["http://api.soaringspot.com/rel/flight"]['href'], https, mysql,
+				await processIGC( classid, pilot, location.altitude, date, row._links["http://api.soaringspot.com/rel/flight"]['href'], https, mysql_db,
 								  () => {soaringSpotAuthHeaders( keys )} );
 				doCheckForOGNMatches = true;
 			}
@@ -647,7 +647,7 @@ async function process_day_scores (day,classid,classname,keys) {
 
 	// If we processed an IGC file we should check to see if we have an OGN launch/landing match
 	if( doCheckForOGNMatches ) {
-		checkForOGNMatches( classid, date, mysql );
+		checkForOGNMatches( classid, date, mysql_db );
 	}
 	
     // Did anything get updated?
