@@ -1,4 +1,13 @@
 syntax = "proto3";
+import "google/protobuf/any.proto";
+
+message OnglideWebSocketMessage {
+		PilotTracks tracks = 1;
+		Scores scores = 2;
+		Positions positions = 3;
+		KeepAlive ka = 4;
+		uint32 t = 5;
+}	   
 
 message PilotTracks {
 		map<string, PilotTrack> pilots = 1;
@@ -31,8 +40,135 @@ message PilotTrack {
 		bytes airSpeed = 9;
 		bytes altitudeBand = 10;
 		bytes leg = 11;
+
+		// Does this contain a full trace or just the most recent trace
+		bool partial = 13;
 };		
 		
+message Scores {
+		map<string,PilotScore> pilots = 1;
+}
 
-		
-		
+message SpeedDist {
+    double distance = 1;
+    double distancedone = 2;
+	
+    double distancetonext = 11;
+    double remainingdistance = 12;
+	
+    uint32 grremaining = 20;
+	
+    double legspeed = 30;
+    double taskspeed = 31;
+}
+
+message Legs {
+    uint32 leg = 1;
+    uint32 time = 2;
+    uint32 duration = 3;
+    double lat = 4;
+    double lng = 5;
+    uint32 alt = 6;
+    uint32 agl = 7;
+
+	SpeedDist handicapped = 10;
+	SpeedDist actual = 11;
+}
+
+message Wind {
+	uint32 speed = 1;
+	uint32 direction = 2;
+}
+
+message Stats {
+    uint32 start = 1;
+    uint32 end = 2;
+    string state = 3;
+    Wind wind = 4;
+    uint32 turncount = 5;
+    double distance = 6;
+    double achievedDistance = 7;
+    int32 delta = 8;
+    double avgDelta = 9;
+    uint32 direction = 10;
+    uint32 heightgain = 11;
+    uint32 heightloss = 12;
+}
+
+message PilotScore {
+    string class = 1;
+    string compno = 2;
+    string dbstatus = 3;
+    string datafromscoring = 4;
+    string scoredstatus = 5;
+    uint32 utcstart = 6;
+    string start = 7;
+    string finish = 8;
+    string duration = 9;
+    uint32 forcetp = 10;
+    string name = 11;
+    string glidertype = 12;
+    double handicap = 13;
+    string image = 14;
+    uint32 daypoints = 15;
+    uint32 dayrank = 16;
+    string dayrankordinal = 18;
+    string country = 17;
+    uint32 prevtotalrank = 19;
+    uint32 totalrank = 20;
+    double hdistancedone = 21;
+    double distancedone = 22;
+    double speed = 23;
+    double hspeed = 24;
+    uint32 maxdistancedone = 25;
+    uint32 min = 26;
+    uint32 max = 27;
+    uint32 taskduration = 28;
+    double lat = 29;
+    double lng = 30;
+    uint32 altitude = 31;
+    uint32 agl = 32;
+    uint32 lastUpdated = 33;
+    bool startFound = 34;
+    map<uint32,Legs> legs = 36;
+    uint32 lasttp = 37;
+    string status = 38;
+    double remainingdistance = 39;
+    double hremainingdistance = 40;
+    uint32 grremaining = 41;
+    uint32 hgrremaining = 42;
+    repeated Stats stats = 43;
+    repeated float scoredpoints = 52;
+    uint32 gainXsecond = 45;
+    uint32 lossXsecond = 46;
+    uint32 Xperiod = 47;
+    double average = 48;
+    uint32 total = 49;
+    bool stationary = 50;
+    uint32 at = 51;
+}
+
+message Positions {
+		map<string, PilotPositions> positions = 1;
+}
+
+message PilotPositions {
+		string c = 1;
+		double lat = 2;
+		double lng = 3;
+		uint32 a = 4;
+		uint32 g = 5;
+		uint32 t = 6;
+		uint32 b = 7;
+		uint32 s = 8;
+		string v = 9;
+}
+
+message KeepAlive {
+		bool keepalive = 1;
+		string t = 2;
+		uint32 at = 3;
+		uint32 listeners = 4;
+		uint32 airborne = 5;
+}
+

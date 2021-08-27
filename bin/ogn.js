@@ -20,7 +20,7 @@ import http from 'http';
 import tx2 from 'tx2';
 
 import protobuf from 'protobufjs/light.js';
-import { PilotTracks } from '../lib/onglide-protobuf.mjs';
+import { OnglideWebSocketMessage } from '../lib/onglide-protobuf.mjs';
 
 console.log(ISSocket);
 
@@ -90,6 +90,14 @@ let unknownTrackers = {}; // All the ones we have seen in launch area but matche
 let ddb = {}; // device_id: { ddb object }
 
 let scoring = {}; // list of classes, each class has { compno: { trackers, state, and points} }
+
+let pbRoot = protobuf.Root.fromJSON(OnglideWebSocketMessage);
+let pbOnglideWebsocketMessage = pbRoot.lookupType( "OnglideWebSocketMessage" );
+function encodePb( msg ) {
+	let message = pbOnglideWebsocketMessage.create( msg );
+	return pbOnglideWebsocketMessage.encode(message).finish();
+}
+
 
 
 // APRS connection
@@ -161,6 +169,7 @@ async function main() {
     // Download the list of trackers so we know who to look for
     await updateTrackers();
     await updateDDB();
+	await sendScores();
 
     startStatusServer();
 
@@ -270,9 +279,32 @@ async function main() {
         // Now download the scores and punt them out so we can mutate them into the results
         sendScores();
 
-    }, 10*1000 );
+    }, 15*1000 );
 
 	//
+	// This function is to send updated flight tracks for the gliders that have reported since the last
+	// time we run the callback (every second), as we only update the screen once a second it should
+	// be sufficient to bundle them even though we are receiving as a stream
+	setInterval( function() {
+		// For each channel (aka class)
+		Object.values(channels).forEach( async function (channel) {
+
+			// Encode all the changes, we only keep latest per glider if multiple received
+			// there shouldn't be multiple!
+			const msg = encodePb( { positions: { positions: channel.toSend }, t: (Math.trunc(Date.now()/1000)+tOffset) } );
+			channel.toSend = {};
+			
+			// Send to each client and if they don't respond they will be cleaned up next time around
+			channel.clients.forEach( (client) => {
+				if (client.readyState === WebSocket.OPEN) {
+					client.send( msg, { binary: true } );
+				}
+			});
+		});
+	}, 1000 );
+
+	//
+	// This is to allow us to replay flights which makes it much easier for testing
 	if( tOffset ) {
 		console.log( "offset", tOffset, Date.now()/1000 );
 
@@ -320,7 +352,11 @@ async function main() {
         }
         connection.valid = false;
 
-        updateTrackers();
+		try { 
+			updateTrackers();
+		} catch(e) {
+			console.log(e);
+		}
     }, 2.5*60*1000 );
 }
 
@@ -352,6 +388,7 @@ async function updateTrackers() {
         channels[ channelName(c.class,c.datecode) ] = { clients: [], launching: false, activeGliders: {},
                                                         ...channel,
                                                         className: c.class, datecode: c.datecode,
+														toSend: {},
                                                       };
 
         newchannels.push(channelName(c.class,c.datecode));
@@ -364,6 +401,11 @@ async function updateTrackers() {
 			
 			// merge pilots into the tracker array, won't score as no pilot selected
 			await scorePilot( c.class, undefined, scoring[c.class] );
+
+			if( ! Object.keys(scoring[c.class].trackers).length ) {
+				console.log( "No valid task" );
+				continue;
+			}
 
 			// Now we will fetch the points for the pilots
 			const rawpoints = await db.query(escape`
@@ -382,20 +424,14 @@ async function updateTrackers() {
 		// firstOldPoint to the end of the points. We don't need to fetch the points as
 		// we have been maintinig a full list in order
 		for( const compno of Object.keys(scoring[c.class].points) ) {
-			scoring[c.class].state[compno] = {}; 
+			scoring[c.class].state[compno] = {};
 			scoring[c.class].trackers[compno].firstOldPoint = scoring[c.class].points[compno]?.length;
 			await scorePilot( c.class, compno, scoring[c.class] );
 		}
 
 		// And fully regenerate the GeoJSONs so they include any late points
 		generatePilotTracks( scoring[c.class], tOffset );
-        channels[ channelName(c.class,c.datecode) ]?.clients?.forEach( (client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                sendPilotTracks( c.class, client );
-            }
-        });
-		
-		
+        sendPilotTracks( channelName(c.class, c.datecode), scoring[c.class].deck );
     }
 
     // How the trackers are indexed into the array, it must include className as compno may not be unique
@@ -482,53 +518,82 @@ async function sendCurrentState(client) {
 
 	// Make sure we send the pilots ASAP
 	if( channels[client.ognChannel]?.lastScores ) {
-        client.send( channels[client.ognChannel].lastScores );
+        client.send( channels[client.ognChannel].lastScores, { binary: true } );
+	}
+	else {
+		console.log( "no current scores", client.ognChannel );
 	}
 
 	// Send them the GeoJSONs, they need to keep this up to date
-	sendPilotTracks( channels[client.ognChannel].className, client );
+	sendRecentPilotTracks( channels[client.ognChannel].className, client );
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
     if( lastKeepAliveMsg ) {
-        client.send( lastKeepAliveMsg );
+        client.send( lastKeepAliveMsg, { binary: true } );
     }
-
-    // And we will send them info on all the gliders we have a message for
-    const toSend = _filter( gliders, {'class': client.class} );
-    _foreach( toSend, (glider) => {
-        if( 'lastMsg' in glider ) {
-            client.send( glider.lastMsg );
-        }
-    });
 }
 
 //
 // Send the GeoJSON for all the gliders, used when a new client connects to make
 // sure they have all the tracks. Client keeps it up to datw
-async function sendPilotTracks( className, client ) {
-	let root = protobuf.Root.fromJSON(PilotTracks);
-	let PT = root.lookupType( "PilotTracks" );
+async function sendPilotTracks( channelName, deck ) {
+	let PT = pbRoot.lookupType( "PilotTracks" );
+
+	const toStream = _reduce( deck, (result,p,compno) =>
+		{
+			result[compno] = {
+				compno: compno,
+				positions: new Uint8Array(p.positions.buffer,0,p.posIndex*3*4),
+				indices: new Uint8Array(p.indices.buffer,0,p.segmentIndex*4),
+				t: new Uint8Array(p.t.buffer,0,p.posIndex*4),
+				climbRate: new Uint8Array(p.climbRate.buffer,0,p.posIndex),
+				recentIndices: new Uint8Array(p.recentIndices.buffer),
+				agl: new Uint8Array(p.agl.buffer,0,p.posIndex*2),
+				posIndex: p.posIndex,
+				partial: false,
+				segmentIndex: p.segmentIndex };
+			return result;
+		}, {} );
+
+	// Send the client the current version of the tracks
+	const message = encodePb( {tracks: { pilots:toStream }});
+    channels[ channelName ]?.clients?.forEach( (client) => {
+        if (client.readyState === WebSocket.OPEN) {
+			client.send( message, { binary: true } );
+        }
+	});
+}
+
+
+// Send the abbreviated track for all gliders, used when a new client connects
+async function sendRecentPilotTracks( className, client ) {
+	let PT = pbRoot.lookupType( "PilotTracks" );
 
 	const toStream = _reduce( scoring[className]?.deck, (result,p,compno) =>
-											  {
-												  result[compno] = {
-													  compno: compno,
-													  positions: new Uint8Array(p.positions.buffer,0,p.posIndex*3*4),
-													  indices: new Uint8Array(p.indices.buffer,0,p.segmentIndex*4),
-													  t: new Uint8Array(p.t.buffer,0,p.posIndex*4),
-													  climbRate: new Uint8Array(p.climbRate.buffer,0,p.posIndex),
-													  recentIndices: new Uint8Array(p.recentIndices.buffer),
-													  agl: new Uint8Array(p.agl.buffer,0,p.posIndex*2),
-													  posIndex: p.posIndex,
-													  segmentIndex: p.segmentIndex };
-												  return result;
-											  }, {} );
-	
-	let message = PT.create( { pilots: toStream } );
-	let buffer = PT.encode(message).finish();
-	
-	client.send( buffer, { binary: true } );
+		{
+			const start = p.recentIndices[0];
+			const end = p.recentIndices[1];
+			const length = end - start;
+			const segments = new Uint32Array( [ 0, length ] );
+			if( length ) {
+				result[compno] = {
+					compno: compno,
+					positions: new Uint8Array(p.positions.buffer,start*12,length*12),
+					indices: new Uint8Array(segments.buffer),
+					t: new Uint8Array(p.t.buffer,start*4,length*4),
+					climbRate: new Uint8Array(p.climbRate.buffer,start,length),
+					recentIndices: new Uint8Array(segments.buffer),
+					agl: new Uint8Array(p.agl.buffer,start*2,length*2),
+					posIndex: length,
+					partial: true,
+					segmentIndex: 1 };
+			}
+			return result;
+		}, {} );
+
+	// Send the client the current version of the tracks
+	client.send(  encodePb( {tracks:{ pilots: toStream }} ), { binary: true } );
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -536,7 +601,7 @@ async function sendPilotTracks( className, client ) {
 // information
 async function sendScores() {
 
-    const now = (new Date()).getTime()/1000;
+    const now = (Date.now()/1000)+tOffset;
 
     // For each channel (aka class)
     Object.values(channels).forEach( async function (channel) {
@@ -557,20 +622,18 @@ async function sendScores() {
         }
 
         // For sending the keepalive
-        const keepAlive = {
+        channel.lastKeepAliveMsg = encodePb( { ka: {
             "keepalive":1,
             "t":timeToText(now),
             "at":Math.floor(now),
             "listeners":channel.clients.length,
             "airborne":Object.keys(channel.activeGliders)?.length||0,
-        };
-        const keepAliveMsg = JSON.stringify( keepAlive );
-        channel.lastKeepAliveMsg = keepAliveMsg;
+        }});
 
         // Send to each client and if they don't respond they will be cleaned up next time around
         channel.clients.forEach( (client) => {
             if (client.readyState === WebSocket.OPEN) {
-                client.send( keepAliveMsg );
+                client.send( channel.lastKeepAliveMsg, { binary: true } );
             }
             client.isAlive = false;
             client.ping(function(){});
@@ -631,17 +694,18 @@ async function sendScores() {
 				}
 				
 				p.at = glider.lastTime;
+
+				// Flatten the scored points so we can serialise them with protobuf
+				p.scoredpoints = p?.scoredpoints?.flat();
 			});
 			
-		
-			// Prepare to send
-			const scoresMsg = JSON.stringify( { pilots: pilots } );
-			channel.lastScores = scoresMsg;
+			// Protobuf encode the scores message
+			channel.lastScores = encodePb( { scores: { pilots: pilots }} );
 		
 			// Send to each client
 			channel.clients.forEach( (client) => {
 				if (client.readyState === WebSocket.OPEN) {
-                    client.send( scoresMsg );
+					client.send( channel.lastScores, { binary: true } );
 				}
 			});
 		});
@@ -696,13 +760,9 @@ function processPacket( packet ) {
     } else {
         glider.lastMoved = packet.timestamp;
     }
-	
+
     const islate = ( glider.lastTime > packet.timestamp );
-    if( ! islate ) {
-        if( glider.compno == 'CH' ) {
-            console.log( 'CH', sender, altitude, glider.lastAlt, aoa );
-        }
-        
+    if( ! islate ) {        
 		glider.lastPoint = jPoint;
 		glider.lastAlt = altitude;
 
@@ -766,20 +826,14 @@ function processPacket( packet ) {
                        // If the packet isn't delayed then we should send it out over our websocket
                        if( ! islate ) {
 
-                           // Prepare to send
-                           const jsonMsg = JSON.stringify( message );
+						   // Buffer the message they get batched every second
+						   if( channel.toSend[glider.compno] ) {
+							   console.log( "hmm two messages for one glider..." );
+						   }
+						   channel.toSend[glider.compno] = message;
 
-                           // Send to each client
-                           channel.clients.forEach( (client) => {
-                               if (client.readyState === WebSocket.OPEN) {
-                                   client.send( jsonMsg );
-                               }
-                           });
-
+						   // Merge into the display data structure
 						   mergePoint( message, sc );
-						   
-                           // Save for reconnects
-                           glider.lastMsg = jsonMsg;
 					   }
 					   
 					   // Slice it into the points array	
