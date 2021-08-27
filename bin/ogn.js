@@ -221,6 +221,10 @@ async function main() {
 
         ws.on('pong', () => { ws.isAlive = true });
         ws.on('close', () => { ws.isAlive = false; console.log( `close received from ${ws.ognPeer} ${ws.ognChannel}`); });
+		ws.on('message', (m) => {
+			sendPilotTrack( ws, ''+m, scoring[channels[channel].className]?.deck );
+			console.log('received %s',m);
+		});
 
         // Send vario etc for all gliders we are tracking
         sendCurrentState(ws);
@@ -563,6 +567,30 @@ async function sendPilotTracks( channelName, deck ) {
 			client.send( message, { binary: true } );
         }
 	});
+}
+
+async function sendPilotTrack( client, compno, deck ) {
+	let PT = pbRoot.lookupType( "PilotTracks" );
+
+	const p = deck[compno];
+	const toStream = {};
+	toStream[compno] = {
+				compno: compno,
+				positions: new Uint8Array(p.positions.buffer,0,p.posIndex*3*4),
+				indices: new Uint8Array(p.indices.buffer,0,p.segmentIndex*4),
+				t: new Uint8Array(p.t.buffer,0,p.posIndex*4),
+				climbRate: new Uint8Array(p.climbRate.buffer,0,p.posIndex),
+				recentIndices: new Uint8Array(p.recentIndices.buffer),
+				agl: new Uint8Array(p.agl.buffer,0,p.posIndex*2),
+				posIndex: p.posIndex,
+				partial: false,
+				segmentIndex: p.segmentIndex };
+
+	// Send the client the current version of the tracks
+	const message = encodePb( {tracks: { pilots:toStream }});
+    if (client.readyState === WebSocket.OPEN) {
+		client.send( message, { binary: true } );
+	}
 }
 
 
