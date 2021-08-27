@@ -106,10 +106,12 @@ function CombinePage( props ) {
     const [viewport, setViewport] = useState({
         latitude: props.lat,
         longitude: props.lng,
-        zoom: 8,
+        zoom: 11.5,
+		minZoom: 6.5,
+		maxZoom: 14,
         bearing: 0,
 		minPitch: 0,
-		maxPitch: 80,
+		maxPitch: 85,
 		altitude: 1.5,
 //        pitch: 90
     });
