@@ -392,12 +392,12 @@ async function process_day_task (day,classid,classname,keys) {
 
     // and add a new one
         .query( escape`
-          INSERT INTO tasks (datecode, class, flown, description, distance, hdistance, duration, type, task, hash )
+          INSERT INTO tasks (datecode, class, flown, description, distance, hdistance, duration, type, task, nostart, hash )
              VALUES ( todcode(${date}), ${classid},
                       'N', ${task_details.task_type},
                       ${task_details.task_distance/1000},
                       ${task_details.task_distance/1000},
-                      ${duration}, ${tasktype}, 'B', ${hash} )`)
+                      ${duration}, ${tasktype}, 'B', ${convert_to_mysql(task_details.no_start)}, ${hash} )`)
 
     // This query is a built one as we have to have it all as one string :( darn transactions
 

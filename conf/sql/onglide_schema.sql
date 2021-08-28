@@ -415,7 +415,7 @@ CREATE TABLE `tasks` (
   `maxmarkingdistance` float DEFAULT NULL COMMENT 'Distance for lowesthandicapped glider',
   
   `duration` time DEFAULT NULL COMMENT 'AAT time',
-  `earlieststart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
+  `nostart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
 
   `hash` TEXT DEFAULT NULL COMMENT 'hash of value from soaring spot to prevent redownloading',
   
