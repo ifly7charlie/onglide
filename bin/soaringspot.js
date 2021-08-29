@@ -632,7 +632,7 @@ async function process_day_scores (day,classid,classname,keys) {
         else if( row.scored_start ) {
             await mysql_db.query( escape`UPDATE pilotresult
                                             SET start=TIME(COALESCE(${convert_to_mysql(row.scored_start)},start))
-                                          WHERE datecode=todcode(${date}) AND compno=${compno} and class=${classid}`);
+                                          WHERE datecode=todcode(${date}) AND compno=${pilot} and class=${classid}`);
         }
 
         // we will capture the total if it is there but not update the scored status as
