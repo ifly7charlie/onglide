@@ -849,7 +849,6 @@ function processPacket( packet ) {
 					   if( ! sc ) {
 						   return;
 					   }
-
 					   
                        // If the packet isn't delayed then we should send it out over our websocket
                        if( ! islate ) {
@@ -868,7 +867,9 @@ function processPacket( packet ) {
 					   if( ! sc.points[glider.compno] ) {
 						   sc.points[glider.compno] = [];
 					   }
-					   
+					   if( ! sc.trackers[glider.compno] ) {
+						   sc.trackers[glider.compno] = [];
+					   }					   
 					   const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, (o) => -o.t);
 
 					   // In dense coverage it's not uncommon to get a duplicate packet. We always take the first one we
@@ -885,11 +886,11 @@ function processPacket( packet ) {
 					   const tracker = sc.trackers[glider.compno];
 					   if( insertIndex <= (sc.trackers[glider.compno]?.firstOldPoint||0) ) {
 						   //						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}` );
-						   tracker.firstOldPoint = (tracker.firstOldPoint||0)+1;
+						   tracker.firstOldPoint = (tracker?.firstOldPoint||0)+1;
 					   }
 					   else {
 						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}, but older than firstOldPoint` );
-						   tracker.outOfOrder = (tracker.outOfOrder||0)+1;
+						   tracker.outOfOrder = (tracker?.outOfOrder||0)+1;
 					   }
 					   
 					   if( tracker.oldestMerge && tracker.oldestMerge >= insertIndex ) {
