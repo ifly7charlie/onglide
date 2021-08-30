@@ -499,32 +499,6 @@ CREATE TABLE `trackpoints` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 
---
--- Table structure for table `pilotlostatushelper`
---
-
-DROP TABLE IF EXISTS `pilotlostatushelper`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `pilotlostatushelper` (
-  `status` char(1) NOT NULL DEFAULT '',
-  `briefname` char(14) NOT NULL,
-  `description` char(40) DEFAULT NULL,
-  `image` varchar(100) DEFAULT 'outline.gif',
-  `after` char(10) NOT NULL,
-  PRIMARY KEY (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `pilotlostatushelper`
---
-
-LOCK TABLES `pilotlostatushelper` WRITE;
-/*!40000 ALTER TABLE `pilotlostatushelper` DISABLE KEYS */;
-INSERT INTO `pilotlostatushelper` VALUES ('-','not yet','Not Launched','trailers.jpg',''),('Z','scrubbed','Day Scrubbed','windsock.jpg',''),('G','grid','Grid / Launched','grid.jpg','RCHWD'),('S','started','Started','leaving.jpg','RCHW'),('R','reported','Landout Reported','InField.jpg','CLOHAW'),('W','a/t request','A/T Requested','tugrequest.jpg','ARCH'),('C','enroute','Crew enroute','enroute.jpg','LOH'),('L','linked','Linked with crew','Linked.jpg','OH'),('A','a/t returning','A/T Returning','AeroTow.jpg','H'),('O','returning','Returning Home','mirrorview.jpg','H'),('H','home','Home','beer.jpg','D'),('F','finished','Finished','finisher.jpg','HRW'),('D','didn\'t fly','Didn\'t fly','trailers.jpg','H'),('/','withdrawn','Withdrawn','trailers.jpg','');
-/*!40000 ALTER TABLE `pilotlostatushelper` ENABLE KEYS */;
-UNLOCK TABLES;
 
 --
 -- Table structure for table `sectortypes`
