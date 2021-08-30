@@ -408,7 +408,7 @@ CREATE TABLE `tasks` (
   `flown` enum('Y','N') DEFAULT 'N' COMMENT 'Must be set to Y to be displayed!',
   `description` text,
 
-  `type` enum('S','A','D') DEFAULT 'S' COMMENT 'Speed, AAT, Handicapped Distance',
+  `type` enum('S','A','D','E','G') DEFAULT 'S' COMMENT 'Speed, AAT, Handicapped Distance, Eglide, SGP',
 
   `distance` float DEFAULT NULL COMMENT 'Actual distance',
   `hdistance` float DEFAULT NULL COMMENT 'distance at handicap 100 aka windicapped distance',
