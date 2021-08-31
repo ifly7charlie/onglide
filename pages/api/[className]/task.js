@@ -30,7 +30,7 @@ export default async function taskHandler( req, res) {
     const datecode = contestday[0].datecode;
 
     const taskdetails = await query(escape`
-         SELECT *, time_to_sec(tasks.duration) durationsecs
+         SELECT *, time_to_sec(tasks.duration) durationsecs, UNIX_TIMESTAMP(CONCAT(fdcode(datecode),' ',nostart))-(SELECT tzoffset FROM competition) nostartutc
           FROM tasks
           WHERE tasks.datecode= ${datecode} and tasks.class= ${className} and tasks.flown='Y'
     `);
