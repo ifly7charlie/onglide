@@ -430,7 +430,7 @@ async function process_day_task (day,classid,classname,keys) {
                 let tpname = tp.name;
                 let trigraph = tpname.substr(0,3);
                 if( tpname && ([trigraph] = tpname.match( /^([0-9]{1,4})/)||[trigraph])) {
-                    tpname = tpname.replace( /^([0-9]{1,4})/, '');
+                    tpname = tpname.replace( /^([0-9]{1,4})/, '').trim();
                 }
 
                 // we will save away the original name for contest day info
