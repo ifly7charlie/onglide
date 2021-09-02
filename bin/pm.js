@@ -148,6 +148,7 @@ async function doIt() {
 				if( ! fe ) {
 					const scoringScript = {'soaringspotkey': 'bin/soaringspot.js',
 										   'rst': 'bin/rst.js',
+										   'sgp': 'bin/sgp.js',
 										   'soaringspotscrape': 'bin/ssscrape.js' }[keys.type];
 
 					if( scoringScript ) {
