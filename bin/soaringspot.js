@@ -359,6 +359,14 @@ async function process_day_task (day,classid,classname,keys) {
         duration = new Date(task_details.task_duration * 1000).toISOString().substr(11, 8);
     }
 
+	// Identify a distance handicap task, or an eglide one
+	if( info.match( /distance handicapping/i )) {
+		tasktype='D';
+		if( task_details.notes.match( /kwh/i )) {
+			tasktype = 'E';
+		}
+	}
+
     // If there are no turnpoints then it isn't a valid task
     const turnpoints = await sendSoaringSpotRequest( task_details._links['http://api.soaringspot.com/rel/points'].href, keys );
     if( !turnpoints || !turnpoints._embedded || ! turnpoints._embedded['http://api.soaringspot.com/rel/points'] || turnpoints._embedded['http://api.soaringspot.com/rel/points'].length < 2 ) {
