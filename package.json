@@ -18,6 +18,7 @@
         "@turf/distance": ">=6.0.1",
         "@turf/turf": ">=5.1.6",
         "bootstrap": ">=4.5.0",
+        "country-iso-3-to-2": "^1.1.0",
         "deck.gl": "^8.5.2",
         "dotenv": ">=8.2.0",
         "js-aprs-fap": ">=1.0.0",
