@@ -18,7 +18,7 @@ import { getElevationOffset } from '../lib/getelevationoffset.js';
 // handle unkownn gliders
 import { capturePossibleLaunchLanding, processIGC, checkForOGNMatches } from '../lib/flightprocessing/launchlanding.js';
 
-import { getCountryISO2 } from 'country-iso-3-2';
+import getCountryISO2 from 'country-iso-3-to-2';
 
 import _groupby from 'lodash.groupby';
 import _forEach from 'lodash.foreach';
@@ -159,11 +159,11 @@ async function update_pilots(pilots) {
         // And change handicaps to BGA style
         pilot.handicap = 100;
 
-		const igcid = (pilot.portraitUrl.match(/([0-9]+).(jpg|png)/i)?.[1])||-1;
-		if( ! igcid ) {
-			console.warn("skipping pilot due to no fai id in filename for picture", pilot );
-			continue;
-		}
+		const igcid = -1; // (pilot.portraitUrl.match(/([0-9]+).(jpg|png)/i)?.[1])||-1;
+//		if( ! igcid ) {
+//			console.warn("skipping pilot due to no fai id in filename for picture", pilot );
+//			continue;
+//		}
 
 		const flarmid = pilot.trackId.match(/[0-9A-F]{6}$/i)||['unknown'];
 
@@ -206,7 +206,7 @@ async function update_pilots(pilots) {
     // Trackers needs a row for each pilot so fill any missing, perhaps we should
     // also remove unwanted ones
         .query( 'INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) select class, compno, "flarm", "unknown" from pilots' )
-    //  .query( 'DELETE FROM tracker where concat(class,compno) not in (select concat(class,compno) from pilots)' );
+		.query( 'DELETE FROM tracker where concat(class,compno) not in (select concat(class,compno) from pilots)' )
 
     // And update the pilots picture to the latest one in the image table - this should be set by download_picture
     //   .query( 'UPDATE PILOTS SET image=(SELECT filename FROM images WHERE keyid=compno AND width IS NOT NULL ORDER BY added DESC LIMIT 1)' );
@@ -314,7 +314,7 @@ async function update_task (task) {
 
                 // can we extract a number off the leading part of the turnpoint name, if so treat it as a trigraph
                 // it must be leading, and 3 or 4 digits long and we will then strip it from the name
-                let tpname = tp.name.replace(/^TP[0-9]+/,'');
+                let tpname = tp.name.replace(/^TP[0-9]+-/,'');
                 let trigraph = tpname.substr(0,3);
                 if( tpname && ([trigraph] = tpname.match( /^([0-9]{1,4})/)||[trigraph])) {
                     tpname = tpname.replace( /^([0-9]{1,4})/, '');
@@ -385,7 +385,12 @@ async function update_task (task) {
 
 // Get rid of the T at the front...
 function convert_to_mysql_time(jsontime) {
-    return jsontime ? jsontime.replace(/^.*T/, '').replace(/[Z]/,'') : jsontime;
+	if( jsontime && jsontime.match(/T.*Z/) ) {
+		return jsontime.replace(/^.*T/, '').replace(/[Z]/,'');
+	}
+	else {
+		return '00:00:00';
+	}
 }
 
 function convert_to_mysql_datetime(jsontime) {
