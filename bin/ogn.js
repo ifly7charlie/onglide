@@ -67,6 +67,7 @@ const { getElevationOffset, getCacheSize } = geo;
 // handle unkownn gliders
 import { capturePossibleLaunchLanding } from '../lib/flightprocessing/launchlanding.js';
 
+import { setSiteTz } from '../lib/flightprocessing/timehelper.js';
 
 // Where is the comp based
 let location = {};
@@ -149,6 +150,9 @@ async function main() {
     location = (await db.query( 'SELECT lt,lg,tz FROM competition LIMIT 1' ))[0];
     location.point = point( [location.lt, location.lg] );
 
+	// Save the tz for use
+	setSiteTz( location.tz );
+	
     const FILTER = `r/${location.lt}/${location.lg}/250`;
 
 	tOffset = parseInt(process.env.NEXT_PUBLIC_TOFFSET)||0;
