@@ -102,6 +102,7 @@ message PilotScore {
     string datafromscoring = 4;
     string scoredstatus = 5;
     uint32 utcstart = 6;
+	uint32 utcfinish = 54;
     string start = 7;
     string finish = 8;
     string duration = 9;
