@@ -15,7 +15,7 @@ export default async function taskHandler( req, res) {
     }
 	
     const rules = await query(escape`
-         SELECT comprules.* FROM comprules,classes WHERE classes.class=${className} AND classes.type = comprules.name
+         SELECT comprules.* FROM comprules,classes,competition WHERE classes.class=${className} AND classes.type = comprules.name AND competition.countrycode = comprules.country
     `);
 	
     // How long should it be cached
