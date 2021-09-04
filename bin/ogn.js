@@ -1054,7 +1054,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 
 			// If it's another match for somebody we have matched then ignore it
 			if( match.trackerid != flarmId ) {
-				console.log( `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${gliders[compno].trackerid}` );
+				console.log( `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.trackerid}` );
 				match.duplicate = true;
 				return;
 			}
