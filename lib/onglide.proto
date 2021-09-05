@@ -70,6 +70,8 @@ message Legs {
     double lng = 5;
     uint32 alt = 6;
     uint32 agl = 7;
+	bool   estimatedend = 8;
+	bool   estimatedstart = 9;
 
 	SpeedDist handicapped = 10;
 	SpeedDist actual = 11;
