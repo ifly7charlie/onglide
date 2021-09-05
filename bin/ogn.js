@@ -249,6 +249,7 @@ async function main() {
     });
 
     // Handle a data packet
+	(parseInt(process.env.NEXT_PUBLIC_NOLIVE||'0')||0) ||
     connection.on('packet', (data) => {
         connection.valid = true;
         if(data.charAt(0) != '#' && !data.startsWith('user')) {
