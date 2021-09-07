@@ -653,10 +653,15 @@ async function sendScores() {
             client.terminate();
         });
 
+		const airborne = Object.keys(channel.activeGliders)?.length||0;
+		
         // If we have nothing then do nothing...
         if( ! channel.clients.length ) {
             console.log( `${channel.className}: no clients subscribed` );
         }
+		else {
+			console.log( `${channel.className}: ${channel.clients.length} subscribed, ${airborne} gliders airborne` );
+		}
 
         // For sending the keepalive
         channel.lastKeepAliveMsg = encodePb( { ka: {
@@ -664,7 +669,7 @@ async function sendScores() {
             "t":timeToText(now),
             "at":Math.floor(now),
             "listeners":channel.clients.length,
-            "airborne":Object.keys(channel.activeGliders)?.length||0,
+            "airborne":airborne,
         }});
 
         // Send to each client and if they don't respond they will be cleaned up next time around
