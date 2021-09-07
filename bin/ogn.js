@@ -228,7 +228,6 @@ async function main() {
         ws.on('close', () => { ws.isAlive = false; console.log( `close received from ${ws.ognPeer} ${ws.ognChannel}`); });
 		ws.on('message', (m) => {
 			sendPilotTrack( ws, ''+m, scoring[channels[channel].name]?.deck );
-			console.log('received %s',m);
 		});
 
         // Send vario etc for all gliders we are tracking
@@ -467,7 +466,7 @@ async function updateTrackers() {
 		// If we have a point but there wasn't one on the glider then we will store this away
         var lp = scoring[t.channel].points[t.compno];
         if( lp && lp.length > 0 && (gliders[gliderKey].lastTime??0) < lp[0].t ) {
-            console.log(`using db altitudes for ${gliderKey}, ${gliders[gliderKey].lastTime??0} < ${lp[0].t}`);
+//            console.log(`using db altitudes for ${gliderKey}, ${gliders[gliderKey].lastTime??0} < ${lp[0].t}`);
             gliders[gliderKey] = { ...gliders[gliderKey],
                                    altitude: lp[0].a,
                                    agl: lp[0].g,
@@ -855,6 +854,8 @@ function processPacket( packet ) {
         channel.launching = true;
     }
 
+//	console.log( "B60 -> processing" );
+
     // Enrich with elevation and send to everybody, this is async
     withElevation( packet.latitude, packet.longitude,
                    async (gl) => {
@@ -1005,7 +1006,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
     const agl = Math.max(packet.altitude-(location.altitude??0),0);
 
     // capture launches close to the airfield (vertically and horizontally)
-    if( distanceFromHome < 30 && agl < 1500 ) {
+    if( distanceFromHome < 15 && agl < 1000 ) {
 
 		// Check if it's a possible launch
 		capturePossibleLaunchLanding( flarmId, packet.timestamp, jPoint, agl, (readOnly ? undefined : db), 'flarm' );
@@ -1047,12 +1048,14 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 
 				// Same glider then ignore
 				if( match.compno == glider.compno && match.className == glider.className ) {
+					unknownTrackers[flarmId].message = `${flarmId}:  flarm already matched to ${glider.compno} (${glider.className})`;
 					return;
 				}
 
 				// New compno then we need to break old association
 				else {
-					console.log( `${flarmId}:  flarm mismatch, previously matched to ${glider.compno} (${glider.className})`);
+					unknownTrackers[flarmId].message = `${flarmId}:  flarm mismatch, previously matched to ${glider.compno} (${glider.className})`;
+					console.log( unknownTrackers[flarmId].message );
 					return;
 					// unknownTrackers[flarmId].matched = `flarm change: ${match.compno} ${match.className} (${match.registration}) previously ${glider.compno}`;
 					// glider.trackerid = 'unknown';
@@ -1069,12 +1072,14 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 
 			// If it's another match for somebody we have matched then ignore it
 			if( match.trackerid != flarmId ) {
-				console.log( `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.trackerid}` );
+				unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.trackerid}`;
+				console.log( unknownTrackers[flarmId].message );
 				match.duplicate = true;
 				return;
 			}
 							 
-			console.log( `${flarmId}:  found in ddb, matched to ${match.compno} (${match.className})`);
+			unknownTrackers[flarmId].message = `${flarmId}:  found in ddb, matched to ${match.compno} (${match.className})`;
+			console.log( unknownTrackers[flarmId].message );
 			
 			// Link the two together
 			match.trackerid = flarmId;
