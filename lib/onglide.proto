@@ -154,7 +154,7 @@ message PilotScore {
 }
 
 message Positions {
-		map<string, PilotPositions> positions = 1;
+		repeated PilotPositions positions = 1;
 }
 
 message PilotPositions {

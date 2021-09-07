@@ -301,7 +301,7 @@ async function main() {
 			// Encode all the changes, we only keep latest per glider if multiple received
 			// there shouldn't be multiple!
 			const msg = encodePb( { positions: { positions: channel.toSend }, t: (Math.trunc(Date.now()/1000)+tOffset) } );
-			channel.toSend = {};
+			channel.toSend = [];
 			
 			// Send to each client and if they don't respond they will be cleaned up next time around
 			channel.clients.forEach( (client) => {
@@ -399,7 +399,7 @@ async function updateTrackers() {
                               ...channel,
                               className: c.class, datecode: c.datecode,
 							  name: cname,
-							  toSend: {},
+							  toSend: [],
                             };
 
         newchannels.push(cname);
@@ -865,20 +865,7 @@ function processPacket( packet ) {
 					   if( ! sc ) {
 						   return;
 					   }
-					   
-                       // If the packet isn't delayed then we should send it out over our websocket
-                       if( ! islate ) {
-
-						   // Buffer the message they get batched every second
-						   if( channel.toSend[glider.compno] ) {
-							   console.log( "hmm two messages for one glider...", glider.compno );
-						   }
-						   channel.toSend[glider.compno] = message;
-
-						   // Merge into the display data structure
-						   mergePoint( message, sc );
-					   }
-					   
+					   					   
 					   // Slice it into the points array	
 					   if( ! sc.points[glider.compno] ) {
 						   sc.points[glider.compno] = [];
@@ -893,6 +880,16 @@ function processPacket( packet ) {
 					   // and then choose when to accept their messages or not
 					   if( sc.points[glider.compno][insertIndex]?.t ==  message.t ) {
 						   return;
+					   }
+					   
+                       // If the packet isn't delayed then we should send it out over our websocket
+                       if( ! islate ) {
+
+						   // Buffer the message they get batched every second
+						   channel.toSend.push( message );
+
+						   // Merge into the display data structure
+						   mergePoint( message, sc );
 					   }
 
 					   // Actually insert the point into the array
