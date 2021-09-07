@@ -45,6 +45,7 @@ import fetch from 'node-fetch';
 import _filter from 'lodash.filter';
 import _pick from 'lodash.pick';
 import _map from 'lodash.map';
+import _flatmap from 'lodash.flatmap';
 import _reduce from 'lodash.reduce';
 import _keyby from 'lodash.keyby';
 import _foreach from 'lodash.foreach';
@@ -475,7 +476,12 @@ async function updateTrackers() {
 
         // If we have a tracker for it then we need to link that as well
         if( t.trackerid && t.trackerid != 'unknown' ) {
-            trackers[ t.trackerid ] = gliders[ gliderKey ];
+			_foreach( t.trackerid.split(','), (tid,i) => {
+				let t = tid.match(/[0-9A-F]{6}$/i);
+				let g = trackers[ t ] = gliders[ gliderKey ];
+				(g.trackers||(g.trackers={}))[t] = { order: i,
+								  pressure: !!tid.match(/OGN/i) };
+			});
         }
 
     });
@@ -483,8 +489,9 @@ async function updateTrackers() {
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
     // unknowns as they won't be in the trackers pick
     gliders = _pick( gliders, _map( cTrackers, (c) => mergedName(c) ));
-    trackers = _pick( trackers, _map( cTrackers, 'trackerid' ));
-
+	trackers = _pick( trackers, _flatmap( cTrackers, (t) => _map(t.trackerid.split(','),(x) => x.match(/[0-9A-F]{6}$/i)) ));
+	console.log( trackers );
+	
     // identify any competition numbers that may be duplicates and mark them.  This
     // will affect how we match from the DDB
     const duplicates = await db.query( 'SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1' );
@@ -772,10 +779,11 @@ function processPacket( packet ) {
 
     // Flarm ID we use is last 6 characters
     const flarmId = packet.sourceCallsign.slice( packet.sourceCallsign.length - 6 );
-
+	const ognTracker = (packet.sourceCallsign.slice( 0, 3 ) == 'OGN');
+	
     const sender = packet.digipeaters?.pop()?.callsign||'unknown';
 
-    const aoa = altitudeOffsetAdjust[ sender ]||0;
+    const aoa = ognTracker ? 0 : (altitudeOffsetAdjust[ sender ]||0);
     if( aoa == null ) {
         console.log( `ignoring packet from ${sender} as blocked` );
         return;
