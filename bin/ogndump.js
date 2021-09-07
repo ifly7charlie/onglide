@@ -17,11 +17,7 @@ import {createWriteStream} from 'fs';
 import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
-
-import { getOffset } from '../lib/egm96.mjs';
-
 import dotenv from 'dotenv';
-
 
 // Where is the comp based
 let location = {};
