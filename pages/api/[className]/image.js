@@ -24,7 +24,7 @@ export default async function image( req, res ) {
       SELECT image
       FROM images
       WHERE class = ${className} and compno=${compno}
-    `))[0].image;
+    `))[0]?.image;
 
 	if( !imageBlob ) {
         console.log( "no image" );
