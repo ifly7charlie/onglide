@@ -16,7 +16,9 @@ export default async function taskHandler( req, res) {
     const pilots = await query(escape`
 	select pilots.class, pilots.compno, 
 		       pr.status dbstatus, datafromscoring,scoredstatus,
-		       UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',start))-(SELECT tzoffset FROM competition) utcstart, start, finish, duration,
+		       CASE WHEN start ='00:00:00' THEN 0
+                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',start))-(SELECT tzoffset FROM competition)
+               END utcstart, start, finish, duration,
 		       pilots.class, forcetp,
 	            concat(firstname,' ',lastname) name, glidertype, handicap, image, daypoints, dayrank, country,
 
