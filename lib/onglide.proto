@@ -151,6 +151,7 @@ message PilotScore {
     bool stationary = 50;
     uint32 at = 51;
 	string task = 53;
+	Wind wind = 56;
 }
 
 message Positions {
