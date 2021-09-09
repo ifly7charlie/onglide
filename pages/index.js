@@ -113,7 +113,7 @@ function CombinePage( props ) {
 		minPitch: 0,
 		maxPitch: 85,
 		altitude: 1.5,
-//        pitch: 90
+        pitch: (! (props.options.mapType % 2)) ? 70 : 0
     });
 
 	// 
