@@ -23,6 +23,7 @@
         "dotenv": ">=8.2.0",
         "js-aprs-fap": ">=1.0.0",
         "js-aprs-is": ">=1.0.1",
+        "kalmanjs": "^1.1.0",
         "lodash": ">=4.17.19",
         "lodash.assignwith": "^4.2.0",
         "lodash.chunk": "^4.2.0",

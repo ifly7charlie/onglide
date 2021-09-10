@@ -22,11 +22,8 @@ import tx2 from 'tx2';
 import protobuf from 'protobufjs/light.js';
 import { OnglideWebSocketMessage } from '../lib/onglide-protobuf.mjs';
 
-console.log(ISSocket);
-
-//import crypto from 'crypto';
-
 // Helper
+import fetch from 'node-fetch';
 const fetcher = url => fetch(url).then(res => res.json());
 
 // DB access
@@ -35,11 +32,8 @@ import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
 import { mergePoint } from '../lib/flightprocessing/incremental.mjs';
-import { altitudeOffsetAdjust } from '../lib/offsets.js';
 
 let db = undefined;
-
-import fetch from 'node-fetch';
 
 // lodash
 import _filter from 'lodash.filter';
@@ -58,6 +52,10 @@ import _clonedeep from 'lodash.clonedeep';
 // Score a single pilot
 import scorePilot from  '../lib/flightprocessing/scorepilot.js';
 import { generatePilotTracks } from '../lib/flightprocessing/tracks.js';
+
+// Data sources
+import { startAprsListener } from '../lib/ws/aprs.js';
+import { startDBReplay } from '../lib/ws/dbreplay.js';
 
 import dotenv from 'dotenv';
 
@@ -101,10 +99,6 @@ function encodePb( msg ) {
 }
 
 
-
-// APRS connection
-let connection = {};
-
 // Are we offsetting time for replay
 let tOffset = 0;
 let tBase = 0;
@@ -124,14 +118,12 @@ let metrics = {
 dotenv.config({ path: '.env.local' })
 let readOnly = process.env.OGN_READ_ONLY == undefined ? false : (!!(parseInt(process.env.OGN_READ_ONLY)));
 
-// Set up background fetching of the competition
 async function main() {
 
     if (dotenv.error) {
         console.log( "New install: no configuration found, or script not being run in the root directory" );
         process.exit();
     }
-
 
     db = mysql( { config:{
         host: process.env.MYSQL_HOST,
@@ -141,20 +133,12 @@ async function main() {
         onError: (e) => { console.log(e); }
     }});
 
-    // Settings for connecting to the APRS server
-    const CALLSIGN = process.env.NEXT_PUBLIC_SITEURL;
-    const PASSCODE = -1;
-    const APRSSERVER = 'aprs.glidernet.org';
-    const PORTNUMBER = 14580;
-
     // Location comes from the competition table in the database
     location = (await db.query( 'SELECT lt,lg,tz FROM competition LIMIT 1' ))[0];
     location.point = point( [location.lt, location.lg] );
 
 	// Save the tz for use
 	setSiteTz( location.tz );
-	
-    const FILTER = `r/${location.lt}/${location.lg}/250`;
 
 	tOffset = parseInt(process.env.NEXT_PUBLIC_TOFFSET)||0;
 	if( tOffset > 0 ) { tOffset = Math.floor(tOffset - (Date.now()/1000)) };
@@ -176,16 +160,21 @@ async function main() {
     await updateDDB();
 	await sendScores();
 
-    startStatusServer();
+//    startStatusServer();
 
-    // Connect to the APRS server
-    connection = new ISSocket(APRSSERVER, PORTNUMBER, 'OG', '', FILTER );
-    let parser = new aprsParser();
-
+	// We want to start listening to the APRS feed as well
+	if( ! tOffset ) {
+		startAprsListener( location, getAssociation, processAPRSPacket, metrics );
+	}
+	else {
+		startDBReplay( db, {tOffset:tOffset,tBase:tBase,stepSize:stepSize},
+					   location, getAssociation, processAPRSPacket, metrics );
+	}
+	
     // And start our websocket server
     const wss = new WebSocketServer({
 		port: (process.env.WEBSOCKET_PORT||8080),
-		perMessageDeflate: {
+/*		perMessageDeflate: { ***** NOT REALLY SO USEFUL NOW PROTOBUF, only 20% reduction
 			zlibDeflateOptions: {
 				// See zlib defaults.
 				chunkSize: 1024,
@@ -203,7 +192,7 @@ async function main() {
 			concurrencyLimit: 10, // Limits zlib concurrency for perf.
 			threshold: 16384 // Size (in bytes) below which messages
 			// should not be compressed.
-		}});
+		}*/});
 	
     // What to do when a client connects
     wss.on( 'connection', (ws,req) => {
@@ -234,62 +223,6 @@ async function main() {
         sendCurrentState(ws);
     });
 
-    /*    wss.on('upgrade', function upgrade(request, socket, head) {
-          console.log( "upgrade" );
-          wss.handleUpgrade(request, socket, head, function done(ws) {
-          wss.emit('connection', ws, request, client);
-          console.log( "upgrade done" );
-          });
-          }); */
-
-    // Handle a connect
-    connection.on('connect', () => {
-        connection.sendLine( connection.userLogin );
-        connection.sendLine(`# onglide ${CALLSIGN} ${process.env.NEXT_PUBLIC_WEBSOCKET_HOST}`);
-    });
-
-    // Handle a data packet
-	(parseInt(process.env.NEXT_PUBLIC_NOLIVE||'0')||0) ||
-    connection.on('packet', (data) => {
-        connection.valid = true;
-        if(data.charAt(0) != '#' && !data.startsWith('user')) {
-            const packet = parser.parseaprs(data);
-            if( "latitude" in packet && "longitude" in packet &&
-                "comment" in packet && packet.comment?.substr(0,2) == 'id' ) {
-				if( ! tOffset ) {
-					processPacket( packet );
-				}
-            }
-        } else {
-            // Server keepalive
-            console.log(data);
-            if( data.match(/aprsc/) ) {
-                connection.aprsc = data;
-            }
-        }
-    });
-
-    // Failed to connect
-    connection.on('error', (err) => {
-        console.log('Error: ' + err);
-        connection.disconnect();
-        connection.connect();
-    });
-
-    // Start the APRS connection
-    connection.connect();
-
-    // Every minute we need to do send a keepalive on the APRS link
-    setInterval( function() {
-
-        // Send APRS keep alive or we will get dumped
-        connection.sendLine(`# ${CALLSIGN} ${process.env.NEXT_PUBLIC_WEBSOCKET_HOST}`);
-
-        // Now download the scores and punt them out so we can mutate them into the results
-        sendScores();
-
-    }, 15*1000 );
-
 	//
 	// This function is to send updated flight tracks for the gliders that have reported since the last
 	// time we run the callback (every second), as we only update the screen once a second it should
@@ -311,62 +244,19 @@ async function main() {
 			});
 		});
 	}, 1000 );
-
-	//
-	// This is to allow us to replay flights which makes it much easier for testing
-	if( tOffset ) {
-		console.log( "offset", tOffset, Date.now()/1000 );
-
-		let lastPoint = Math.floor((Date.now()/1000) + tOffset);
-		const datecode = (await db.query( 'SELECT datecode FROM compstatus LIMIT 1' ))[0].datecode;
-		
-		setInterval( async function() {
-			const rawpoints = await db.query(escape`
-                SELECT compno, class, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
-                  FROM trackpoints
-                 WHERE datecode=${datecode} AND t >= ${lastPoint} AND t < ${lastPoint+stepSize}
-                 ORDER BY t DESC`);
-
-//			if( ! rawpoints.length ) {
-				lastPoint+=stepSize;
-//			}
-			console.log( "poll, ", lastPoint, tOffset, rawpoints.length, _map( rawpoints, (p) => p.compno ).join(',') );
-			for( const point of rawpoints ) {
-				// How the trackers are indexed into the array, it must include className as compno may not be unique
-				const mergedName = point.class+'_'+point.compno;
-				const aprsPacket = {
-					altitude: point.a,
-					sourceCallsign: `id00${gliders[mergedName]?.trackerid||'000000'}`,
-//					comment: `id00${gliders[mergedName]?.trackerid||'000000'} -000fpm +0.0rot 0.0dB -0,0kHz gps1x1 +0.0dBm`,
-					course: point.b,
-					latitude: point.lat,
-					longitude: point.lng,
-					posresolution: 1.852,
-					speed: point.s,
-					timestamp: point.t,
-				};
-                processPacket( aprsPacket );
-			}
-		},1000);
-	}
 			
-    // And every 2.5 minutes we need to update the trackers, and confirm the APRS
-    // connection has had some traffic
-    setInterval( function() {
 
-        // Re-establish the APRS connection if we haven't had anything in
-        if( ! connection.valid ) {
-            console.log( "failed APRS connection, retrying" );
-            connection.disconnect( () => { connection.connect() } );
-        }
-        connection.valid = false;
-
+	// And every 4-6 minutes rescore and update everything - the random is to make sure
+	// multiple processes don't intersect
+	setInterval( function() {
 		try { 
-			updateTrackers();
+			if( ! tOffset ) {
+				updateTrackers();
+			}
 		} catch(e) {
 			console.log(e);
 		}
-    }, 2.5*60*1000 );
+    }, (4*60*1000+(2*60000*Math.random())) );
 }
 
 main()
@@ -461,10 +351,18 @@ async function updateTrackers() {
 
         // Spread, this will define/overwrite as needed
         const gliderKey = mergedName(t);
+
+		// If we have changed channel then we have changed datecode as channel is class+datecode
+		// and glider is simply keyed on class+compno
+		if( gliders[gliderKey] && gliders[gliderKey].channel != t.channel ) {
+			console.log( `glider channel changed to ${t.channel} so resetting vario` );
+			gliders[gliderKey] = {};
+		}
+		
         gliders[gliderKey] = { ...gliders[gliderKey], ...t, greg: t?.greg?.replace(/[^A-Z0-9]/i,'') };
 
 		// If we have a point but there wasn't one on the glider then we will store this away
-        var lp = scoring[t.channel].points[t.compno];
+        var lp = scoring[t.channel]?.points[t.compno];
         if( lp && lp.length > 0 && (gliders[gliderKey].lastTime??0) < lp[0].t ) {
 //            console.log(`using db altitudes for ${gliderKey}, ${gliders[gliderKey].lastTime??0} < ${lp[0].t}`);
             gliders[gliderKey] = { ...gliders[gliderKey],
@@ -489,7 +387,6 @@ async function updateTrackers() {
     // unknowns as they won't be in the trackers pick
     gliders = _pick( gliders, _map( cTrackers, (c) => mergedName(c) ));
 	trackers = _pick( trackers, _flatmap( cTrackers, (t) => _map(t.trackerid.split(','),(x) => x.match(/[0-9A-F]{6}$/i)) ));
-	console.log( trackers );
 	
     // identify any competition numbers that may be duplicates and mark them.  This
     // will affect how we match from the DDB
@@ -703,14 +600,16 @@ async function sendScores() {
         // Reset for next iteration
         channel.activeGliders = {};
 
-		Promise.all( _map( scores.trackers, (tracker) =>  new Promise((resolve) => { try {
-			scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
-		} catch(e) {
-			console.warn(e);
-		}
-																					 resolve(); })
+		Promise.all( _map( scores.trackers, (tracker) =>
+			new Promise((resolve) => {
+				try {
+					scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
+				} catch(e) {
+					console.warn(e);
+				}
+				resolve(); })
 		)).then( () => {
-			
+						   
 			// Make a copy that we can tweak
 			const pilots = _clonedeep( scores.trackers );
 			
@@ -767,80 +666,19 @@ async function sendScores() {
     });
 }
 
+function processAPRSPacket( glider, message, islate ) {
 
+	// Update the vario
+	message.v = ! islate ? calculateVario( glider, altitude, packet.timestamp ).join(',') : '';
 
-//
-// collect points, emit to competition db every 30 seconds
-function processPacket( packet ) {
-
-    // Count this packet into pm2
-    metrics?.ognPerSecond.mark();
-
-    // Flarm ID we use is last 6 characters
-    const flarmId = packet.sourceCallsign.slice( packet.sourceCallsign.length - 6 );
-	const ognTracker = (packet.sourceCallsign.slice( 0, 3 ) == 'OGN');
-	
-    const sender = packet.digipeaters?.pop()?.callsign||'unknown';
-
-    const aoa = ognTracker ? 0 : (altitudeOffsetAdjust[ sender ]||0);
-    if( aoa == null ) {
-        console.log( `ignoring packet from ${sender} as blocked` );
-        return;
-    }
-    const altitude = Math.floor(packet.altitude + aoa);
-
-    // Check if the packet is late, based on previous packets for the glider
-    const now = (new Date()).getTime()/1000;
-    const td = now - packet.timestamp;
-
-    // determine how far they are away
-    let printedalready = 0;
-    const jPoint = point( [packet.latitude, packet.longitude] );
-
-    checkAssociation( flarmId, packet, jPoint, trackers[flarmId] );
-
-    // Look it up, do we have a match?
-    const glider = trackers[flarmId];
-	if( ! glider ) {
-		return;
-    }
-	
-    // Check to make sure they have moved or that it's been about 10 seconds since the last update
-    // this reduces load from stationary gliders on the ground and allows us to track stationary gliders
-    // better. the 1 ensures that first packet gets picked up after restart
-    const distanceFromLast = glider.lastPoint ? distance( jPoint, glider.lastPoint ) : 1;
-    if( distanceFromLast < 0.01 ) {
-        if( (packet.timestamp - glider.lastTime) < 10 ) {
-            return;
-        }
-    } else {
-        glider.lastMoved = packet.timestamp;
-    }
-
-    const islate = ( glider.lastTime > packet.timestamp );
-    if( ! islate ) {        
-		glider.lastPoint = jPoint;
-		glider.lastAlt = altitude;
-
-		if( glider.lastTime - packet.timestamp > 1800 ) {
-			console.log( `${glider.compno} : VERY late flarm packet received, ${(glider.lastTime - packet.timestamp)/60}  minutes earlier than latest packet received for the glider, ignoring` );
-			console.log( packet );
-			glider.lastTime = packet.timestamp;
-			return;
-		}
-		
-        glider.lastTime = packet.timestamp;
-    }
-
-
-    // Where are we broadcasting this data
+	// Keep track of how many gliders this channel is receiving data for
     let channel = channels[glider.channel];
-    //    console.log( `${flarmId}: ${glider.compno} - ${glider.channel}` );
-
     if( ! channel ) {
         console.log( `don't know ${glider.compno}/${flarmId}`);
         return;
     }
+	
+    checkAssociation( flarmId, packet, jPoint, trackers[flarmId] );
 
     // how many gliders are we tracking for this channel
     if( !'activeGliders' in channel ) {
@@ -848,97 +686,73 @@ function processPacket( packet ) {
     }
     channel.activeGliders[glider.compno]=1;
 
-    // Capture the fact that we are launching
-    if( altitude - location.altitude > 100 && ! channel.launching ) {
+	// Check if they are a launch
+    if( message.agl > 100 && ! channel.launching ) {
         console.log( `Launch detected: ${glider.compno}, class: ${glider.className}`);
         channel.launching = true;
     }
-
-//	console.log( "B60 -> processing" );
-
-    // Enrich with elevation and send to everybody, this is async
-    withElevation( packet.latitude, packet.longitude,
-                   async (gl) => {
-					   glider.agl = Math.round(Math.max(altitude-gl,0));
-					   glider.altitude = altitude;
-					   
-					   let message = {
-						   c: glider.compno,
-						   lat: Math.round(packet.latitude*1000000)/1000000,
-						   lng: Math.round(packet.longitude*1000000)/1000000,
-						   a: altitude,
-						   g: glider.agl,
-						   t: packet.timestamp,
-						   b: packet.course,
-						   s: packet.speed,
-						   v: ! islate ? calculateVario( glider, altitude, packet.timestamp ).join(',') : '',
-					   };
-					   
-					   let sc = scoring[glider.channel];
-
-					   if( ! sc ) {
-						   return;
-					   }
-					   					   
-					   // Slice it into the points array	
-					   if( ! sc.points[glider.compno] ) {
-						   sc.points[glider.compno] = [];
-					   }
-					   if( ! sc.trackers[glider.compno] ) {
-						   sc.trackers[glider.compno] = [];
-					   }					   
-					   const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, (o) => -o.t);
-
-					   // In dense coverage it's not uncommon to get a duplicate packet. We always take the first one we
-					   // have received. The packets may be very different and ideally we would identify problem receivers
-					   // and then choose when to accept their messages or not
-					   if( sc.points[glider.compno][insertIndex]?.t ==  message.t ) {
-						   return;
-					   }
-					   
-                       // If the packet isn't delayed then we should send it out over our websocket
-                       if( ! islate ) {
-
-						   // Buffer the message they get batched every second
-						   channel.toSend.push( message );
-
-						   // Merge into the display data structure
-						   mergePoint( message, sc );
-					   }
-
-					   // Actually insert the point into the array
-					   sc.points[glider.compno].splice(insertIndex, 0, message);
-					   
-					   // Now update the indexes for this
-					   const tracker = sc.trackers[glider.compno];
-					   if( insertIndex <= (sc.trackers[glider.compno]?.firstOldPoint||0) ) {
-						   //						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}` );
-						   tracker.firstOldPoint = (tracker?.firstOldPoint||0)+1;
-					   }
-					   else {
-						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}, but older than firstOldPoint` );
-						   tracker.outOfOrder = (tracker?.outOfOrder||0)+1;
-					   }
-					   
-					   if( tracker.oldestMerge && tracker.oldestMerge >= insertIndex ) {
-						   tracker.oldestMerge ++;
-					   }
-					   else {
-						   tracker.oldestMerge = insertIndex+1;
-					   }
-					   
-					   // update the geojson
-//					   mergePoints( sc, glider.compno, insertIndex );
-						   
-                       // Pop into the database
-					   if( ! readOnly ) {
-						   db.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
+	
+	// Now get the data structures
+	let sc = scoring[glider.channel];
+	if( ! sc ) {
+		return;
+	}
+	
+	// Slice it into the points array	
+	if( ! sc.points[glider.compno] ) {
+		sc.points[glider.compno] = [];
+	}
+	if( ! sc.trackers[glider.compno] ) {
+		sc.trackers[glider.compno] = [];
+	}					   
+	const insertIndex = _sortedIndexBy(sc.points[glider.compno], message, (o) => -o.t);
+	
+	// In dense coverage it's not uncommon to get a duplicate packet. We always take the first one we
+	// have received. The packets may be very different and ideally we would identify problem receivers
+	// and then choose when to accept their messages or not
+	if( sc.points[glider.compno][insertIndex]?.t ==  message.t ) {
+		return;
+	}
+	
+    // If the packet isn't delayed then we should send it out over our websocket
+    if( ! islate ) {
+		
+		// Buffer the message they get batched every second
+		channel.toSend.push( message );
+		
+		// Merge into the display data structure
+		mergePoint( message, sc );
+	}
+	
+	// Actually insert the point into the array
+	sc.points[glider.compno].splice(insertIndex, 0, message);
+	
+	// Now update the indexes for this
+	const tracker = sc.trackers[glider.compno];
+	if( insertIndex <= (sc.trackers[glider.compno]?.firstOldPoint||0) ) {
+		//						   console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}` );
+		tracker.firstOldPoint = (tracker?.firstOldPoint||0)+1;
+	}
+	else {
+		console.log( glider.compno, islate ? "late" : "not-late", `inserting at ${insertIndex}, but older than firstOldPoint` );
+		tracker.outOfOrder = (tracker?.outOfOrder||0)+1;
+	}
+	
+	if( tracker.oldestMerge && tracker.oldestMerge >= insertIndex ) {
+		tracker.oldestMerge ++;
+	}
+	else {
+		tracker.oldestMerge = insertIndex+1;
+	}
+	
+    // Pop into the database
+	if( ! readOnly ) {
+		db.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
                                                            ${packet.latitude}, ${packet.longitude}, ${altitude}, ${glider.agl}, ${packet.timestamp}, ${packet.course}, ${packet.speed}, ${sender} )` );
-					   }
-                   });
-
+	}
 }
+
 
 function calculateVario( glider, altitude, timestamp ) {
 
@@ -998,11 +812,13 @@ function calculateVario( glider, altitude, timestamp ) {
 //
 // Determine if it is close enough to the launch point to be considered launched from this site
 //
-function checkAssociation( flarmId, packet, jPoint, glider ) {
+function getAssociation( flarmId, packet, jPoint ) {
 
+	// Look it up, do we have a match?
+    const glider = trackers[flarmId];
+	
+    // How far from/high above the airfield are we?
     const distanceFromHome = distance( jPoint, location.point );
-
-    // How high are we above the airfield
     const agl = Math.max(packet.altitude-(location.altitude??0),0);
 
     // capture launches close to the airfield (vertically and horizontally)
@@ -1019,7 +835,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 
 		// If we have matched before then don't do it again
 		if( unknownTrackers[flarmId].message ) {
-			return;
+			return glider;
 		}
 
         // This works by checking what is configured in the ddb
@@ -1030,7 +846,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 
             if( ! Object.keys(matches).length ) {
                 unknownTrackers[flarmId].message = `Not in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
-				return;
+				return glider;
             }
 
             if( matches.length > 1 ) {
@@ -1049,14 +865,14 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 				// Same glider then ignore
 				if( match.compno == glider.compno && match.className == glider.className ) {
 					unknownTrackers[flarmId].message = `${flarmId}:  flarm already matched to ${glider.compno} (${glider.className})`;
-					return;
+					return glider;
 				}
 
 				// New compno then we need to break old association
 				else {
 					unknownTrackers[flarmId].message = `${flarmId}:  flarm mismatch, previously matched to ${glider.compno} (${glider.className})`;
 					console.log( unknownTrackers[flarmId].message );
-					return;
+					return glider;
 					// unknownTrackers[flarmId].matched = `flarm change: ${match.compno} ${match.className} (${match.registration}) previously ${glider.compno}`;
 					// glider.trackerid = 'unknown';
 					
@@ -1075,7 +891,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 				unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.trackerid}`;
 				console.log( unknownTrackers[flarmId].message );
 				match.duplicate = true;
-				return;
+				return glider;
 			}
 							 
 			unknownTrackers[flarmId].message = `${flarmId}:  found in ddb, matched to ${match.compno} (${match.className})`;
@@ -1095,6 +911,7 @@ function checkAssociation( flarmId, packet, jPoint, glider ) {
 			}
         }
     }
+	return glider;
 }
 
 
