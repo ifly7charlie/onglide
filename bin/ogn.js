@@ -152,8 +152,8 @@ async function main() {
 
     // Set the altitude offset for launching, this will take time to return
     // so there is a period when location altitude will be wrong for launches
-    withElevation( location.lt, location.lg,
-                   (agl) => { location.altitude = agl;console.log('SITE:'+agl) });
+    getElevationOffset( location.lt, location.lg,
+                        (agl) => { location.altitude = agl;console.log('SITE:'+agl) });
 
     // Download the list of trackers so we know who to look for
     await updateTrackers();
@@ -256,7 +256,7 @@ async function main() {
 		} catch(e) {
 			console.log(e);
 		}
-    }, (4*60*1000+(2*60000*Math.random())) );
+    }, (1*60*1000+(2*60000*Math.random())) );
 }
 
 main()
@@ -600,7 +600,7 @@ async function sendScores() {
         // Reset for next iteration
         channel.activeGliders = {};
 
-		Promise.all( _map( scores.trackers, (tracker) =>
+		Promise.allSettled( _map( scores.trackers, (tracker) =>
 			new Promise((resolve) => {
 				try {
 					scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
@@ -669,7 +669,7 @@ async function sendScores() {
 function processAPRSPacket( glider, message, islate ) {
 
 	// Update the vario
-	message.v = ! islate ? calculateVario( glider, altitude, packet.timestamp ).join(',') : '';
+	message.v = ! islate ? calculateVario( glider, message.a, message.t ).join(',') : '';
 
 	// Keep track of how many gliders this channel is receiving data for
     let channel = channels[glider.channel];
@@ -678,7 +678,7 @@ function processAPRSPacket( glider, message, islate ) {
         return;
     }
 	
-    checkAssociation( flarmId, packet, jPoint, trackers[flarmId] );
+//    checkAssociation( flarmId, packet, jPoint, trackers[flarmId] );
 
     // how many gliders are we tracking for this channel
     if( !'activeGliders' in channel ) {
@@ -687,7 +687,7 @@ function processAPRSPacket( glider, message, islate ) {
     channel.activeGliders[glider.compno]=1;
 
 	// Check if they are a launch
-    if( message.agl > 100 && ! channel.launching ) {
+    if( message.g > 100 && ! channel.launching ) {
         console.log( `Launch detected: ${glider.compno}, class: ${glider.className}`);
         channel.launching = true;
     }
@@ -749,7 +749,7 @@ function processAPRSPacket( glider, message, islate ) {
 	if( ! readOnly ) {
 		db.query( escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
-                                                           ${packet.latitude}, ${packet.longitude}, ${altitude}, ${glider.agl}, ${packet.timestamp}, ${packet.course}, ${packet.speed}, ${sender} )` );
+                                                           ${message.lat}, ${message.lng}, ${message.a}, ${message.g}, ${message.t}, ${message.b}, ${message.s}, ${message.f} )` );
 	}
 }
 
@@ -887,7 +887,7 @@ function getAssociation( flarmId, packet, jPoint ) {
 			}
 
 			// If it's another match for somebody we have matched then ignore it
-			if( match.trackerid != flarmId ) {
+			if( match.trackerid != flarmId && match.trackerid != 'unknown' ) {
 				unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.trackerid}`;
 				console.log( unknownTrackers[flarmId].message );
 				match.duplicate = true;

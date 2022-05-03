@@ -491,9 +491,9 @@ async function process_day_task (day,classid,classname,keys) {
 
     // make sure we have result placeholder for each day, we will fail to save scores otherwise
         .query( escape`INSERT IGNORE INTO pilotresult
-               ( class, datecode, compno, status, lonotes, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable, turnpoints )
+               ( class, datecode, compno, status, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable )
              SELECT ${classid}, todcode(${date}),
-               compno, '-', '', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N', -2
+               compno, '-', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N'
              FROM pilots WHERE pilots.class = ${classid}`)
 
     // And update the day with status and text etc
@@ -709,7 +709,7 @@ async function update_contest(contest,keys) {
          UPDATE competition SET start = ${contest.start_date},
                                   end = ${contest.end_date},
                                   countrycode = ${contest.country},
-                                  name = ${contest.name}`);
+                                  name = ${contest.name.substring(0,59)}`);
 
 
     // If we have a location then update
