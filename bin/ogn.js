@@ -678,8 +678,6 @@ function processAPRSPacket( glider, message, islate ) {
         return;
     }
 	
-//    checkAssociation( flarmId, packet, jPoint, trackers[flarmId] );
-
     // how many gliders are we tracking for this channel
     if( !'activeGliders' in channel ) {
         channel.activeGliders = {};
