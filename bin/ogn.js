@@ -56,6 +56,7 @@ import { generatePilotTracks } from '../lib/flightprocessing/tracks.js';
 // Data sources
 import { startAprsListener } from '../lib/ws/aprs.js';
 import { startDBReplay } from '../lib/ws/dbreplay.js';
+import { startFileReplay } from '../lib/ws/filereplay.js';
 
 import dotenv from 'dotenv';
 
@@ -98,11 +99,10 @@ function encodePb( msg ) {
 	return pbOnglideWebsocketMessage.encode(message).finish();
 }
 
-
-// Are we offsetting time for replay
+//
+// Replay may offset time
 let tOffset = 0;
 let tBase = 0;
-let stepSize = 1;
 
 // Performance counter
 let metrics = { 
@@ -139,17 +139,10 @@ async function main() {
 
 	// Save the tz for use
 	setSiteTz( location.tz );
-
-	tOffset = parseInt(process.env.NEXT_PUBLIC_TOFFSET)||0;
-	if( tOffset > 0 ) { tOffset = Math.floor(tOffset - (Date.now()/1000)) };
-	if( tOffset ) {
-		stepSize = parseInt(process.env.NEXT_PUBLIC_STEPSIZE)||1;
-		readOnly = true;
-		tBase = Math.floor(tOffset + (Date.now()/1000));
-	}
 	
-	console.log( 'Onglide OGN handler', readOnly ? '(read only)' : '', tOffset ? '(replay)':'', process.env.NEXT_PUBLIC_SITEURL ); 
-
+	console.log( 'Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL );
+	console.log( `db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}` );
+	
     // Set the altitude offset for launching, this will take time to return
     // so there is a period when location altitude will be wrong for launches
     getElevationOffset( location.lt, location.lg,
@@ -163,12 +156,15 @@ async function main() {
 //    startStatusServer();
 
 	// We want to start listening to the APRS feed as well
-	if( ! tOffset ) {
-		startAprsListener( location, getAssociation, processAPRSPacket, metrics );
+	if( process.env.REPLAY_FILE ) {
+		startFileReplay( process.env.REPLAY_FILE, {}, location, getAssociation, processAPRSPacket, metrics );
+	}
+	else if( process.env.NEXT_PUBLIC_TOFFSET ) {
+		readOnly = true;
+		[ tOffset, tBase ] = startDBReplay( db, {}, location, getAssociation, processAPRSPacket, metrics );
 	}
 	else {
-		startDBReplay( db, {tOffset:tOffset,tBase:tBase,stepSize:stepSize},
-					   location, getAssociation, processAPRSPacket, metrics );
+		startAprsListener( location, getAssociation, processAPRSPacket, metrics );
 	}
 	
     // And start our websocket server
@@ -953,11 +949,6 @@ async function startStatusServer() {
                      </body></html>`);
         res.end(); //end the response
     }).listen(process.env.STATUS_SERVER_PORT||8081);
-}
-
-// Handle DEM
-async function withElevation(lt,lg,cb) {
-    getElevationOffset( lt, lg, cb );
 }
 
 // Display a time as competition time, use 24hr clock (en-GB)
