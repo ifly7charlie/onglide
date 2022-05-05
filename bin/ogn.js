@@ -252,7 +252,18 @@ async function main() {
 		} catch(e) {
 			console.log(e);
 		}
-    }, (1*60*1000+(2*60000*Math.random())) );
+    }, (20*60*1000+(2*60000*Math.random())) );
+
+	// And every 4-6 minutes rescore and update everything - the random is to make sure
+	// multiple processes don't intersect
+	setInterval( function() {
+		try {
+			console.log( 'sending scores' );
+			sendScores();
+		} catch(e) {
+			console.log(e);
+		}
+    }, (1*60*1000+(10000*Math.random())) );
 }
 
 main()
