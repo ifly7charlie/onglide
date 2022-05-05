@@ -55,7 +55,7 @@ import { generatePilotTracks } from '../lib/flightprocessing/tracks.js';
 
 // Data sources
 import { startAprsListener } from '../lib/ws/aprs.js';
-import { startDBReplay } from '../lib/ws/dbreplay.js';
+import { startDBReplay, establishOffset } from '../lib/ws/dbreplay.js';
 import { startFileReplay } from '../lib/ws/filereplay.js';
 
 import dotenv from 'dotenv';
@@ -148,6 +148,9 @@ async function main() {
     getElevationOffset( location.lt, location.lg,
                         (agl) => { location.altitude = agl;console.log('SITE:'+agl) });
 
+	// Check if an offset should be used
+	[ tOffset, tBase ] = establishOffset();
+	console.log( tOffset, ',', tBase );
     // Download the list of trackers so we know who to look for
     await updateTrackers();
     await updateDDB();
@@ -161,7 +164,7 @@ async function main() {
 	}
 	else if( process.env.NEXT_PUBLIC_TOFFSET ) {
 		readOnly = true;
-		[ tOffset, tBase ] = startDBReplay( db, {}, location, getAssociation, processAPRSPacket, metrics );
+		startDBReplay( db, {}, location, getAssociation, processAPRSPacket, gliders, metrics );
 	}
 	else {
 		startAprsListener( location, getAssociation, processAPRSPacket, metrics );
@@ -263,7 +266,7 @@ async function main() {
 		} catch(e) {
 			console.log(e);
 		}
-    }, (1*60*1000+(10000*Math.random())) );
+    }, (1*20*1000+(10000*Math.random())) );
 }
 
 main()
@@ -316,8 +319,7 @@ async function updateTrackers() {
 			}
 
 			// Now we will fetch the points for the pilots
-			const rawpoints = await db.query(escape`
-                SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
+			const rawpoints = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
                   FROM trackpoints
                  WHERE datecode=${c.datecode} AND (${tBase} = 0 OR t < ${tBase}) AND class=${c.class}
                  ORDER BY t DESC`);
