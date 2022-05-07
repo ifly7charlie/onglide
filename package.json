@@ -8,6 +8,7 @@
     "scripts": {
         "build": "next build",
         "soaringspot": "bin/soaringspot.js",
+        "ssscrape": "bin/ssscrape.js",
         "rst": "bin/rst.js",
         "setup": "bin/install.js",
         "ogn": "bin/ogn.js"
