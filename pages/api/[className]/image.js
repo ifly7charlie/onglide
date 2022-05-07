@@ -4,17 +4,9 @@
  *
  */
 
-const db = require('../../../lib/db')
-const escape = require('sql-template-strings')
+import { query } from '../../../lib/react/db';
+import escape from 'sql-template-strings';
 
-import { useRouter } from 'next/router'
-import _groupby  from 'lodash.groupby'
-import _mapvalues  from 'lodash.mapvalues'
-
-import { useKVs } from '../../../lib/kv.js';
-let kvs = useKVs();
-
-const historyLength = 600;
 
 export default async function image( req, res ) {
     const {
@@ -28,11 +20,11 @@ export default async function image( req, res ) {
     }
 
     // We need to figure out what date is needed as this isn't passed in to the webpage
-    const imageBlob = (await db.query(escape`
+    const imageBlob = (await query(escape`
       SELECT image
       FROM images
       WHERE class = ${className} and compno=${compno}
-    `))[0].image;
+    `))[0]?.image;
 
 	if( !imageBlob ) {
         console.log( "no image" );

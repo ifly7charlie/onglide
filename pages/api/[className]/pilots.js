@@ -1,6 +1,5 @@
-const db = require('../../../lib/db')
-const escape = require('sql-template-strings')
-import { useRouter } from 'next/router'
+import { query } from '../../../lib/react/db'
+import escape from 'sql-template-strings'
 
 export default async function taskHandler( req, res) {
     const {
@@ -14,12 +13,14 @@ export default async function taskHandler( req, res) {
     }
 
     // this is the pilot results
-    const pilots = await db.query(escape`
+    const pilots = await query(escape`
 	select pilots.class, pilots.compno, 
 		       pr.status dbstatus, datafromscoring,scoredstatus,
-		       UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',start))-(SELECT tzoffset FROM competition) utcstart, start, finish,
-		       lolat,lolong,pilots.class,
-	               concat(firstname,' ',lastname) name, glidertype, handicap, image, daypoints, dayrank, country,
+		       CASE WHEN start ='00:00:00' THEN 0
+                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',start))-(SELECT tzoffset FROM competition)
+               END utcstart, start, finish, duration,
+		       pilots.class, forcetp,
+	            concat(firstname,' ',lastname) name, glidertype, handicap, image, daypoints, dayrank, country,
 
           CASE
 			WHEN participating = 'N' THEN "H/C"
@@ -31,15 +32,6 @@ export default async function taskHandler( req, res) {
 	    ELSE concat(dayrank,"th place")
           END dayrankordinal,
 
-	  CASE
-	    WHEN turnpoints = -1 THEN "Before Start, 0 tps"
-	    WHEN turnpoints = 0 THEN "After Start, 0 tps"
-	    ELSE concat('After ',(select nname from taskleg, tasks
-	                                      WHERE tasks.flown = 'Y' and tasks.taskid = taskleg.taskid and
-	                                        legno = turnpoints and tasks.datecode=pr.datecode and
-	                                        taskleg.class=pr.class),
-	                ', ', turnpoints, ' tps' )
-          END lasttp,
 	  prevtotalrank, totalrank,
 	  hdistance hdistancedone, distance distancedone,
           speed, hspeed
@@ -52,10 +44,10 @@ export default async function taskHandler( req, res) {
      `);
 
     if( ! pilots || ! pilots.length ) {
-	console.log( "invalid class" );
-	console.log( pilots );
-	res.status(404).json({error: "invalid class"});
-	return;
+		console.log( "invalid class" );
+		console.log( pilots );
+		res.status(404).json({error: "invalid class"});
+		return;
     }
 
 

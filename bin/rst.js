@@ -65,10 +65,10 @@ async function main() {
     }
 
     mysql.config({
-        host: config.MYSQL_HOST,
-        database: config.MYSQL_DATABASE,
-        user: config.MYSQL_USER,
-        password: config.MYSQL_PASSWORD
+        host: process.env.MYSQL_HOST,
+        database: process.env.MYSQL_DATABASE,
+        user: process.env.MYSQL_USER,
+        password: process.env.MYSQL_PASSWORD
     });
 
 	console.log(config);
@@ -664,7 +664,7 @@ async function update_contest(contest_name, info) {
 	location.point = point( [location.lt, location.lg] );
 
 	// Calculate elevation so we can do launch calculations from the IGC files
-	getElevationOffset( config, location.lt, location.lg,
+	getElevationOffset( location.lt, location.lg,
 						(agl) => { location.altitude = agl;console.log('SITE Altitude:'+agl) });
 
     if( 0 ) { //keys.deep ) {

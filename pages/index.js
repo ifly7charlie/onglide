@@ -1,6 +1,5 @@
 import next from 'next'
 import { useRouter } from 'next/router'
-import dynamic from 'next/dynamic'
 import Head from 'next/head'
 
 // What do we need to render the bootstrap part of the page
@@ -15,22 +14,18 @@ import NavDropdown from 'react-bootstrap/NavDropdown'
 import { useState, useRef } from 'react';
 
 // Helpers for loading contest information etc
-import { useContest, usePilots, useTask, Spinner, Error } from '../lib/loaders.js';
-import { TaskDetails } from '../lib/taskdetails.js';
-import { Nbsp, Icon } from '../lib/htmlhelper.js';
-import { PilotList } from '../lib/pilotlist.js';
-
-// Dynamically load the map as it's big and slow
-const TaskMap  = dynamic(() => import( '../lib/taskmap.js' ),
-                         { loading: () => <Spinner/>});
+import { useContest, usePilots, useTask, Spinner, Error } from '../lib/react/loaders.js';
+import { Nbsp, Icon } from '../lib/react/htmlhelper.js';
 
 // And connect to websockets...
-import { OgnFeed } from '../lib/ognfeed.js';
+import { OgnFeed } from '../lib/react/ognfeed.js';
 
 import Router from 'next/router'
 
-const pilotsorting = require('../lib/pilot-sorting.js');
-const db = require('../lib/db')
+import pilotsorting from '../lib/react/pilot-sorting.js';
+import { query } from '../lib/react/db';
+
+import cookies from 'next-cookies';
 
 import _find from 'lodash.find';
 
@@ -100,14 +95,9 @@ function CombinePage( props ) {
         className = props.defaultClass;
     }
 
-    // For remote updating of the map
-    const mapRef = useRef(null);
-
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
     const { comp, isLoading, error } = useContest();
-    const { pilots, isLoading: isPLoading, error: isPerror, mutate } =
-          usePilots(className);
 
     // And keep track of who is selected
     const [ selectedCompno, setSelectedCompno ] = useState();
@@ -116,21 +106,24 @@ function CombinePage( props ) {
     const [viewport, setViewport] = useState({
         latitude: props.lat,
         longitude: props.lng,
-        zoom: 8,
+        zoom: 11.5,
+		minZoom: 6.5,
+		maxZoom: 14,
         bearing: 0,
-        pitch: 0
+		minPitch: 0,
+		maxPitch: 85,
+		altitude: 1.5,
+        pitch: (! (props.options.mapType % 2)) ? 70 : 0
     });
-	
-	// Get our options from _app.js
-	const options = props.options;
 
+	// 
     // And display in progress until they are loaded
     if (isLoading)
         return (<div className="loading">
                     <div className="loadinginner"/>
                 </div>) ;
 
-    if (error||!comp.competition)
+    if (error||!comp?.competition)
         return (<div>
                     <div style={{position:'fixed', zIndex:'10', marginLeft:'10px' }}>
                         <h1>
@@ -152,68 +145,38 @@ function CombinePage( props ) {
 
     // Make sure we have the class object
     const selectedClass = _find( comp.classes,{'class': className} );
-
-	function setCompno(cn) {
-		setSelectedCompno(cn);
-		if(cn&&pilots[cn]) {
-			let pilot = pilots[cn];
-			pilot.follow = true;
-			if( pilot.lat && pilot.lng ) {
-				setViewport( {...viewport, latitude:pilot.lat, longitude:pilot.lng} );
-			}
-		}
-	}
-
-
-    // And the pilot object
-    const selectedPilot = pilots ? pilots[selectedCompno] : undefined;
-
-    return (
+	
+	return (
         <>
             <Head>
                 <title>{comp.competition.name} - {className}</title>
+				<meta name='viewport' content='width=device-width, minimal-ui'/>
                 <IncludeJavascript/>
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno}/>
-            <Container fluid>
-                <Row>
-                    <Col sm={7}>
-                        <TaskMap vc={className} datecode={selectedClass?selectedClass.datecode:'07C'} selectedPilot={selectedPilot} setSelectedCompno={(x)=>setSelectedCompno(x)}
-								 mapRef={mapRef}
-								 pilots={pilots} options={options} setOptions={props.setOptions}
-								 tz={props.tz}
-								 viewport={viewport} setViewport={setViewport}/>
-                        <OgnFeed vc={className} datecode={selectedClass?selectedClass.datecode:'07C'} selectedPilot={selectedPilot}
-                                 pilots={pilots} mutatePilots={mutate} mapRef={mapRef} tz={props.tz} viewport={viewport} setViewport={setViewport}/>
-                    </Col>
-                    <Col>
-                        <TaskDetails vc={className}/>
-                        {isPLoading &&<><Icon type="plane" spin={true}/> Loading pilots...</>
-                        }
-                        {pilots &&
-                         <PilotList vc={className} pilots={pilots}
-									selectedPilot={selectedPilot}
-									setSelectedCompno={(x)=>setCompno(x)}
-									options={options} setViewport={setViewport}/>
-                        }
-                    </Col>
-                </Row>
-            </Container>
-        </>
+			<div className="resizingContainer" >
+				<OgnFeed vc={className}
+						 tz={props.tz} datecode={selectedClass?selectedClass.datecode:'07C'}
+						 selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno}
+						 viewport={viewport} setViewport={setViewport}
+						 options={props.options} setOptions={props.setOptions}
+				/>
+			</div>
+		</>
     );
 }
 
 //
 // Determine the default class
-export async function getStaticProps(context) {
-
-	const location = (await db.query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
-    const classes = await db.query('SELECT class FROM classes ORDER BY class');
+export async function getServerSideProps(context) {
+	const location = (await query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
+    const classes = await query('SELECT class FROM classes ORDER BY class');
 
     return {
-        props: { lat: location?.lt, lng: location?.lg, tzoffset: location?.tzoffset, tz: location?.tz,
-				 defaultClass: classes && classes.length > 0 ? classes[0].class : '' }, // will be passed to the page component as props
-    }
+        props: { lat: location?.lt||51, lng: location?.lg||0, tzoffset: location?.tzoffset||0, tz: location?.tz||'Etc/UTC',
+				 defaultClass: classes && classes.length > 0 ? classes[0].class : '',
+				 options: cookies(context).options || { rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1 }}
+	};
 }
 
 export default CombinePage;

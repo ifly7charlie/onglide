@@ -81,3 +81,9 @@ eg: "DM Herrljunga 2021 18-Meter" select "DM Herrljunga 2021" as the contest nam
 
 Default configuration configures url /wsstatus that allows you to see what is happening with the OGN feed on the server end
 PM2 also exposes some of these values and you can easily watch them using pm2 monit
+
+
+## rebuilding protobuf
+
+cd lib; pbjs --target json --wrap es6 onglide.proto -o onglide-protobuf.mjs; cd -
+cd lib; pbjs --target json onglide.proto -o onglide-protobuf.js; cd -
