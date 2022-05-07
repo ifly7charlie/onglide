@@ -2,6 +2,7 @@ import next from 'next'
 import dynamic from 'next/dynamic'
 import Head from 'next/head'
 import Router from 'next/router'
+import { useRouter } from 'next/router'
 import Link from 'next/link'
 
 // What do we need to render the bootstrap part of the page
@@ -78,6 +79,14 @@ function Menu( props ) {
 // Main page rendering :)
 function SettingsPage( { options, setOptions, tz } ) {
 
+	// Check if manual maptype was specified
+    const router = useRouter()
+    let { mapType } = router.query;
+	if( mapType ) {
+		options.mapType = parseInt(mapType);
+		console.log( "mapType:", mapType );
+	}
+
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
     const { comp, isLoading, error } = useContest();
@@ -133,10 +142,11 @@ function SettingsPage( { options, setOptions, tz } ) {
 								Display Units
 							</Col>
 							<Col>
-								<ButtonGroup toggle type="radio" name="units">
+								<ButtonGroup toggle="true" type="radio" name="units" aria-label="Display Units">
 									{['metric','imperial'].map((radio, idx) => (
 										<ToggleButton
 											key={idx}
+											id={'units'+idx}
 											variant="secondary"
 											type="radio"
 											value={idx}
@@ -155,10 +165,11 @@ function SettingsPage( { options, setOptions, tz } ) {
 								Map orientation when following
 							</Col>
 							<Col>
-								<ButtonGroup toggle type="radio" name="mapType">
+								<ButtonGroup toggle type="radio" name="mapOrientation">
 									{['North Up','Next Turnpoint Up',"Don't Change"].map((radio, idx) => (
 										<ToggleButton
 											key={idx}
+											id={'mapOrientation'+idx}
 											variant="secondary"
 											type="radio"
 											value={idx}
@@ -181,6 +192,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 									{['3D satellite','3D road', '2D satellite', '2D road'].map((radio, idx) => (
 										<ToggleButton
 											key={idx}
+											id={'mapType'+idx}
 											variant="secondary"
 											type="radio"
 											value={idx}
@@ -203,6 +215,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 									{ ['off','actual','forecast +10m','forecast +20m'].map((radio, idx) => (
 										<ToggleButton
 											key={idx}
+											id={'rain'+idx}
 											variant="secondary"
 											type="radio"
 											value={radio}
@@ -224,7 +237,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 							</Col>
 						</Row>
 						<hr/>
-						<Row>
+						<Row  style={{overflow: 'auto'}}>
 							<Col sm={3}>
 								<h5>Info</h5>
 							</Col>
