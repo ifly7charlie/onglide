@@ -5,6 +5,7 @@
 body {
     padding-top: 40px;
     position: relative;
+	overflow: hidden;
 }
 
 
@@ -25,22 +26,27 @@ body {
 // These are tweaks for small screens
 @include media-breakpoint-down(sm) {
 	.resizingMap {
+		height: 97vh;
 	}
 	
 	.resultsOverlay {
 //		width: 10000px;
 		left: 0px;
-		height: 150px;
+		height: 120px;
 		top: 0px;
+		width: 100vw;
 		overflow-x: auto;
 		overflow-y: clip;
 		position:absolute;
-		display:block;	
+		display:block;
+		clear: both;
+		margin-top: 20px;
 		background-color: rgba(255,255,255,0.7);
 	}
 	
 	.results {
 		font-size: 90%;
+		top: 70px;
 	}
 	
 	.details {
@@ -53,10 +59,18 @@ body {
 		background-color: rgba(255,255,255,0.7);
 	}
 
+	.sorting {
+		right: 0px;
+		position: fixed;
+		height: 2em;
+	}
+
 	ul.pilots {
 		list-style-type: none;
 		padding: 0px;
 		margin: 0px;
+		clear: both;
+		margin-top: 2em;
 		display: flex;
 		flex-wrap: none;
 	}
@@ -96,6 +110,9 @@ body {
 		flex-wrap: wrap;
 	}
 
+	.sorting {
+		float:right;
+	}
 
 	.details {
 		clear: both;
@@ -129,6 +146,24 @@ body {
         display:none;
     }
 }
+
+.smallbuttons .btn {
+	padding-top: 0px;
+	padding-bottom: 0px;
+}
+
+.goright {
+	float: right;
+}
+
+.legs {
+	border: 1px solid grey;
+	width: 100%;
+}
+
+.legs thead {
+    font-weight: bold;
+}	
 
 .doclearboth:after {
     content:"";

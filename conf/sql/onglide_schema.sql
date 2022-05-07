@@ -134,9 +134,6 @@ CREATE TABLE `compstatus` (
   `starttime` time DEFAULT NULL COMMENT 'Startline open time',
   `startheight` int(11) DEFAULT '0',
   
-  `winddir` int(11) DEFAULT '0' COMMENT 'Used for windicapping in UK, leave both 0 for no windicapping',
-  `windspeed` int(11) DEFAULT '0' COMMENT 'Used for windicapping in UK, leave both 0 for no windicapping',
-  
   `compdate` date DEFAULT NULL,
   `briefdc` char(4) DEFAULT NULL,
   `grid` char(20) DEFAULT '',
@@ -284,16 +281,7 @@ CREATE TABLE `pilotresult` (
   `forcetp` int(11) DEFAULT NULL COMMENT 'last turnpoint rounded, used by UI to override when a sector has not been detected due to poor coverage',
   `forcetptime` datetime DEFAULT NULL,
   
-  `turnpoints` int(11) DEFAULT NULL COMMENT 'landout status record, these are from old UI but may be useful in the future',
-  `loLAT` float DEFAULT NULL,
-  `loLONG` float DEFAULT NULL,
-  `loNotes` varchar(6000) DEFAULT NULL,
-  `loReported` datetime DEFAULT NULL,
   `statuschanged` datetime DEFAULT NULL,
-  `loOriginal` time DEFAULT NULL,
-  `loNear` varchar(60) DEFAULT NULL,
-  `gliderok` char(1) DEFAULT '',
-  `youok` char(1) DEFAULT '',
   
   PRIMARY KEY (`class`,`datecode`,`compno`),
   KEY `class` (`class`),
@@ -420,14 +408,14 @@ CREATE TABLE `tasks` (
   `flown` enum('Y','N') DEFAULT 'N' COMMENT 'Must be set to Y to be displayed!',
   `description` text,
 
-  `type` enum('S','A','D') DEFAULT 'S' COMMENT 'Speed, AAT, Handicapped Distance',
+  `type` enum('S','A','D','E','G') DEFAULT 'S' COMMENT 'Speed, AAT, Handicapped Distance, Eglide, SGP',
 
   `distance` float DEFAULT NULL COMMENT 'Actual distance',
   `hdistance` float DEFAULT NULL COMMENT 'distance at handicap 100 aka windicapped distance',
   `maxmarkingdistance` float DEFAULT NULL COMMENT 'Distance for lowesthandicapped glider',
   
   `duration` time DEFAULT NULL COMMENT 'AAT time',
-  `earlieststart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
+  `nostart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
 
   `hash` TEXT DEFAULT NULL COMMENT 'hash of value from soaring spot to prevent redownloading',
   
@@ -505,37 +493,12 @@ CREATE TABLE `trackpoints` (
   `t` int(11) NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
   `bearing` int(11) DEFAULT NULL,
   `speed` float DEFAULT NULL,
+  `station` char(15) DEFAULT NULL,
   PRIMARY KEY (`datecode`,`class`,`t`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 
---
--- Table structure for table `pilotlostatushelper`
---
-
-DROP TABLE IF EXISTS `pilotlostatushelper`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
-CREATE TABLE `pilotlostatushelper` (
-  `status` char(1) NOT NULL DEFAULT '',
-  `briefname` char(14) NOT NULL,
-  `description` char(40) DEFAULT NULL,
-  `image` varchar(100) DEFAULT 'outline.gif',
-  `after` char(10) NOT NULL,
-  PRIMARY KEY (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table `pilotlostatushelper`
---
-
-LOCK TABLES `pilotlostatushelper` WRITE;
-/*!40000 ALTER TABLE `pilotlostatushelper` DISABLE KEYS */;
-INSERT INTO `pilotlostatushelper` VALUES ('-','not yet','Not Launched','trailers.jpg',''),('Z','scrubbed','Day Scrubbed','windsock.jpg',''),('G','grid','Grid / Launched','grid.jpg','RCHWD'),('S','started','Started','leaving.jpg','RCHW'),('R','reported','Landout Reported','InField.jpg','CLOHAW'),('W','a/t request','A/T Requested','tugrequest.jpg','ARCH'),('C','enroute','Crew enroute','enroute.jpg','LOH'),('L','linked','Linked with crew','Linked.jpg','OH'),('A','a/t returning','A/T Returning','AeroTow.jpg','H'),('O','returning','Returning Home','mirrorview.jpg','H'),('H','home','Home','beer.jpg','D'),('F','finished','Finished','finisher.jpg','HRW'),('D','didn\'t fly','Didn\'t fly','trailers.jpg','H'),('/','withdrawn','Withdrawn','trailers.jpg','');
-/*!40000 ALTER TABLE `pilotlostatushelper` ENABLE KEYS */;
-UNLOCK TABLES;
 
 --
 -- Table structure for table `sectortypes`

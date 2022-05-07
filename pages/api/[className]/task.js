@@ -1,8 +1,7 @@
-const db = require('../../../lib/db')
-const escape = require('sql-template-strings')
-import { useRouter } from 'next/router'
+import {query} from '../../../lib/react/db';
+import escape from 'sql-template-strings';
 
-import { calculateTaskLength } from '../../../lib/taskhelper.js';
+import { calculateTaskLength } from '../../../lib/flightprocessing/taskhelper.js';
 
 export default async function taskHandler( req, res) {
     const {
@@ -15,7 +14,7 @@ export default async function taskHandler( req, res) {
 	return;
     }
 
-     const contestday = await db.query(escape`
+     const contestday = await query(escape`
          SELECT contestday.*, DATE_FORMAT( contestday.calendardate, "%a %D %M" ) displaydate
           FROM contestday, compstatus cs
           WHERE cs.datecode = contestday.datecode and cs.class = contestday.class and contestday.class= ${className}
@@ -30,8 +29,11 @@ export default async function taskHandler( req, res) {
 
     const datecode = contestday[0].datecode;
 
-    const taskdetails = await db.query(escape`
-         SELECT *, time_to_sec(tasks.duration) durationsecs
+    const taskdetails = await query(escape`
+         SELECT *, time_to_sec(tasks.duration) durationsecs, 
+               CASE WHEN nostart ='00:00:00' THEN 0
+                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${datecode}),' ',nostart))-(SELECT tzoffset FROM competition)
+               END utcstartutc
           FROM tasks
           WHERE tasks.datecode= ${datecode} and tasks.class= ${className} and tasks.flown='Y'
     `);
@@ -45,7 +47,7 @@ export default async function taskHandler( req, res) {
     const taskid = taskdetails[0].taskid;
     console.log(taskid);
 
-    const tasklegs = await db.query(escape`
+    const tasklegs = await query(escape`
       SELECT taskleg.*, nname name
       FROM taskleg
       WHERE taskleg.taskid = ${taskid}
@@ -56,7 +58,7 @@ export default async function taskHandler( req, res) {
     taskdetails[0].distance = calculateTaskLength(tasklegs);
     delete taskdetails[0].hdistance;
 
-    const classes = await db.query(escape`
+    const classes = await query(escape`
      SELECT *
           FROM classes
           WHERE classes.class= ${className}

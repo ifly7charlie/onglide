@@ -6,14 +6,20 @@
 // It will read the existing .env.local file if it exists
 //
 
-const prompts = require('prompts');
-const escape = require('sql-template-strings')
-const mysql = require('serverless-mysql')();
-const mysql_admin = require('serverless-mysql')();
+import prompts from 'prompts';
+import escape from 'sql-template-strings';
+import mysql_pkg from 'serverless-mysql';
+import { renameSync, writeFileSync } from 'fs';
+
+let mysql = mysql_pkg();
+let mysql_admin = mysql_pkg();
 
 
 // Load the current file
-const result = require('dotenv').config({ path: '.env.local' })
+// Load the current file
+import dotenv from 'dotenv';
+const result = dotenv.config({ path: '.env.local' })
+console.log( result );
 
 // Defaults incase we can't read the dotenv file
 let nE = { 'MYSQL_HOST': 'localhost', 'MYSQL_DATABASE': 'onglide', 'MYSQL_USER': 'onglide' };
@@ -24,6 +30,7 @@ if (result.error) {
 else {
     nE = result.parsed;
 }
+console.log(nE);
 
 const questions = [
     {
@@ -240,7 +247,6 @@ async function main() {
 
     console.log( "\nUpdating .env.local" );
 
-    const fs = require('fs');
     let envFile =
           `MYSQL_HOST=${response.dbhost}
 MYSQL_USER=${response.dbuser}
@@ -266,11 +272,11 @@ NEXT_PUBLIC_SITEURL=${wsresponse.url}
     console.log( envFile );
 
     try {
-        fs.renameSync( '.env.local', '.env.backup' );
+        renameSync( '.env.local', '.env.backup' );
     } catch(e) {
     }
     
-    fs.writeFileSync( '.env.local', envFile, (err) => {
+    writeFileSync( '.env.local', envFile, (err) => {
         console.log( "Unable to write file (.env.local)" );
         console.log( err );
         process.exit();

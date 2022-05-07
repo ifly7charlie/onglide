@@ -15,10 +15,11 @@ import NavDropdown from 'react-bootstrap/NavDropdown'
 import ButtonGroup from 'react-bootstrap/ButtonGroup'
 import ToggleButton from 'react-bootstrap/ToggleButton'
 
-import { Nbsp, Icon } from '../lib/htmlhelper.js';
+import { Nbsp, Icon } from '../lib/react/htmlhelper.js';
 
-const db = require('../lib/db')
-import { useContest, Spinner } from '../lib/loaders.js';
+import { query } from '../lib/react/db';
+import { useContest, Spinner } from '../lib/react/loaders.js';
+import cookies from 'next-cookies';
 
 import _find from 'lodash.find';
 
@@ -81,6 +82,12 @@ function SettingsPage( { options, setOptions, tz } ) {
     // if the className matches
     const { comp, isLoading, error } = useContest();
 
+	function setOptionsAndCookie( o ) {
+		document.cookie = `options=${JSON.stringify(o)}; path=/`;
+		setOptions(o);
+	}
+	console.log(options);
+
     // And display in progress until they are loaded
     if (isLoading)
         return (<div className="loading">
@@ -122,13 +129,6 @@ function SettingsPage( { options, setOptions, tz } ) {
                         </h1>
 
 						<Row>
-							<Col>
-								These settings are just for this session!
-							</Col>
-						</Row>
-						<hr/>
-
-						<Row>
 							<Col sm={3}>
 								Display Units
 							</Col>
@@ -141,7 +141,51 @@ function SettingsPage( { options, setOptions, tz } ) {
 											type="radio"
 											value={idx}
 											checked={(idx === options.units)}
-											onChange={(e) => setOptions( {...options, units: idx })}
+											onChange={(e) => setOptionsAndCookie( {...options, units: idx })}
+										>
+											{radio}
+										</ToggleButton>
+									))}
+								</ButtonGroup>
+							</Col>
+						</Row>
+						<hr/>
+						<Row>
+							<Col sm={3}>
+								Map orientation when following
+							</Col>
+							<Col>
+								<ButtonGroup toggle type="radio" name="mapType">
+									{['North Up','Next Turnpoint Up',"Don't Change"].map((radio, idx) => (
+										<ToggleButton
+											key={idx}
+											variant="secondary"
+											type="radio"
+											value={idx}
+											checked={(idx === options.taskUp)}
+											onChange={(e) => setOptionsAndCookie( {...options, taskUp: idx })}
+										>
+											{radio}
+										</ToggleButton>
+									))}
+								</ButtonGroup>
+							</Col>
+						</Row>
+						<Row>
+						<br/>
+							<Col sm={3}>
+								Map Type
+							</Col>
+							<Col>
+								<ButtonGroup toggle type="radio" name="mapType">
+									{['3D satellite','3D road', '2D satellite', '2D road'].map((radio, idx) => (
+										<ToggleButton
+											key={idx}
+											variant="secondary"
+											type="radio"
+											value={idx}
+											checked={(idx === options.mapType)}
+											onChange={(e) => setOptionsAndCookie( {...options, mapType: idx })}
 										>
 											{radio}
 										</ToggleButton>
@@ -163,7 +207,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 											type="radio"
 											value={radio}
 											checked={(idx === (options.rainRadarAdvance+1))}
-											onChange={(e) => setOptions( {...options, rainRadarAdvance: idx-1, rainRadar: idx > 0 })}
+											onChange={(e) => setOptionsAndCookie( {...options, rainRadarAdvance: idx-1, rainRadar: idx > 0 })}
 										>
 											{radio}
 										</ToggleButton>
@@ -185,7 +229,7 @@ function SettingsPage( { options, setOptions, tz } ) {
 								<h5>Info</h5>
 							</Col>
 							<Col>
-								If you would like to use it for your competition please email me at melissa-onglide@littlebluecar.co.uk with your <Link href="https://kb.naviter.com/en/kb/public-api-for-soaring-spot/">SoaringSpot API keys</Link>
+								If you would like to use it for your competition please email me at melissa-onglide@littlebluecar.co.uk with your <Link href="https://kb.naviter.com/en/kb/public-api-for-soaring-spot/">SoaringSpot API keys</Link>, likewise for bugs.
 								<br/>
 								I normally ask for some commitment to help get more women into gliding.
 								<hr/>
@@ -193,9 +237,9 @@ function SettingsPage( { options, setOptions, tz } ) {
 								<hr/>
 							Flarm IDs are matched based on launches from configured airfield coordinates and the <Link href="https://ddb.glidernet.org">OGN DDB</Link>, you can add your glider there if it isn't matched. The IGC files will also be analysed to see if a launch/landing time match can be made. This happens after the trace is available from scoring so may take a few days to pick up gliders.
 								<hr/>
-								Onglide is an open source project (<Link href="http://igcrankings.fai.org">https://github.com/glidernet/onglide</Link>) written in Javascript (Next.js/Bootstrap/Mapbox) and contributions and bug fixes are always welcome! And yes there are plenty of bugs - this was written under various tents at gliding competitions.<br/>
+								Onglide is an open source project (<Link href="https://github.com/glidernet/onglide">https://github.com/glidernet/onglide</Link>) written in Javascript (Next.js/Bootstrap/Mapbox) and contributions and bug fixes are always welcome! And yes there are plenty of bugs - this was written under various tents at gliding competitions.<br/>
 								<hr/>
-								Onglide does not use any cookies except to pass the mapbox token to mapbox. This cookie is 'Strictly necessary' according to the ePrivacy directive.
+								Onglide does not use any cookies except to pass the mapbox token to mapbox and to store your settings. These cookies are 'Strictly necessary' for the site to function according to the ePrivacy directive.
 							</Col>
 						</Row>
 					</Col>
@@ -207,12 +251,13 @@ function SettingsPage( { options, setOptions, tz } ) {
 
 //
 // Determine the default class
-export async function getStaticProps(context) {
+export async function getServerSideProps(context) {
+	const location = (await query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
 
-	const location = (await db.query( 'SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1' ))?.[0];
     return {
-        props: { lat: location?.lt, lng: location?.lg, tzoffset: location?.tzoffset, tz: location?.tz }, // will be passed to the page component as props
-    }
+        props: { lat: location?.lt||51, lng: location?.lg||0, tzoffset: location?.tzoffset||0, tz: location?.tz||'Etc/UTC',
+				 options: cookies(context).options || { rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 0, taskUp: 1 }}
+	};
 }
 
 export default SettingsPage;
