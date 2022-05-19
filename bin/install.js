@@ -9,7 +9,7 @@
 import prompts from 'prompts';
 import escape from 'sql-template-strings';
 import mysql_pkg from 'serverless-mysql';
-import { renameSync, writeFileSync } from 'fs';
+import { renameSync, writeFileSync, readFileSync } from 'fs';
 
 let mysql = mysql_pkg();
 let mysql_admin = mysql_pkg();
@@ -97,10 +97,27 @@ async function main() {
 
     // We need to load the schema
     if( ! tables || tables.length < 5 ) {
-        console.log( "Database connection is good, you now need to load the schema and stored procedures" );
-        console.log( "these are in the conf/sql directory" );
-        process.exit();
-    }
+
+		async function doSql(fname,delimiter=';') {	
+        console.log( `loading database schema ${fname}` );
+		const onglide_schema = readFileSync( fname );
+			const lines = String(onglide_schema)
+				  .split( /[\r\n]+/ )
+				  .filter( (v) => (!v.match(/^\s*(--.*|)$/)));
+			
+			const combined = lines.join(' ');
+			const statements = combined.split( delimiter )
+				  .filter( (v) => (!v.match(/^\s*(--.*|)$/)));
+			
+			const t = mysql.transaction();
+			statements.forEach((s) => { t.query(s); console.log(s) });
+			t.rollback((f)=>{console.log('rollback')})
+			return await t.commit();
+		}
+
+		await doSql( 'conf/sql/onglide_schema.sql' );
+//		await doSql( 'conf/sql/sp_nextjs.sql', '//' );
+	}
 
     if( !(await mysql.query( 'select fdcode("07C")' ))[0] ) {
         console.log( "Database connection is good, you now need to load the stored procedures" );

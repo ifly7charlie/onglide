@@ -1,35 +1,9 @@
--- MySQL dump 10.13  Distrib 5.7.30, for FreeBSD12.1 (amd64)
 --
--- Host: localhost    Database: dsample19
--- ------------------------------------------------------
--- Server version	5.7.30-log
-
-/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
-/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
-/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!40101 SET NAMES utf8 */;
-/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
-/*!40103 SET TIME_ZONE='+00:00' */;
-/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
-/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
-/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
-/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
-SET @MYSQLDUMP_TEMP_LOG_BIN = @@SESSION.SQL_LOG_BIN;
-SET @@SESSION.SQL_LOG_BIN= 0;
-
---
--- GTID state at the beginning of the backup 
---
-
-SET @@GLOBAL.GTID_PURGED='8bd8a256-d699-11e6-8a3a-00259071d4aa:1-913267473';
-
 --
 -- Table structure for table `comprules`
 --
 
 DROP TABLE IF EXISTS `comprules`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `comprules` (
   `name` char(20) NOT NULL DEFAULT '',
   `country` char(2) NOT NULL DEFAULT '',
@@ -46,24 +20,17 @@ CREATE TABLE `comprules` (
   `grandprixstart` char(1) DEFAULT 'N',
   PRIMARY KEY (`country`,`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='See Scoring section of rules for details';
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Dumping data for table `comprules`
 --
 
-LOCK TABLES `comprules` WRITE;
-/*!40000 ALTER TABLE `comprules` DISABLE KEYS */;
 INSERT INTO `comprules` VALUES ('Open','UK',0.5,0,100,200,1.18,250,200,'N','Y','N','N'),('18m','UK',0.5,0,90,180,1.1,250,200,'N','Y','N','N'),('15m','UK',0.5,0,90,180,1.04,250,200,'N','Y','N','N'),('Standard','UK',0.5,0,80,160,1,250,200,'N','Y','N','N'),('Club','UK',0.5,0,80,160,1,250,200,'Y','Y','Y','N'),('HCap','UK',0.5,0,80,160,1,250,200,'Y','Y','N','N'),('Junior','UK',0,0.4,60,120,1,0,0,'Y','Y','Y','N'),('Regionals','UK',0,0.4,60,120,1,0,0,'Y','N','Y','N'),('20m','UK',0.5,0,90,180,1.04,250,200,'N','Y','N','N'),('15_meter','CZ',0,0,0,0,0,0,0,'Y','N','N','N'),('club','CZ',0,0,0,0,0,0,0,'Y','N','N','N'),('open','CZ',0,0,0,0,0,0,0,'Y','Y','N','N'),('grandprix','SK',0,0,0,0,0,0,0,'N','N','N','Y'),('grandprix','UK',0,0,0,0,0,0,0,'N','N','N','Y'),('double_seater','CZ',0,0,0,0,0,0,0,'N','N','N','Y'),('standard','CZ',0,0,0,0,0,0,0,'N','N','N','Y'),('grandprix','CL',0,0,0,0,0,0,0,'N','N','N','Y'),('15_meter','SK',0,0,0,0,0,0,0,'N','N','N','N'),('club','SK',0,0,0,0,0,0,0,'Y','N','N','N'),('standard','SK',0,0,0,0,0,0,0,'N','N','N','N');
-/*!40000 ALTER TABLE `comprules` ENABLE KEYS */;
-UNLOCK TABLES;
 --
 -- Table structure for table `classes`
 --
 
 DROP TABLE IF EXISTS `classes`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `classes` (
   `class` char(15) NOT NULL,
   `classname` char(30) NOT NULL,
@@ -71,29 +38,23 @@ CREATE TABLE `classes` (
   `type` char(20) DEFAULT NULL,
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `compdayshelper`
 --
 
 DROP TABLE IF EXISTS `compdayshelper`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `compdayshelper` (
   `year` int(11) DEFAULT NULL,
   `month` int(11) DEFAULT NULL,
   `day` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `competition`
 --
 
 DROP TABLE IF EXISTS `competition`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `competition` (
   `name` varchar(60) DEFAULT NULL COMMENT 'Competition name',
   `sitename` varchar(100) DEFAULT NULL COMMENT 'Site name',
@@ -110,15 +71,12 @@ CREATE TABLE `competition` (
   `lt` float DEFAULT NULL COMMENT 'launch/landing location',
   `lg` float DEFAULT NULL COMMENT 'launch/landing location'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `compstatus`
 --
 
 DROP TABLE IF EXISTS `compstatus`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `compstatus` (
   `class` char(15) NOT NULL,
   `datecode` char(3) DEFAULT NULL COMMENT 'current contest date code for this class',
@@ -139,15 +97,12 @@ CREATE TABLE `compstatus` (
   `grid` char(20) DEFAULT '',
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Current competition status, one row per class';
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `contestday`
 --
 
 DROP TABLE IF EXISTS `contestday`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `contestday` (
   `class` char(15) NOT NULL DEFAULT '',
   `datecode` char(4) NOT NULL,
@@ -168,7 +123,6 @@ CREATE TABLE `contestday` (
   `winddir` int(11) DEFAULT NULL COMMENT 'Used for UK Scoring script windicapping',
   PRIMARY KEY (`class`,`datecode`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 
 --
@@ -176,8 +130,6 @@ CREATE TABLE `contestday` (
 --
 
 DROP TABLE IF EXISTS `errorlog`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `errorlog` (
   `at` datetime NOT NULL,
   `msg` text,
@@ -188,7 +140,6 @@ CREATE TABLE `errorlog` (
   `extra1` text,
   `extra2` text
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 
 --
@@ -196,8 +147,6 @@ CREATE TABLE `errorlog` (
 --
 
 DROP TABLE IF EXISTS `images`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `images` (
   `class` char(15) NOT NULL,
   `compno` char(4) NOT NULL,
@@ -205,15 +154,12 @@ CREATE TABLE `images` (
   `updated` int(11) NOT NULL,
   PRIMARY KEY (`class`,`compno`,`updated`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `logindetails`
 --
 
 DROP TABLE IF EXISTS `logindetails`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `logindetails` (
   `username` varchar(160) NOT NULL DEFAULT '',
   `password` tinyblob,
@@ -226,19 +172,15 @@ CREATE TABLE `logindetails` (
   `mobilekey` text NOT NULL,
   PRIMARY KEY (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `msg`
 --
 
 DROP TABLE IF EXISTS `msg`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `msg` (
   `msg` text
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 
 --
@@ -247,8 +189,6 @@ CREATE TABLE `msg` (
 
 -- This table 
 DROP TABLE IF EXISTS `pilotresult`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `pilotresult` (
   `class` char(15) NOT NULL,
   `datecode` char(3) NOT NULL,
@@ -288,15 +228,12 @@ CREATE TABLE `pilotresult` (
   KEY `datecode` (`datecode`),
   KEY `compno` (`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Stores results for a pilot along with landout and status information';
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `pilots`
 --
 
 DROP TABLE IF EXISTS `pilots`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `pilots` (
   `class` char(15) NOT NULL COMMENT 'classid',
   `compno` char(4) NOT NULL,
@@ -334,7 +271,6 @@ CREATE TABLE `pilots` (
   UNIQUE KEY `username` (`username`),
   KEY `fai` (`fai`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 
 --
@@ -342,8 +278,6 @@ CREATE TABLE `pilots` (
 --
 
 DROP TABLE IF EXISTS `scoringsource`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `scoringsource` (
   `type` enum('soaringspotkey','soaringspotscrape','rst') DEFAULT 'soaringspotkey',
   `url` text,
@@ -355,15 +289,12 @@ CREATE TABLE `scoringsource` (
   `portoffset` int(11) DEFAULT '0',
   `domain` text
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `taskleg`
 --
 
 DROP TABLE IF EXISTS `taskleg`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `taskleg` (
   `class` char(15) NOT NULL DEFAULT '',
   `datecode` char(3) NOT NULL,
@@ -390,15 +321,12 @@ CREATE TABLE `taskleg` (
   PRIMARY KEY (`taskid`,`legno`),
   KEY `class` (`class`,`datecode`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='One row per TP, leg 0 is before start(tp0), 1 from start(tp0) to tp1, last is finish';
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `tasks`
 --
 
 DROP TABLE IF EXISTS `tasks`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `tasks` (
   `datecode` char(3) NOT NULL,
   `class` char(15) DEFAULT NULL,
@@ -422,16 +350,13 @@ CREATE TABLE `tasks` (
   PRIMARY KEY (`taskid`),
   UNIQUE KEY `integrity` (`class`,`datecode`,`task`),
   KEY `class` (`class`)
-) ENGINE=InnoDB AUTO_INCREMENT=152937 DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
 
 --
 -- Table structure for table `tracker`
 --
 
 DROP TABLE IF EXISTS `tracker`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `tracker` (
   `compno` char(4) NOT NULL,
   `type` enum('flarm','delorme','spot','none') DEFAULT NULL,
@@ -441,15 +366,12 @@ CREATE TABLE `tracker` (
   `class` char(15) NOT NULL DEFAULT '',
   PRIMARY KEY (`class`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `trackerhistory`
 --
 
 DROP TABLE IF EXISTS `trackerhistory`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `trackerhistory` (
   `compno` char(4) DEFAULT NULL,
   `changed` datetime DEFAULT NULL,
@@ -458,12 +380,9 @@ CREATE TABLE `trackerhistory` (
   `launchtime` time DEFAULT NULL,
   `method` enum('none','startline','pilot','ognddb','igcfile','tltimes') DEFAULT 'none'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 
 DROP TABLE IF EXISTS `movements`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `movements` (
   `action` char(10) NOT NULL COMMENT 'launch/landing',
   `time` int(11) NOT NULL COMMENT 'timestamp epoch',
@@ -473,15 +392,12 @@ CREATE TABLE `movements` (
   PRIMARY KEY (`id`,`time`,`action`),
   KEY `action` (`action`,`type`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Table structure for table `trackpoints`
 --
 
 DROP TABLE IF EXISTS `trackpoints`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `trackpoints` (
   `compno` char(4) NOT NULL,
   `class` char(15) NOT NULL,
@@ -496,7 +412,6 @@ CREATE TABLE `trackpoints` (
   `station` char(15) DEFAULT NULL,
   PRIMARY KEY (`datecode`,`class`,`t`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 
 
@@ -505,35 +420,15 @@ CREATE TABLE `trackpoints` (
 --
 
 DROP TABLE IF EXISTS `sectortypes`;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `sectortypes` (
   `countrycode` char(2) DEFAULT NULL,
   `name` char(20) DEFAULT NULL,
   `defaults` char(40) DEFAULT NULL,
   KEY `st` (`countrycode`,`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
 --
 -- Dumping data for table `sectortypes`
 --
 
-LOCK TABLES `sectortypes` WRITE;
-/*!40000 ALTER TABLE `sectortypes` DISABLE KEYS */;
 INSERT INTO `sectortypes` VALUES ('UK','Start Sector','sector,np,5,90,0,0,0'),('UK','BGA Sector','sector,symmetrical,20,45,0.5,180,0'),('UK','BGA Enhanced Sector','sector,symmetrical,10,90,0.5,180,0'),('UK','AAT','sector,symmetrical,20,180,0,0,2'),('UK','Finish Line','line,pp,2,90,0,0,1'),('UK','Finish Ring','sector,pp,3,180,0,0,1'),('UK','DH Sector','sector,symmetrical,20,45,5,180,0'),('UK','DH Enhanced Sector','sector,symmetrical,10,90,5,180,0'),('CZ','Start Line','line,np,5,90,0,0,1'),('CZ','Sector','sector,symmetrical,0.5,180,0,0,1'),('CZ','Finish Ring','sector,pp,3,180,0,0,1'),('CZ','AAT','sector,symmetrical,20,180,0,0,2'),('CZ','Hack Start','sector,np,5,90,0,0,0'),('SK','Start','sector,np,5,90,0,0,0'),('SK','Finish Ring','sector,np,3,180,0,0,0'),('SK','Barrel','sector,np,0.5,180,0,0,0'),('SK','Finish Line','sector,pp,2,90,0,0,1'),('SK','Start Line','line,pp,5,90,0,0,1');
-/*!40000 ALTER TABLE `sectortypes` ENABLE KEYS */;
-UNLOCK TABLES;
-
-
-SET @@SESSION.SQL_LOG_BIN = @MYSQLDUMP_TEMP_LOG_BIN;
-/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
-
-/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
-/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
-/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
-/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
-/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
-/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
--- Dump completed on 2020-07-10 17:15:03
