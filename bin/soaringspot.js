@@ -252,7 +252,9 @@ async function update_pilots(class_url,classid,classname,keys) {
     //  .query( 'DELETE FROM tracker where concat(class,compno) not in (select concat(class,compno) from pilots)' );
 
     // And update the pilots picture to the latest one in the image table - this should be set by download_picture
-    //   .query( 'UPDATE PILOTS SET image=(SELECT filename FROM images WHERE keyid=compno AND width IS NOT NULL ORDER BY added DESC LIMIT 1)' );
+        .query( 'UPDATE PILOTS SET image=CASE ' +
+                '   WHEN (SELECT count(*) FROM images i WHERE i.compno=pilots.compno AND i.class = pilots.class AND i.image IS NOT NULL) > 0 THEN "Y" ' +
+                '   ELSE "N" END' )
 
         .rollback( e => { console.log("rollback") } )
         .commit();
@@ -262,7 +264,8 @@ async function update_pilots(class_url,classid,classname,keys) {
 async function download_picture( url, compno, classid, mysql ) {
 
 	// Check when it was last checked
-	const lastUpdated = (await mysql_db.query( escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND unix_timestamp()-updated < 86400` ))[0];
+	const lastUpdated
+          = (await mysql_db.query( escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND unix_timestamp()-updated < 86400` ))[0];
 
 	if( lastUpdated ) {
 		console.log( `not updating ${compno} picture` );
@@ -275,6 +278,8 @@ async function download_picture( url, compno, classid, mysql ) {
 			if( res.status != 200 ) {
 				console.log( ` ${classid}:${compno}: FAI website returns ${res.status}: ${res.statusText}` );
 				if( res.status == '404' ) {
+				    mysql_db.query( escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, null, unix_timestamp() )
+                                             ON DUPLICATE KEY UPDATE image=null, updated=values(updated)` );
 					return undefined;
 				}
 				throw `FAI website returns ${res.status}: ${res.statusText}`;
@@ -287,7 +292,6 @@ async function download_picture( url, compno, classid, mysql ) {
 			if( data ) {
 				mysql_db.query( escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
                                   ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)` );
-				mysql_db.query( escape`UPDATE pilots SET image = 'Y' WHERE  class=${classid} AND compno=${compno}` );
 			}
         });
 }
