@@ -1,26 +1,32 @@
 ## Running (Docker)
 
 This repo includes docker commands to launch everything required to run your own competition. You should clone the 
-repository, and then configure .env to have at least the mapbox access token. Without this docker compose build will
+repository, and then configure a file called **.env** to have at least the mapbox access token. Without this docker compose build will
 fail to build a valid website
->NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=
+```
+NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=
+```
 
 You can also use it to specify the soaring spot credentials, or you can pass then in through your service provider
 environment variables.
->SOARINGSPOT_CLIENT_ID=
->SOARINGSPOT_SECRET=
-
+```
+SOARINGSPOT_CLIENT_ID=
+SOARINGSPOT_SECRET=
+```
 Once you have configure the environment variables use docker compose to create all the 'services' required
-
+```
 > docker compose build
 > docker compose up
+```
 
 This will launch the following:
-> onglide-mysql (db)
-> onglide-soaringspot (data syncrhonisation)
-> onglide-ogn (ogn/flarm data feed handler and websocket provider)
-> onglide-next (front end next.js)
-> onglide-apache (web proxy to route things to the right place)
+```
+* onglide-mysql (db)
+* onglide-soaringspot (data syncrhonisation)
+* onglide-ogn (ogn/flarm data feed handler and websocket provider)
+* onglide-next (front end next.js)
+* onglide-apache (web proxy to route things to the right place)
+```
 
 Your website will be available on localhost:8080
 
@@ -104,7 +110,7 @@ eg: "DM Herrljunga 2021 18-Meter" select "DM Herrljunga 2021" as the contest nam
 
 ## Troubleshooting
 
-Default configuration configures url /wsstatus that allows you to see what is happening with the OGN feed on the server end
+Uncomment startStatusServer() line in bin/ogn.js to configure url /wsstatus that allows you to see what is happening with the OGN feed on the server end
 PM2 also exposes some of these values and you can easily watch them using pm2 monit
 
 
