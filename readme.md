@@ -1,4 +1,30 @@
-## Installing
+## Running (Docker)
+
+This repo includes docker commands to launch everything required to run your own competition. You should clone the 
+repository, and then configure .env to have at least the mapbox access token. Without this docker compose build will
+fail to build a valid website
+>NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=
+
+You can also use it to specify the soaring spot credentials, or you can pass then in through your service provider
+environment variables.
+>SOARINGSPOT_CLIENT_ID=
+>SOARINGSPOT_SECRET=
+
+Once you have configure the environment variables use docker compose to create all the 'services' required
+
+> docker compose build
+> docker compose up
+
+This will launch the following:
+> onglide-mysql (db)
+> onglide-soaringspot (data syncrhonisation)
+> onglide-ogn (ogn/flarm data feed handler and websocket provider)
+> onglide-next (front end next.js)
+> onglide-apache (web proxy to route things to the right place)
+
+Your website will be available on localhost:8080
+
+## Installing manually (non-docker)
 
 It isn't difficult to deploy and run this on your own server. However if you would prefer a hosted version please email
 your soaring spot keys to melissa-ogn@onglide.com and I can set it up for you.
@@ -7,7 +33,7 @@ your soaring spot keys to melissa-ogn@onglide.com and I can set it up for you.
 
 - Mysql server with a database
 - Node and Yarn
-- Apache with caching modules (you can deploy the front end somewhere like vercel as well)
+- Apache with caching modules (you can deploy the front end somewhere like vercel as well), it also works well behind cloudfront
 
 #### Steps
 
@@ -24,7 +50,7 @@ your soaring spot keys to melissa-ogn@onglide.com and I can set it up for you.
 - install pm2
 > yarn global add pm2
 
-- run the installation script, this will require a mapbox API key, and the database to be loaded
+- run the onglide installation script, this will require a mapbox API key, and the database to be loaded
 > yarn setup
 
 - configure your webserver (there is a sample file but you'll want certificates etc)
@@ -34,7 +60,6 @@ your soaring spot keys to melissa-ogn@onglide.com and I can set it up for you.
 
 ## Running (pm2)
 
-The easiest way is to use pm2
 > pm2 start ecosystem.config.js
 > pm2 start all
 - start webserver

@@ -54,9 +54,9 @@ async function main() {
     }
 
     mysql_db = mysql({ config:{
-        host: process.env.MYSQL_HOST,
-        database: process.env.MYSQL_DATABASE,
-        user: process.env.MYSQL_USER,
+        host: process.env.MYSQL_HOST||'db',
+        database: process.env.MYSQL_DATABASE||'ogn',
+        user: process.env.MYSQL_USER||'ogn',
         password: process.env.MYSQL_PASSWORD
     }});
 
@@ -82,10 +82,24 @@ async function soaringSpot(deep = false) {
 
     console.log("Checking SoaringSpot @ "+(new Date().toString()));
 
-    // Get the soaring spot keys from database
-    let keys = (await mysql_db.query(escape`
+	let keys = {};
+	console.log('env', {...process.env})
+
+	// Allow the use of environment variables to configure the soaring spot endpoint
+	// rather than it being in the database
+	if( process.env.SOARINGSPOT_CLIENT_ID && process.env.SOARINGSPOT_SECRET ) {
+		keys.client_id = process.env.SOARINGSPOT_CLIENT_ID;
+		keys.secret = process.env.SOARINGSPOT_SECRET;
+		keys.overwrite = process.env.SOARINGSPOT_OVERWRITE || 1;
+		keys.actuals = process.env.SOARINGSPOT_ACTUALS || 1;
+		console.log( 'environment variable', keys );
+	}
+	else {
+		// Get the soaring spot keys from database
+		keys = (await mysql_db.query(escape`
               SELECT *
                 FROM scoringsource where type='soaringspotkey'`))[0];
+	}
 
     if( ! keys || ! keys.client_id || ! keys.secret ) {
         console.log( 'no soaringspot keys configured' );
@@ -109,7 +123,7 @@ async function soaringSpot(deep = false) {
         // If there are many you can filter on name in the soaringspotkey database, if that is
         // empty than accept all of then?!
         console.log( contest.name );
-        if( contest.name == keys.contest_name || keys.contest_name == '' ) {
+        if( (!keys?.contest_name) || contest.name == keys.contest_name || keys.contest_name == '') {
 
             // Update the competition global values
             await update_contest( contest, keys );
