@@ -1,5 +1,5 @@
 import '../public/bootstrap/css/font-awesome.min.css';
-import 'mapbox-gl/dist/mapbox-gl.css';
+//import 'mapbox-gl/dist/mapbox-gl.css';
 import '../styles/onglide.scss';
 
 import { useState } from 'react';
