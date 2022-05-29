@@ -4,12 +4,12 @@ services:
     image: mysql:8-oracle
     command: --default-authentication-plugin=mysql_native_password
     healthcheck:
-      test: mysql ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
+      test: mysql ogn --user=root --password='${MYSQL_PASSWORD:-PS=FT7O99HQIA5}' --silent --execute "SELECT 1;"
       interval: 10s
       timeout: 10s
       retries: 10
     environment:
-      MYSQL_ROOT_PASSWORD: "$MYSQL_PASSWORD"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_PASSWORD:-PS=FT7O99HQIA5}"
     volumes:
       - ./conf/sql/docker:/docker-entrypoint-initdb.d
   next:
@@ -23,7 +23,7 @@ services:
       mysql:
         condition: service_healthy
     environment:
-      MYSQL_PASSWORD: $MYSQL_PASSWORD
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-PS=FT7O99HQIA5}
       MYSQL_HOST: mysql
       MYSQL_USER: root
       MYSQL_DATABASE: ogn
@@ -39,7 +39,7 @@ services:
         condition: service_healthy
     restart: always
     environment:
-      MYSQL_PASSWORD: $MYSQL_PASSWORD
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-PS=FT7O99HQIA5}
       MYSQL_HOST: mysql
       MYSQL_USER: root
       MYSQL_DATABASE: ogn
@@ -47,24 +47,21 @@ services:
       NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
       NEXT_SCORE_REFRESH_INTERVAL: ${NEXT_SCORE_REFRESH_INTERVAL:-60000}
       API_HOSTNAME: next:3000
-  soaringspot:
+  rst:
     build: 
       dockerfile: ./conf/Dockerfile-be
-    command: node bin/soaringspot.js
+    command: node bin/rst.js
     depends_on:
       mysql:
         condition: service_healthy
     restart: always
     environment:
-      MYSQL_PASSWORD: $MYSQL_PASSWORD
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-PS=FT7O99HQIA5}
       MYSQL_HOST: mysql
       MYSQL_USER: root
       MYSQL_DATABASE: ogn
       NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
-      SOARINGSPOT_CLIENT_ID: $SOARINGSPOT_CLIENT_ID
-      SOARINGSPOT_SECRET: ${SOARINGSPOT_SECRET?SoaringSpot Secret not set}
-      SOARINGSPOT_OVERWRITE: ${SOARINGSPOT_OVERWRITE:-1}
-      SOARINGSPOT_ACTUALS: ${SOARINGSPOT_ACTUALS:-1}
+      RST_URL: ${RST_URL?RST_URL not set}
   apache:
     build: ./conf/apache
     restart: always

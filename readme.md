@@ -1,14 +1,23 @@
 ## Running (Docker)
 
-This repo includes docker commands to launch everything required to run your own competition. You should clone the 
-repository, and then configure a file called **.env** to have at least the mapbox access token. Without this docker compose build will
-fail to build a valid website
+This repo includes docker commands to launch everything required to
+run your own competition.
+
+You should clone the repository, and then configure a file called
+**.env** to have at least the mapbox access token
+(https://account.mapbox.com/auth/signup/), the 'URL' for the site and a
+database password. Without this docker compose build will fail to
+build a valid website
+
 ```
-NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=
+MYSQL_PASSWORD=<random string>
+NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=<access token>
+NEXT_PUBLIC_SITEURL=<url less protocol, eg localhost:3000 or regionals.onglide.com>
 ```
 
-You can also use it to specify the soaring spot credentials, or you can pass then in through your service provider
-environment variables.
+You can also use it to specify the soaring spot credentials, or you
+can pass then in through your service provider environment variables.
+
 ```
 SOARINGSPOT_CLIENT_ID=
 SOARINGSPOT_SECRET=
@@ -29,6 +38,21 @@ This will launch the following:
 ```
 
 Your website will be available on localhost:8080
+
+### RST
+
+### scraping soaringspot (not recommended for hosting competitions but useful for testing)
+
+Instead of configuring client keys configure SOARINGSPOT_URL= to point
+ot the en_gb root of the competition URL on soaringspot, eg
+https://www.soaringspot.com/en_gb/my-comp-name-2022/
+
+Then use
+```
+> docker compose -f docker-compose-ssscrape.yml build
+> docker compose -f docker-compose-ssscrape.yml up
+```
+
 
 ## Installing manually (non-docker)
 

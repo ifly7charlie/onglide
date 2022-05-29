@@ -4,40 +4,41 @@
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
-const crypto = require('crypto');
+import crypto from 'crypto';
 
-const tabletojson = require('tabletojson').Tabletojson;
-const htmlparser = require('htmlparser2');
+import { Tabletojson } from 'tabletojson'; // tabletojson = require('tabletojson').Tabletojson;
 
-const { findOne, findAll, existsOne, 
+import * as htmlparser from 'htmlparser2';
+//const htmlparser = require('htmlparser2');
+
+import { findOne, findAll, existsOne, 
 		removeElement,
 		getChildren,
-		getInnerHTML, getOuterHTML, textContent } = require('domutils');
+		getInnerHTML, getOuterHTML, textContent, getAttributeValue } from 'domutils';
 
 
 // Helper
 const fetcher = url => fetch(url).then(res => res.json());
 
 // We use these to get IGCs from SoaringSpot streaming
-var readline = require('readline');
-var https = require('https');
-var http = require('http');
-const { point } = require ( '@turf/helpers' );
-const distance = (require( '@turf/distance' )).default;
-const { getElevationOffset } = require('../lib/getelevationoffset.js');
-// handle unkown gliders
-const { capturePossibleLaunchLanding, processIGC, checkForOGNMatches } = require('../lib/launchlanding.js');
+import readline from 'readline';
+import https from 'https';
+import { point } from '@turf/helpers';
+import distance from '@turf/distance';
+import bearing from '@turf/bearing';
+import { getElevationOffset } from '../lib/getelevationoffset.js';
 
+// handle unkownn gliders
+import { capturePossibleLaunchLanding, processIGC, checkForOGNMatches } from '../lib/flightprocessing/launchlanding.js';
 
-const _groupby = require('lodash.groupby');
-const _foreach = require('lodash.foreach');
-const _reduce = require('lodash.reduce');
+import _groupby from 'lodash.groupby';
+import _forEach from 'lodash.foreach';
 
 // DB access
-//const db = require('../db')
-const escape = require('sql-template-strings')
-const mysql = require('serverless-mysql')();
-const fetch = require('node-fetch');
+import escape from 'sql-template-strings';
+import mysql from 'serverless-mysql';
+let mysql_db = undefined;
+import fetch from 'node-fetch';
 
 let cnhandicaps = {};
 
@@ -50,8 +51,8 @@ let cnhandicaps = {};
 
 
 // Load the current file
-const dotenv = require('dotenv').config({ path: '.env.local' })
-const config = dotenv.parsed;
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' })
 
 // Location information, fetched from DB
 var location;
@@ -64,14 +65,12 @@ async function main() {
         process.exit();
     }
 
-    mysql.config({
-        host: process.env.MYSQL_HOST,
-        database: process.env.MYSQL_DATABASE,
-        user: process.env.MYSQL_USER,
+    mysql_db = mysql({ config:{
+        host: process.env.MYSQL_HOST||'db',
+        database: process.env.MYSQL_DATABASE||'ogn',
+        user: process.env.MYSQL_USER||'ogn',
         password: process.env.MYSQL_PASSWORD
-    });
-
-	console.log(config);
+    }});
 
 	// Now get data from soaringspot
     rst();
@@ -89,10 +88,18 @@ main()
 async function rst(deep = false) {
 
 	// Get the soaring spot keys from database
-    let keys = (await mysql.query(escape`
+    let keys = {}
+
+	if( process.env.RST_URL ) {
+		keys.url = process.env.RST_URL;
+		console.log( 'environment variable', keys );
+	}
+	else {
+		keys	= (await mysql_db.query(escape`
               SELECT *
                 FROM scoringsource where type='rst'`))[0];
-
+	}
+	
     if( ! keys ) {
         console.log( 'no soaringspot keys configured' );
         return {
@@ -199,17 +206,17 @@ async function update_class(className, data, dataHtml, hcaps ) {
 		  .replace(/[_]/gi, ' ');
 
     // Add to the database
-    await mysql.query( escape`
+    await mysql_db.query( escape`
              INSERT INTO classes (class, classname, description, type )
                    VALUES ( ${classid}, ${name.substr(0,29)}, ${name}, 'club' )
                     ON DUPLICATE KEY UPDATE classname=values(classname), description=values(description),
                                             type=values(type) `);
 
-    await mysql.query( escape`insert ignore into compstatus (class) values ( ${classid} )` );
+    await mysql_db.query( escape`insert ignore into compstatus (class) values ( ${classid} )` );
 
     // Make sure we have rows for each day and that compstatus is correct
-    //    await mysql.query( escape`call contestdays()`);
-    await mysql.query( escape`update compstatus set status=':', datecode=todcode(now())`);
+    //    await mysql_db.query( escape`call contestdays()`);
+    await mysql_db.query( escape`update compstatus set status=':', datecode=todcode(now())`);
 
     // Now add details of pilots
     await update_pilots( classid, data[ 'Piloter' ], hcaps );
@@ -228,7 +235,7 @@ async function update_pilots(classid, data, hcaps) {
 	let pilotnumber = 0;
 
     // Start a transaction for updating pilots
-    let t = mysql.transaction();
+    let t = mysql_db.transaction();
 
     for ( const pilot of data[0] ) {
 
@@ -306,7 +313,7 @@ async function process_class_tasks_and_results (classid, className, data ) {
 			const day_number = matches[1];
 			const day_data = data[day];
 
-			const dbdate = (await mysql.query( escape`SELECT DATE_ADD(start, INTERVAL ${day_number-1} DAY) date FROM competition` ));
+			const dbdate = (await mysql_db.query( escape`SELECT DATE_ADD(start, INTERVAL ${day_number-1} DAY) date FROM competition` ));
 			const date = dbdate[0].date;
 
 			const day_info = day_data[0];
@@ -348,7 +355,7 @@ async function process_class_task (classid, className, date, day_number, day_inf
 	if( task_info ) {
 		const tps = _reduce(task_info, function(text,v) { return [text,v.Label,v.Brytpunkt,v.Radie].join('_'); }, '');
 		const hash = crypto.createHash('sha256').update(info).update(tps).digest('base64');
-		const dbhashrow = (await mysql.query( escape`SELECT hash FROM tasks WHERE datecode=todcode(${date}) AND class=${classid}` ));
+		const dbhashrow = (await mysql_db.query( escape`SELECT hash FROM tasks WHERE datecode=todcode(${date}) AND class=${classid}` ));
 		if( (dbhashrow && dbhashrow.length > 0) && hash == dbhashrow[0].hash ) {
 			return;
 		}
@@ -358,7 +365,7 @@ async function process_class_task (classid, className, date, day_number, day_inf
 		}
 		
 		// Do this as one block so we don't end up with broken tasks
-		mysql.transaction()
+		mysql_db.transaction()
 
 		// If it is the current day and we have a start time we save it
 		//        .query( escape`
@@ -396,6 +403,9 @@ async function process_class_task (classid, className, date, day_number, day_inf
 					"length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) "+
 					"VALUES ";
 
+				let previousPoint = null;
+				let currentPoint = null;
+				
 				let point_index = 0;
 				for ( const tp of task_info ) {
 					// can we extract a number off the leading part of the turnpoint name, if so treat it as a trigraph
@@ -406,11 +416,21 @@ async function process_class_task (classid, className, date, day_number, day_inf
 						tpname = tpname.replace( /^([0-9]{3,4})/, '');
 					}
 
-					query = query + "( ?, todcode(?), ?, ?, 0,0, ?, ?, 0, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
+					// So we can calculate distances etc
+					previousPoint = currentPoint;
+					currentPoint = point( [ toDeg(tp.Longitud), toDeg(tp.Latitud) ] );
+					
+					const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
+					const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
+					let hi = 100;
+					
+					query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
 
 					values = values.concat( [
 						classid, date, taskid, point_index,
+                		leglength, bearingDeg,
 						toDeg(tp.Latitud),toDeg(tp.Longitud),
+						hi,
 						trigraph, tpname,
 						point_index > 0 ? 'symmetrical' : 'np',
 						parseFloat(tp.Radie),
@@ -440,9 +460,9 @@ async function process_class_task (classid, className, date, day_number, day_inf
 
 		// make sure we have result placeholder for each day, we will fail to save scores otherwise
 			.query( escape`INSERT IGNORE INTO pilotresult
-               ( class, datecode, compno, status, lonotes, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable, turnpoints )
+               ( class, datecode, compno, status, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable )
              SELECT ${classid}, todcode(${date}),
-               compno, '-', '', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N', -2
+               compno, '-', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N'
              FROM pilots WHERE pilots.class = ${classid}`)
 
 		// And update the day with status and text etc
@@ -567,7 +587,7 @@ async function process_class_results (classid, className, date, day_number, resu
         // If there is data from scoring then process it into the database
 		// NOTE THE TIMES ARE UTC not local so we to convert back to local
         if( row['M�l'] != '' || finished ) {
-            const r = (await mysql.query( escape`
+            const r = (await mysql_db.query( escape`
                            UPDATE pilotresult
                            SET
 		                     start=TIME(from_unixtime(${start}+(SELECT tzoffset FROM competition))),
@@ -587,7 +607,7 @@ async function process_class_results (classid, className, date, day_number, resu
             rows += r.affectedRows;
 
             // check the file to check tracking details
-            let { igcavailable } = (await mysql.query( escape`SELECT igcavailable FROM pilotresult
+            let { igcavailable } = (await mysql_db.query( escape`SELECT igcavailable FROM pilotresult
                                                               WHERE datecode=todcode(${date}) and compno=${pilot} and class=${classid}` ))[0]||{igcavailable:false};
             if( (igcavailable||'Y') == 'N' && url ) {
 				console.log( date, pilot, igcavailable );
@@ -605,7 +625,7 @@ async function process_class_results (classid, className, date, day_number, resu
 
     // Did anything get updated?
     if( rows ) {
-        await mysql.query( escape`UPDATE contestday SET results_uploaded=NOW()
+        await mysql_db.query( escape`UPDATE contestday SET results_uploaded=NOW()
                                  WHERE class=${classid} AND datecode=todcode(${date}) and STATUS != "Z"`);
     }
 
@@ -626,10 +646,10 @@ async function update_contest(contest_name, info) {
 	console.log( info[0] );
 
     // Add a row if we need to
-    const count = (await mysql.query( 'SELECT COUNT(*) cnt FROM competition' ));
+    const count = (await mysql_db.query( 'SELECT COUNT(*) cnt FROM competition' ));
     if( ! count || !count[0] || ! count[0].cnt ) {
         console.log( "Empty competition, pre-populating" );
-        mysql.query( 'INSERT IGNORE INTO competition ( tz, tzoffset, mainwebsite ) VALUES ( "Europe/Stockholm", 7200, "http://www.rst-online.se/RSTmain.php?main=excup&cmd=list&excup=list&sub=EX" )' );
+        mysql_db.query( 'INSERT IGNORE INTO competition ( tz, tzoffset, mainwebsite ) VALUES ( "Europe/Stockholm", 7200, "http://www.rst-online.se/RSTmain.php?main=excup&cmd=list&excup=list&sub=EX" )' );
     }
 
 
@@ -642,7 +662,7 @@ async function update_contest(contest_name, info) {
 				
 				//
 				// Make sure the dates are copied across
-				await mysql.query( escape`
+				await mysql_db.query( escape`
          UPDATE competition SET start = ${matches[1]},
                                   end = ${matches[2]},
                                   countrycode = 'SE',
@@ -656,9 +676,9 @@ async function update_contest(contest_name, info) {
 //	if( ssLocation && ssLocation.latitude ) {
   //      const lat = toDeg(ssLocation.latitude);
   //  //    const lng = toDeg(ssLocation.longitude);
-//        await mysql.query( escape`UPDATE competition SET lt = ${lat}, lg = ${lng},
+//        await mysql_db.query( escape`UPDATE competition SET lt = ${lat}, lg = ${lng},
     //                                                  sitename = ${ssLocation.name}`);
-    location = (await mysql.query( escape`SELECT lt, lg FROM competition`))[0];
+    location = (await mysql_db.query( escape`SELECT lt, lg FROM competition`))[0];
 
 		// Save four our use
 	location.point = point( [location.lt, location.lg] );
@@ -671,7 +691,7 @@ async function update_contest(contest_name, info) {
         // clear it all down, we will load all of this from soaring spot
         // NOTE: this should not be cleared every time, even though at present it is
         // TBD!!
-        mysql.transaction()
+        mysql_db.transaction()
             .query( escape`delete from classes` )
             .query( escape`delete from logindetails where type="P"` )
             .query( escape`delete from pilots` )
