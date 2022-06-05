@@ -676,7 +676,7 @@ async function process_day_scores (day,classid,classname,keys) {
 
             // check the file to check tracking details
             let { igcavailable } = (await mysql_db.query( escape`SELECT igcavailable FROM pilotresult
-                                                              WHERE datecode=todcode(${date}) and compno=${pilot} and class=${classid}` ))[0];			
+                                                              WHERE datecode=todcode(${date}) and compno=${pilot} and class=${classid}` ))?.[0];
             if( (igcavailable||'Y') == 'N' && row?._links?.["http://api.soaringspot.com/rel/flight"]) {
 				console.log( date, pilot, igcavailable );
 				await processIGC( classid, pilot, location.altitude, date, row._links["http://api.soaringspot.com/rel/flight"]['href'], https, mysql_db,
