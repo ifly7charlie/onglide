@@ -14,6 +14,7 @@ import readline from 'readline';
 import https from 'https';
 import { point } from '@turf/helpers';
 import distance from '@turf/distance';
+import bearing from '@turf/bearing';
 import { getElevationOffset } from '../lib/getelevationoffset.js';
 // handle unkownn gliders
 import { capturePossibleLaunchLanding, processIGC, checkForOGNMatches } from '../lib/flightprocessing/launchlanding.js';
@@ -83,7 +84,6 @@ async function soaringSpot(deep = false) {
     console.log("Checking SoaringSpot @ "+(new Date().toString()));
 
 	let keys = {};
-	console.log('env', {...process.env})
 
 	// Allow the use of environment variables to configure the soaring spot endpoint
 	// rather than it being in the database
@@ -372,6 +372,7 @@ async function process_day_task (day,classid,classname,keys) {
 
     let tasktype = 'S';
     let duration = '00:00';
+	let W = 0;
     if( task_details.task_type == 'assigned_area' ) {
         tasktype = 'A';
         duration = new Date(task_details.task_duration * 1000).toISOString().substr(11, 8);
@@ -384,6 +385,24 @@ async function process_day_task (day,classid,classname,keys) {
 			tasktype = 'E';
 		}
 	}
+	else if( winddir && windspeed ) {
+		const {contestWindDivisionFactor} = await queryRow( escape`
+		SELECT contestWindDivisionFactor
+		     FROM global.comprules, classes, competition
+			WHERE classes.class=${classdetails.class}
+			  AND classes.type = comprules.name
+		      AND comprules.country = competition.countrycode
+		`);
+		
+		// calculate wind according to new rules
+		// if the factor is not set or it is distance handicap then no windicapping
+		W = contestWindDivisionFactor != 0 
+			? Math.min( windspeed / contestWindDivisionFactor, 30 )
+			: 0;
+
+		console.log( iclass, "UK Windicapping Check, wddirrad=",wdirrad,",W=",W,",minhandicap",minhandicap );
+	}
+
 
     // If there are no turnpoints then it isn't a valid task
     const turnpoints = await sendSoaringSpotRequest( task_details._links['http://api.soaringspot.com/rel/points'].href, keys );
@@ -444,6 +463,9 @@ async function process_day_task (day,classid,classname,keys) {
                 "length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) "+
                 "VALUES ";
 
+			let previousPoint = null;
+			let currentPoint = null;
+			
             for ( const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'] ) {
 
                 // We don't handle multiple starts at all so abort
@@ -459,29 +481,38 @@ async function process_day_task (day,classid,classname,keys) {
                     tpname = tpname.replace( /^([0-9]{1,4})/, '').trim();
                 }
 
-                // we will save away the original name for contest day info
-                //        tplist[ tp.point_index ] = tp.name;
+				// So we can calculate distances etc
+                previousPoint = currentPoint;
+				currentPoint = point( [ toDeg(tp.longitude), toDeg(tp.latitude) ] );
+				
+				const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
+				const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
+				let hi = 100;
 
-                // Add the turnpoint.  The leg length etc is from the point to the previous one
-                // so start point will have 0's
-                /*let inner = escape`(
-                  ${classid}, todcode(${date}), ${taskid}, ${tp.point_index},
-                  0, 0,
-                  ${toDeg(tp.latitude)},${toDeg(tp.longitude)},
-                  0, ${trigraph}, ${tpname},
-                  'sector',
-                  ${oz_types[tp.oz_type]},
-                  ${tp.oz_radius1/1000},
-                  ${(tp.oz_line?90:toDeg(tp.oz_angle1))},
-                  ${tp.oz_radius2/1000},
-                  ${toDeg(tp.oz_angle2)},
-                  ${tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0} ),`; */
+				// If we have windicapping then calculate the effect of the wind on the handicap
+				if( W ) {
+					//  theta & stuff
+					const radbear = toRad(bearingDeg);
+					const WdirRAD = toRad(winddir);
+					const theta = radbear-WdirRAD > Math.PI
+						  ? (2*Math.PI) - radbear+WdirRAD
+						  : radbear-WdirRAD;
+					
+					// calcute the bearing & Hi
+					hi = 100*(Math.sqrt(1-((W/46)*(W/46)*Math.sin(theta)*Math.sin(theta)))-(1+(W/46)*Math.cos(theta)));
+					console.log( _legno, ":theta=",theta,",radbear=",radbear,",hi=",hi,",dist=",leglength,",wdirrad",WdirRAD );
+				}
 
-                query = query + "( ?, todcode(?), ?, ?, 0,0, ?, ?, 0, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
+//            let query = "INSERT INTO taskleg ( class, datecode, taskid, legno, "+
+  //              "length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) "+
+    //            "VALUES ";
+                query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
 
                 values = values.concat( [
                     classid, date, taskid, tp.point_index,
+					leglength, bearingDeg,
                     toDeg(tp.latitude),toDeg(tp.longitude),
+					hi,
                     trigraph, tpname,
                     oz_types[tp.oz_type],
                     tp.oz_radius1/1000,
@@ -504,8 +535,8 @@ async function process_day_task (day,classid,classname,keys) {
                             return ['UPDATE tasks SET task="A", flown="Y" WHERE class=? AND taskid = ?',[classid,taskid]]; })
 
     // redo the distance calculation, including calculating handicaps
-        .query( (r,ro) => { const taskid = ro[ro.length-5].insertId;
-                            return escape`call wcapdistance_taskid( ${taskid} )` })
+//        .query( (r,ro) => { const taskid = ro[ro.length-5].insertId;
+  //                          return escape`call wcapdistance_taskid( ${taskid} )` })
 
     // make sure we have result placeholder for each day, we will fail to save scores otherwise
         .query( escape`INSERT IGNORE INTO pilotresult
@@ -810,6 +841,10 @@ function convert_to_mysql(jsontime) {
 // From radians
 function toDeg(a) {
     return a/Math.PI*180;
+}
+
+function toRad(a) {
+	return a*Math.PI/180;
 }
 
 //
