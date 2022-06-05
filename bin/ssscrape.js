@@ -420,8 +420,8 @@ async function process_day_task (day,classid,classname) {
 				console.log( tpname, toDeg(tp.longitude), toDeg(tp.latitude) );
 				currentPoint = point( [ toDeg(tp.longitude), toDeg(tp.latitude) ] );
 				
-				const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
-				const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
+				const leglength = previousPoint && tp.type != 'finish' ? distance( previousPoint, currentPoint ) : 0;
+				const bearingDeg = previousPoint && tp.type != 'finish' ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
 				let hi = 100;
 				
                 query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
