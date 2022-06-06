@@ -215,7 +215,7 @@ async function update_pilots(class_url,classid,classname,keys) {
         // Get nested data more easily
         const epilot = pilot._embedded['http://api.soaringspot.com/rel/pilot'][0];
 
-        t.query( escape`
+        await t.query( escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
@@ -243,7 +243,7 @@ async function update_pilots(class_url,classid,classname,keys) {
     }
 
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
-    t.query( escape`DELETE FROM pilots WHERE class=${classid} AND registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
+    await t.query( escape`DELETE FROM pilots WHERE class=${classid} AND registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
 
 
     // Trackers needs a row for each pilot so fill any missing, perhaps we should
@@ -466,7 +466,7 @@ async function process_day_task (day,classid,classname,keys) {
 			let previousPoint = null;
 			let currentPoint = null;
 			
-            for ( const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'] ) {
+            for ( const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'].sort((a,b) => a.point_index - b.point_index ) ) {
 
                 // We don't handle multiple starts at all so abort
                 if( tp.multiple_start != 0 ) {
@@ -485,8 +485,8 @@ async function process_day_task (day,classid,classname,keys) {
                 previousPoint = currentPoint;
 				currentPoint = point( [ toDeg(tp.longitude), toDeg(tp.latitude) ] );
 				
-				const leglength = previousPoint && tp.type != 'finish' ? distance( previousPoint, currentPoint ) : 0;
-				const bearingDeg = previousPoint && tp.type != 'finish' ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
+				const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
+				const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
 				let hi = 100;
 
 				// If we have windicapping then calculate the effect of the wind on the handicap
@@ -676,7 +676,7 @@ async function process_day_scores (day,classid,classname,keys) {
 
             // check the file to check tracking details
             let { igcavailable } = (await mysql_db.query( escape`SELECT igcavailable FROM pilotresult
-                                                              WHERE datecode=todcode(${date}) and compno=${pilot} and class=${classid}` ))?.[0];
+                                                              WHERE datecode=todcode(${date}) and compno=${pilot} and class=${classid}` ))?.[0]||{igcavailable:'N'};
             if( (igcavailable||'Y') == 'N' && row?._links?.["http://api.soaringspot.com/rel/flight"]) {
 				console.log( date, pilot, igcavailable );
 				await processIGC( classid, pilot, location.altitude, date, row._links["http://api.soaringspot.com/rel/flight"]['href'], https, mysql_db,
@@ -732,7 +732,7 @@ async function update_contest(contest,keys) {
         // clear it all down, we will load all of this from soaring spot
         // NOTE: this should not be cleared every time, even though at present it is
         // TBD!!
-        mysql_db.transaction()
+        await mysql_db.transaction()
             .query( escape`delete from classes` )
             .query( escape`delete from logindetails where type="P"` )
             .query( escape`delete from pilots` )
@@ -749,7 +749,7 @@ async function update_contest(contest,keys) {
     const count = (await mysql_db.query( 'SELECT COUNT(*) cnt FROM competition' ));
     if( ! count || !count[0] || ! count[0].cnt ) {
         console.log( "Empty competition, pre-populating" );
-        mysql_db.query( 'INSERT IGNORE INTO competition ( tz, tzoffset ) VALUES ( "Europe/Stockholm", 7200 )' );
+        await mysql_db.query( 'INSERT IGNORE INTO competition ( tz, tzoffset ) VALUES ( "Europe/Stockholm", 7200 )' );
     }
 
     //

@@ -295,7 +295,7 @@ async function update_pilots(data ) {
 			  .substring(0,14);
 		
 		pilotnumber = pilotnumber+1;
-		t.query( escape`
+		await t.query( escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
@@ -315,7 +315,7 @@ async function update_pilots(data ) {
 	}
 
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
-    t.query( escape`DELETE FROM pilots WHERE registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
+    await t.query( escape`DELETE FROM pilots WHERE registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
 
 
     // Trackers needs a row for each pilot so fill any missing, perhaps we should
@@ -363,7 +363,7 @@ async function process_day_task (day,classid,classname) {
     }
 
     // Do this as one block so we don't end up with broken tasks
-    mysql_db.transaction()
+    await mysql_db.transaction()
 
     // If it is the current day and we have a start time we save it
         .query( escape`
@@ -398,7 +398,7 @@ async function process_day_task (day,classid,classname) {
 
 			let previousPoint = null;
 			let currentPoint = null;
-            for ( const tp of day.task_points ) {
+            for ( const tp of day.task_points.sort((a,b) => a.point_index - b.point_index ) ) {
 
 				console.log( tp );
 
@@ -420,8 +420,8 @@ async function process_day_task (day,classid,classname) {
 				console.log( tpname, toDeg(tp.longitude), toDeg(tp.latitude) );
 				currentPoint = point( [ toDeg(tp.longitude), toDeg(tp.latitude) ] );
 				
-				const leglength = previousPoint && tp.type != 'finish' ? distance( previousPoint, currentPoint ) : 0;
-				const bearingDeg = previousPoint && tp.type != 'finish' ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
+				const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
+				const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
 				let hi = 100;
 				
                 query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
@@ -660,7 +660,7 @@ async function update_contest(contest_name, dates, site_name, url) {
     const count = (await mysql_db.query( 'SELECT COUNT(*) cnt FROM competition' ));
     if( ! count || !count[0] || ! count[0].cnt ) {
         console.log( "Empty competition, pre-populating" );
-        mysql_db.query( escape`INSERT IGNORE INTO competition ( tz, tzoffset, mainwebsite ) VALUES ( "Europe/London", 3600, ${url} )` );
+        await mysql_db.query( escape`INSERT IGNORE INTO competition ( tz, tzoffset, mainwebsite ) VALUES ( "Europe/London", 3600, ${url} )` );
     }
 
 	console.log( dates );
@@ -702,7 +702,7 @@ async function update_contest(contest_name, dates, site_name, url) {
         // clear it all down, we will load all of this from soaring spot
         // NOTE: this should not be cleared every time, even though at present it is
         // TBD!!
-        mysql_db.transaction()
+        await mysql_db.transaction()
             .query( escape`delete from classes` )
             .query( escape`delete from logindetails where type="P"` )
             .query( escape`delete from pilots` )
