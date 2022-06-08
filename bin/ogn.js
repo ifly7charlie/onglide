@@ -852,7 +852,8 @@ function getAssociation( flarmId, packet, jPoint ) {
             const matches = _filter( gliders, (x) => { return ((!x.duplicate) && ddbf.cn == x.compno) || (ddbf.registration == x.greg && (x.greg||'') != '')} );
 
             if( ! Object.keys(matches).length ) {
-                unknownTrackers[flarmId].message = `Not in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
+                unknownTrackers[flarmId].message = glider ? `No DDB match, tracker already associated with ${glider.compno}`
+					: `Not in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
 				return glider;
             }
 
