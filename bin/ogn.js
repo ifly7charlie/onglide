@@ -54,7 +54,7 @@ import scorePilot from  '../lib/flightprocessing/scorepilot.js';
 import { generatePilotTracks } from '../lib/flightprocessing/tracks.js';
 
 // Data sources
-import { startAprsListener } from '../lib/ws/aprs.js';
+import { startAprsListener, connection } from '../lib/ws/aprs.js';
 import { startDBReplay, establishOffset } from '../lib/ws/dbreplay.js';
 import { startFileReplay } from '../lib/ws/filereplay.js';
 
@@ -156,7 +156,7 @@ async function main() {
     await updateDDB();
 	await sendScores();
 
-//    startStatusServer();
+    startStatusServer();
 
 	// We want to start listening to the APRS feed as well
 	if( process.env.REPLAY_FILE ) {
@@ -337,6 +337,9 @@ async function updateTrackers() {
 		// we have been maintinig a full list in order
 		for( const compno of Object.keys(cscores.points) ) {
 			cscores.state[compno] = {};
+            if( ! cscores.trackers[compno] ) {
+                cscores.trackers[compno]={};
+            }
 			cscores.trackers[compno].firstOldPoint = cscores.points[compno]?.length;
 			await scorePilot( c.class, compno, cscores );
 		}
@@ -959,7 +962,7 @@ async function startStatusServer() {
                          </table>
                       <h2>Other</h2>
                           ${displayCache()}
-                          ${connection.aprsc??'unknown'}
+                          ${connection?.aprsc??'unknown'}
                      </body></html>`);
         res.end(); //end the response
     }).listen(process.env.STATUS_SERVER_PORT||8081);
