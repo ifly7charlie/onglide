@@ -487,7 +487,7 @@ async function process_day_task (day,classid,classname,keys) {
 				
 				const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
 				const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
-				let hi = 100;
+				let hi = 0; // only used when windicapping
 
 				// If we have windicapping then calculate the effect of the wind on the handicap
 				if( W ) {
