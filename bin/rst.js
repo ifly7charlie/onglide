@@ -16,7 +16,6 @@ import { findOne, findAll, existsOne,
 		getChildren,
 		getInnerHTML, getOuterHTML, textContent, getAttributeValue } from 'domutils';
 
-
 // Helper
 const fetcher = url => fetch(url).then(res => res.json());
 
@@ -33,6 +32,7 @@ import { capturePossibleLaunchLanding, processIGC, checkForOGNMatches } from '..
 
 import _groupby from 'lodash.groupby';
 import _forEach from 'lodash.foreach';
+import _reduce from 'lodash.reduce';
 
 // DB access
 import escape from 'sql-template-strings';
@@ -108,10 +108,12 @@ async function rst(deep = false) {
     }
 
 	let hcaps = {};
-	
-	fetch( keys.url )
-		.then( res => res.text() )
-		.then( body => {
+    
+	await fetch( keys.url )
+		.then( res => res.arrayBuffer() )
+		.then( buffer => {
+            console.log(buffer)
+            const body =Buffer.from(buffer).toString('latin1');
 			var dom = htmlparser.parseDocument(body);
 			var competitionnames = [];
 			const headings = findAll( (li) => (li.name == 'li'
@@ -173,8 +175,8 @@ async function rst(deep = false) {
 					
 					for( let i = 0; i < sectionHeaders.length; i++ ) {
 						const sh = textContent(sectionHeaders[i]);
-						mapped[ sh ] = tabletojson.convert( getInnerHTML(sections[i]), { stripHtmlFromCells: true});
-						mappedHtml[ sh ] = tabletojson.convert( getInnerHTML(sections[i]), { stripHtmlFromCells: false});
+						mapped[ sh ] = Tabletojson.convert( getInnerHTML(sections[i]), { stripHtmlFromCells: true});
+						mappedHtml[ sh ] = Tabletojson.convert( getInnerHTML(sections[i]), { stripHtmlFromCells: false});
 					}
 
 					update_contest( keys.contest_name, mapped[ 'Info' ] );
@@ -219,6 +221,8 @@ async function update_class(className, data, dataHtml, hcaps ) {
     await mysql_db.query( escape`update compstatus set status=':', datecode=todcode(now())`);
 
     // Now add details of pilots
+    console.log( '--- pilots ---' );
+    console.log( data[ 'Piloter' ] );
     await update_pilots( classid, data[ 'Piloter' ], hcaps );
 
     // Import the results
@@ -263,7 +267,7 @@ async function update_pilots(classid, data, hcaps) {
 		cnhandicaps[classid+"_"+compno] = handicap;
 		
 		pilotnumber = pilotnumber+1;
-		t.query( escape`
+		await t.query( escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
@@ -365,7 +369,7 @@ async function process_class_task (classid, className, date, day_number, day_inf
 		}
 		
 		// Do this as one block so we don't end up with broken tasks
-		mysql_db.transaction()
+    await mysql_db.transaction()
 
 		// If it is the current day and we have a start time we save it
 		//        .query( escape`
@@ -422,7 +426,7 @@ async function process_class_task (classid, className, date, day_number, day_inf
 					
 					const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
 					const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
-					let hi = 100;
+					let hi = 0;
 					
 					query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
 
