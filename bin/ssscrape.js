@@ -422,7 +422,7 @@ async function process_day_task (day,classid,classname) {
 				
 				const leglength = previousPoint ? distance( previousPoint, currentPoint ) : 0;
 				const bearingDeg = previousPoint ? (bearing( previousPoint, currentPoint ) + 360)%360 : 0;
-				let hi = 100;
+				let hi = 0;
 				
                 query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
 
