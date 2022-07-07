@@ -3,10 +3,9 @@
 -- Table structure for table `comprules`
 --
 
-DROP TABLE IF EXISTS `comprules`;
-CREATE TABLE `comprules` (
-  `name` char(20) NOT NULL DEFAULT '',
-  `country` char(2) NOT NULL DEFAULT '',
+DROP TABLE IF EXISTS `rules`;
+CREATE TABLE `rules` (
+  `class` char(20) NOT NULL DEFAULT '',
   `ypercentageW` float DEFAULT NULL,
   `ypercentageU` float DEFAULT NULL,
   `minY` int(11) DEFAULT NULL,
@@ -18,14 +17,13 @@ CREATE TABLE `comprules` (
   `mauw` char(1) DEFAULT 'Y',
   `hcapmodifiers` char(1) DEFAULT 'N',
   `grandprixstart` char(1) DEFAULT 'N',
-  PRIMARY KEY (`country`,`name`)
+  PRIMARY KEY (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='See Scoring section of rules for details';
 
 --
 -- Dumping data for table `comprules`
 --
 
-INSERT INTO `comprules` VALUES ('Open','UK',0.5,0,100,200,1.18,250,200,'N','Y','N','N'),('18m','UK',0.5,0,90,180,1.1,250,200,'N','Y','N','N'),('15m','UK',0.5,0,90,180,1.04,250,200,'N','Y','N','N'),('Standard','UK',0.5,0,80,160,1,250,200,'N','Y','N','N'),('Club','UK',0.5,0,80,160,1,250,200,'Y','Y','Y','N'),('HCap','UK',0.5,0,80,160,1,250,200,'Y','Y','N','N'),('Junior','UK',0,0.4,60,120,1,0,0,'Y','Y','Y','N'),('Regionals','UK',0,0.4,60,120,1,0,0,'Y','N','Y','N'),('20m','UK',0.5,0,90,180,1.04,250,200,'N','Y','N','N'),('15_meter','CZ',0,0,0,0,0,0,0,'Y','N','N','N'),('club','CZ',0,0,0,0,0,0,0,'Y','N','N','N'),('open','CZ',0,0,0,0,0,0,0,'Y','Y','N','N'),('grandprix','SK',0,0,0,0,0,0,0,'N','N','N','Y'),('grandprix','UK',0,0,0,0,0,0,0,'N','N','N','Y'),('double_seater','CZ',0,0,0,0,0,0,0,'N','N','N','Y'),('standard','CZ',0,0,0,0,0,0,0,'N','N','N','Y'),('grandprix','CL',0,0,0,0,0,0,0,'N','N','N','Y'),('15_meter','SK',0,0,0,0,0,0,0,'N','N','N','N'),('club','SK',0,0,0,0,0,0,0,'Y','N','N','N'),('standard','SK',0,0,0,0,0,0,0,'N','N','N','N');
 --
 -- Table structure for table `classes`
 --
