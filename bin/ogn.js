@@ -11,6 +11,7 @@ import { aprsParser } from  'js-aprs-fap';
 // Helper function
 import distance from '@turf/distance';
 import { point } from '@turf/helpers';
+import LatLong from '../lib/flightprocessing/LatLong.js';
 
 // And the Websocket
 import { WebSocket, WebSocketServer } from 'ws';
@@ -327,6 +328,7 @@ async function updateTrackers() {
 	
 			// Group them by comp number, this is quicker than multiple sub queries from the DB
 			scoring[cname].points = _groupby( rawpoints, 'c' );
+            console.log( `${cname} reloaded all points` );
 		}
         else {
             // make sure the task is cached properly
@@ -350,11 +352,15 @@ async function updateTrackers() {
                 cscores.trackers[compno]={};
             }
 			cscores.trackers[compno].firstOldPoint = cscores.points[compno]?.length;
-			await scorePilot( c.class, compno, cscores );
+            try {
+			    await scorePilot( c.class, compno, cscores );
+            } catch(e) {
+                console.log( `unable to scorePilot ${c.class}: ${compno}, ${e}` );
+            }
 		}
 
 		// And fully regenerate the GeoJSONs so they include any late points
-		generatePilotTracks( cscores, tOffset );
+		await generatePilotTracks( cscores, tOffset );
         sendPilotTracks( cname, cscores.deck );
     }
 
@@ -614,8 +620,8 @@ async function sendScores() {
 
         // We only need to mix in the gliders that are active
         if( Object.keys(channel.activeGliders).length == 0 && channel.lastScores ) {
-//            console.log( `${channel.className}: no activity since last scoring so do nothing` );
-  //          return;
+            console.log( `${channel.className}: no activity since last scoring so do nothing` );
+            return;
         }
 
         // Reset for next iteration
@@ -626,7 +632,8 @@ async function sendScores() {
 				try {
 					scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
 				} catch(e) {
-					console.warn(e);
+                    console.log( `exception scoring ${className}, ${tracker.compno} [FULL:${tracker.outOfOrder > 5}]` );
+					console.warn( className, tracker.compno, 'Unable to score', e);
 				}
 				resolve(); })
 		)).then( () => {
@@ -742,7 +749,11 @@ function processAPRSPacket( glider, message, islate ) {
 		// Merge into the display data structure
 		mergePoint( message, sc );
 	}
-	
+
+    // Make sure we have geo objects
+	message.ll = new LatLong( message.lat, message.lng );
+    message.geoJSON = point([message.lng,message.lat]);
+    
 	// Actually insert the point into the array
 	sc.points[glider.compno].splice(insertIndex, 0, message);
 	
