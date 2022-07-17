@@ -458,9 +458,9 @@ async function process_class_task (classid, className, date, day_number, day_inf
 								return ['UPDATE tasks SET task="A", flown="Y" WHERE class=? AND taskid = ?',[classid,taskid]]; })
 
 		// redo the distance calculation, including calculating handicaps
-			.query( (r,ro) => { const taskid = ro[1].insertId;
-								console.log( "WCAP DIS", taskid, ro );
-								return ['call wcapdistance_taskid( ? )', [taskid]]; })
+//			.query( (r,ro) => { const taskid = ro[1].insertId;
+//								console.log( "WCAP DIS", taskid, ro );
+//								return ['call wcapdistance_taskid( ? )', [taskid]]; })
 
 		// make sure we have result placeholder for each day, we will fail to save scores otherwise
 			.query( escape`INSERT IGNORE INTO pilotresult

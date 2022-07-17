@@ -50,7 +50,7 @@ import _sortedIndexBy from 'lodash.sortedindexby';
 import _clonedeep from 'lodash.clonedeep';
 
 // Score a single pilot
-import scorePilot from  '../lib/flightprocessing/scorepilot.js';
+import { scorePilot, fetchTaskAndPilots } from  '../lib/flightprocessing/scorepilot.js';
 import { generatePilotTracks } from '../lib/flightprocessing/tracks.js';
 
 // Data sources
@@ -255,7 +255,7 @@ async function main() {
 		} catch(e) {
 			console.log(e);
 		}
-    }, (20*60*1000+(2*60000*Math.random())) );
+    }, (10*60*1000+(2*60000*Math.random())) );
 
 	// And every 4-6 minutes rescore and update everything - the random is to make sure
 	// multiple processes don't intersect
@@ -327,6 +327,15 @@ async function updateTrackers() {
 	
 			// Group them by comp number, this is quicker than multiple sub queries from the DB
 			scoring[cname].points = _groupby( rawpoints, 'c' );
+		}
+        else {
+            // make sure the task is cached properly
+			await fetchTaskAndPilots( c.class, false );
+        }
+            
+		if( ! Object.keys(scoring[cname].trackers).length ) {
+			console.log( "No valid task", cname );
+			continue;
 		}
 
 		const cscores = scoring[cname];
@@ -605,8 +614,8 @@ async function sendScores() {
 
         // We only need to mix in the gliders that are active
         if( Object.keys(channel.activeGliders).length == 0 && channel.lastScores ) {
-            console.log( `${channel.className}: no activity since last scoring so do nothing` );
-            return;
+//            console.log( `${channel.className}: no activity since last scoring so do nothing` );
+  //          return;
         }
 
         // Reset for next iteration
