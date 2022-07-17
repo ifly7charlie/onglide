@@ -305,6 +305,9 @@ async function updateTrackers() {
 
         newchannels.push(cname);
 
+        // make sure the task is cached properly
+		await fetchTaskAndPilots( c.class, false );
+		
 		// Make sure we have an entry for the scoring and do a dummy
 		// fetch to get the task prepped and merge the scoring data into the
 		// trackers array
@@ -330,10 +333,6 @@ async function updateTrackers() {
 			scoring[cname].points = _groupby( rawpoints, 'c' );
             console.log( `${cname} reloaded all points` );
 		}
-        else {
-            // make sure the task is cached properly
-			await fetchTaskAndPilots( c.class, false );
-        }
             
 		if( ! Object.keys(scoring[cname].trackers).length ) {
 			console.log( "No valid task", cname );
