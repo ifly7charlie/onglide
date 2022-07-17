@@ -11,6 +11,7 @@ import { aprsParser } from  'js-aprs-fap';
 // Helper function
 import distance from '@turf/distance';
 import { point } from '@turf/helpers';
+import LatLong from '../lib/flightprocessing/LatLong.js';
 
 // And the Websocket
 import { WebSocket, WebSocketServer } from 'ws';
@@ -50,7 +51,7 @@ import _sortedIndexBy from 'lodash.sortedindexby';
 import _clonedeep from 'lodash.clonedeep';
 
 // Score a single pilot
-import scorePilot from  '../lib/flightprocessing/scorepilot.js';
+import { scorePilot, fetchTaskAndPilots } from  '../lib/flightprocessing/scorepilot.js';
 import { generatePilotTracks } from '../lib/flightprocessing/tracks.js';
 
 // Data sources
@@ -255,7 +256,7 @@ async function main() {
 		} catch(e) {
 			console.log(e);
 		}
-    }, (20*60*1000+(2*60000*Math.random())) );
+    }, (10*60*1000+(2*60000*Math.random())) );
 
 	// And every 4-6 minutes rescore and update everything - the random is to make sure
 	// multiple processes don't intersect
@@ -327,6 +328,16 @@ async function updateTrackers() {
 	
 			// Group them by comp number, this is quicker than multiple sub queries from the DB
 			scoring[cname].points = _groupby( rawpoints, 'c' );
+            console.log( `${cname} reloaded all points` );
+		}
+        else {
+            // make sure the task is cached properly
+			await fetchTaskAndPilots( c.class, false );
+        }
+            
+		if( ! Object.keys(scoring[cname].trackers).length ) {
+			console.log( "No valid task", cname );
+			continue;
 		}
 
 		const cscores = scoring[cname];
@@ -341,11 +352,15 @@ async function updateTrackers() {
                 cscores.trackers[compno]={};
             }
 			cscores.trackers[compno].firstOldPoint = cscores.points[compno]?.length;
-			await scorePilot( c.class, compno, cscores );
+            try {
+			    await scorePilot( c.class, compno, cscores );
+            } catch(e) {
+                console.log( `unable to scorePilot ${c.class}: ${compno}, ${e}` );
+            }
 		}
 
 		// And fully regenerate the GeoJSONs so they include any late points
-		generatePilotTracks( cscores, tOffset );
+		await generatePilotTracks( cscores, tOffset );
         sendPilotTracks( cname, cscores.deck );
     }
 
@@ -617,7 +632,8 @@ async function sendScores() {
 				try {
 					scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
 				} catch(e) {
-					console.warn(e);
+                    console.log( `exception scoring ${className}, ${tracker.compno} [FULL:${tracker.outOfOrder > 5}]` );
+					console.warn( className, tracker.compno, 'Unable to score', e);
 				}
 				resolve(); })
 		)).then( () => {
@@ -733,7 +749,11 @@ function processAPRSPacket( glider, message, islate ) {
 		// Merge into the display data structure
 		mergePoint( message, sc );
 	}
-	
+
+    // Make sure we have geo objects
+	message.ll = new LatLong( message.lat, message.lng );
+    message.geoJSON = point([message.lng,message.lat]);
+    
 	// Actually insert the point into the array
 	sc.points[glider.compno].splice(insertIndex, 0, message);
 	

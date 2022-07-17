@@ -175,7 +175,7 @@ export async function getServerSideProps(context) {
     return {
         props: { lat: location?.lt||51, lng: location?.lg||0, tzoffset: location?.tzoffset||0, tz: location?.tz||'Etc/UTC',
 				 defaultClass: classes && classes.length > 0 ? classes[0].class : '',
-				 options: cookies(context).options || { rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 0, taskUp: 1 }}
+				 options: cookies(context).options || { rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1 }}
 	};
 }
 
