@@ -294,6 +294,12 @@ async function update_pilots(data ) {
 			  .replace(/[^A-Z0-9]/gi,'')
 			  .substring(0,14);
 		
+		function gravatar(x) {
+			const y = crypto.createHash('md5').update((x+'@comps.onglide.com').replace(/\s/g, '').toLowerCase()).digest('hex');
+			console.log(y);
+			return y;
+		}
+		
 		pilotnumber = pilotnumber+1;
 		await t.query( escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
@@ -301,7 +307,7 @@ async function update_pilots(data ) {
                   VALUES ( ${classid},
                            ${pilot.Contestant}, ${''}, ${pilot.Club}, null,
                            ${pilotnumber}, '',
-                           null,
+                           ${gravatar(pilot.Contestant)},
                            ${compno},
                            'Y',
                            ${pilot.Glider},
@@ -309,7 +315,7 @@ async function update_pilots(data ) {
                            ${handicap}, 'Y', NOW() )
                   ON DUPLICATE KEY UPDATE
                            class=values(class), firstname=values(firstname), lastname=values(lastname),
-                           homeclub=values(homeclub), fai=values(fai), country=values(country),
+                           homeclub=values(homeclub), fai=values(fai), country=values(country), email=values(email),
                            participating=values(participating), handicap=values(handicap),
                            glidertype=values(glidertype), greg=values(greg), registereddt=NOW()`);
 	}

@@ -215,13 +215,21 @@ async function update_pilots(class_url,classid,classname,keys) {
         // Get nested data more easily
         const epilot = pilot._embedded['http://api.soaringspot.com/rel/pilot'][0];
 
+		function gravatar(pilot) {
+			if( pilot.email ) {
+				return crypto.createHash('md5').update(pilot.email.trim().toLowerCase()).digest('hex');
+			} else {
+				return crypto.createHash('md5').update((pilot.first_name+pilot.last_name+'@comps.onglide.com').replace(/\s/g, '').toLowerCase()).digest('hex');
+			}
+		}
+
         await t.query( escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
                            ${epilot.first_name?.substring(0,30)||''}, ${epilot.last_name?.substring(0,30)||''}, ${pilot.club?.substring(0,80)||''}, null,
                            ${epilot.civl_id?epilot.civl_id:epilot.igc_id}, ${epilot.nationality?.substring(0,2)||''},
-                           null,
+                           ${gravatar(epilot)},
                            ${pilot.contestant_number.substring(0,4)},
                            ${pilot.not_competing?'N':'Y'},
                            ${pilot.aircraft_model.substring(0,30)||''},
@@ -229,7 +237,7 @@ async function update_pilots(class_url,classid,classname,keys) {
                            ${pilot.handicap}, 'Y', NOW() )
                   ON DUPLICATE KEY UPDATE
                            class=values(class), firstname=values(firstname), lastname=values(lastname),
-                           homeclub=values(homeclub), fai=values(fai), country=values(country),
+                           homeclub=values(homeclub), fai=values(fai), country=values(country), email=values(email),
                            participating=values(participating), handicap=values(handicap),
                            glidertype=values(glidertype), greg=values(greg), registereddt=NOW()`);
 

@@ -20,7 +20,9 @@ export default async function taskHandler( req, res) {
                     ELSE UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',start))-(SELECT tzoffset FROM competition)
                END utcstart, start, finish, duration,
 		       pilots.class, forcetp,
-	            concat(firstname,' ',lastname) name, glidertype, handicap, image, daypoints, dayrank, country,
+	            concat(firstname,' ',lastname) name, glidertype, handicap, daypoints, dayrank, country,
+          CASE 
+            WHEN image != 'Y' THEN email ELSE 'Y' END image,
 
           CASE
 			WHEN participating = 'N' THEN "H/C"
