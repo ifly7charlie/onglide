@@ -277,15 +277,13 @@ CREATE TABLE `pilots` (
 
 DROP TABLE IF EXISTS `scoringsource`;
 CREATE TABLE `scoringsource` (
-  `type` enum('soaringspotkey','soaringspotscrape','rst') DEFAULT 'soaringspotkey',
+  `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','grandprix') DEFAULT 'soaringspotkey',
   `url` text,
   `client_id` char(120) DEFAULT NULL,
   `secret` char(120) DEFAULT NULL,
   `contest_name` char(120) DEFAULT NULL,
   `overwrite` int(11) DEFAULT '0',
-  `actuals` int(11) DEFAULT '1',
-  `portoffset` int(11) DEFAULT '0',
-  `domain` text
+  `actuals` int(11) DEFAULT '1'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
@@ -376,7 +374,7 @@ CREATE TABLE `trackerhistory` (
   `flarmid` char(10) DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes') DEFAULT 'none'
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix') DEFAULT 'none'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
