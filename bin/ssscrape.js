@@ -73,16 +73,55 @@ async function main() {
 
 	// Now get data from soaringspot
     ssscrape();
+	roboControl();
 
     console.log( "Background download from soaring spot enabled" );
     setInterval( function() {
         ssscrape();
     }, 5*60*1000 );
+    setInterval( function() {
+        roboControl();
+    }, 3*60*60*1000 );
 }
 
 
 main()
     .then("exiting");
+
+async function roboControl() {
+	// Allow the use of environment variables to configure the soaring spot endpoint
+	// rather than it being in the database
+	let robocontrol_url = null;
+	if( process.env.ROBOCONTROL_URL ) {
+		robocontrol_url = process.env.ROBOCONTROL_URL;
+	}
+
+	if( ! robocontrol_url ) {
+		// Get the soaring spot keys from database
+		robocontrol_url = (await mysql_db.query(escape`
+              SELECT url
+                FROM scoringsource where type='robocontrol'`))[0].url;
+	}
+
+    fetch( robocontrol_url ) 
+        .then( (res) => {
+			if( res.status != 200 ) {
+				console.log( ` ${robocontrol_url}: ${res}` );
+				return {};
+			}
+			else {
+				return res.json()
+			}})
+        .then( data => {
+			data?.forEach( (p) => {
+				if( p.flarm?.length ) {
+					console.log( `updating tracker ${p.cn} to ${p.flarm.join(',')}` );
+					mysql_db.query( escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
+					mysql_db.query( escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
+				}
+			})
+		})
+};
 
 async function ssscrape(deep = false) {
 
