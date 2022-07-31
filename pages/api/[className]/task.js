@@ -22,9 +22,9 @@ export default async function taskHandler( req, res) {
     `);
 
     if( ! contestday || ! contestday.length ) {
-	console.log( "invalid class" );
-	res.status(404).json({error: "invalid class"});
-	return;
+	    console.log( "invalid class", className, contestday );
+	    res.status(404).json({error: "invalid class"});
+	    return;
     }
 
     const datecode = contestday[0].datecode;
