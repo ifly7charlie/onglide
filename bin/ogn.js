@@ -306,8 +306,8 @@ async function updateTrackers() {
         newchannels.push(cname);
 
         // make sure the task is cached properly
-		await fetchTaskAndPilots( c.class, false );
-		
+		const [ task ] = await fetchTaskAndPilots( c.class, false );
+
 		// Make sure we have an entry for the scoring and do a dummy
 		// fetch to get the task prepped and merge the scoring data into the
 		// trackers array
@@ -352,7 +352,9 @@ async function updateTrackers() {
             }
 			cscores.trackers[compno].firstOldPoint = cscores.points[compno]?.length;
             try {
-			    await scorePilot( c.class, compno, cscores );
+				if( task ) {
+					await scorePilot( c.class, compno, cscores );
+				}
             } catch(e) {
                 console.log( `unable to scorePilot ${c.class}: ${compno}, ${e}` );
             }
@@ -629,12 +631,13 @@ async function sendScores() {
 		Promise.allSettled( _map( scores.trackers, (tracker) =>
 			new Promise((resolve) => {
 				try {
-					scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 );
+					scorePilot( className, tracker.compno, scores, tracker.outOfOrder > 5 ).then( () => resolve() )
 				} catch(e) {
                     console.log( `exception scoring ${className}, ${tracker.compno} [FULL:${tracker.outOfOrder > 5}]` );
 					console.warn( className, tracker.compno, 'Unable to score', e);
+					resolve(); 
 				}
-				resolve(); })
+			})
 		)).then( () => {
 						   
 			// Make a copy that we can tweak
