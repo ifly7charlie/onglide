@@ -9,30 +9,28 @@ import {ISSocket} from 'js-aprs-is';
 import {aprsParser} from 'js-aprs-fap';
 
 // Helper function
-import distance from '@turf/distance';
+//import distance from '@turf/distance';
 import {point} from '@turf/helpers';
-import LatLong from '../lib/flightprocessing/LatLong.js';
+//import LatLong from '../lib/flightprocessing/LatLong.js';
 
 // And the Websocket
 import {WebSocket, WebSocketServer} from 'ws';
-
-// And status display
-import * as http from 'node:http';
-import tx2 from 'tx2';
 
 import * as protobuf from 'protobufjs/light.js';
 import {OnglideWebSocketMessage} from '../lib/onglide-protobuf.js';
 
 // Helper
-import fetch from 'node-fetch';
 const fetcher = (url) => fetch(url).then((res) => res.json());
+
+import {setTimeout} from 'timers/promises';
 
 // DB access
 //const db from '../db')
 import escape from 'sql-template-strings';
-import * as mysql from 'serverless-mysql';
+import mysql from 'serverless-mysql';
 
 import {mergePoint, DeckData} from '../lib/flightprocessing/incremental';
+import {calculateTask} from '../lib/flightprocessing/taskhelper';
 
 // Message passed from the AprsContest Listener
 import {PositionMessage} from '../lib/webworkers/positionmessage';
@@ -68,9 +66,9 @@ import {getElevationOffset, getCacheSize} from '../lib/getelevationoffset';
 // handle unkownn gliders
 import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding.js';
 
-import {setSiteTz} from '../lib/flightprocessing/timehelper.js';
+import {setSiteTz, getSiteTz} from '../lib/flightprocessing/timehelper.js';
 
-import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno} from '../lib/types';
+import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, Task} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
 // Where is the comp based
@@ -201,8 +199,9 @@ async function main() {
     unknownChannel = new BroadcastChannel('Unknown_' + internalName);
     unknownChannel.onmessage = (ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(ev.data);
 
-    await updateClasses();
     await updateTrackers();
+    await updateClasses();
+
     //    await sendScores();
 
     // And start our websocket server
@@ -280,6 +279,8 @@ async function main() {
             console.log(e);
         }
     }, 1 * 20 * 1000 + 10000 * Math.random());
+
+    await setTimeout(10000000);
 }
 
 main().then(() => console.log('exiting'));
@@ -323,14 +324,75 @@ async function updateClasses() {
             // channel to simplify things
             channel.broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => processAprsMessage(c.class, channel, ev.data);
         }
-    }
 
-    // replace (do we need to close the old ones?)
-    channels = newchannels;
+        // And configure scoring for it as well
+        if (!channel.scoring) {
+            channel.scoring = new ScoringController({className: c.class});
+            await getInitialTrackPoints(channel);
+            const task = await updateTasks(c.class);
+            if (task) {
+                channel.scoring.setTask(task);
+            }
+        }
+
+        // replace (do we need to close the old ones?)
+        channels = newchannels;
+    }
 }
 
-async function updateTasks() {
-    /*
+async function updateTasks(className: ClassName): Promise<Task | void> {
+    // Get the details for the task
+    const taskdetails = ((await db.query(escape`
+         SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped,
+               CASE WHEN nostart ='00:00:00' THEN 0
+                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',nostart))-(SELECT tzoffset FROM competition)
+               END nostartutc
+          FROM tasks, compstatus cs, classes c
+          WHERE tasks.datecode= cs.datecode and tasks.class = cs.class AND c.class = cs.class
+             AND tasks.class= ${className} and tasks.flown='Y'
+    `)) || {})[0];
+
+    if (!taskdetails || !taskdetails.type) {
+        console.log(`${className}: no active task`, taskdetails);
+        return;
+    }
+
+    const taskid = taskdetails.taskid;
+
+    const tasklegs = await db.query(escape`
+      SELECT taskleg.*, nname name
+        FROM taskleg
+       WHERE taskleg.taskid = ${taskid}
+      ORDER BY legno
+    `);
+
+    if (tasklegs.length < 2) {
+        console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
+        return null;
+    }
+
+    // These are invalid
+    delete taskdetails.hdistance;
+    delete taskdetails.distance;
+    delete taskdetails.maxmarkingdistance;
+
+    let task = {
+        rules: {
+            grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
+            nostartutc: taskdetails.nostartutc,
+            aat: taskdetails.type == 'A',
+            dh: taskdetails.type == 'D',
+            handicapped: taskdetails.handicapped == 'Y'
+        },
+        details: taskdetails,
+        legs: tasklegs
+    };
+
+    calculateTask(task);
+    return task;
+}
+
+/*
         // make sure the task is cached properly
         const [task] = await fetchTaskAndPilots(c.class, false);
 
@@ -393,16 +455,13 @@ async function updateTasks() {
         // And fully regenerate the GeoJSONs so they include any late points
         await generatePilotTracks(cscores, tOffset);
         sendPilotTracks(cname, cscores.deck); */
-}
 
 async function updateTrackers() {
     // Now get the trackers
-    const cTrackers = await db.query(
-        'select p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, ' +
-            ' p.class className ' +
-            ' from pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join compstatus c on c.class=p.class ' +
-            '   where p.class = c.class'
-    );
+    const cTrackers = await db.query(`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate,
+                                             p.class className
+                                        FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join compstatus c on c.class=p.class
+                                      WHERE p.class = c.class`);
 
     // Now go through all the gliders and make sure we have linked them
     cTrackers.forEach((t) => {
@@ -552,23 +611,25 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
         (result, glider, compno) => {
             if (glider.className == className) {
                 const p = glider.deck;
-                const start = p.recentIndices[0];
-                const end = p.recentIndices[1];
-                const length = end - start;
-                const segments = new Uint32Array([0, length]);
-                if (length) {
-                    result[compno] = {
-                        compno: compno,
-                        positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
-                        indices: new Uint8Array(segments.buffer),
-                        t: new Uint8Array(p.t.buffer, start * 4, length * 4),
-                        climbRate: new Uint8Array(p.climbRate.buffer, start, length),
-                        recentIndices: new Uint8Array(segments.buffer),
-                        agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
-                        posIndex: length,
-                        partial: true,
-                        segmentIndex: 1
-                    };
+                if (p) {
+                    const start = p.recentIndices[0];
+                    const end = p.recentIndices[1];
+                    const length = end - start;
+                    const segments = new Uint32Array([0, length]);
+                    if (length) {
+                        result[compno] = {
+                            compno: compno,
+                            positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
+                            indices: new Uint8Array(segments.buffer),
+                            t: new Uint8Array(p.t.buffer, start * 4, length * 4),
+                            climbRate: new Uint8Array(p.climbRate.buffer, start, length),
+                            recentIndices: new Uint8Array(segments.buffer),
+                            agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                            posIndex: length,
+                            partial: true,
+                            segmentIndex: 1
+                        };
+                    }
                 }
             }
             return result;
@@ -718,15 +779,15 @@ async function sendScores() {
 async function getInitialTrackPoints(channel: Channel): Promise<void> {
     //
     // Now we will fetch the points for the pilots
-    const rawpoints: PositionMessage[] =
-        await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
+    const rawpoints: PositionMessage[] = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
                                               FROM trackpoints
-                                             WHERE datecode=${channel.datecode} AND class=${channel.className}
+                                             WHERE datecode=${channel.datecode} AND class=${channel.className} AND compno='81'
                                              ORDER BY t ASC`);
 
     const groupedPoints: Record<Compno, PositionMessage[]> = _groupby(rawpoints, 'c');
 
     for (const compno in groupedPoints) {
+        console.log(compno);
         // Find the glider
         const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
 
@@ -829,9 +890,7 @@ function identifyUnknownGlider(data: PositionMessage): void {
 
         // If it's another match for somebody we have matched then ignore it
         if (match.dbTrackerId != flarmId && match.dbTrackerId != 'unknown') {
-            unknownTrackers[
-                flarmId
-            ].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
+            unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
             console.log(unknownTrackers[flarmId].message);
             match.duplicate = 1;
             return;
@@ -854,9 +913,7 @@ function identifyUnknownGlider(data: PositionMessage): void {
                     escape`UPDATE tracker SET trackerid = ${flarmId} WHERE
                                       compno = ${match.compno} AND class = ${match.className} AND trackerid="unknown" limit 1`
                 )
-                .query(
-                    escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), ${flarmId}, now(), "ognddb" )`
-                )
+                .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), ${flarmId}, now(), "ognddb" )`)
                 .commit();
         }
     }

@@ -43,6 +43,7 @@ export interface PositionMessage {
     f?: string; // sender & id receiver
     v?: string; // vario string
     l?: boolean | null; // is late
+    _?: boolean; // live
 }
 
 // Base class for things that are timestamped
@@ -50,34 +51,52 @@ export interface TimeStampType {
     t: Epoch;
 }
 
-export interface task {
+// A leg in the task
+export interface TaskLeg {
+    type: 'line' | 'sector';
+    legno: number;
+
+    // Center
+    nlat: number;
+    nlng: number;
+
+    length: DistanceKM;
+
+    r1: DistanceKM;
+    r2: DistanceKM;
+
+    a12: Bearing;
+    a1: Bearing;
+    a2: Bearing;
+
+    direction: 'symmetrical' | 'np' | 'pp' | 'fixed';
+
+    maxR?: DistanceKM;
+    geoJSON?: any; // geoJSON for the sector
+    lineString?: any;
+    point?: any; // coordiantes of center geoJSON style
+    quickSector?: boolean; // are we simple or not?
+}
+
+// The task from the DB and decorated
+export interface Task {
     rules: {
         grandprixstart: boolean;
         nostartutc: Epoch;
         aat?: boolean; // capture points
         dh?: boolean; // distance handicap
+
+        handicapped?: boolean;
     };
 
-    legs: {
-        type: 'line' | 'sector';
-        length: DistanceKM;
+    details: any;
 
-        r1: DistanceKM;
-        r2: DistanceKM;
-
-        a12: Bearing;
-        a1: Bearing;
-        a2: Bearing;
-
-        direction: 'symmetrical' | 'np' | 'pp' | 'fixed';
-
-        geoJSON: any; // geoJSON for the sector
-        quickSector: boolean; // are we simple or not?
-    }[];
+    legs: TaskLeg[];
 }
 
 export enum EstimatedTurnType {
-    dogleg
+    none = 'none',
+    dogleg = 'dogleg'
 }
 
 export interface TaskStatus extends TimeStampType {
@@ -85,13 +104,25 @@ export interface TaskStatus extends TimeStampType {
     utcFinish: Epoch | null;
     startFound: boolean; // time for start has passed in the track
     startConfirmed: boolean; // been close to a turnpoint as well
+    currentLeg: number; // what leg are we on
+
+    //
+    inSector?: boolean;
+    inPenalty?: boolean;
+    distanceRemaining?: DistanceKM;
+    closestToNext?: DistanceKM;
+
+    //
+    pointsProcessed: number;
 
     legs?: {
+        legno: number;
         // If we are an AAT then we need to track the points (task.rules.aat controls this)
         points?: PositionMessage[];
         penaltyPoints?: PositionMessage[];
 
         entryTimeStamp?: Epoch;
+        exitTimeStamp?: Epoch;
         penaltyTimeStamp?: Epoch;
         altitude?: AltitudeAMSL;
 

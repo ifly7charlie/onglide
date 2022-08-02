@@ -23,6 +23,8 @@ import {bindChannelForInOrderPackets, InOrderGeneratorFunction} from './inorderg
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
 
+import {cloneDeep as _clonedeep} from 'lodash';
+
 // Downsample something with a timestamp
 import {everySoOftenGenerator} from './everysooftengenerator';
 
@@ -71,6 +73,7 @@ export class ScoringController {
 
     // Load these points into scoring
     setInitialTrack(compno: Compno, points: PositionMessage[]) {
+        console.log(`setInitialTrack(${compno}) -> ${points.length} points`);
         this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, compno: compno, points: points});
     }
 
@@ -160,7 +163,7 @@ function spawnScoringContestListener(config: ScoringConfig): Worker {
 }
 
 if (!isMainThread) {
-    console.log('Started Scoring:${config.className} worker thread');
+    console.log(`Started Scoring  worker thread`);
 
     // The parent can post a few different messages to us
     //
@@ -176,16 +179,22 @@ if (!isMainThread) {
         // Load data for specific tracker and add it to the list
         // of gliders to track
         if (task.action == ScoringCommandEnum.initialTrack) {
+            if (Object.keys(gliders).length > 0) {
+                return;
+            }
+            const itTask: ScoringCommandTrack = task;
+            console.log(`${task.className} - ${task.compno}: initial track ${itTask.points.length} points`);
             gliders[makeClassname_Compno(task)] = {
                 className: task.className,
                 compno: task.compno,
-                inorder: bindChannelForInOrderPackets(makeClassname_Compno(task), task.initialPoints),
+                inorder: bindChannelForInOrderPackets(makeClassname_Compno(task), itTask.points),
                 scoring: null
             };
         }
 
         // Actually start scoring the task, will score all the gliders we have tracks for
         if (task.action == ScoringCommandEnum.newtask) {
+            startScoring({className: task.className}, task.task);
         }
     });
 }
@@ -193,6 +202,9 @@ if (!isMainThread) {
 //
 // Connect to the APRS Server
 function startScoring(config: ScoringConfig, task: any) {
+    console.log(`${config.className} -/ newTask ${task.details.taskid}/${task.details.task}: ${task.legs.map((l) => l.name).join(',')}...`);
+    console.log(`${config.className} -> gliders: ${Object.keys(gliders).join(',')}`);
+
     // Loop through all of them
     for (const cncn in gliders) {
         const glider = gliders[cncn];
@@ -209,13 +221,21 @@ function startScoring(config: ScoringConfig, task: any) {
 // Setup the pipeworks for the pilot, this does not reset any
 // received APRS messages
 async function scorePilot(glider: GliderState, task: any) {
-    if (task.rules.aat) {
-    } else {
-        const tpg = taskPositionGenerator(task, glider.inorder, console.log);
-        const esog = everySoOftenGenerator(30 as Epoch, tpg);
+    console.log('setuppilot, glider', task);
+    //    if (task.rules.aat) {
+    //    } else {
+    const tpg = taskPositionGenerator(task, glider.inorder, console.log);
+    const esog = everySoOftenGenerator(30 as Epoch, tpg);
 
-        for (const output in esog) {
-            console.log(output);
-        }
+    const start = process.hrtime();
+
+    for (const output of esog) {
+        let temp: any = _clonedeep(output);
+        temp.legs = output.legs.map((l) => {
+            return {...l, points: l?.points?.length, penaltyPoints: l.penaltyPoints?.length};
+        });
+        console.log('->', JSON.stringify(temp, null, 2));
     }
+    console.log('-> done iterate', process.hrtime(start));
+    //    }
 }

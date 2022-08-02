@@ -17,16 +17,22 @@ export const everySoOftenGenerator = function* <Type extends TimeStampType>(inte
     //
     // How far through are we
     let lastTime: Epoch = 0 as Epoch;
+    let lastItem: Type | null = null;
 
     // Loop till we are told to stop
-    for (const item of input) {
+    for (let current = input.next(); !current.done && current.value; current = input.next()) {
+        const item = current.value;
         if (item.t - lastTime > interval) {
             yield item;
-            lastTime = item.t;
+            lastItem = null; // it's been sent so don't output twice if it's the last item
+            lastTime = item.t; // and this is our list interval
+        } else {
+            lastItem = item;
         }
     }
-    //    };
 
-    return;
-    //    return soOftenGenerator;
+    // Make sure we don't drop the last item
+    if (lastItem) {
+        yield lastItem;
+    }
 };
