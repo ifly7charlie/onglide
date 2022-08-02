@@ -31,24 +31,26 @@ export type Datecode = string & As<'Datecode'>;
 
 export type FlarmID = string & As<'FlarmID'>;
 
-export interface PositionMessage {
-    c: Compno | FlarmID; // compno
-    lat: number; // location
+// Base class for things that are timestamped
+export interface TimeStampType {
+    t: Epoch;
+}
+
+export interface BasePositionMessage extends TimeStampType {
+    lat: number;
     lng: number;
+}
+
+export interface PositionMessage extends BasePositionMessage {
+    c: Compno | FlarmID; // compno
     a: AltitudeAMSL; // altitude
     g: AltitudeAgl; // agl
-    t: Epoch; // timestamp
     b?: Bearing; // course
     s?: Speed; // speed
     f?: string; // sender & id receiver
     v?: string; // vario string
     l?: boolean | null; // is late
     _?: boolean; // live
-}
-
-// Base class for things that are timestamped
-export interface TimeStampType {
-    t: Epoch;
 }
 
 // A leg in the task
@@ -99,6 +101,7 @@ export enum EstimatedTurnType {
     dogleg = 'dogleg'
 }
 
+export type TaskStatusGenerator = Generator<TaskStatus, void, void>;
 export interface TaskStatus extends TimeStampType {
     utcStart: Epoch | null;
     utcFinish: Epoch | null;
@@ -118,8 +121,8 @@ export interface TaskStatus extends TimeStampType {
     legs?: {
         legno: number;
         // If we are an AAT then we need to track the points (task.rules.aat controls this)
-        points?: PositionMessage[];
-        penaltyPoints?: PositionMessage[];
+        points?: BasePositionMessage[];
+        penaltyPoints?: BasePositionMessage[];
 
         entryTimeStamp?: Epoch;
         exitTimeStamp?: Epoch;
@@ -129,3 +132,6 @@ export interface TaskStatus extends TimeStampType {
         estimatedTurn?: EstimatedTurnType;
     }[];
 }
+
+export type TaskScoresGenerator = Generator<TaskScores, void, void>;
+export interface TaskScores extends TaskStatus {}

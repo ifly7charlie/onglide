@@ -16,7 +16,7 @@ import distance from '@turf/distance';
 
 import {cloneDeep as _clonedeep} from 'lodash';
 
-import {checkIsInTP, checkIsInStartSector, calculateTask} from '../flightprocessing/taskhelper';
+import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper';
 
 export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => Generator<TaskStatus, void, void>;
 
@@ -69,7 +69,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
         }
         return;
     }
-*/
+    */
 
     // state for the search
     let inStartSector = false;
@@ -158,6 +158,9 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 // If we are in the start sector this is now wrong
                 status.utcStart = undefined;
                 status.startFound = false;
+                if (task.rules.aat) {
+                    status.legs[0].points = [];
+                }
             }
             // We have left the start sector, remember we are going forward in time
             // we will advance but the start is not confirmed until we get
@@ -166,6 +169,9 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 status.startFound = true;
                 wasInStartSector = false;
                 status.currentLeg = 1;
+                if (task.rules.aat) {
+                    status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng}];
+                }
                 if (point._) yield status;
                 continue;
             }
@@ -333,12 +339,9 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 //
                 if (task.rules.aat) {
                     legStatus.points.push({
-                        c: '' as Compno,
                         t: possibleAdvance.estimatedTurnTime,
                         lat: possibleAdvance.nearestSectorPoint.geometry.coordinates[1],
-                        lng: possibleAdvance.nearestSectorPoint.geometry.coordinates[0],
-                        a: 0 as AltitudeAMSL,
-                        g: 0 as AltitudeAgl
+                        lng: possibleAdvance.nearestSectorPoint.geometry.coordinates[0]
                     });
                 }
                 legStatus.entryTimeStamp = possibleAdvance.estimatedTurnTime;
