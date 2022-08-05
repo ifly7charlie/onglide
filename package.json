@@ -6,7 +6,9 @@
     "author": "Melissa Jenkins",
     "license": "BSD",
     "scripts": {
-        "build": "tsc --composite false --noEmit false",
+        "build": "yarn build:protobuf && yarn build:tsc",
+        "build:tsc": "tsc --composite false --noEmit false",
+        "build:protobuf": "protoc --plugin=node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=. ./lib/protobuf/onglide.proto",
         "soaringspot": "bin/soaringspot.js",
         "ssscrape": "bin/ssscrape.js",
         "rst": "bin/rst.js",
@@ -86,6 +88,7 @@
         "@types/node": "^18.6.0",
         "@types/react": "^18.0.15",
         "prettier": "^2.7.1",
+        "ts-proto": "^1.121.1",
         "tsc-watch": "^5.0.3",
         "typescript": "^4.7.4"
     }

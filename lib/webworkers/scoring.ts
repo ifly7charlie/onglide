@@ -14,11 +14,12 @@
 // Import the APRS server
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno, FlarmID, Bearing, Speed} from '../types';
+import {Epoch, TaskStatus, ClassName_Compno, makeClassname_Compno, ClassName, Compno, FlarmID, Bearing, Speed} from '../types';
 
 import {Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
 import {bindChannelForInOrderPackets, InOrderGeneratorFunction} from './inordergenerator';
+import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
@@ -205,15 +206,19 @@ function startScoring(config: ScoringConfig, task: any) {
     console.log(`${config.className} -/ newTask ${task.details.taskid}/${task.details.task}: ${task.legs.map((l) => l.name).join(',')}...`);
     console.log(`${config.className} -> gliders: ${Object.keys(gliders).join(',')}`);
 
-    // Loop through all of them
-    for (const cncn in gliders) {
-        const glider = gliders[cncn];
+    try {
+        // Loop through all of them
+        for (const cncn in gliders) {
+            const glider = gliders[cncn];
 
-        if (glider.scoring) {
-            //			glider.scoring.stop();
+            if (glider.scoring) {
+                //			glider.scoring.stop();
+            }
+
+            scorePilot(glider, task);
         }
-
-        scorePilot(glider, task);
+    } catch (e) {
+        console.log(e);
     }
 }
 
@@ -225,17 +230,32 @@ async function scorePilot(glider: GliderState, task: any) {
     //    if (task.rules.aat) {
     //    } else {
     const tpg = taskPositionGenerator(task, glider.inorder, console.log);
-    const esog = everySoOftenGenerator(30 as Epoch, tpg);
+    const aat = assignedAreaScoringGenerator(task, tpg, console.log);
+
+    //    const esog = everySoOftenGenerator(30 as Epoch, tpg);
 
     const start = process.hrtime();
 
-    for (const output of esog) {
-        let temp: any = _clonedeep(output);
-        temp.legs = output.legs.map((l) => {
-            return {...l, points: l?.points?.length, penaltyPoints: l.penaltyPoints?.length};
-        });
-        console.log('->', JSON.stringify(temp, null, 2));
+    try {
+        for (const output of aat) {
+            let temp: any = _clonedeep(output);
+
+            //        let x: TaskStatus = temp;
+            //        throw new Error('aat out:' + typeof output.legs + ',' + JSON.stringify(output.legs[0]));
+            temp.legs = output.legs.map((l) => {
+                if (l) {
+                    return {...l, points: l?.points?.length, penaltyPoints: l.penaltyPoints?.length};
+                }
+            });
+            if (output) {
+                console.log(output.t, '->', JSON.stringify(temp, null, 2));
+            } else {
+                console.log('wtf');
+            }
+        }
+        console.log('-> done iterate', process.hrtime(start));
+    } catch (e) {
+        console.log('oops!', e);
     }
-    console.log('-> done iterate', process.hrtime(start));
     //    }
 }

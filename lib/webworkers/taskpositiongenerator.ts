@@ -5,10 +5,9 @@
  *
  */
 
-import {Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, EstimatedTurnType, Task} from '../types';
+import {Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task} from '../types';
 
 import {InOrderGeneratorFunction} from './inordergenerator';
-import {PositionMessage} from './positionmessage';
 
 import {Point, Feature, lineString, point as turfPoint} from '@turf/helpers';
 import length from '@turf/length';
@@ -19,6 +18,10 @@ import {cloneDeep as _clonedeep} from 'lodash';
 import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper';
 
 export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => Generator<TaskStatus, void, void>;
+
+function simplifyPoint(point: PositionMessage): BasePositionMessage {
+    return {t: point.t, lat: point.lat, lng: point.lng};
+}
 
 //
 // Get a generator to calculate task status
@@ -38,6 +41,8 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
         startConfirmed: false,
         currentLeg: 0,
         closestToNext: Infinity as DistanceKM,
+        inSector: false,
+        inPenalty: false,
         pointsProcessed: 0,
         legs: task.legs.map((l) => {
             return {legno: l.legno, points: [], penaltyPoints: []};
@@ -123,7 +128,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
 
         // Keep track of where we are
         previousPoint = point;
-        point = current.value;
+        point = status.lastProcessedPoint = current.value;
 
         // For distance calculations
         point.geoJSON = turfPoint([point.lng, point.lat]);
@@ -131,6 +136,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
         // What time have we scored to
         status.t = point.t;
         status.pointsProcessed++;
+        status.lastProcessedPoint = simplifyPoint(point);
 
         // Helper
         let legStatus = status.legs[status.currentLeg];
@@ -149,6 +155,10 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 } else {
                     status.startFound = true;
                     status.startConfirmed = true;
+                    if (task.rules.aat) {
+                        status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng}];
+                    }
+                    status.legs[0].exitTimeStamp = point.t;
                 }
             }
             // normal tasks require some form of sector entry/exit
@@ -161,6 +171,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 if (task.rules.aat) {
                     status.legs[0].points = [];
                 }
+                delete status.legs[0].exitTimeStamp;
             }
             // We have left the start sector, remember we are going forward in time
             // we will advance but the start is not confirmed until we get
@@ -172,6 +183,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 if (task.rules.aat) {
                     status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng}];
                 }
+                status.legs[0].exitTimeStamp = point.t;
                 if (point._) yield status;
                 continue;
             }
@@ -201,18 +213,14 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
         const [inSector, inPenalty, distanceRemaining]: [boolean, boolean, DistanceKM] = checkIsInTP(tp, point, nearestSectorPoint);
         status.inPenalty = inPenalty;
         status.inSector = inSector;
-        status.distanceRemaining = (Math.round(distanceRemaining * 10) / 10) as DistanceKM;
 
         // If this point is closer to the sector than the last one then save it away so we can
         // check for doglegs
         if (!inSector && !inPenalty && distanceRemaining < status.closestToNext) {
             status.closestToNext = (Math.round(distanceRemaining * 10) / 10) as DistanceKM;
-            try {
-                nearestSectorPoint.properties.t = point.t;
-                closestSectorPoint = _clonedeep(nearestSectorPoint);
-            } catch (e) {
-                throw new Error(JSON.stringify(nearestSectorPoint) + ',' + inSector + ',' + inPenalty + ',' + distanceRemaining);
-            }
+            status.closestToNextSectorPoint = simplifyPoint(point);
+            nearestSectorPoint.properties.t = point.t;
+            closestSectorPoint = _clonedeep(nearestSectorPoint);
         }
 
         // Check for the finish, if it is then only one point counts and we can stop tracking
@@ -222,8 +230,10 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 status.utcFinish = point.t;
                 legStatus.entryTimeStamp = point.t;
                 legStatus.altitude = point.a;
-                legStatus.points.push(point);
+                //                legStatus.points.push(simplifyPoint(point));
+                legStatus.points = [{t: point.t, lat: tp.nlat, lng: tp.nlng}];
                 status.closestToNext = Infinity as DistanceKM;
+                delete status.closestToNextSectorPoint;
                 // we are done scoring at this point so we can close the iterator and
                 // return the status
                 yield status;
@@ -238,7 +248,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
         // If we have a point in the sector then we should advance on this
         if (inSector) {
             if (task.rules.aat) {
-                legStatus.points.push(point);
+                legStatus.points.push(simplifyPoint(point));
                 legStatus.penaltyPoints = [];
             }
             if (!legStatus.entryTimeStamp) {
@@ -249,6 +259,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
             }
             legStatus.exitTimeStamp = point.t;
             status.closestToNext = Infinity as DistanceKM;
+            delete status.closestToNextSectorPoint;
         }
 
         // If we have a point in the penalty sector and we don't yet/or ever
@@ -256,12 +267,13 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
         else if (inPenalty) {
             if (!legStatus.entryTimeStamp) {
                 if (task.rules.aat && !legStatus.points.length) {
-                    legStatus.penaltyPoints.push(point);
+                    legStatus.penaltyPoints.push(simplifyPoint(point));
                 }
                 if (!legStatus.penaltyTimeStamp) {
                     legStatus.altitude = point.a;
                     legStatus.penaltyTimeStamp = point.t;
                 }
+                legStatus.exitTimeStamp = point.t;
             }
         }
 
@@ -271,9 +283,10 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
             // Make sure we have actually left the sector and passed a small distance from the TP before
             // assuming advance. AAT is longer otherwise a brief pop out will ignore points after
             // however need to cope with short legs (control points for example)
-            if (!status.inSector && !status.inPenalty && status.distanceRemaining > Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, task.rules.aat ? 10 : 2)) {
+            if (!status.inSector && !status.inPenalty && distanceRemaining > Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, task.rules.aat ? 10 : 2)) {
                 status.currentLeg++;
                 status.closestToNext = Infinity as DistanceKM;
+                delete status.closestToNextSectorPoint;
             }
         }
 
@@ -316,7 +329,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                     if (neededSpeed < possibleSpeed) {
                         log(`* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` + ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`);
                         possibleAdvance = {
-                            nearestSectorPoint: closestSectorPoint,
+                            nearestSectorPoint: _clonedeep(closestSectorPoint),
                             estimatedTurnTime: Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch,
                             rewindTo: point.t
                         };
@@ -344,7 +357,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                         lng: possibleAdvance.nearestSectorPoint.geometry.coordinates[0]
                     });
                 }
-                legStatus.entryTimeStamp = possibleAdvance.estimatedTurnTime;
+                legStatus.exitTimeStamp = legStatus.entryTimeStamp = possibleAdvance.estimatedTurnTime;
                 legStatus.estimatedTurn = EstimatedTurnType.dogleg;
                 legStatus.altitude = point.a;
                 possibleAdvance = null;

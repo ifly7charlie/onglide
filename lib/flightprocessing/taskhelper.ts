@@ -8,7 +8,7 @@ import distance from '@turf/distance';
 
 import {lineString, point as turfPoint} from '@turf/helpers';
 
-import {DistanceKM, As, Task, TaskLeg, Bearing} from '../types';
+import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage} from '../types';
 
 let hit = 0;
 let miss = 0;
@@ -28,13 +28,18 @@ export function calculateTask(task: Task) {
     }
 }
 
-// Between LEGS, less finish ring!
+// Between LEGS, less finish/start rings!
 export function calculateTaskLength(legs: TaskLeg[]): DistanceKM {
-    // If it is the last point then we need to reduce it by the radius of the finish ring
-    const last = legs.length - 1;
-    if (legs[last].type == 'sector' && legs[last].a1 == 180) {
-        console.log('adjusting length');
-        legs[last].length = (legs[last].length - legs[last].r1) as DistanceKM;
+    const first = legs[legs.length - 1];
+    if (first.type == 'sector' && first.a1 == 180) {
+        first.legDistanceAdjust = first.r1;
+        first.length = (first.length - first.legDistanceAdjust) as DistanceKM;
+    }
+
+    const last = legs[legs.length - 1];
+    if (last.type == 'sector' && last.a1 == 180) {
+        last.legDistanceAdjust = last.r1;
+        last.length = (last.length - last.legDistanceAdjust) as DistanceKM;
     }
 
     // Return the length of the task
@@ -359,4 +364,30 @@ export function calcHandicap(dist, leg, handicap) {
 export function stats() {
     console.log(`in tp cache ratio ${((100 * hit) / miss).toFixed(1)}%}`);
     hit = miss = 0;
+}
+
+//  * (C) 2002-2005 Chris Veness, www.movable-type.co.uk (From LatLong.js)
+/*
+ * Calculate distance (in km) between two points specified by latitude/longitude with Haversine formula
+ *
+ * from: Haversine formula - R. W. Sinnott, "Virtues of the Haversine",
+ *       Sky and Telescope, vol 68, no 2, 1984
+ *       http://www.census.gov/cgi-bin/geo/gisfaq?Q5.1
+ */
+const d2r = Math.PI / 180;
+export function distHaversine(p1: BasePositionMessage, p2: BasePositionMessage): DistanceKM {
+    const p1lat = p1.lat * d2r;
+    const p2lat = p2.lat * d2r;
+    const p1long = p1.lng * d2r;
+    const p2long = p2.lng * d2r;
+
+    var R = 6371; // earth's mean radius in km
+    var dLat = p2lat - p1lat;
+    var dLong = p2long - p1long;
+
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(p1lat) * Math.cos(p2lat) * Math.sin(dLong / 2) * Math.sin(dLong / 2);
+    var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    var d = R * c;
+
+    return d as DistanceKM;
 }

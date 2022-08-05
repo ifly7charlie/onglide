@@ -25,10 +25,10 @@ import distance from '@turf/distance';
 import {Coord, point} from '@turf/helpers';
 
 // For smoothing altitudes
-import * as KalmanFilter from 'kalmanjs';
+import KalmanFilter from 'kalmanjs';
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName_Compno, makeClassname_Compno, Compno, FlarmID, Bearing, Speed} from '../types';
+import {Epoch, ClassName_Compno, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, Bearing, Speed} from '../types';
 
 // APRS connection
 let connection;
@@ -102,6 +102,7 @@ interface Aircraft {
 
 // Where is the airfield?
 let airfieldLocation: Coord;
+let airfieldElevation: AltitudeAgl;
 
 // And where to send unknown gliders close to the airfield
 let unknownChannel: BroadcastChannel;
@@ -208,6 +209,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // Save away where we are
     airfieldLocation = point([config.location.lt, config.location.lg]);
+    getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
 
     // Connect to the APRS server
     connection = new ISSocket(APRSSERVER, PORTNUMBER, 'OG', PASSCODE, FILTER);
@@ -252,11 +254,7 @@ function startAprsListener(config: AprsListenerConfig) {
         // Log and reset statistics
         const period = (Date.now() - statistics.periodStart) / 1000;
         console.log(period);
-        console.log(
-            `APRS: ${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(
-                statistics.aprsDelay / statistics.msgsReceived
-            ).toFixed(1)}s`
-        );
+        console.log(`APRS: ${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s`);
         statistics.msgsReceived = statistics.aprsDelay = 0;
         statistics.periodStart = Date.now();
 
@@ -343,7 +341,7 @@ function processPacket(packet: aprsPacket) {
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough
     if (!aircraft) {
-        if (distance(jPoint, airfieldLocation) < 200) {
+        if (distance(jPoint, airfieldLocation) < 20 && packet.altitude < airfieldElevation + 750) {
             getElevationOffset(packet.latitude, packet.longitude, withElevation);
         }
         return;
@@ -376,11 +374,7 @@ function processPacket(packet: aprsPacket) {
     // Ignore duplicates
     if (aircraft.lastTime == packet.timestamp) {
         aircraft.log(packet);
-        aircraft.log(
-            `${packet.timestamp} ${kfalt}/${altitude}\t${aircraft.compno} ** ${ognTracker} ${td}/***** from ${sender}: ${packet.altitude.toFixed(
-                0
-            )} + ${aoa} adjust :: ${packet.speed}`
-        );
+        aircraft.log(`${packet.timestamp} ${kfalt}/${altitude}\t${aircraft.compno} ** ${ognTracker} ${td}/***** from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
         return;
     }
 
@@ -391,21 +385,13 @@ function processPacket(packet: aprsPacket) {
         aircraft.lastTime = packet.timestamp;
 
         if (aircraft.lastTime - packet.timestamp > 1800) {
-            console.log(
-                `${aircraft.compno} : VERY late flarm packet received, ${
-                    (aircraft.lastTime - packet.timestamp) / 60
-                }  minutes earlier than latest packet received for the aircraft, ignoring`
-            );
+            console.log(`${aircraft.compno} : VERY late flarm packet received, ${(aircraft.lastTime - packet.timestamp) / 60}  minutes earlier than latest packet received for the aircraft, ignoring`);
             return;
         }
     }
 
     // Logging if requested
-    aircraft.log(
-        `${kfalt}/${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${
-            packet.speed
-        }`
-    );
+    aircraft.log(`${kfalt}/${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
 
     // And now use the kalman filtered altitude for everything else
     altitude = kfalt;

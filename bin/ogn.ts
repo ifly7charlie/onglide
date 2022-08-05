@@ -781,8 +781,8 @@ async function getInitialTrackPoints(channel: Channel): Promise<void> {
     // Now we will fetch the points for the pilots
     const rawpoints: PositionMessage[] = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
                                               FROM trackpoints
-                                             WHERE datecode=${channel.datecode} AND class=${channel.className} AND compno='81'
-                                             ORDER BY t ASC`);
+                                             WHERE datecode=${channel.datecode} AND class=${channel.className} AND compno='LS3'
+                                             ORDER BY t ASC LIMIT 4400`);
 
     const groupedPoints: Record<Compno, PositionMessage[]> = _groupby(rawpoints, 'c');
 

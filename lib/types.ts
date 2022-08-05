@@ -36,6 +36,11 @@ export interface TimeStampType {
     t: Epoch;
 }
 
+type ComparableCompareFunction<T> = (a: T, b: T) => number;
+
+export interface Comparable<T> {
+    compare: ComparableCompareFunction<T>;
+}
 export interface BasePositionMessage extends TimeStampType {
     lat: number;
     lng: number;
@@ -78,6 +83,7 @@ export interface TaskLeg {
     lineString?: any;
     point?: any; // coordiantes of center geoJSON style
     quickSector?: boolean; // are we simple or not?
+    legDistanceAdjust?: DistanceKM; // start/finish rings need length adjustment
 }
 
 // The task from the DB and decorated
@@ -101,6 +107,20 @@ export enum EstimatedTurnType {
     dogleg = 'dogleg'
 }
 
+export interface TaskLegStatus {
+    legno: number;
+    // If we are an AAT then we need to track the points (task.rules.aat controls this)
+    points?: BasePositionMessage[];
+    penaltyPoints?: BasePositionMessage[];
+
+    entryTimeStamp?: Epoch;
+    exitTimeStamp?: Epoch;
+    penaltyTimeStamp?: Epoch;
+    altitude?: AltitudeAMSL;
+
+    estimatedTurn?: EstimatedTurnType;
+}
+
 export type TaskStatusGenerator = Generator<TaskStatus, void, void>;
 export interface TaskStatus extends TimeStampType {
     utcStart: Epoch | null;
@@ -110,28 +130,45 @@ export interface TaskStatus extends TimeStampType {
     currentLeg: number; // what leg are we on
 
     //
-    inSector?: boolean;
-    inPenalty?: boolean;
-    distanceRemaining?: DistanceKM;
+    inSector: boolean;
+    inPenalty: boolean;
+
     closestToNext?: DistanceKM;
+    closestToNextSectorPoint?: any;
 
     //
     pointsProcessed: number;
+    legs: TaskLegStatus[];
 
-    legs?: {
-        legno: number;
-        // If we are an AAT then we need to track the points (task.rules.aat controls this)
-        points?: BasePositionMessage[];
-        penaltyPoints?: BasePositionMessage[];
-
-        entryTimeStamp?: Epoch;
-        exitTimeStamp?: Epoch;
-        penaltyTimeStamp?: Epoch;
-        altitude?: AltitudeAMSL;
-
-        estimatedTurn?: EstimatedTurnType;
-    }[];
+    //
+    lastProcessedPoint?: BasePositionMessage | PositionMessage;
 }
 
-export type TaskScoresGenerator = Generator<TaskScores, void, void>;
-export interface TaskScores extends TaskStatus {}
+// We use basically the same structure once we have determined lengths
+export interface ScoredTaskLegStatus extends TaskLegStatus {
+    //extends Omit<TaskLegStatus, //'points' | 'penaltyPoints'> {
+    point?: BasePositionMessage; // where is the turn scored to
+    distance?: DistanceKM; // how long is this leg (to previous)
+    maxPossible?: {
+        distance: DistanceKM;
+        point: BasePositionMessage;
+    };
+    minPossible?: {
+        distance?: DistanceKM;
+        point: BasePositionMessage;
+    };
+}
+
+export interface ScoredTaskDistanceStatus extends TaskStatus {
+    //Omit<TaskStatus, 'lastProcessedPoint' > {
+    legs: ScoredTaskLegStatus[];
+    distance?: DistanceKM; // flown distance
+    distanceRemaining?: DistanceKM; // how much left
+    maxTaskDistance?: DistanceKM;
+    minTaskDistance?: DistanceKM;
+}
+
+export type TaskScoresGenerator = Generator<ScoredTaskDistanceStatus, void, void>;
+
+// For serialising to the client
+export type ProtobufGenerator = Generator<Uint8Array, void, void>;
