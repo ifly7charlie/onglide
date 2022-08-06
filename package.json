@@ -7,14 +7,14 @@
     "license": "BSD",
     "scripts": {
         "build": "yarn build:protobuf && yarn build:tsc",
-        "build:tsc": "tsc --composite false --noEmit false",
+        "build:tsc": "tsc --project tsconfig-bin.json",
         "build:protobuf": "protoc --plugin=node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=. ./lib/protobuf/onglide.proto",
         "soaringspot": "bin/soaringspot.js",
         "ssscrape": "bin/ssscrape.js",
         "rst": "bin/rst.js",
         "setup": "bin/install.js",
         "ogn": "dist/bin/ogn.js",
-        "ogn:dev": "tsc-watch --composite false --incremental false --noEmit false --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/ogn.js\""
+        "ogn:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/ogn.js\""
     },
     "dependencies": {
         "@mapbox/tilebelt": ">=1.0.1",
