@@ -100,6 +100,8 @@ export const taskScoresGenerator = function* (task: Task, compno: Compno, handic
         score.actual = {
             taskDistance: item.distance
         };
+        score.utcDuration = duration;
+
         copyPick(score.actual, item, 'minPossible', 'maxPossible', 'distanceRemaining');
 
         // Calculate overall speed and remaining GR if there is a need for one

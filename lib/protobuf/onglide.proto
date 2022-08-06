@@ -128,7 +128,8 @@ message PilotScore {
     // Start/Finish details
     uint32 utcStart = 3;
     uint32 utcFinish = 4;
-	//    uint32 utcDuration = 5;
+	optional uint32 utcDuration = 5; // scored to when
+	
 	//    bool startFound = 6;
 	optional bool inSector = 7;
 	optional bool inPenalty = 8;

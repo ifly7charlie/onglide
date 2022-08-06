@@ -97,10 +97,30 @@ function OptionalDiv(props) {
     }
     return null;
 }
-function OptionalText(b, iv, e) {
+function OptionalText(b, iv, e = null) {
     const v = RoundNumber(iv);
     if (v) {
         return `${b ? b : ''}${v}${e ? e : ''}`;
+    }
+    return '';
+}
+function OptionalTime(before: string, t: Epoch, tz: TZ, after: string | null = null) {
+    if (!t) {
+        return '';
+    }
+    const v = new Date(t * 1000).toLocaleTimeString('eu', {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    if (v) {
+        return `${before || ''}${v}${after || ''}`;
+    }
+    return '';
+}
+function OptionalDuration(before: string, t: Epoch, tz: TZ, after: string | null = null) {
+    if (!t) {
+        return '';
+    }
+    const v = new Date(t * 1000).toLocaleTimeString('eu', {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    if (v) {
+        return `${before || ''}${v}${after || ''}`;
     }
     return '';
 }
@@ -139,7 +159,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
     const speed = score ? (
         <>
-            Speed:
+            Speed:&nbsp;
             {hasHandicappedResults && score.handicapped?.taskSpeed ? <>{score.handicapped.taskSpeed.toFixed(1)} kph hcap</> : null}
             {score.actual?.taskSpeed?.toFixed(1) || '-'} kph
         </>
@@ -279,11 +299,13 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     }
 
     let times = null;
-    //	if( pilot.start ) {
-    //		times = OptionalText( 'Start ',pilot.start )
-    //			+ OptionalText(' +',pilot.duration)
-    //			+ OptionalText(' Finish ',pilot.finish);
-    //	}
+    if (score?.utcStart) {
+        times = (
+            <div>
+                {OptionalTime('Start ', score.utcStart as Epoch, tz)} {OptionalDuration(' +', score.utcDuration as Epoch, tz)} {OptionalTime(' Finish ', score.utcFinish as Epoch, tz)}
+            </div>
+        );
+    }
 
     // Figure out what to show based on the db status
     let flightDetails = null;
@@ -301,6 +323,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     } else if (score.utcFinish) {
         flightDetails = (
             <div>
+                {climb}
                 {times}
                 {speed}
                 <br />
@@ -343,7 +366,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 ) : (
                     <>
                         <Icon type="exclamation" />
-                        {(vario?.max || 0) > 0 ? <>&gt;2 hours ago</> : <>No tracking yet</>}
+                        {(vario?.lat || 0) > 0 ? <>&gt;2 hours ago</> : <>No tracking yet</>}
                     </>
                 )}
             </a>

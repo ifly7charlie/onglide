@@ -1,9 +1,8 @@
-import _find from 'lodash.find';
-import _foreach from 'lodash.foreach';
+import {sortedIndex as _sortedIndex} from 'lodash';
 
 import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants';
 
-import {PositionMessage, PilotTrackData} from '../types';
+import {PositionMessage, PilotTrackData, Epoch, DeckData, VarioData} from '../types';
 import {PilotPosition} from '../protobuf/onglide';
 
 /*
@@ -29,10 +28,6 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     const compno = glider.compno;
     let lastTime: number | null = null;
 
-    //    if (glider?.utcStart && point.t < glider.utcStart) {
-    //        return;
-    //    }
-
     if (!glider.deck) {
         glider.deck = {
             compno: compno,
@@ -53,6 +48,9 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
             return;
         }
     }
+
+    // Last point we go
+    glider.t = point.t as Epoch;
 
     // Now we will work with this data
     const deck = glider.deck;
@@ -113,25 +111,90 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     deck.recentIndices[0] = recentOldest;
     deck.recentIndices[1] = deck.posIndex;
 
-    if (point.v) {
-        // Update the altitude and height AGL for the pilot
-        // Mutate the vario and altitude back into SWR
-        const cp: any = glider.vario || {};
-        if (cp) {
-            try {
-                cp.altitude = point.a;
-                cp.agl = point.g;
-                cp.lat = point.lat;
-                cp.lng = point.lng;
-                var min: number, max: number;
+    // Update the altitude and height AGL for the pilot
+    // Mutate the vario and altitude back into SWR
+    const cp: any = glider.vario || {min: Infinity, max: 0};
+    try {
+        cp.altitude = point.a;
+        cp.agl = point.g;
+        cp.lat = point.lat;
+        cp.lng = point.lng;
 
-                [cp.lossXsecond, cp.gainXsecond, cp.total, cp.average, cp.Xperiod, min, max] = point.v.split(',').map((a) => parseFloat(a));
-                cp.min = Math.min(min, cp.min);
-                cp.max = Math.max(max, cp.max);
-                if (!glider.vario) {
-                    glider.vario = cp;
-                }
-            } catch (_e) {}
+        var min: number, max: number;
+
+        if (point.v) {
+            [cp.lossXsecond, cp.gainXsecond, cp.total, cp.average, cp.Xperiod, min, max] = point.v.split(',').map((a) => parseFloat(a));
+        }
+
+        cp.min = Math.min(min || point.a, cp.min);
+        cp.max = Math.max(max || point.a, cp.max);
+        if (!glider.vario) {
+            glider.vario = cp;
+        }
+    } catch (_e) {
+        console.log(_e);
+    }
+}
+
+//
+// If the pilot has started we can prune before the startline
+export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
+    // Keep 30 seconds before start
+    if (!deck || deck.t[0] > startTime - 30) {
+        return false;
+    }
+
+    let indexRemove = _sortedIndex(deck.t, startTime - 20);
+    if (!indexRemove) {
+        return false;
+    }
+
+    // first we need to remove old segments - start with the older list as may be points in it
+    deck.recentIndices[0] = Math.max(indexRemove, deck.recentIndices[0]);
+    deck.recentIndices[1] = Math.max(indexRemove, deck.recentIndices[1]);
+
+    // now go through the segment list
+    let pruneIndex = 0;
+    for (let index = 0; index < deck.indices.length; index += 2) {
+        // If both are greater then we will discard
+        if (deck.indices[index + 1] < indexRemove) {
+            pruneIndex = index;
+            continue;
+        }
+        // If the first is then we update that
+        else if (deck.indices[index] < indexRemove) {
+            deck.indices[index] = 0;
+        } else {
+            deck.indices[index] -= indexRemove;
+            deck.indices[index + 1] -= indexRemove;
         }
     }
+
+    if (pruneIndex) {
+        deck.indices = new Uint32Array(deck.indices.buffer, pruneIndex * 2 * Uint32Array.BYTES_PER_ELEMENT);
+    }
+
+    // And prune it out
+    deck.positions = new Float32Array(deck.positions.buffer, indexRemove * 3 * Float32Array.BYTES_PER_ELEMENT);
+    deck.agl = new Int16Array(deck.agl.buffer, indexRemove * Int16Array.BYTES_PER_ELEMENT);
+    deck.t = new Uint32Array(deck.t.buffer, indexRemove * Uint32Array.BYTES_PER_ELEMENT);
+    deck.climbRate = new Int8Array(deck.climbRate.buffer, indexRemove * Int8Array.BYTES_PER_ELEMENT);
+    return true;
+}
+
+export function updateVarioFromDeck(deck: DeckData, vario: VarioData): [Epoch, VarioData] {
+    const cp: any = vario || {min: Infinity, max: 0};
+    try {
+        const lastPos = deck.t.length - 1;
+        cp.agl = deck.agl[lastPos];
+        [cp.lng, cp.lat, cp.altitude] = deck.positions.subarray(lastPos * 3);
+
+        cp.lossXsecond = cp.gainXsecond = cp.total = cp.average = cp.Xperiod = 0;
+
+        //        cp.min = Math.min(min || point.a, cp.min);
+        //      cp.max = Math.max(max || point.a, cp.max);
+    } catch (_e) {
+        console.log(_e);
+    }
+    return [deck.t[deck.t.length - 1] as Epoch, cp];
 }

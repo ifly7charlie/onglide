@@ -215,7 +215,7 @@ export interface PilotTrackData {
     compno: Compno;
     deck?: DeckData;
     vario?: VarioData;
-    lastUpdated?: Epoch;
+    t?: Epoch;
     //    colors?: Uint8Array; // deck colour picking
 }
 

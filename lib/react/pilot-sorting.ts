@@ -28,7 +28,7 @@ export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'a
 export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreData, trackData: TrackData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ) {
     //
     // Map function
-    function pilotSortKey(compno: Compno, pilotScore: PilotScore, vario: VarioData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ): ShortDisplayKeys {
+    function pilotSortKey(compno: Compno, pilotScore: PilotScore, vario: VarioData, t: Epoch, sortKey: SortKey, units: Units, now: Epoch, tz: TZ): ShortDisplayKeys {
         var newKey;
         var suffix = '';
         var displayAs = null;
@@ -38,14 +38,13 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
             return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon: 'question'};
         }
 
-        //        console.log(pilotScore);
-
         // Update delay numbers
-        const delay = now - (pilotScore.t || 0);
+        const delay = now - (t || 0);
+        //        console.log('wsStatus:', wsStatus);
 
-        let icon = delay > 300 ? 'nosignal' : 'question';
-        if (pilotScore.utcStart) {
-            if (pilotScore.utcFinish) {
+        let icon;
+        if (pilotScore?.utcStart) {
+            if (pilotScore?.utcFinish) {
                 icon = 'trophy';
             }
             //        if( pilotScore.landBack ) {
@@ -62,7 +61,16 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
             //                icon = icon + ` h${pilot.heightColour}`;
             //            }
         } else {
-            icon = 'cloud-upload';
+            icon = delay > 300 ? 'nosignal' : 'cloud-upload';
+        }
+
+        if (vario) {
+            vario.delay = delay;
+        }
+
+        //        console.log(pilotScore);
+        if (!pilotScore && sortKey != 'height' && sortKey != 'aheight' && sortKey != 'auto') {
+            return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon};
         }
 
         const remaining = (a) => Math.round((a?.distanceRemaining || a?.minPossible || 0) * 10) / 10;
@@ -78,10 +86,10 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 suffix = 'kph';
                 break;
             case 'fspeed':
-                if (pilotScore.stationary && !pilotScore.utcFinish) {
+                if (pilotScore?.stationary && !pilotScore?.utcFinish) {
                     displayAs = '-';
                 } else {
-                    newKey = pilotScore.utcStart ? remaining(pilotScore.actual) / ((pilotScore.t - pilotScore.utcStart) / 3600) : 0;
+                    newKey = pilotScore?.utcStart ? remaining(pilotScore?.actual) / ((pilotScore?.t - pilotScore?.utcStart) / 3600) : 0;
                     displayAs = Math.round(newKey * 10) / 10;
                     suffix = 'kph';
                 }
@@ -183,7 +191,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 }
                 // Before they start show altitude, sort to the end of the list
                 else */
-                if (!pilotScore.utcStart) {
+                if (!pilotScore?.utcStart) {
                     newKey = vario?.agl / 10000;
                     [displayAs, suffix] = convertHeight(vario?.agl || 0, units);
                 } else if (!vario) {
@@ -192,10 +200,10 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 }
                 // After start but be
                 else {
-                    var speed = pilotScore.handicapped?.taskSpeed || pilotScore.actual?.taskSpeed;
-                    var distance = pilotScore.handicapped?.taskDistance || pilotScore.actual?.taskDistance;
+                    var speed = pilotScore?.handicapped?.taskSpeed || pilotScore?.actual?.taskSpeed;
+                    var distance = pilotScore?.handicapped?.taskDistance || pilotScore?.actual?.taskDistance;
 
-                    if ((speed > 5 && delay < 3600) || pilotScore.utcFinish) {
+                    if ((speed > 5 && delay < 3600) || pilotScore?.utcFinish) {
                         newKey = 10000 + Math.round(speed * 10);
                         displayAs = Math.round(speed);
                         suffix = 'kph';
@@ -236,7 +244,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
     }
 
     return _sortBy(
-        _map(pilots, (pilot) => pilotSortKey(pilot.compno as Compno, pilotScores[pilot.compno], trackData[pilot.compno]?.vario, sortKey, units, now, tz)),
+        _map(pilots, (pilot) => pilotSortKey(pilot.compno as Compno, pilotScores[pilot.compno], trackData[pilot.compno]?.vario, trackData[pilot.compno]?.t, sortKey, units, now, tz)),
         ['sortKey', 'compno']
     );
 }

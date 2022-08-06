@@ -612,6 +612,7 @@ async function sendScores(channel: any, scores: Buffer) {
     // Reset for next iteration
     channel.activeGliders = {};
 }
+
 //
 // Get the intitial track points from the database and make sure everything has been
 // setup properly

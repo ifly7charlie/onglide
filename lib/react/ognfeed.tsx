@@ -16,8 +16,8 @@ import useWebSocket, {ReadyState} from 'react-use-websocket';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, chunk as _chunk} from 'lodash';
 
-import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, ClassName, PilotScoreDisplay} from '../types';
-import {mergePoint} from '../flightprocessing/incremental';
+import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
+import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
 
 import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
@@ -234,8 +234,8 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                         if (!result[compno]) {
                             result[compno] = {compno: compno};
                         }
-                        result[compno].deck = {
-                            compno: compno,
+                        const deck: DeckData = (result[compno].deck = {
+                            compno: compno as Compno,
                             indices: new Uint32Array(p.indices.slice().buffer),
                             positions: new Float32Array(p.positions.slice().buffer),
                             t: new Uint32Array(p.t.slice().buffer),
@@ -245,9 +245,13 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                             posIndex: p.posIndex,
                             partial: p.partial,
                             segmentIndex: p.segmentIndex
-                        };
+                        });
                         //                        result[compno].colors = new Uint8Array(_map(result[compno].t, (_) => [Math.floor(Math.random() * 255), 128, 128]).flat());
                         console.log(`track  for ${compno}, ${p.climbRate.length} points, partial: ${p.partial}`);
+                        if (pilotScores[compno]?.utcStart) {
+                            pruneStartline(deck, pilotScores[compno].utcStart);
+                        }
+                        [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
                         return result;
                     },
                     trackData
