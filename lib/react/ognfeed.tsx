@@ -8,36 +8,27 @@
 
 import {useState, useMemo, useRef} from 'react';
 
-import {useTaskGeoJSON, Spinner, Error} from './loaders.js';
-import {Nbsp, Icon} from './htmlhelper.js';
+import {useTaskGeoJSON, usePilots, Spinner, Error} from './loaders';
+import {Nbsp, Icon} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
-import _find from 'lodash.find';
-import _clonedeep from 'lodash.clonedeep';
-import _foreach from 'lodash.foreach';
-import _reduce from 'lodash.reduce';
-import _map from 'lodash.map';
-import _chunk from 'lodash.chunk';
+import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, chunk as _chunk} from 'lodash';
 
-const {mergePoint, checkGrey} = require('../incremental.js');
+import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, ClassName, PilotScoreDisplay} from '../types';
+import {mergePoint} from '../flightprocessing/incremental';
 
 import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
 
-import {PilotList, Details} from './pilotlist.js';
-import {TaskDetails} from './taskdetails.js';
+import {PilotList, Details} from './pilotlist';
+import {TaskDetails} from './taskdetails';
 
-import protobuf from 'protobufjs/light.js';
-import {OnglideWebSocketMessage} from '../onglide-protobuf.js';
-import {point, lineString} from '@turf/helpers';
+import {lineString} from '@turf/helpers';
 
-import MApp from './deckgl.js';
+import {PilotScore, PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 
-// Dynamically load the map as it's big and slow
-//import dynamic from 'next/dynamic'
-//const TaskMap  = dynamic(() => import( './taskmap.js' ),
-//						 { loading: () => <Spinner/>});
+import MApp from './deckgl';
 
 let mutateTimer = 0;
 const httpsTest = new RegExp(/^https/i, 'i');
@@ -47,33 +38,23 @@ function proposedUrl(vc, datecode) {
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) ? 'wss://' : 'ws://') + hn + '/' + (vc + datecode).toUpperCase();
 }
 
-let scoresAF = undefined;
-let pointAF = undefined;
-
-let pbRoot = protobuf.Root.fromJSON(OnglideWebSocketMessage);
-let pbOnglideWebsocketMessage = pbRoot.lookupType('OnglideWebSocketMessage');
-function decodePB(msg) {
-    return pbOnglideWebsocketMessage.decode(new Uint8Array(msg));
-}
-function plainObjectFromPB(msg) {
-    return msg; // pbOnglideWebsocketMessage.(msg);
-}
-
 export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions}) {
-    const [trackData, setTrackData] = useState({});
-    const [pilots, setPilots] = useState({});
+    const [trackData, setTrackData] = useState<TrackData>({});
+    const [pilotScores, setPilotScores] = useState<ScoreData>({});
+    const {pilots, isPLoading} = usePilots(vc);
     const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
-    const [wsStatus, setWsStatus] = useState({c: 1, p: 0, timeStamp: 0});
+    const [wsStatus, setWsStatus] = useState({c: 1, p: 0, timeStamp: 0, at: 0});
+    const [follow, setFollow] = useState(false);
     const [attempt, setAttempt] = useState(0);
 
     // For remote updating of the map
     const mapRef = useRef(null);
 
     // Keep track of online/offline status of the page
-    const [online, isOnline] = useState(navigator.onLine);
+    const [online] = useState(navigator.onLine);
 
     // We are using a webSocket to update our data here
-    const {getWebSocket, lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
+    const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
         reconnectAttempts: 3,
         reconnectInterval: 30000,
         shouldReconnect: (closeEvent) => {
@@ -86,14 +67,14 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
     });
 
     // Do we have a loaded set of details?
-    const valid = Object.keys(pilots).length > 0 && mapRef && mapRef.current && mapRef.current.getMap();
+    const valid = !isPLoading && pilots && Object.keys(pilots).length > 0 && mapRef && mapRef.current && mapRef.current.getMap();
 
     // Have we had a websocket message, if it hasn't changed then ignore it!
     let updateMessage = null;
     if (lastMessage) {
         if (wsStatus.timeStamp != lastMessage.timeStamp) {
             wsStatus.timeStamp = lastMessage.timeStamp;
-            decodeWebsocketMessage(lastMessage.data, trackData, setTrackData, pilots, setPilots, wsStatus, setWsStatus, selectedCompno);
+            decodeWebsocketMessage(lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus, selectedCompno, follow);
         }
     }
 
@@ -106,7 +87,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
     }[readyState];
 
     if (socketUrl != proposedUrl(vc, datecode)) {
-        setPilots({});
+        setPilotScores({});
         setTrackData({});
         setSocketUrl(proposedUrl(vc, datecode));
     }
@@ -114,31 +95,71 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
     function setCompno(cn) {
         setSelectedCompno(cn);
         if (cn && pilots[cn]) {
-            let pilot = pilots[cn];
-            pilot.follow = true;
-            if (trackData[cn]?.partial) {
+            setFollow(true);
+            console.log(cn, trackData[cn]?.deck?.partial);
+            if (!trackData[cn]?.deck || trackData[cn]?.deck?.partial) {
                 sendMessage(cn);
             }
         }
     }
+
     // And the pilot object
-    const selectedPilot = pilots ? pilots[selectedCompno] : undefined;
+    const selectedPilotData: SelectedPilotDetails | null = pilots
+        ? {
+              pilot: pilots[selectedCompno],
+              score: pilotScores[selectedCompno],
+              track: trackData[selectedCompno]
+          }
+        : null;
 
     // Cache the calculated times and only refresh every 60 seconds
-    const status = useMemo(() => `${connectionStatus} @ ${wsStatus && wsStatus.at ? formatTimes(wsStatus.at, tz) : ''}` + ` | <a href='#' title='number of viewers'>${wsStatus.c} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.p} ✈️  </a>`, [connectionStatus, Math.round(wsStatus.at / 60), wsStatus.p, wsStatus.c]);
+    const status = useMemo(
+        () =>
+            `${connectionStatus} @ ${wsStatus && wsStatus.at ? formatTimes(wsStatus.at, tz) : ''}` + //
+            ` | <a href='#' title='number of viewers'>${wsStatus.c} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.p} ✈️  </a>`,
+        [connectionStatus, Math.round(wsStatus.at / 60), wsStatus.p, wsStatus.c]
+    );
 
     return (
         <>
             <div className={'resizingMap'}>
-                <MApp vc={vc} datecode={datecode} selectedPilot={selectedPilot} setSelectedCompno={(x) => setCompno(x)} mapRef={mapRef} pilots={pilots} setPilots={setPilots} options={options} setOptions={setOptions} tz={tz} t={wsStatus.at} viewport={viewport} setViewport={setViewport} trackData={trackData} selectedCompno={selectedCompno} status={status} />
+                <MApp
+                    vc={vc}
+                    follow={follow}
+                    setFollow={setFollow}
+                    selectedPilotData={selectedPilotData}
+                    setSelectedCompno={(x) => setCompno(x)}
+                    mapRef={mapRef} //
+                    pilots={pilots}
+                    pilotScores={pilotScores}
+                    options={options}
+                    setOptions={setOptions}
+                    tz={tz}
+                    t={wsStatus.at as Epoch}
+                    viewport={viewport}
+                    setViewport={setViewport}
+                    trackData={trackData}
+                    selectedCompno={selectedCompno}
+                    status={status}
+                />
             </div>
             <div className="resultsOverlay">
                 <div className="resultsUnderlay">
-                    <TaskDetails vc={vc} position={'top'} />
-                    <PilotList vc={vc} pilots={pilots} selectedPilot={selectedPilot} setSelectedCompno={(x) => setCompno(x)} now={wsStatus.at} tz={tz} options={options} setOptions={setOptions} setViewport={setViewport} />
+                    <TaskDetails vc={vc} />
+                    <PilotList
+                        pilots={pilots}
+                        pilotScores={pilotScores} //
+                        trackData={trackData}
+                        selectedPilot={selectedCompno}
+                        setSelectedCompno={(x) => setCompno(x)}
+                        now={wsStatus.at as Epoch}
+                        tz={tz}
+                        options={options}
+                        setOptions={setOptions}
+                    />
                 </div>
             </div>
-            <Details pilot={selectedPilot} units={options.units} tz={tz} />
+            <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} />
         </>
     );
 }
@@ -152,23 +173,23 @@ function formatTimes(t, tz) {
     return `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ✈️ </a>` + `<a href='#' title='your time'>${dt.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`;
 }
 
-function mergePointToPilots(point, data) {
+function mergePointToPilot(point: PilotPosition, pilots) {
     if (!point) {
         return;
     }
     // We need to do a deep clone for the change detection to work
     const compno = point.c;
-    const cp = data.pilots?.[compno];
+    const cp = pilots?.[compno];
 
     // If the pilot isn't here or this is a duplicate update then noop
-    if (cp?.lastUpdated == point.t) {
+    if (cp?.lastUpdated >= point.t) {
         return;
     }
 
     cp.lastUpdated = point.t;
 
     // Merge into the geoJSON objects as needed
-    mergePoint(point, data);
+    mergePoint(point, cp);
 }
 
 export function AlertDisconnected({mutatePilots, attempt}) {
@@ -196,17 +217,19 @@ export function AlertDisconnected({mutatePilots, attempt}) {
     return null;
 }
 
-function decodeWebsocketMessage(data, trackData, setTrackData, pilots, setPilots, wsStatus, setWsStatus, selectedCompno) {
+function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData, pilotScores: ScoreData, setPilotScores, wsStatus, setWsStatus, selectedCompno: Compno, follow: boolean) {
     new Response(data).arrayBuffer().then((ab) => {
-        let buffer = decodePB(new Uint8Array(ab));
-
+        const decoded = OnglideWebSocketMessage.decode(new Uint8Array(ab));
         // Merge in changed tracks
-        if (buffer.tracks) {
+        if (decoded?.tracks) {
             setTrackData(
                 _reduce(
-                    buffer.tracks.pilots,
+                    decoded.tracks?.pilots,
                     (result, p, compno) => {
-                        result[compno] = {
+                        if (!result[compno]) {
+                            result[compno] = {compno: compno};
+                        }
+                        result[compno].deck = {
                             compno: compno,
                             indices: new Uint32Array(p.indices.slice().buffer),
                             positions: new Float32Array(p.positions.slice().buffer),
@@ -218,7 +241,8 @@ function decodeWebsocketMessage(data, trackData, setTrackData, pilots, setPilots
                             partial: p.partial,
                             segmentIndex: p.segmentIndex
                         };
-                        result[compno].colors = new Uint8Array(_map(result[compno].t, (_) => [Math.floor(Math.random() * 255), 128, 128]).flat());
+                        //                        result[compno].colors = new Uint8Array(_map(result[compno].t, (_) => [Math.floor(Math.random() * 255), 128, 128]).flat());
+                        console.log(`track  for ${compno}, ${p.climbRate.length} points, partial: ${p.partial}`);
                         return result;
                     },
                     trackData
@@ -229,49 +253,50 @@ function decodeWebsocketMessage(data, trackData, setTrackData, pilots, setPilots
         // If we have been sent scores then merge them in,
         // this will update what has changed so no need to send scores if they are unchanged since previous
         // message
-        if (buffer.scores) {
-            setPilots(
+        if (decoded?.scores) {
+            setPilotScores(
                 _reduce(
-                    plainObjectFromPB(buffer).scores.pilots,
-                    (result, p, compno) => {
-                        // If this pilot being followed?
-                        p.follow = compno == selectedCompno && pilots[compno]?.follow;
-
+                    decoded.scores.pilots,
+                    (result, p: PilotScoreDisplay, compno) => {
                         // Update the geoJSON with the scored trackline so we can easily display
                         // what the pilot has been scored for
-                        if (p.scoredpoints && p.scoredpoints.length > 1) {
-                            p.scoredGeoJSON = lineString(_chunk(p.scoredpoints, 2), {});
+                        if (p.scoredPoints && p.scoredPoints.length > 1) {
+                            p.scoredGeoJSON = lineString(_chunk(p.scoredPoints, 2), {});
                         }
-
-                        if (p.task) {
-                            p.task = JSON.parse(p.task);
+                        if (p.minDistancePoints && p.minDistancePoints.length > 1) {
+                            p.minGeoJSON = lineString(_chunk(p.minDistancePoints, 2), {});
+                        }
+                        if (p.maxDistancePoints && p.maxDistancePoints.length > 1) {
+                            p.maxGeoJSON = lineString(_chunk(p.maxDistancePoints, 2), {});
+                        }
+                        if (p.taskGeoJSON) {
+                            p.taskGeoJSON = JSON.parse(p.taskGeoJSON);
                         }
 
                         // Save into the pilot structure
                         result[compno] = p;
                         return result;
                     },
-                    pilots
+                    pilotScores
                 )
             );
         }
 
         // Merge in any new position reports, one update for all
-        if (buffer.positions) {
-            _foreach(buffer.positions.positions, (p) => {
-                mergePointToPilots(p, {pilots: pilots, trackData: trackData});
+        if (decoded.positions) {
+            _foreach(decoded.positions.positions, (p) => {
+                mergePointToPilot(p, trackData);
             });
-            setPilots(pilots);
             setTrackData(trackData);
         }
 
-        if (buffer.ka) {
-            wsStatus = {...wsStatus, ...buffer.ka};
+        if (decoded.ka) {
+            wsStatus = {...wsStatus, ...decoded.ka};
             setWsStatus(wsStatus);
         }
 
-        if (buffer.t) {
-            wsStatus = {...wsStatus, at: buffer.t};
+        if (decoded.t) {
+            wsStatus = {...wsStatus, at: decoded.t};
             setWsStatus(wsStatus);
         }
     });
