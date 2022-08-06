@@ -14,7 +14,8 @@
         "rst": "bin/rst.js",
         "setup": "bin/install.js",
         "ogn": "dist/bin/ogn.js",
-        "ogn:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/ogn.js\""
+        "ogn:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/ogn.js\"",
+        "ogn:devbrk": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect-brk --experimental-fetch dist/bin/ogn.js\""
     },
     "dependencies": {
         "@mapbox/tilebelt": ">=1.0.1",

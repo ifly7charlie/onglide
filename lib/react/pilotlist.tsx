@@ -17,6 +17,7 @@ import Button from 'react-bootstrap/Button';
 import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch} from '../types';
 import {PilotScoreLeg} from '../protobuf/onglide';
 import {API_ClassName_Pilots_PilotDetail} from '../rest-api-types';
+import {API_ClassName_Pilots} from './react-api-types';
 
 import {useState} from 'react';
 
@@ -29,7 +30,7 @@ import {find as _find, sortBy as _sortby, clone as _clone, map as _map} from 'lo
 
 // Helpers for sorting pilot list
 import {updateSortKeys, nextSortOrder, getSortDescription, ShortDisplayKeys, SortKey} from './pilot-sorting';
-import {displayHeight, displayClimb} from './displayunits.js';
+import {displayHeight, displayClimb} from './displayunits';
 
 function isoCountryCodeToFlagEmoji(country) {
     return String.fromCodePoint(...[...country].map((c) => c.charCodeAt() + 0x1f1a5));
@@ -139,8 +140,8 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     const speed = score ? (
         <>
             Speed:
-            {score.handicapped.taskSpeed && hasHandicappedResults ? <>{score.handicapped.taskSpeed.toFixed(1)} kph hcap</> : null}
-            {score.actual.taskSpeed.toFixed(1) || '-'} kph
+            {hasHandicappedResults && score.handicapped?.taskSpeed ? <>{score.handicapped.taskSpeed.toFixed(1)} kph hcap</> : null}
+            {score.actual?.taskSpeed?.toFixed(1) || '-'} kph
         </>
     ) : null;
 
@@ -157,11 +158,11 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             return firstIncompleteLeg == legno ? <Icon type="plane" tooltip="current leg" /> : <Icon type="check" tooltip="leg completed" />;
         };
 
-        const accessor = viewOptions.hcapped ? (l: PilotScoreLeg) => l.handicapped : (l: PilotScoreLeg) => l.actual;
+        const accessor = viewOptions.hcapped ? (l: PilotScoreLeg) => l?.handicapped : (l: PilotScoreLeg) => l?.actual;
 
         const distanceRemaining = (x) => {
             const l = accessor(x);
-            if (l.minPossible) {
+            if (l && l.minPossible) {
                 return (
                     <td>
                         {l.minPossible} to {l.maxPossible} km
@@ -228,11 +229,11 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                     </tr>
                                     <tr>
                                         <td>Leg Speed</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x).legSpeed}</td> : null))}
+                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.legSpeed}</td> : null))}
                                     </tr>
                                     <tr>
                                         <td>Leg Distance</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x).distance || ''}</td> : null))}
+                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.distance || ''}</td> : null))}
                                     </tr>
                                     <tr>
                                         <td>Leg Remaining</td>
@@ -244,11 +245,11 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                 <>
                                     <tr>
                                         <td>Task Speed</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x).taskSpeed || ''}</td> : null))}
+                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.taskSpeed || ''}</td> : null))}
                                     </tr>
                                     <tr>
                                         <td>Task Distance</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x).taskDistance || ''}</td> : null))}
+                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.taskDistance || ''}</td> : null))}
                                     </tr>
                                     {!score.utcFinish && !pilot.utcFinish && (
                                         <tr>
@@ -287,7 +288,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     // Figure out what to show based on the db status
     let flightDetails = null;
 
-    if (!score || !vario) {
+    if (!score && !vario) {
         flightDetails = <div>No tracking yet</div>;
     } else if (!score.utcStart) {
         flightDetails = (
@@ -312,8 +313,8 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 {climb}
                 {times}
                 {legs}
-                <Optional b="Glide Ratio to Finish" v={score.actual.grRemaining} e=":1" />
-                <Optional b=", HCap Ratio" v={score.handicapped.grRemaining} e=":1" />
+                <Optional b="Glide Ratio to Finish" v={score.actual?.grRemaining} e=":1" />
+                <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining} e=":1" />
             </div>
         );
     }
@@ -516,7 +517,7 @@ export function PilotList({
     tz
 }: //
 {
-    pilots: API_ClassName_Pilots_PilotDetail;
+    pilots: API_ClassName_Pilots;
     pilotScores: ScoreData;
     trackData: TrackData;
     selectedPilot: Compno;
@@ -530,6 +531,10 @@ export function PilotList({
     const [order, setOrder] = useState<SortKey>('auto');
     const [visible, setVisible] = useState(true);
 
+    //    if (trackData) {
+    //        console.log(trackData);
+    //    }
+
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
     // this can be done with a clone and reoder
@@ -541,6 +546,7 @@ export function PilotList({
         .map((pilot) => {
             return (
                 <Pilot
+                    key={pilot.compno + 'pl'}
                     pilot={pilots[pilot.compno]}
                     display={pilot}
                     selected={selectedPilot === pilot.compno}

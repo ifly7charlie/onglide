@@ -1,15 +1,13 @@
 import Graph from '../flightprocessing/dijkstras';
 
-import {ProtobufGenerator, Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, EstimatedTurnType, Task, ScoredTaskDistanceStatus, TaskScoresGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
+import {Epoch, Compno, Task, TaskScoresGenerator} from '../types';
 
-import {InOrderGeneratorFunction} from './inordergenerator';
-import {PositionMessage} from './positionmessage';
+import {PilotScore} from '../protobuf/onglide';
 
 import {cloneDeep as _clonedeep, keyBy as _keyby} from 'lodash';
 
-import {distHaversine} from '../flightprocessing/taskhelper';
-
 import {OnglideWebSocketMessage} from '../protobuf/onglide';
+import {MessagePort} from 'node:worker_threads';
 
 /*
  * collect scores from a collection of different generators and post update messages
@@ -17,7 +15,7 @@ import {OnglideWebSocketMessage} from '../protobuf/onglide';
  */
 //
 // Get a generator to calculate task status
-export async function scoreCollector(interval: Epoch, task: Task, scoreStreams: Record<Compno, TaskScoresGenerator>, log?: Function) {
+export async function scoreCollector(interval: Epoch, port: MessagePort, task: Task, scoreStreams: Record<Compno, TaskScoresGenerator>, log?: Function) {
     // Generate log function as it's quite slow to read environment all the time
     if (!log)
         log = (...a) => {
@@ -25,10 +23,15 @@ export async function scoreCollector(interval: Epoch, task: Task, scoreStreams: 
         };
 
     //
-    const mostRecentScore: Record<Compno, ScoredTaskDistanceStatus> = {};
+    const mostRecentScore: Record<Compno, PilotScore> = {};
 
-    function updateScore(compno: Compno, score: ScoredTaskDistanceStatus) {
+    function updateScore(compno: Compno, score: PilotScore) {
+        const sendImmediately = !mostRecentScore[compno];
         mostRecentScore[compno] = score;
+        if (sendImmediately) {
+            console.log(`first score for ${compno} received`);
+            composeAndSendProtobuf(port, mostRecentScore);
+        }
     }
 
     // Start async functions to read scores and update our most recent
@@ -39,7 +42,7 @@ export async function scoreCollector(interval: Epoch, task: Task, scoreStreams: 
 
     // And a timer callback that posts the message to front end
     setInterval(() => {
-        composeAndSendProtobuf(mostRecentScore);
+        composeAndSendProtobuf(port, mostRecentScore);
     }, 30000);
 
     Promise.allSettled(promises);
@@ -47,9 +50,21 @@ export async function scoreCollector(interval: Epoch, task: Task, scoreStreams: 
 
 async function iterateAndUpdate(compno: Compno, input: TaskScoresGenerator, updateScore: Function): Promise<void> {
     // Loop till we are told to stop
-    for (let current = input.next(); !current.done && current.value; current = input.next()) {
-        updateScore(compno, current.value);
+    try {
+        for (let current = input.next(); !current.done && current.value; current = input.next()) {
+            updateScore(compno, current.value);
+        }
+    } catch (e) {
+        console.log(e);
     }
 }
 
-function composeAndSendProtobuf(recent: Record<Compno, ScoredTaskDistanceStatus>) {}
+function composeAndSendProtobuf(port: MessagePort, recent: Record<Compno, PilotScore>) {
+    console.log('composeAndSendProtobuf');
+    //
+    // Encoe this as a protobuf
+    const msg = OnglideWebSocketMessage.encode({scores: {pilots: recent}, t: Math.trunc(Date.now() / 1000)}).finish();
+
+    // Now we need to send it back to the main thread
+    port.postMessage(msg);
+}

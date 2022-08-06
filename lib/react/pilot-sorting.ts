@@ -6,7 +6,7 @@ import {convertHeight, convertClimb} from './displayunits';
 import {delayToText, formatTime} from './timehelper.js';
 
 import {Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData} from '../types';
-import {API_ClassName_Pilots_PilotDetail} from '../rest-api-types';
+import {API_ClassName_Pilots} from '../rest-api-types';
 
 export interface ShortDisplayKeys {
     compno: Compno;
@@ -23,7 +23,7 @@ export enum Units {
 
 export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'ald' | 'ld' | 'done' | 'auto';
 
-export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotScores: ScoreData, trackData: TrackData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ) {
+export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreData, trackData: TrackData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ) {
     //
     // Map function
     function pilotSortKey(compno: Compno, pilotScore: PilotScore, vario: VarioData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ): ShortDisplayKeys {
@@ -66,7 +66,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotSc
         // data is in pilotScore.details.x
         switch (sortKey) {
             case 'speed':
-                displayAs = Math.round((newKey = pilotScore.handicapped.taskSpeed));
+                displayAs = Math.round((newKey = pilotScore.handicapped?.taskSpeed || pilotScore.actual.taskSpeed));
                 suffix = 'kph';
                 break;
             case 'aspeed':
@@ -95,7 +95,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotSc
                 suffix = 'km';
                 break;
             case 'distance':
-                newKey = Math.round(pilotScore.handicapped.taskDistance);
+                newKey = Math.round(pilotScore.handicapped?.taskDistance || pilotScore.actual.taskDistance);
                 suffix = 'km';
                 break;
             case 'adistance':
@@ -137,8 +137,8 @@ export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotSc
                 }
                 break;
             case 'ld':
-                if (pilotScore.handicapped.grRemaining > 0) {
-                    displayAs = Math.round(pilotScore.handicapped.grRemaining);
+                if (pilotScore.handicapped?.grRemaining > 0) {
+                    displayAs = Math.round(pilotScore.handicapped?.grRemaining);
                     suffix = ':1';
                     newKey = -displayAs;
                 } else {
@@ -148,8 +148,8 @@ export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotSc
                 }
                 break;
             case 'ald':
-                if (pilotScore.actual.grRemaining > 0) {
-                    displayAs = Math.round(pilotScore.actual.grRemaining);
+                if (pilotScore.actual?.grRemaining > 0) {
+                    displayAs = Math.round(pilotScore.actual?.grRemaining);
                     suffix = ':1';
                     newKey = -displayAs;
                 } else {
@@ -159,7 +159,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotSc
                 }
                 break;
             case 'done':
-                newKey = pilotScore.handicapped.taskDistance;
+                newKey = pilotScore.handicapped?.taskDistance;
                 suffix = 'km';
                 break;
             case 'auto':
@@ -180,16 +180,16 @@ export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotSc
                 // Before they start show altitude, sort to the end of the list
                 else */
                 if (!pilotScore.utcStart) {
-                    newKey = vario.agl / 10000;
-                    [displayAs, suffix] = convertHeight(vario.agl || 0, units);
+                    newKey = vario?.agl / 10000;
+                    [displayAs, suffix] = convertHeight(vario?.agl || 0, units);
                 } else if (!vario) {
                     newKey = -1;
                     displayAs = '-';
                 }
                 // After start but be
                 else {
-                    var speed = pilotScore.handicapped.taskSpeed;
-                    var distance = pilotScore.handicapped.taskDistance;
+                    var speed = pilotScore.handicapped?.taskSpeed || pilotScore.actual?.taskSpeed;
+                    var distance = pilotScore.handicapped?.taskDistance || pilotScore.actual?.taskDistance;
 
                     if ((speed > 5 && delay < 3600) || pilotScore.utcFinish) {
                         newKey = 10000 + Math.round(speed * 10);
@@ -200,8 +200,8 @@ export function updateSortKeys(pilots: API_ClassName_Pilots_PilotDetail, pilotSc
                         displayAs = Math.round(distance);
                         suffix = 'km';
                     } else {
-                        newKey = vario.agl / 10000;
-                        [displayAs, suffix] = convertHeight(vario.agl || 0, units);
+                        newKey = vario?.agl / 10000;
+                        [displayAs, suffix] = convertHeight(vario?.agl || 0, units);
                     }
                 }
         }

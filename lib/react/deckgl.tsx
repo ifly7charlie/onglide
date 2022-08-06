@@ -7,10 +7,10 @@ import {MercatorCoordinate} from 'mapbox-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
-import {gapLength} from '../constants.js';
+import {gapLength} from '../constants';
 
 // Height/Climb helpers
-import {displayHeight, displayClimb} from './displayunits.js';
+import {displayHeight, displayClimb} from './displayunits';
 
 import {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
 
@@ -43,7 +43,7 @@ import {OgnPathLayer} from './ognpathlayer';
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function}, taskGeoJSON, map2d) {
+function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d) {
     if (!props.trackData) {
         return [];
     }
@@ -52,6 +52,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
     let layers = _reduce(
         props.trackData,
         (result, track, compno) => {
+            // Don't include current pilot in list of all
             if (compno == props.selectedCompno) {
                 return result;
             }
@@ -73,7 +74,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     _pathType: 'open',
                     positionFormat: map2d ? 'XY' : 'XYZ',
                     getWidth: 5,
-                    getColor: [220, 220, 220, 128],
+                    getColor: [120, 120, 120, 128],
                     jointRounded: true,
                     fp64: false,
                     widthMinPixels: 2,
@@ -100,13 +101,21 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
     // the point is
     const data = _map(props.trackData, (track) => {
         const p = track.deck;
-        return {name: track.compno, compno: track.compno, climbRate: p.climbRate[p.posIndex - 1], agl: p.vario?.agl[p.posIndex - 1], alt: p.positions[(p.posIndex - 1) * 3 + 2], time: p.t[p.posIndex - 1], coordinates: p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)};
+        return {
+            name: track.compno,
+            compno: track.compno,
+            climbRate: p.climbRate[p.posIndex - 1], //
+            agl: p?.agl[p.posIndex - 1],
+            alt: p.positions[(p.posIndex - 1) * 3 + 2],
+            time: p.t[p.posIndex - 1],
+            coordinates: p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)
+        };
     });
     layers.push(
         new TextLayer({
             id: 'labels',
             data: data,
-            getPosition: (d) => d.coordinates,
+            getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), 100] : (d) => d.coordinates,
             getText: (d) => d.name,
             getTextColor: (d) => (props.t - d.time > gapLength ? [192, 192, 192] : [0, 0, 0]),
             getTextAnchor: 'middle',
@@ -142,7 +151,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 },
                 _pathType: 'open',
                 positionFormat: map2d ? 'XY' : 'XYZ',
-                getWidth: () => 5,
+                getWidth: 5,
                 billboard: true,
                 getColor: [255, 0, 255, 192],
                 jointRounded: true,
@@ -344,6 +353,7 @@ export default function MApp(props: {
     };
 
     const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
+    console.log(selectedPilotData?.score?.maxGeoJSON);
 
     return (
         <DeckGL viewState={viewport} controller={true} getTooltip={toolTip} onViewStateChange={(e) => onViewStateChange(e)} layers={layers}>
@@ -361,19 +371,19 @@ export default function MApp(props: {
                         </Source>
                     </>
                 ) : null}
-                {selectedPilotData && selectedPilotData.score?.scoredGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score?.scoredGeoJSON} key={'scored_' + selectedCompno}>
+                {selectedPilotData && selectedPilotData?.score?.scoredGeoJSON ? (
+                    <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_' + selectedCompno}>
                         <Layer {...scoredLineStyle} />
                     </Source>
                 ) : null}
                 {selectedPilotData && selectedPilotData.score?.minGeoJSON ? (
                     <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_' + selectedCompno}>
-                        <Layer {...scoredLineStyle} />
+                        <Layer {...minLineStyle} />
                     </Source>
                 ) : null}
                 {selectedPilotData && selectedPilotData.score?.maxGeoJSON ? (
                     <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_' + selectedCompno}>
-                        <Layer {...scoredLineStyle} />
+                        <Layer {...maxLineStyle} />
                     </Source>
                 ) : null}
                 {!map2d && (
@@ -401,6 +411,27 @@ const scoredLineStyle: LayerProps = {
     }
 };
 
+const minLineStyle: LayerProps = {
+    id: 'minpossible',
+    type: 'line',
+    paint: {
+        'line-color': '#0f0',
+        'line-width': 4,
+        'line-opacity': 0.7,
+        'line-dasharray': [3, 5]
+    }
+};
+
+const maxLineStyle: LayerProps = {
+    id: 'maxpossible',
+    type: 'line',
+    paint: {
+        'line-color': '#0f0',
+        'line-width': 4,
+        'line-opacity': 0.7,
+        'line-dasharray': [5, 3]
+    }
+};
 function getSunPosition(mapRef, date?) {
     const map = mapRef?.current?.getMap();
     if (map) {

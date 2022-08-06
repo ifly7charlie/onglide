@@ -1,4 +1,4 @@
-import {ClassName, Compno, Epoch, DistanceKM, SpeedKPH} from '../../../lib/types';
+import {ClassName, Compno, Epoch, DistanceKM, SpeedKPH} from './types';
 
 export interface API_ClassName_Pilots_PilotDetail {
     class: ClassName;
@@ -21,4 +21,4 @@ export interface API_ClassName_Pilots_PilotDetail {
     speed: SpeedKPH;
 }
 
-export type API_ClassName_Pilots = API_ClassName_Pilots_PilotDetail[];
+export type API_ClassName_Pilots = Record<Compno, API_ClassName_Pilots_PilotDetail>;

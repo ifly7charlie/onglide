@@ -57,24 +57,25 @@ message SpeedDist {
     optional double maxPossible = 12; // AAT
     optional double minPossible = 13;
 
-    uint32 grRemaining = 20;
+    optional uint32 grRemaining = 20;
 
-    double legSpeed = 30; // speed on this leg
-    double taskSpeed = 31; // speed on task to end of leg
+    optional double legSpeed = 30; // speed on this leg
+    optional double taskSpeed = 31; // speed on task to end of leg
 }
 
 message PilotScoreLeg {
     uint32 legno = 1;
     uint32 time = 2;
-    uint32 duration = 3; // time from previous point to this one
-    double lat = 4;
-    double lng = 5;
-    uint32 alt = 6;
-    uint32 agl = 7;
+	optional uint32 duration = 3; // time from previous point to this one
 
-    bool   estimatedEnd = 8;
-    bool   estimatedStart = 9;
-    bool   inPenalty = 10;
+	optional BasePositionMessage point = 4;
+
+    optional uint32 alt = 6;
+    optional uint32 agl = 7;
+
+    optional bool   estimatedEnd = 8;
+    optional bool   estimatedStart = 9;
+    optional bool   inPenalty = 10;
 
 	// Scores
     optional SpeedDist handicapped = 11;
@@ -90,7 +91,7 @@ message Wind {
 
 //
 // A segment of the flight
-message Stats {
+message StatSegment {
     uint32 start = 1; // Epoch
     uint32 end = 2; // Epoch
     string state = 3; // Type of segment
@@ -105,6 +106,16 @@ message Stats {
     uint32 heightloss = 12; // loss m
 }
 
+message Stats {
+	repeated StatSegment segments = 1;
+}
+
+message BasePositionMessage {
+	uint32 t = 1;
+	float lat = 2;
+	float lng = 3;
+}
+
 //
 // Scores for each pilot
 message PilotScore {
@@ -117,8 +128,8 @@ message PilotScore {
     // Start/Finish details
     uint32 utcStart = 3;
     uint32 utcFinish = 4;
-    uint32 utcDuration = 5;
-    bool startFound = 6;
+	//    uint32 utcDuration = 5;
+	//    bool startFound = 6;
 	optional bool inSector = 7;
 	optional bool inPenalty = 8;
 	optional bool stationary = 9;
@@ -133,7 +144,7 @@ message PilotScore {
     map<uint32,PilotScoreLeg> legs = 36;
 
     // If we are generating statistics then include that
-    repeated Stats stats = 43;
+    optional Stats stats = 43;
     optional Wind wind = 56;
 
     // List of points [x,y,x,y,x,y]

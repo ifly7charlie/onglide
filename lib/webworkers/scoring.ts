@@ -14,15 +14,17 @@
 // Import the APRS server
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, TaskStatus, ClassName_Compno, makeClassname_Compno, ClassName, Compno, FlarmID, Bearing, Speed} from '../types';
+import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno} from '../types';
 
-import {Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
+import {Worker, parentPort, isMainThread, SHARE_ENV} from 'node:worker_threads';
 
 import {bindChannelForInOrderPackets, InOrderGeneratorFunction} from './inordergenerator';
 import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
+import {taskScoresGenerator} from './taskScoresGenerator';
+import {scoreCollector} from './scoreCollector';
 
 import {cloneDeep as _clonedeep} from 'lodash';
 
@@ -86,6 +88,10 @@ export class ScoringController {
     shutdown() {
         this.worker.postMessage({action: ScoringCommandEnum.shutdown});
     }
+
+    hookScores(callback) {
+        this.worker.on('message', callback);
+    }
 }
 
 //////////////////////////////////////////////
@@ -94,6 +100,7 @@ export class ScoringController {
 interface GliderState {
     className: ClassName;
     compno: Compno;
+    handicap: number;
 
     // Sequence of steps used to do the scoring
     // inorder returns a generator that gives all of the glider points
@@ -142,6 +149,7 @@ interface ScoringCommandTrack {
     action: ScoringCommandEnum.track;
 
     compno: Compno;
+    handicap: number;
 
     // Historical points, must be in sorted order
     points: PositionMessage[];
@@ -180,14 +188,15 @@ if (!isMainThread) {
         // Load data for specific tracker and add it to the list
         // of gliders to track
         if (task.action == ScoringCommandEnum.initialTrack) {
-            if (Object.keys(gliders).length > 0) {
-                return;
-            }
+            //            if (Object.keys(gliders).length > 0) {
+            //              return;
+            //        }
             const itTask: ScoringCommandTrack = task;
             console.log(`${task.className} - ${task.compno}: initial track ${itTask.points.length} points`);
             gliders[makeClassname_Compno(task)] = {
                 className: task.className,
                 compno: task.compno,
+                handicap: task.handicap,
                 inorder: bindChannelForInOrderPackets(makeClassname_Compno(task), itTask.points),
                 scoring: null
             };
@@ -207,55 +216,21 @@ function startScoring(config: ScoringConfig, task: any) {
     console.log(`${config.className} -> gliders: ${Object.keys(gliders).join(',')}`);
 
     try {
+        const iterators: Record<Compno, any> = {};
+
         // Loop through all of them
         for (const cncn in gliders) {
-            const glider = gliders[cncn];
+            const glider: GliderState = gliders[cncn];
 
-            if (glider.scoring) {
-                //			glider.scoring.stop();
+            if (task.rules.aat) {
+                const tpg = taskPositionGenerator(task, glider.inorder, console.log);
+                const aat = assignedAreaScoringGenerator(task, tpg, console.log);
+                const scores = taskScoresGenerator(task, glider.compno, glider.handicap, aat);
+                iterators[glider.compno] = scores;
             }
-
-            scorePilot(glider, task);
         }
+        scoreCollector(30 as Epoch, parentPort, task, iterators, console.log);
     } catch (e) {
         console.log(e);
     }
-}
-
-//
-// Setup the pipeworks for the pilot, this does not reset any
-// received APRS messages
-async function scorePilot(glider: GliderState, task: any) {
-    console.log('setuppilot, glider', task);
-    //    if (task.rules.aat) {
-    //    } else {
-    const tpg = taskPositionGenerator(task, glider.inorder, console.log);
-    const aat = assignedAreaScoringGenerator(task, tpg, console.log);
-
-    //    const esog = everySoOftenGenerator(30 as Epoch, tpg);
-
-    const start = process.hrtime();
-
-    try {
-        for (const output of aat) {
-            let temp: any = _clonedeep(output);
-
-            //        let x: TaskStatus = temp;
-            //        throw new Error('aat out:' + typeof output.legs + ',' + JSON.stringify(output.legs[0]));
-            temp.legs = output.legs.map((l) => {
-                if (l) {
-                    return {...l, points: l?.points?.length, penaltyPoints: l.penaltyPoints?.length};
-                }
-            });
-            if (output) {
-                console.log(output.t, '->', JSON.stringify(temp, null, 2));
-            } else {
-                console.log('wtf');
-            }
-        }
-        console.log('-> done iterate', process.hrtime(start));
-    } catch (e) {
-        console.log('oops!', e);
-    }
-    //    }
 }

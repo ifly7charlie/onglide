@@ -9,6 +9,7 @@
 import {useState, useMemo, useRef} from 'react';
 
 import {useTaskGeoJSON, usePilots, Spinner, Error} from './loaders';
+
 import {Nbsp, Icon} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
@@ -26,7 +27,7 @@ import {TaskDetails} from './taskdetails';
 
 import {lineString} from '@turf/helpers';
 
-import {PilotScore, PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
+import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 
 import MApp from './deckgl';
 
@@ -173,13 +174,17 @@ function formatTimes(t, tz) {
     return `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ✈️ </a>` + `<a href='#' title='your time'>${dt.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`;
 }
 
-function mergePointToPilot(point: PilotPosition, pilots) {
+function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
     if (!point) {
         return;
     }
     // We need to do a deep clone for the change detection to work
     const compno = point.c;
-    const cp = pilots?.[compno];
+    let cp = trackData?.[compno];
+
+    if (!cp) {
+        cp = trackData[compno] = {};
+    }
 
     // If the pilot isn't here or this is a duplicate update then noop
     if (cp?.lastUpdated >= point.t) {
@@ -258,6 +263,8 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                 _reduce(
                     decoded.scores.pilots,
                     (result, p: PilotScoreDisplay, compno) => {
+                        console.log(compno, p);
+
                         // Update the geoJSON with the scored trackline so we can easily display
                         // what the pilot has been scored for
                         if (p.scoredPoints && p.scoredPoints.length > 1) {

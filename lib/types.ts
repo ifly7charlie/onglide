@@ -147,8 +147,10 @@ export interface TaskStatus extends TimeStampType {
     lastProcessedPoint?: BasePositionMessage | PositionMessage;
 }
 
+//
 // We use basically the same structure once we have determined lengths
-export interface ScoredTaskLegStatus extends TaskLegStatus {
+// This is ready for final scoring
+export interface CalculatedTaskLegStatus extends TaskLegStatus {
     //extends Omit<TaskLegStatus, //'points' | 'penaltyPoints'> {
     point?: BasePositionMessage; // where is the turn scored to
     distance?: DistanceKM; // how long is this leg (to previous)
@@ -162,17 +164,19 @@ export interface ScoredTaskLegStatus extends TaskLegStatus {
     };
 }
 
-export interface ScoredTaskDistanceStatus extends TaskStatus {
+export interface CalculatedTaskStatus extends TaskStatus {
     //Omit<TaskStatus, 'lastProcessedPoint' > {
-    legs: ScoredTaskLegStatus[];
+    legs: CalculatedTaskLegStatus[];
     distance?: DistanceKM; // flown distance
     distanceRemaining?: DistanceKM; // how much left
     maxTaskDistance?: DistanceKM;
     minTaskDistance?: DistanceKM;
 }
+export type CalculatedTaskGenerator = Generator<CalculatedTaskStatus, void, void>;
 
-export type TaskScoresGenerator = Generator<ScoredTaskDistanceStatus, void, void>;
-
+//
+// Final scores for sending to websocket
+export type TaskScoresGenerator = Generator<PilotScore, void, void>;
 // For serialising to the client
 export type ProtobufGenerator = Generator<Uint8Array, void, void>;
 
@@ -210,10 +214,13 @@ export interface PilotTrackData {
     compno: Compno;
     deck?: DeckData;
     vario?: VarioData;
+    lastUpdated?: Epoch;
+    //    colors?: Uint8Array; // deck colour picking
 }
 
 export {PilotScore} from './protobuf/onglide';
 import {PilotScore} from './protobuf/onglide';
+import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 
 export type TrackData = Record<Compno, PilotTrackData>;
 export type ScoreData = Record<Compno, PilotScore>;
@@ -225,7 +232,7 @@ export interface PilotScoreDisplay extends PilotScore {
 }
 
 export interface SelectedPilotDetails {
-    pilot: any; // from db
+    pilot: API_ClassName_Pilots_PilotDetail; // from db
     score: PilotScoreDisplay;
     track: PilotTrackData; // deck, vario
 }

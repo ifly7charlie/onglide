@@ -18,8 +18,8 @@ export function checkGrey(pilotsGeoJSON, timestamp) {
 */
 
 // Helper fro resizing TypedArrays so we don't end up with them being huge
-function resize(a, b: number) {
-    let c = new a.constructor(b);
+function resize<T extends Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
+    let c = new allocator(b);
     c.set(a);
     return c;
 }
@@ -60,14 +60,14 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     // Resize required
     if (deck.posIndex >= deck.t.length) {
         const newLength = deck.posIndex + deckPointIncrement;
-        deck.positions = resize(deck.positions, newLength * 3);
-        deck.t = resize(deck.t, newLength);
-        deck.agl = resize(deck.agl, newLength);
-        deck.climbRate = resize(deck.climbRate, newLength);
+        deck.positions = resize(Float32Array, deck.positions, newLength * 3);
+        deck.t = resize(Uint32Array, deck.t, newLength);
+        deck.agl = resize(Int16Array, deck.agl, newLength);
+        deck.climbRate = resize(Int8Array, deck.climbRate, newLength);
     }
 
     if (deck.segmentIndex + 2 >= deck.indices.length) {
-        deck.indices = resize(deck.indices, deck.segmentIndex + deckSegmentIncrement);
+        deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
     }
 
     // Set the new positions
@@ -113,10 +113,10 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     deck.recentIndices[0] = recentOldest;
     deck.recentIndices[1] = deck.posIndex;
 
-    if (glider.vario) {
+    if (point.v) {
         // Update the altitude and height AGL for the pilot
         // Mutate the vario and altitude back into SWR
-        const cp = glider.vario;
+        const cp: any = glider.vario || {};
         if (cp) {
             try {
                 cp.altitude = point.a;
@@ -128,6 +128,9 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
                 [cp.lossXsecond, cp.gainXsecond, cp.total, cp.average, cp.Xperiod, min, max] = point.v.split(',').map((a) => parseFloat(a));
                 cp.min = Math.min(min, cp.min);
                 cp.max = Math.max(max, cp.max);
+                if (!glider.vario) {
+                    glider.vario = cp;
+                }
             } catch (_e) {}
         }
     }

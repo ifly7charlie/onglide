@@ -58,7 +58,7 @@ export function bindChannelForInOrderPackets(channelName: ClassName_Compno, init
         //
         // How far through are we
         let position = 0;
-        console.log('start iterator iog');
+        console.log('start iterator iog', channelName);
 
         // Loop till we are told to stop
         while (running) {

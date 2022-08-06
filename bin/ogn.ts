@@ -40,7 +40,7 @@ let db = undefined;
 
 // lodash
 
-import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap} from 'lodash';
+import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove} from 'lodash';
 
 //import _remove from 'lodash.remove';
 //import _groupby from 'lodash.groupby';
@@ -245,7 +245,7 @@ async function main() {
                 // Encode all the changes, we only keep latest per glider if multiple received
                 // there shouldn't be multiple!
                 const msg = OnglideWebSocketMessage.encode({positions: {positions: channel.toSend}, t: Math.trunc(Date.now() / 1000)}).finish();
-                console.log(OnglideWebSocketMessage.toJSON({positions: {positions: channel.toSend}, t: Math.trunc(Date.now() / 1000)}));
+                //                console.log(OnglideWebSocketMessage.toJSON({positions: {positions: channel.toSend}, t: Math.trunc(Date.now() / 1000)}));
                 channel.toSend = [];
 
                 // Send to each client and if they don't respond they will be cleaned up next time around
@@ -257,17 +257,6 @@ async function main() {
             }
         }
     }, 1000);
-
-    // And every 4-6 minutes rescore and update everything - the random is to make sure
-    // multiple processes don't intersect
-    setInterval(function () {
-        try {
-            console.log('sending scores');
-            //            sendScores();
-        } catch (e) {
-            console.log(e);
-        }
-    }, 1 * 20 * 1000 + 10000 * Math.random());
 
     await setTimeout(10000000);
 }
@@ -317,6 +306,7 @@ async function updateClasses() {
         // And configure scoring for it as well
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: c.class});
+            channel.scoring.hookScores((a) => sendScores(channel, a));
             await getInitialTrackPoints(channel);
             const task = await updateTasks(c.class);
             if (task) {
@@ -380,70 +370,6 @@ async function updateTasks(className: ClassName): Promise<Task | void> {
     calculateTask(task);
     return task;
 }
-
-/*
-        // make sure the task is cached properly
-        const [task] = await fetchTaskAndPilots(c.class, false);
-
-        // Make sure we have an entry for the scoring and do a dummy
-        // fetch to get the task prepped and merge the scoring data into the
-        // trackers array
-        if (!scoring[cname]) {
-            scoring[cname] = {
-                trackers: {},
-                state: {},
-                points: {},
-                geoJSON: {tracks: {}, fulltracks: {}, locations: {}}
-            };
-
-            // merge pilots into the tracker array, won't score as no pilot selected
-            await scorePilot(c.class, undefined, scoring[cname]);
-
-            if (!Object.keys(scoring[cname].trackers).length) {
-                console.log('No valid task');
-                continue;
-            }
-
-            // Now we will fetch the points for the pilots
-            const rawpoints = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s
-                  FROM trackpoints
-                 WHERE datecode=${c.datecode} AND (${tBase} = 0 OR t < ${tBase}) AND class=${c.class}
-                 ORDER BY t DESC`);
-
-            // Group them by comp number, this is quicker than multiple sub queries from the DB
-            scoring[cname].points = _groupby(rawpoints, 'c');
-            console.log(`${cname} reloaded all points`); 
-        }
-
-        if (!Object.keys(scoring[cname].trackers).length) {
-            console.log('No valid task', cname);
-            continue;
-        }
-
-        const cscores = scoring[cname];
-
-        // Score them so we have some data to pass back over websocket
-        // This also forces a full rescore by removing state and resetting
-        // firstOldPoint to the end of the points. We don't need to fetch the points as
-        // we have been maintinig a full list in order
-        for (const compno of Object.keys(cscores.points)) {
-            cscores.state[compno] = {};
-            if (!cscores.trackers[compno]) {
-                cscores.trackers[compno] = {};
-            }
-            cscores.trackers[compno].firstOldPoint = cscores.points[compno]?.length;
-            try {
-                if (task) {
-                    await scorePilot(c.class, compno, cscores);
-                }
-            } catch (e) {
-                console.log(`unable to scorePilot ${c.class}: ${compno}, ${e}`);
-            }
-        }
-
-        // And fully regenerate the GeoJSONs so they include any late points
-        await generatePilotTracks(cscores, tOffset);
-        sendPilotTracks(cname, cscores.deck); */
 
 async function updateTrackers() {
     // Now get the trackers
@@ -571,7 +497,7 @@ async function sendCurrentState(client: WebSocket) {
 }
 
 async function sendPilotTrack(client: WebSocket, compno: Compno) {
-    const p = gliders[compno]?.deck;
+    const p = gliders[makeClassname_Compno(channels[client.ognChannel].className, compno)]?.deck;
     const toStream = {};
     if (p) {
         toStream[compno] = {
@@ -608,8 +534,8 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
                     const length = end - start;
                     const segments = new Uint32Array([0, length]);
                     if (length) {
-                        result[compno] = {
-                            compno: compno,
+                        result[glider.compno] = {
+                            compno: glider.compno,
                             positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
                             indices: new Uint8Array(segments.buffer),
                             t: new Uint8Array(p.t.buffer, start * 4, length * 4),
@@ -627,7 +553,6 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
         },
         {}
     );
-
     // Send the client the current version of the tracks
     client.send(OnglideWebSocketMessage.encode({tracks: {pilots: toStream}}).finish(), {binary: true});
 }
@@ -635,134 +560,58 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
 // We need to fetch and repeat the scores for each class, enriched with vario information
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
-async function sendScores() {
+async function sendScores(channel: any, scores: Buffer) {
     const now = Date.now() / 1000;
-    /*
     // For each channel (aka class)
-    for( const channel of channels ) {
-        // Remove any that are still marked as not alive
-        const toterminate = _remove(channel.clients, (client) => {
-            return client.isAlive === false;
-        });
 
-        toterminate.forEach((client) => {
-            console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
-            client.terminate();
-        });
+    console.log('Sending Scores', scores);
 
-        const airborne = Object.keys(channel.activeGliders)?.length || 0;
+    // Remove any that are still marked as not alive
+    const toterminate = _remove(channel.clients, (client: any) => {
+        return client.isAlive === false;
+    });
 
-        // If we have nothing then do nothing...
-        if (!channel.clients.length) {
-            console.log(`${channel.className}: no clients subscribed`);
-        } else {
-            console.log(`${channel.className}: ${channel.clients.length} subscribed, ${airborne} gliders airborne`);
+    toterminate.forEach((client) => {
+        console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
+        client.terminate();
+    });
+
+    const airborne = Object.keys(channel.activeGliders)?.length || 0;
+
+    // If we have nothing then do nothing...
+    if (!channel.clients.length) {
+        console.log(`${channel.className}: no clients subscribed`);
+    } else {
+        console.log(`${channel.className}: ${channel.clients.length} subscribed, ${airborne} gliders airborne`);
+    }
+
+    // For sending the keepalive
+    channel.lastKeepAliveMsg = OnglideWebSocketMessage.encode({
+        ka: {
+            keepalive: true,
+            t: timeToText(now),
+            at: Math.floor(now),
+            listeners: channel.clients.length,
+            airborne: airborne
         }
+    }).finish();
 
-        // For sending the keepalive
-        channel.lastKeepAliveMsg = encodePb({
-            ka: {
-                keepalive: 1,
-                t: timeToText(now),
-                at: Math.floor(now),
-                listeners: channel.clients.length,
-                airborne: airborne
-            }
-        });
+    // Protobuf encode the scores message
+    channel.lastScores = scores;
 
-        // Send to each client and if they don't respond they will be cleaned up next time around
-        channel.clients.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(channel.lastKeepAliveMsg, {binary: true});
-            }
-            client.isAlive = false;
-            client.ping(function () {});
-        });
-
-        const className = channel.className;
-        const scores = scoring[channel.name];
-        if (!scores || !Object.keys(scores.trackers).length) {
-            console.log(`no pilots scored for ${channel.className} ${channel.datecode}`);
-            return;
+    // Send to each client and if they don't respond they will be cleaned up next time around
+    channel.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(channel.lastKeepAliveMsg, {binary: true});
+            client.send(channel.lastScores, {binary: true});
         }
+        client.isAlive = false;
+        client.ping(function () {});
+    });
 
-        // We only need to mix in the gliders that are active
-        if (Object.keys(channel.activeGliders).length == 0 && channel.lastScores) {
-            console.log(`${channel.className}: no activity since last scoring so do nothing`);
-            return;
-        }
-
-        // Reset for next iteration
-        channel.activeGliders = {};
-
-        Promise.allSettled(
-            _map(
-                scores.trackers,
-                (tracker) =>
-                    new Promise((resolve) => {
-                        try {
-                            scorePilot(className, tracker.compno, scores, tracker.outOfOrder > 5).then(() => resolve());
-                        } catch (e) {
-                            console.log(`exception scoring ${className}, ${tracker.compno} [FULL:${tracker.outOfOrder > 5}]`);
-                            console.warn(className, tracker.compno, 'Unable to score', e);
-                            resolve();
-                        }
-                    })
-            )
-        )
-            .then(() => {
-                // Make a copy that we can tweak
-                const pilots = _clonedeep(scores.trackers);
-
-                // Get gliders for the class;
-                //              const gliders = _pickby( gliders, (f) => f.className == channel.className );
-                function mergedName(t) {
-                    return t.class + '_' + t.compno;
-                }
-
-                forEach(pilots, (p, k) => {
-                    const glider = gliders[mergedName(p)];
-                    if (!glider) {
-                        console.log(`unable to find glider ${p.compno} in ${p.class}`);
-                        return;
-                    }
-
-                    // Mix in the last real time information
-                    p.altitude = glider.altitude;
-                    p.agl = glider.agl;
-
-                    // And check to see if it has moved in the last 5 minutes, if we don't know omit the key
-                    if (glider.lastTime) {
-                        p.stationary = (glider.lastTime - glider.lastMoved ?? glider.lastTime) > 5 * 60;
-                    }
-
-                    // If it is recent then we will also include vario
-                    if (now - glider.lastTime < 60 && 'lastvario' in glider) {
-                        [p.lossXsecond, p.gainXsecond, p.total, p.average, p.Xperiod, p.min, p.max] = glider.lastvario;
-                    }
-
-                    p.at = glider.lastTime;
-
-                    // Flatten the scored points so we can serialise them with protobuf
-                    p.scoredpoints = p?.scoredpoints?.flat();
-                });
-
-                // Protobuf encode the scores message
-                channel.lastScores = encodePb({scores: {pilots: pilots}});
-
-                // Send to each client
-                channel.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(channel.lastScores, {binary: true});
-                    }
-                });
-            })
-            .catch((err) => {
-                console.warn(err);
-            });
-} */
+    // Reset for next iteration
+    channel.activeGliders = {};
 }
-
 //
 // Get the intitial track points from the database and make sure everything has been
 // setup properly
@@ -772,8 +621,10 @@ async function getInitialTrackPoints(channel: Channel): Promise<void> {
     // Now we will fetch the points for the pilots
     const rawpoints: PositionMessage[] = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
                                               FROM trackpoints
-                                             WHERE datecode=${channel.datecode} AND class=${channel.className} AND compno='LS3'
-                                             ORDER BY t ASC LIMIT 4400`);
+                                             WHERE datecode=${channel.datecode} AND class=${channel.className} 
+                                             ORDER BY t ASC`);
+
+    // AND compno='LS3'
 
     const groupedPoints: Record<Compno, PositionMessage[]> = _groupby(rawpoints, 'c');
 
