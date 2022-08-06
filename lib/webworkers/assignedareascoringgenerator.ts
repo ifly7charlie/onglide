@@ -46,7 +46,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
 
     // Sum up the shortest/longest path
     function sumPath(path: BasePositionMessage[], startLeg: number = 0, saveLeg: Function = (_leg: number, _distance: DistanceKM, _point?: BasePositionMessage): void => {}) {
-        console.log('sumPath', path, startLeg);
+        log('sumPath', path, startLeg);
         let previousPoint: BasePositionMessage | null = null;
         let distance = 0;
         if (!startLeg) {
@@ -55,7 +55,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
         }
         let leg = startLeg;
         for (const point of path) {
-            console.log('sp:', leg, task.legs.length, distance);
+            log('sp:', leg, task.legs.length, distance);
             const legDistance = Math.max((previousPoint !== null ? Math.round(distHaversine(previousPoint, point) * 20) / 20 : 0) - (task.legs[leg].legDistanceAdjust || 0), 0);
             saveLeg(leg, legDistance, point);
             distance += legDistance;
@@ -117,7 +117,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
 
             // Did we generate from penalty points (used to reset convex hull above)
             aatLeg.penaltyPoints = points == leg.penaltyPoints;
-            console.log('AATLEG', aatLeg, points.length);
+            log('AATLEG', aatLeg, points.length);
 
             // Are we missing some from the convexhull?
             if (aatLeg.lengthConvexHullGeneratedAt < points.length) {
@@ -129,7 +129,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
                 const newConvexHullPoints = [...aatLeg.convexHull, ...points.slice(aatLeg.lengthConvexHullGeneratedAt)];
                 const newConvexHull = convexHull(newConvexHullPoints);
 
-                console.log('================================ >>> cvex h', leg.legno);
+                log('================================ >>> cvex h', leg.legno);
                 console.table(newConvexHull);
 
                 //
@@ -159,7 +159,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
             }
         }
 
-        //        aatGraph.dump(console.log, (a) => a.t);
+        //        aatGraph.dump(long, (a) => a.t);
 
         // What we optimize in next stage
         let scoredPoints: BasePositionMessage[];
@@ -210,13 +210,13 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
                     }
                 }
 
-                console.log('from->', startPoint.t);
-                tempGraph.dump(console.log, (a) => a.t);
-                //                console.log('<-to', currentPoint.t, fakePoint);
+                log('from->', startPoint.t);
+                tempGraph.dump(long, (a) => a.t);
+                //                log('<-to', currentPoint.t, fakePoint);
 
                 // Calculate the longest path, doesn't include the start for some reason so we'll add it
                 scoredPoints = tempGraph.findPath(startPoint, fakePoint);
-                console.log(scoredPoints);
+                log(scoredPoints);
 
                 // If we are in sector then we added a control point to the next turnpoint that we don't need
                 if (taskStatus.inSector) {
@@ -284,9 +284,9 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
                 }
 
                 const longestRemainingPath = tempGraph.findPath(startPoint, finishPoint).reverse();
-                console.log('longestRemainingPath', longestRemainingPath);
+                log('longestRemainingPath', longestRemainingPath);
                 const shortestRemainingPath = minGraph.findPath(fakeMinStart, finishPoint).reverse().slice(1);
-                console.log('shortestRemainingPath', shortestRemainingPath);
+                log('shortestRemainingPath', shortestRemainingPath);
 
                 // First sum up the total maximum distance - could be different solution than current
                 // score and covers whole flight

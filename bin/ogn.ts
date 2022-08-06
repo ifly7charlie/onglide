@@ -564,7 +564,7 @@ async function sendScores(channel: any, scores: Buffer) {
     const now = Date.now() / 1000;
     // For each channel (aka class)
 
-    console.log('Sending Scores', scores);
+    console.log('Sending Scores', scores.length);
 
     // Remove any that are still marked as not alive
     const toterminate = _remove(channel.clients, (client: any) => {
