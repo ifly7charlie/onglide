@@ -14,9 +14,12 @@ export type AltitudeAMSL = number;
 export type Bearing = number & As<'Bearing'>; /// Degrees
 export type Speed = number & As<'Speed'>; /// Kph
 export type DistanceKM = number & As<'DistanceKM'>;
+export type SpeedKPH = number & As<'SpeedKPH'>;
 
 export type Compno = string & As<'Compno'>;
 export type ClassName = string & As<'ClassName'>;
+
+export type TZ = string & As<'TZ'>;
 
 export function makeClassname_Compno(t: {className: string; compno: string} | ClassName, cn?: Compno): ClassName_Compno {
     if (typeof t != 'object') {
@@ -172,3 +175,57 @@ export type TaskScoresGenerator = Generator<ScoredTaskDistanceStatus, void, void
 
 // For serialising to the client
 export type ProtobufGenerator = Generator<Uint8Array, void, void>;
+
+export interface DeckData {
+    compno: Compno;
+    positions: Float32Array;
+    indices: Uint32Array;
+    agl: Int16Array;
+    t: Uint32Array;
+    recentIndices: Uint32Array;
+    climbRate: Int8Array;
+    posIndex: number;
+    partial: boolean;
+    segmentIndex: number;
+}
+
+export interface VarioData {
+    altitude: AltitudeAMSL;
+    agl: AltitudeAgl;
+    lat: number;
+    lng: number;
+    min: AltitudeAgl;
+    max: AltitudeAgl;
+
+    lossXsecond: number;
+    gainXsecond: number;
+    total: number;
+    average: number;
+    Xperiod: number;
+
+    delay: number;
+}
+
+export interface PilotTrackData {
+    compno: Compno;
+    deck?: DeckData;
+    vario?: VarioData;
+}
+
+export {PilotScore} from './protobuf/onglide';
+import {PilotScore} from './protobuf/onglide';
+
+export type TrackData = Record<Compno, PilotTrackData>;
+export type ScoreData = Record<Compno, PilotScore>;
+
+export interface PilotScoreDisplay extends PilotScore {
+    scoredGeoJSON?: any;
+    minGeoJSON?: any;
+    maxGeoJSON?: any;
+}
+
+export interface SelectedPilotDetails {
+    pilot: any; // from db
+    score: PilotScoreDisplay;
+    track: PilotTrackData; // deck, vario
+}

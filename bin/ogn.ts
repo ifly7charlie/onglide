@@ -11,13 +11,11 @@ import {aprsParser} from 'js-aprs-fap';
 // Helper function
 //import distance from '@turf/distance';
 import {point} from '@turf/helpers';
-//import LatLong from '../lib/flightprocessing/LatLong.js';
 
 // And the Websocket
 import {WebSocket, WebSocketServer} from 'ws';
 
-import * as protobuf from 'protobufjs/light.js';
-import {OnglideWebSocketMessage} from '../lib/onglide-protobuf.js';
+import {OnglideWebSocketMessage} from '../lib/protobuf/onglide';
 
 // Helper
 const fetcher = (url) => fetch(url).then((res) => res.json());
@@ -29,7 +27,7 @@ import {setTimeout} from 'timers/promises';
 import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
-import {mergePoint, DeckData} from '../lib/flightprocessing/incremental';
+import {mergePoint} from '../lib/flightprocessing/incremental';
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 
 // Message passed from the AprsContest Listener
@@ -68,7 +66,7 @@ import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlandin
 
 import {setSiteTz, getSiteTz} from '../lib/flightprocessing/timehelper.js';
 
-import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, Task} from '../lib/types';
+import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, Task, DeckData} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
 // Where is the comp based
@@ -136,14 +134,6 @@ interface DDBEntry {
     identified: string;
 }
 let ddb: Record<string, DDBEntry> = {};
-
-// For encoding protocol buffer messages to be sent to clients...
-let pbRoot = protobuf.Root.fromJSON(OnglideWebSocketMessage);
-let pbOnglideWebsocketMessage = pbRoot.lookupType('OnglideWebSocketMessage');
-function encodePb(msg: any) {
-    let message = pbOnglideWebsocketMessage.create(msg);
-    return pbOnglideWebsocketMessage.encode(message).finish();
-}
 
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
@@ -234,6 +224,7 @@ async function main() {
             console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('message', (m) => {
+            console.log('requested pilot track', '' + m);
             sendPilotTrack(ws, ('' + m) as Compno);
         });
 
@@ -253,10 +244,8 @@ async function main() {
             if (channel.clients.length) {
                 // Encode all the changes, we only keep latest per glider if multiple received
                 // there shouldn't be multiple!
-                const msg = encodePb({
-                    positions: {positions: channel.toSend},
-                    t: Math.trunc(Date.now() / 1000)
-                });
+                const msg = OnglideWebSocketMessage.encode({positions: {positions: channel.toSend}, t: Math.trunc(Date.now() / 1000)}).finish();
+                console.log(OnglideWebSocketMessage.toJSON({positions: {positions: channel.toSend}, t: Math.trunc(Date.now() / 1000)}));
                 channel.toSend = [];
 
                 // Send to each client and if they don't respond they will be cleaned up next time around
@@ -582,23 +571,25 @@ async function sendCurrentState(client: WebSocket) {
 }
 
 async function sendPilotTrack(client: WebSocket, compno: Compno) {
-    const p = gliders[compno].deck;
+    const p = gliders[compno]?.deck;
     const toStream = {};
-    toStream[compno] = {
-        compno: compno,
-        positions: new Uint8Array(p.positions.buffer, 0, p.posIndex * 3 * 4),
-        indices: new Uint8Array(p.indices.buffer, 0, p.segmentIndex * 4),
-        t: new Uint8Array(p.t.buffer, 0, p.posIndex * 4),
-        climbRate: new Uint8Array(p.climbRate.buffer, 0, p.posIndex),
-        recentIndices: new Uint8Array(p.recentIndices.buffer),
-        agl: new Uint8Array(p.agl.buffer, 0, p.posIndex * 2),
-        posIndex: p.posIndex,
-        partial: false,
-        segmentIndex: p.segmentIndex
-    };
+    if (p) {
+        toStream[compno] = {
+            compno: compno,
+            positions: new Uint8Array(p.positions.buffer, 0, p.posIndex * 3 * 4),
+            indices: new Uint8Array(p.indices.buffer, 0, p.segmentIndex * 4),
+            t: new Uint8Array(p.t.buffer, 0, p.posIndex * 4),
+            climbRate: new Uint8Array(p.climbRate.buffer, 0, p.posIndex),
+            recentIndices: new Uint8Array(p.recentIndices.buffer),
+            agl: new Uint8Array(p.agl.buffer, 0, p.posIndex * 2),
+            posIndex: p.posIndex,
+            partial: false,
+            segmentIndex: p.segmentIndex
+        };
+    }
 
     // Send the client the current version of the tracks
-    const message = encodePb({tracks: {pilots: toStream}});
+    const message = OnglideWebSocketMessage.encode({tracks: {pilots: toStream}}).finish();
     if (client.readyState === WebSocket.OPEN) {
         client.send(message, {binary: true});
     }
@@ -638,7 +629,7 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
     );
 
     // Send the client the current version of the tracks
-    client.send(encodePb({tracks: {pilots: toStream}}), {binary: true});
+    client.send(OnglideWebSocketMessage.encode({tracks: {pilots: toStream}}).finish(), {binary: true});
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information

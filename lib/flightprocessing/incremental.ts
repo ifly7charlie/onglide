@@ -3,18 +3,8 @@ import _foreach from 'lodash.foreach';
 
 import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants';
 
-import {PositionMessage} from '../webworkers/positionmessage';
-
-export interface DeckData {
-    positions: Float32Array;
-    indices: Uint32Array;
-    agl: Int16Array;
-    t: Uint32Array;
-    recentIndices: Uint32Array;
-    climbRate: Int8Array;
-    posIndex: number;
-    segmentIndex: number;
-}
+import {PositionMessage, PilotTrackData} from '../types';
+import {PilotPosition} from '../protobuf/onglide';
 
 /*
 //
@@ -34,12 +24,14 @@ function resize(a, b: number) {
     return c;
 }
 
-export function mergePoint(point: PositionMessage, glider, latest = true, now = Date.now() / 1000): void {
+export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true, now = Date.now() / 1000): void {
     // Ignore if before start
     const compno = glider.compno;
-    if (glider?.utcstart && point.t < glider.utcstart) {
-        return;
-    }
+    let lastTime: number | null = null;
+
+    //    if (glider?.utcStart && point.t < glider.utcStart) {
+    //        return;
+    //    }
 
     if (!glider.deck) {
         glider.deck = {
@@ -50,14 +42,22 @@ export function mergePoint(point: PositionMessage, glider, latest = true, now = 
             t: new Uint32Array(deckPointIncrement),
             recentIndices: new Uint32Array(2),
             climbRate: new Int8Array(deckPointIncrement),
+            partial: true,
             posIndex: 0,
             segmentIndex: 0
         };
+    } else {
+        // If not first point then make sure we are in order!
+        lastTime = glider.deck.t[glider.deck.posIndex - 1];
+        if (point.t < lastTime) {
+            return;
+        }
     }
 
     // Now we will work with this data
     const deck = glider.deck;
 
+    // Resize required
     if (deck.posIndex >= deck.t.length) {
         const newLength = deck.posIndex + deckPointIncrement;
         deck.positions = resize(deck.positions, newLength * 3);
@@ -85,8 +85,6 @@ export function mergePoint(point: PositionMessage, glider, latest = true, now = 
     if (deck.posIndex == 0) {
         deck.indices[deck.segmentIndex++] = 0;
     } else {
-        const lastTime = deck.t[deck.posIndex - 1];
-
         // If the gap is too long then we need to start the next segment as well
         if (point.t - lastTime > gapLength) {
             // If we have only one point in the previous segment then we should duplicate it
@@ -94,11 +92,7 @@ export function mergePoint(point: PositionMessage, glider, latest = true, now = 
             if (previousSegmentStart == deck.posIndex) {
                 // add it to the previous segment so there are two points in it, it's not a line
                 // without two points
-                pushPoint(
-                    deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3),
-                    deck.agl[previousSegmentStart],
-                    deck.t[previousSegmentStart]
-                );
+                pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
             }
 
             // Start a new segment, on the next point (which has not yet been pushed)
@@ -118,4 +112,23 @@ export function mergePoint(point: PositionMessage, glider, latest = true, now = 
     }
     deck.recentIndices[0] = recentOldest;
     deck.recentIndices[1] = deck.posIndex;
+
+    if (glider.vario) {
+        // Update the altitude and height AGL for the pilot
+        // Mutate the vario and altitude back into SWR
+        const cp = glider.vario;
+        if (cp) {
+            try {
+                cp.altitude = point.a;
+                cp.agl = point.g;
+                cp.lat = point.lat;
+                cp.lng = point.lng;
+                var min: number, max: number;
+
+                [cp.lossXsecond, cp.gainXsecond, cp.total, cp.average, cp.Xperiod, min, max] = point.v.split(',').map((a) => parseFloat(a));
+                cp.min = Math.min(min, cp.min);
+                cp.max = Math.max(max, cp.max);
+            } catch (_e) {}
+        }
+    }
 }
