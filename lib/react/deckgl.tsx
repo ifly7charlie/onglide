@@ -353,7 +353,7 @@ export default function MApp(props: {
     };
 
     const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
-    console.log(selectedPilotData?.score?.maxGeoJSON);
+    //    console.log(selectedPilotData?.score?.maxGeoJSON);
 
     return (
         <DeckGL viewState={viewport} controller={true} getTooltip={toolTip} onViewStateChange={(e) => onViewStateChange(e)} layers={layers}>

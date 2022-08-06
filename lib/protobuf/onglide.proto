@@ -50,7 +50,7 @@ message Scores {
 }
 
 message SpeedDist {
-    double distance = 1; // done distance on this leg
+    optional double distance = 1; // done distance on this leg
 	double taskDistance = 2; // done distance on whole task
 
     optional double distanceRemaining = 11; // Speed

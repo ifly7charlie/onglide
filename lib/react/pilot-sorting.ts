@@ -8,6 +8,8 @@ import {delayToText, formatTime} from './timehelper.js';
 import {Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData} from '../types';
 import {API_ClassName_Pilots} from '../rest-api-types';
 
+import {sortBy as _sortBy} from 'lodash';
+
 export interface ShortDisplayKeys {
     compno: Compno;
     sortKey: string | number;
@@ -32,9 +34,11 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
         var displayAs = null;
 
         // Make sure we actually have data..
-        if (!pilotScore || !vario) {
-            return {compno, sortKey: '-', displayAs: '-', units: '', icon: 'question'};
+        if (!pilotScore && !vario) {
+            return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon: 'question'};
         }
+
+        //        console.log(pilotScore);
 
         // Update delay numbers
         const delay = now - (pilotScore.t || 0);
@@ -47,9 +51,9 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
             //        if( pilotScore.landBack ) {
             //              icon = 'home';
             //        }
-            if (vario.agl < 100) {
+            else if (vario?.agl < 100) {
                 icon = 'question';
-            } else if (vario.average > 1) {
+            } else if (vario?.average > 1) {
                 icon = 'upload';
             } else {
                 icon = 'plane';
@@ -61,16 +65,16 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
             icon = 'cloud-upload';
         }
 
-        const remaining = (a) => Math.round((a.distanceRemaining || a.minPossible || 0) * 10) / 10;
+        const remaining = (a) => Math.round((a?.distanceRemaining || a?.minPossible || 0) * 10) / 10;
 
         // data is in pilotScore.details.x
         switch (sortKey) {
             case 'speed':
-                displayAs = Math.round((newKey = pilotScore.handicapped?.taskSpeed || pilotScore.actual.taskSpeed));
+                displayAs = Math.round((newKey = pilotScore.handicapped?.taskSpeed || pilotScore.actual?.taskSpeed));
                 suffix = 'kph';
                 break;
             case 'aspeed':
-                displayAs = Math.round((newKey = pilotScore.actual.taskSpeed));
+                displayAs = Math.round((newKey = pilotScore.actual?.taskSpeed));
                 suffix = 'kph';
                 break;
             case 'fspeed':
@@ -95,11 +99,11 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 suffix = 'km';
                 break;
             case 'distance':
-                newKey = Math.round(pilotScore.handicapped?.taskDistance || pilotScore.actual.taskDistance);
+                newKey = Math.round(pilotScore.handicapped?.taskDistance || pilotScore.actual?.taskDistance);
                 suffix = 'km';
                 break;
             case 'adistance':
-                newKey = Math.round(pilotScore.actual.taskDistance);
+                newKey = Math.round(pilotScore.actual?.taskDistance);
                 suffix = 'km';
                 break;
             case 'height':
@@ -206,11 +210,11 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 }
         }
         if (!newKey) {
-            newKey = '';
+            newKey = 0;
             suffix = '';
         }
 
-        if (displayAs !== undefined) {
+        if (displayAs !== null) {
             if (!displayAs) {
                 displayAs = '-';
             }
@@ -231,7 +235,10 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
         };
     }
 
-    return _map(pilots, (pilot) => pilotSortKey(pilot.compno as Compno, pilotScores[pilot.compno], trackData[pilot.compno]?.vario, sortKey, units, now, tz));
+    return _sortBy(
+        _map(pilots, (pilot) => pilotSortKey(pilot.compno as Compno, pilotScores[pilot.compno], trackData[pilot.compno]?.vario, sortKey, units, now, tz)),
+        ['sortKey', 'compno']
+    );
 }
 
 // list of descriptions

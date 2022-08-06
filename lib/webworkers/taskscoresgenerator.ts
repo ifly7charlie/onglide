@@ -21,6 +21,8 @@ export const taskScoresGenerator = function* (task: Task, compno: Compno, handic
             return;
         }
 
+        console.log(item);
+
         // We will get called every time a calculation is ready for final scoring.
         // Our job is to calculate & populate the structure that goes to the front end
         //
@@ -60,7 +62,7 @@ export const taskScoresGenerator = function* (task: Task, compno: Compno, handic
                 // Figure out actuals for the leg/copy them over
                 sl.actual = {
                     distance: leg.distance,
-                    taskDistance: (score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance
+                    taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance) * 10) / 10
                 };
                 copyPick(sl.actual, leg, 'distanceRemaining', 'minPossible', 'maxPossible');
 
@@ -90,6 +92,20 @@ export const taskScoresGenerator = function* (task: Task, compno: Compno, handic
             }
 
             previousLeg = leg;
+        }
+
+        //
+        // Task overalls
+        const duration = (item.utcFinish || item.t) - item.utcStart;
+        score.actual = {
+            taskDistance: item.distance
+        };
+        copyPick(score.actual, item, 'minPossible', 'maxPossible', 'distanceRemaining');
+
+        // Calculate overall speed and remaining GR if there is a need for one
+        score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 360)) * 10;
+        if (!item.utcFinish && item.lastProcessedPoint?.a) {
+            score.actual.grRemaining = (score.actual.distanceRemaining || score.actual.minPossible) / item.lastProcessedPoint.a;
         }
 
         // Helper for handicapping

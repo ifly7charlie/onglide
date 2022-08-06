@@ -47,11 +47,12 @@ export interface Comparable<T> {
 export interface BasePositionMessage extends TimeStampType {
     lat: number;
     lng: number;
+    a: AltitudeAMSL;
 }
 
 export interface PositionMessage extends BasePositionMessage {
     c: Compno | FlarmID; // compno
-    a: AltitudeAMSL; // altitude
+    //    a: AltitudeAMSL; // altitude
     g: AltitudeAgl; // agl
     b?: Bearing; // course
     s?: Speed; // speed

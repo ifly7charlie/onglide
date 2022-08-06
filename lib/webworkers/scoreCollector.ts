@@ -26,12 +26,12 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     const mostRecentScore: Record<Compno, PilotScore> = {};
 
     function updateScore(compno: Compno, score: PilotScore) {
-        const sendImmediately = !mostRecentScore[compno];
+        //        const sendImmediately = !mostRecentScore[compno];
         mostRecentScore[compno] = score;
-        if (sendImmediately) {
-            console.log(`first score for ${compno} received`);
-            composeAndSendProtobuf(port, mostRecentScore);
-        }
+        //        if (sendImmediately) {
+        //            console.log(`first score for ${compno} received`);
+        //          composeAndSendProtobuf(port, mostRecentScore);
+        //    }
     }
 
     // Start async functions to read scores and update our most recent
@@ -44,6 +44,10 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     setInterval(() => {
         composeAndSendProtobuf(port, mostRecentScore);
     }, 30000);
+
+    setTimeout(() => {
+        composeAndSendProtobuf(port, mostRecentScore);
+    }, 10000);
 
     Promise.allSettled(promises);
 }

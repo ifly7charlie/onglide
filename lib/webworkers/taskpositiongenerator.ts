@@ -20,7 +20,7 @@ import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper'
 export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => Generator<TaskStatus, void, void>;
 
 function simplifyPoint(point: PositionMessage): BasePositionMessage {
-    return {t: point.t, lat: point.lat, lng: point.lng};
+    return {t: point.t, lat: point.lat, lng: point.lng, a: point.a};
 }
 
 //
@@ -156,7 +156,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                     status.startFound = true;
                     status.startConfirmed = true;
                     if (task.rules.aat) {
-                        status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng}];
+                        status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng, a: point.a}];
                     }
                     status.legs[0].exitTimeStamp = point.t;
                 }
@@ -181,7 +181,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 wasInStartSector = false;
                 status.currentLeg = 1;
                 if (task.rules.aat) {
-                    status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng}];
+                    status.legs[0].points = [{t: point.t, a: point.a, lat: startLine.nlat, lng: startLine.nlng}];
                 }
                 status.legs[0].exitTimeStamp = point.t;
                 if (point._) yield status;
@@ -231,7 +231,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 legStatus.entryTimeStamp = point.t;
                 legStatus.altitude = point.a;
                 //                legStatus.points.push(simplifyPoint(point));
-                legStatus.points = [{t: point.t, lat: tp.nlat, lng: tp.nlng}];
+                legStatus.points = [{t: point.t, a: point.a, lat: tp.nlat, lng: tp.nlng}];
                 status.closestToNext = Infinity as DistanceKM;
                 delete status.closestToNextSectorPoint;
                 // we are done scoring at this point so we can close the iterator and
@@ -352,6 +352,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 //
                 if (task.rules.aat) {
                     legStatus.points.push({
+                        a: null,
                         t: possibleAdvance.estimatedTurnTime,
                         lat: possibleAdvance.nearestSectorPoint.geometry.coordinates[1],
                         lng: possibleAdvance.nearestSectorPoint.geometry.coordinates[0]

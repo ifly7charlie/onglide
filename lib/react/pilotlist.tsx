@@ -541,21 +541,19 @@ export function PilotList({
     let mutatedPilotList = updateSortKeys(pilots, pilotScores, trackData, order as SortKey, options.units, now, tz);
 
     // Generate the pilot list, sorted by the correct key
-    const pilotList = _sortby(mutatedPilotList, ['sortKey'])
-        .reverse()
-        .map((pilot) => {
-            return (
-                <Pilot
-                    key={pilot.compno + 'pl'}
-                    pilot={pilots[pilot.compno]}
-                    display={pilot}
-                    selected={selectedPilot === pilot.compno}
-                    select={() => {
-                        selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
-                    }}
-                />
-            );
-        });
+    const pilotList = mutatedPilotList.reverse().map((pilot) => {
+        return (
+            <Pilot
+                key={pilot.compno + 'pl'}
+                pilot={pilots[pilot.compno]}
+                display={pilot}
+                selected={selectedPilot === pilot.compno}
+                select={() => {
+                    selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
+                }}
+            />
+        );
+    });
 
     // Output the whole of the pilots list component
     return (

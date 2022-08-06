@@ -62,7 +62,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
             leg++;
             previousPoint = point;
         }
-        return (Math.round(distance * 20) / 20) as DistanceKM;
+        return (Math.round(distance * 10) / 10) as DistanceKM;
     }
 
     let scoredStatus: CalculatedTaskStatus;
@@ -88,7 +88,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
         // if we haven't got a finish we need a temporary one - it's not persisted
         // so it's ok
         const startPoint = aatLegStatus[0].convexHull[0];
-        const finishPoint = taskStatus.utcFinish ? taskStatus.legs[taskStatus.currentLeg].points[0] : {t: -999999999 as Epoch, lat: task.legs[task.legs.length - 1].nlat, lng: task.legs[task.legs.length - 1].nlng};
+        const finishPoint = taskStatus.utcFinish ? taskStatus.legs[taskStatus.currentLeg].points[0] : {t: -999999999 as Epoch, lat: task.legs[task.legs.length - 1].nlat, lng: task.legs[task.legs.length - 1].nlng, a: null};
 
         for (let legno = 1; legno <= taskStatus.currentLeg; legno++) {
             // Helpers
@@ -188,6 +188,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
                 //                log('  assuming leg end leg' + t + ', at ' + (minNextDistP ? minNextDistP : p) + ' mdp:' + minNextDistP + ', finish:' + finish);
 
                 const fakePoint: BasePositionMessage = {
+                    a: 0 as AltitudeAMSL,
                     t: 0 as Epoch, //
                     lat: task.legs[taskStatus.inSector ? taskStatus.currentLeg + 1 : taskStatus.currentLeg].nlat,
                     lng: task.legs[taskStatus.inSector ? taskStatus.currentLeg + 1 : taskStatus.currentLeg].nlng
@@ -210,8 +211,8 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
                     }
                 }
 
-                log('from->', startPoint.t);
-                tempGraph.dump(long, (a) => a.t);
+                //log('from->', startPoint.t);
+                //                tempGraph.dump(log, (a) => a.t);
                 //                log('<-to', currentPoint.t, fakePoint);
 
                 // Calculate the longest path, doesn't include the start for some reason so we'll add it
@@ -249,7 +250,7 @@ export const assignedAreaScoringGenerator = function* (task: Task, taskStatusGen
                 const maxLegStart = taskStatus.currentLeg - 1;
                 const minLegStart = taskStatus.currentLeg;
                 let previousMaxPoints = aatLegStatus[maxLegStart].convexHull;
-                const fakeMinStart = {t: -888888888 as Epoch, lat: 0, lng: 0};
+                const fakeMinStart: BasePositionMessage = {t: -888888888 as Epoch, lat: 0, lng: 0, a: 0};
                 let previousMinPoints = [fakeMinStart];
 
                 const finishLeg = task.legs.length - 1;
