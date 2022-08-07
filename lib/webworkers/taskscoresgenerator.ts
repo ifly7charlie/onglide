@@ -54,9 +54,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             if (previousLeg) {
                 const sl: PilotScoreLeg = (score.legs[leg.legno] = {
                     legno: leg.legno,
-                    time: legTime(leg),
-                    estimatedEnd: leg.estimatedTurn ? true : false,
-                    estimatedStart: previousLeg?.estimatedTurn ? true : false
+                    time: legTime(previousLeg),
+                    estimatedStart: previousLeg?.estimatedTurn ? true : false,
+                    estimatedEnd: leg.estimatedTurn ? true : false
                 });
 
                 // Figure out actuals for the leg/copy them over
@@ -64,14 +64,20 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     distance: leg.distance,
                     taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance) * 10) / 10
                 };
-                copyPick(sl.actual, leg, 'distanceRemaining', 'minPossible', 'maxPossible');
+                if (leg.minPossible) {
+                    sl.actual.minPossible = leg.minPossible.distance;
+                }
+                if (leg.maxPossible) {
+                    sl.actual.maxPossible = leg.maxPossible.distance;
+                }
+                copyPick(sl.actual, leg, 'distanceRemaining');
 
                 // And now do speeds
                 if (sl.time) {
-                    const totalDuration = sl.time - item.utcStart;
+                    const totalDuration = legTime(leg) - item.utcStart;
                     sl.duration = sl.time - legTime(previousLeg);
-                    sl.actual.legSpeed = Math.round(sl.actual.distance / (sl.duration / 360)) * 10;
-                    sl.actual.taskSpeed = Math.round(sl.actual.taskDistance / (totalDuration / 360)) * 10;
+                    sl.actual.legSpeed = Math.round(sl.actual.distance / (sl.duration / 36000)) / 10;
+                    sl.actual.taskSpeed = Math.round(sl.actual.taskDistance / (totalDuration / 36000)) / 10;
                 }
             }
             // otherwise we are start leg
@@ -85,6 +91,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 score.scoredPoints.push(leg.point.lng, leg.point.lat);
             }
             if (leg.minPossible) {
+                if (leg.minPossible.start) {
+                    score.minDistancePoints.push(leg.minPossible.start.lng, leg.minPossible.start.lat);
+                }
                 score.minDistancePoints.push(leg.minPossible.point.lng, leg.minPossible.point.lat);
             }
             if (leg.maxPossible) {
@@ -105,7 +114,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         copyPick(score.actual, item, 'minPossible', 'maxPossible', 'distanceRemaining');
 
         // Calculate overall speed and remaining GR if there is a need for one
-        score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 360)) * 10;
+        score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
         if (!item.utcFinish && item.lastProcessedPoint?.a) {
             score.actual.grRemaining = (score.actual.distanceRemaining || score.actual.minPossible) / item.lastProcessedPoint.a;
         }
