@@ -91,7 +91,17 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
         // our current position to the end of the task and put that in the
         // minTaskDistance - this is much more interesting that just the 'task length'
         // remaining as it's what the pilot needs to fly to finish
-        if (!taskStatus.utcFinish && taskStatus.utcStart) {
+        if (taskStatus.utcFinish) {
+            const leg = taskStatus.legs[taskStatus.currentLeg];
+            leg.distance = (Math.round(task.legs[leg.legno].length * 10) / 10) as DistanceKM; // already adjusted for start/finish rings
+            taskStatus.distance = (Math.round((taskStatus.distance + leg.distance) * 10) / 10) as DistanceKM;
+            leg.point = {
+                t: taskStatus.utcFinish,
+                lat: task.legs[leg.legno].nlat,
+                lng: task.legs[leg.legno].nlng,
+                a: taskStatus.lastProcessedPoint.a
+            };
+        } else {
             // 1. Build the graphs
             const minGraph = new Graph<BasePositionMessage, DistanceKM>(); // min remaining graph
             let fakePointCount = -1;
