@@ -14,7 +14,7 @@ import ButtonGroup from 'react-bootstrap/ButtonGroup';
 import ToggleButton from 'react-bootstrap/ToggleButton';
 import Button from 'react-bootstrap/Button';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
+import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch} from '../types';
 import {PilotScoreLeg} from '../protobuf/onglide';
@@ -25,7 +25,7 @@ import {useState} from 'react';
 
 // Helpers for loading contest information etc
 import {useContest, usePilots, useTask, Spinner, Error} from './loaders';
-import {Nbsp, Icon} from './htmlhelper';
+import {Nbsp, Icon, TooltipIcon} from './htmlhelper';
 import {delayToText, formatTime} from './timehelper.js';
 
 import {find as _find, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
@@ -141,7 +141,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         </span>
     ) : null;
 
-    const howMuchClimb = vario.average > 0.2 ? solid('circle-arrow-up') : vario.average < -0.2 ? solid('circle-arrow-down') : solid('circle-arrow-right');
+    const howMuchClimb = vario ? (vario.average > 0.2 ? solid('circle-arrow-up') : vario.average < -0.2 ? solid('circle-arrow-down') : solid('circle-arrow-right')) : solid('question');
     const climb =
         vario && (vario.gainXsecond > 0 || vario.lossXsecond > 0) ? (
             <>
@@ -170,15 +170,17 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
     let legs = <></>;
     if (score?.legs) {
-        const firstIncompleteLeg = score.currentLeg + (score.utcFinish ? 1 : 0);
-        const legIcon = (legno, leg) => {
-            if (score.inSector && (firstIncompleteLeg == legno || firstIncompleteLeg == legno + 1)) {
-                return <Icon type="spinner" tooltip="plane still in sector" />;
+        const legIcon = (leg) => {
+            if (leg.legno == score.currentLeg) {
+                if (score.utcFinish) {
+                    return <TooltipIcon icon={solid('trophy')} tooltip="Finished!" />;
+                }
+                return <TooltipIcon icon={solid('plane')} tooltip="plane still in sector" fade style={{animationDuration: '10s'}} />;
             }
-            if (leg.estimatedstart || leg.estimatedend) {
-                return <Icon type="signal" tooltip={`warning: estimated ${leg.estimatedstart ? 'leg start ' : ''}${leg.estimatedend ? 'leg end' : ''} due to coverage issue`} />;
+            if (leg.estimatedStart || leg.estimatedEnd) {
+                return <TooltipIcon icon={solid('signal')} tooltip={`warning: estimated ${leg.estimatedStart ? 'leg start ' : ''}${leg.estimatedEnd ? 'leg end' : ''} due to coverage issue`} />;
             }
-            return firstIncompleteLeg == legno ? <Icon type="plane" tooltip="current leg" /> : <Icon type="check" tooltip="leg completed" />;
+            return <TooltipIcon icon={regular('square-check')} tooltip="leg completed" />;
         };
 
         const accessor = viewOptions.hcapped ? (l: PilotScoreLeg | PilotScore) => l?.handicapped : (l: PilotScoreLeg | PilotScore) => l?.actual;
@@ -233,7 +235,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                 {_map(score.legs, (x) =>
                                     x.legno > 0 ? (
                                         <td>
-                                            Leg {x.legno} {legIcon(x.legno, x)}
+                                            Leg {x.legno} {legIcon(x)}
                                         </td>
                                     ) : null
                                 )}
@@ -354,7 +356,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         <span>
             <Nbsp />
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage">
-                <Icon type="check" /> {Math.round(vario?.delay)}s delay
+                <TooltipIcon icon={regular('square-check')} /> {Math.round(vario?.delay)}s delay
             </a>
         </span>
     ) : (
@@ -363,12 +365,13 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage">
                 {(vario?.delay || Infinity) < 3600 ? (
                     <>
-                        <Icon type="spinner" spin={true} />
-                        Last point {delayToText(vario.delay)} ago
+                        <FontAwesomeIcon type={solid('spinner')} spin />
+                        &nbsp; Last point {delayToText(vario.delay)} ago
                     </>
                 ) : (
                     <>
-                        <Icon type="exclamation" />
+                        <FontAwesomeIcon icon={solid('triangle-exclamation')} />
+                        &nbsp;
                         {(vario?.lat || 0) > 0 ? <>&gt;2 hours ago</> : <>No tracking yet</>}
                     </>
                 )}

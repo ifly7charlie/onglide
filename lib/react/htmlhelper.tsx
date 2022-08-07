@@ -1,9 +1,18 @@
 //
 // Some helpers for rending assistance
 //
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
 export function Nbsp() {
     return <>&nbsp;</>;
+}
+
+export function TooltipIcon(props) {
+    return (
+        <a href="#" title={props.tooltip}>
+            <FontAwesomeIcon {...props} />
+        </a>
+    );
 }
 
 export function Icon(props) {
@@ -32,7 +41,7 @@ export function Icon(props) {
             );
         }
 
-        return <i className={`icon-${props.type} ${size}`} />;
+        return <FontAwesomeIcon icon={`fa-solid fa-${props.type}`} />;
     };
     if (props.tooltip) {
         return (
