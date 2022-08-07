@@ -157,12 +157,14 @@ export interface CalculatedTaskLegStatus extends TaskLegStatus {
     point?: BasePositionMessage; // where is the turn scored to
     distance?: DistanceKM; // how long is this leg (to previous)
     maxPossible?: {
+        // end of leg for max
         distance: DistanceKM;
         point: BasePositionMessage;
     };
     minPossible?: {
         distance?: DistanceKM;
         point: BasePositionMessage;
+        start?: BasePositionMessage;
     };
 }
 
