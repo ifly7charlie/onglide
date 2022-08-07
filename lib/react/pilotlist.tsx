@@ -106,11 +106,11 @@ function OptionalText(b, iv, e = null) {
     }
     return '';
 }
-function OptionalTime(before: string, t: Epoch, tz: TZ, after: string | null = null) {
+function OptionalTime(before: string, t: Epoch | number, tz: TZ, after: string | null = null) {
     if (!t) {
         return '';
     }
-    const v = new Date(t * 1000).toLocaleTimeString('eu', {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
@@ -120,7 +120,7 @@ function OptionalDuration(before: string, t: Epoch, tz: TZ, after: string | null
     if (!t) {
         return '';
     }
-    const v = new Date(t * 1000).toLocaleTimeString('eu', {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
@@ -181,18 +181,18 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             return firstIncompleteLeg == legno ? <Icon type="plane" tooltip="current leg" /> : <Icon type="check" tooltip="leg completed" />;
         };
 
-        const accessor = viewOptions.hcapped ? (l: PilotScoreLeg) => l?.handicapped : (l: PilotScoreLeg) => l?.actual;
+        const accessor = viewOptions.hcapped ? (l: PilotScoreLeg | PilotScore) => l?.handicapped : (l: PilotScoreLeg | PilotScore) => l?.actual;
 
         const distanceRemaining = (x) => {
             const l = accessor(x);
-            if (l && l.minPossible) {
+            if (l && l.maxPossible) {
                 return (
                     <td>
                         {l.minPossible} to {l.maxPossible} km
                     </td>
                 );
             }
-            if (x.legno > 0) {
+            if (l.distanceRemaining > 0) {
                 return <td>{l.distanceRemaining}</td>;
             }
             return null;
@@ -242,7 +242,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                         <tbody>
                             <tr>
                                 <td>Leg Start</td>
-                                {_map(score.legs, (x) => (x.legno > 0 ? <td>{formatTime(x.time, tz)[0]}</td> : null))}
+                                {_map(score.legs, (x) => (x.legno > 0 ? <td>{formatTime(x.time as Epoch, tz)[0]}</td> : null))}
                             </tr>
                             {!viewOptions.task ? (
                                 <>
@@ -260,7 +260,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                     </tr>
                                     <tr>
                                         <td>Leg Remaining</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? distanceRemaining(x) : null))}
+                                        {_map(score.legs, (x) => (x.legno == score.currentLeg ? distanceRemaining(x) : null))}
                                     </tr>
                                 </>
                             ) : null}
@@ -278,7 +278,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                         <tr>
                                             <td>Task Remaining</td>
                                             {_map(score.legs, (x) => (
-                                                <td>{x.legno == score.currentLeg ? distanceRemaining(x) : null}</td>
+                                                <td>{x.legno == score.currentLeg - 1 ? distanceRemaining(score) : null}</td>
                                             ))}
                                         </tr>
                                     )}
