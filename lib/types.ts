@@ -108,7 +108,8 @@ export interface Task {
 
 export enum EstimatedTurnType {
     none = 'none',
-    dogleg = 'dogleg'
+    dogleg = 'dogleg',
+    penalty = 'penalty'
 }
 
 export interface TaskLegStatus {
@@ -125,7 +126,7 @@ export interface TaskLegStatus {
     estimatedTurn?: EstimatedTurnType;
 }
 
-export type TaskStatusGenerator = Generator<TaskStatus, void, void>;
+export type TaskStatusGenerator = AsyncGenerator<TaskStatus, void, void>;
 export interface TaskStatus extends TimeStampType {
     utcStart: Epoch | null;
     utcFinish: Epoch | null;
@@ -173,13 +174,13 @@ export interface CalculatedTaskStatus extends TaskStatus {
     maxTaskDistance?: DistanceKM;
     minTaskDistance?: DistanceKM;
 }
-export type CalculatedTaskGenerator = Generator<CalculatedTaskStatus, void, void>;
+export type CalculatedTaskGenerator = AsyncGenerator<CalculatedTaskStatus, void, void>;
 
 //
 // Final scores for sending to websocket
-export type TaskScoresGenerator = Generator<PilotScore, void, void>;
+export type TaskScoresGenerator = AsyncGenerator<PilotScore, void, void>;
 // For serialising to the client
-export type ProtobufGenerator = Generator<Uint8Array, void, void>;
+export type ProtobufGenerator = AsyncGenerator<Uint8Array, void, void>;
 
 export interface DeckData {
     compno: Compno;

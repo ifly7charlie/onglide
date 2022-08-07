@@ -7,7 +7,7 @@ import {PositionMessage} from './positionmessage';
 
 import {cloneDeep as _clonedeep, keyBy as _keyby} from 'lodash';
 
-import {distHaversine, sumPath} from '../flightprocessing/taskhelper';
+import {distHaversine} from '../flightprocessing/taskhelper';
 
 import {convexHull} from '../flightprocessing/convexHull';
 
@@ -42,6 +42,27 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     // Used to track if leg has changed since last calculation
     function legFingerPrint(leg: TaskLegStatus): string {
         return String(leg.entryTimeStamp || '-') + ',' + (leg.exitTimeStamp || '-') + ',' + (leg.points?.length * 10000 + leg.penaltyPoints?.length || 'np');
+    }
+
+    // Sum up the shortest/longest path
+    function sumPath(path: BasePositionMessage[], startLeg: number = 0, saveLeg: Function = (_leg: number, _distance: DistanceKM, _point?: BasePositionMessage): void => {}) {
+        log('sumPath', path, startLeg);
+        let previousPoint: BasePositionMessage | null = null;
+        let distance = 0;
+        if (!startLeg) {
+            previousPoint = path.shift();
+            startLeg++;
+        }
+        let leg = startLeg;
+        for (const point of path) {
+            log('sp:', leg, task.legs.length, distance);
+            const legDistance = Math.max((previousPoint !== null ? Math.round(distHaversine(previousPoint, point) * 20) / 20 : 0) - (task.legs[leg].legDistanceAdjust || 0), 0);
+            saveLeg(leg, legDistance, point);
+            distance += legDistance;
+            leg++;
+            previousPoint = point;
+        }
+        return (Math.round(distance * 10) / 10) as DistanceKM;
     }
 
     let scoredStatus: CalculatedTaskStatus;
@@ -246,7 +267,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // Loop through them all
                     for (const sectorPoint of thisLegPoints) {
                         for (const pPoint of previousMaxPoints) {
-                            maxGraph.addLink(pPoint, sectorPoint, (1000 - distHaversine(pPoint, sectorPoint)) as DistanceKM);
+                            tempGraph.addLink(pPoint, sectorPoint, (1000 - distHaversine(pPoint, sectorPoint)) as DistanceKM);
                         }
                     }
                     previousMaxPoints = thisLegPoints; // after first point they are the same
@@ -263,19 +284,19 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     previousMinPoints = thisLegPoints; // after first point they are the same
                 }
 
-                const longestRemainingPath = maxGraph.findPath(startPoint, finishPoint).reverse();
+                const longestRemainingPath = tempGraph.findPath(startPoint, finishPoint).reverse();
                 log('longestRemainingPath', longestRemainingPath);
                 const shortestRemainingPath = minGraph.findPath(fakeMinStart, finishPoint).reverse().slice(1);
                 log('shortestRemainingPath', shortestRemainingPath);
 
                 // First sum up the total maximum distance - could be different solution than current
                 // score and covers whole flight
-                scoredStatus.maxTaskDistance = sumPath(longestRemainingPath, maxLegStart, task.legs, (leg, distance, point) => {
+                scoredStatus.maxTaskDistance = sumPath(longestRemainingPath, maxLegStart, (leg, distance, point) => {
                     scoredStatus.legs[leg].maxPossible = {distance, point};
                 });
 
                 // Then add from where we are to the end of the task
-                scoredStatus.minTaskDistance = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, (leg, distance, point) => {
+                scoredStatus.minTaskDistance = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, (leg, distance, point) => {
                     scoredStatus.legs[leg].minPossible = {distance, point};
                 });
 
@@ -293,7 +314,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             let previousPoint: BasePositionMessage | null = null;
             let leg = 0;
 
-            scoredStatus.distance = sumPath(scoredPoints, 0, task.legs, (leg, distance, point) => {
+            scoredStatus.distance = sumPath(scoredPoints, 0, (leg, distance, point) => {
                 scoredStatus.legs[leg].point = point;
                 scoredStatus.legs[leg].distance = distance;
             });
@@ -305,10 +326,8 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
             // We don't need necessary precision
         }
-        log('AAT Scoring:');
         log(scoredStatus);
-        log('-------------');
-        yield scoredStatus;
+        //        yield scoredStatus;
     }
     yield scoredStatus;
 };

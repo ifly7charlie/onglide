@@ -18,6 +18,10 @@
         "ogn:devbrk": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect-brk --experimental-fetch dist/bin/ogn.js\""
     },
     "dependencies": {
+        "@babel/helper-module-imports": "^7.18.6",
+        "@fortawesome/fontawesome-svg-core": "^6.1.2",
+        "@fortawesome/free-solid-svg-icons": "^6.1.2",
+        "@fortawesome/react-fontawesome": "^0.2.0",
         "@mapbox/tilebelt": ">=1.0.1",
         "@turf/along": "^6.5.0",
         "@turf/boolean-point-in-polygon": ">=6.0.1",
@@ -25,6 +29,8 @@
         "@turf/line-intersect": "^6.5.0",
         "@turf/turf": ">=5.1.6",
         "@types/node-fetch": "^2.6.2",
+        "babel-plugin-macros": "^3.1.0",
+        "bootstrap": "^5.0.0",
         "country-iso-3-to-2": "^1.1.0",
         "deck.gl": "=8.5.2",
         "dotenv": ">=8.2.0",
@@ -68,7 +74,6 @@
         "protobufjs": "^6.11.2",
         "react": ">=18.0.1",
         "react-bootstrap": "^2.5.0",
-        "bootstrap": "^5.0.0",
         "react-dom": "^18.2.0",
         "react-map-gl": "=6.1.17",
         "react-use-websocket": ">=2.0.3",

@@ -12,16 +12,16 @@ function selectPick(o, ...props) {
 }
 
 //export function everySoOftenGenerator<Type extends TimeStampType> *(interval: Epoch, input: SoftenGenerator<Type>): SoftenGenerator<Type> {
-export const taskScoresGenerator = function* (task: Task, compno: Compno, handicap: number, input: CalculatedTaskGenerator): TaskScoresGenerator {
+export const taskScoresGenerator = async function* (task: Task, compno: Compno, handicap: number, input: CalculatedTaskGenerator, log: Function): TaskScoresGenerator {
     //
     // Loop till we are told to stop
-    for (let current = input.next(); !current.done && current.value; current = input.next()) {
+    for (let current = await input.next(); !current.done && current.value; current = await input.next()) {
         const item = current.value;
         if (!item) {
             return;
         }
 
-        console.log(item);
+        log(item);
 
         // We will get called every time a calculation is ready for final scoring.
         // Our job is to calculate & populate the structure that goes to the front end
@@ -115,8 +115,8 @@ export const taskScoresGenerator = function* (task: Task, compno: Compno, handic
             return (100.0 * dist) / Math.max(handicap + leg.Hi, 25);
         };
 
-        console.log('--------> score [', compno, '] <--------');
-        console.log(JSON.stringify(score, null, 2));
+        log('--------> score [', compno, '] <--------');
+        log(JSON.stringify(score, null, 2));
         yield score;
     }
 };

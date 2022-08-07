@@ -19,7 +19,10 @@ import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno} from '
 import {Worker, parentPort, isMainThread, SHARE_ENV} from 'node:worker_threads';
 
 import {bindChannelForInOrderPackets, InOrderGeneratorFunction} from './inordergenerator';
+
+// Scoring types
 import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
+import {racingScoringGenerator} from './racingScoringGenerator';
 
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
@@ -197,7 +200,7 @@ if (!isMainThread) {
                 className: task.className,
                 compno: task.compno,
                 handicap: task.handicap,
-                inorder: bindChannelForInOrderPackets(makeClassname_Compno(task), itTask.points),
+                inorder: bindChannelForInOrderPackets(task.className, task.compno, itTask.points),
                 scoring: null
             };
         }
@@ -222,13 +225,26 @@ function startScoring(config: ScoringConfig, task: any) {
         for (const cncn in gliders) {
             const glider: GliderState = gliders[cncn];
 
-            if (task.rules.aat) {
-                const tpg = taskPositionGenerator(task, glider.inorder, console.log);
-                const aat = assignedAreaScoringGenerator(task, tpg, console.log);
-                const scores = taskScoresGenerator(task, glider.compno, glider.handicap, aat);
-                iterators[glider.compno] = scores;
-            }
+            const log = glider.compno == 'N5' ? console.log : () => {};
+
+            // 1. Figure out where in the task we are
+            const tpg = taskPositionGenerator(task, glider.inorder, log);
+
+            // 2. Figure out what that means for leg distances
+            const distances = task.rules.aat // what kind of scoring do we do
+                ? assignedAreaScoringGenerator(task, tpg, log)
+                : racingScoringGenerator(task, tpg, log);
+
+            // 3. Once we have distances we can calculate task lengths
+            //    and therefore speeds
+            const scores = taskScoresGenerator(task, glider.compno, glider.handicap, distances, log);
+
+            iterators[glider.compno] = scores;
         }
+
+        // This setups up a set of async listeners for each of the above iterators
+        // and a timer to collect the results to bundle them up and send back to the
+        // parent port
         scoreCollector(30 as Epoch, parentPort, task, iterators, console.log);
     } catch (e) {
         console.log(e);

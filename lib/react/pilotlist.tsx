@@ -13,6 +13,8 @@ import NavDropdown from 'react-bootstrap/NavDropdown';
 import ButtonGroup from 'react-bootstrap/ButtonGroup';
 import ToggleButton from 'react-bootstrap/ToggleButton';
 import Button from 'react-bootstrap/Button';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch} from '../types';
 import {PilotScoreLeg} from '../protobuf/onglide';
@@ -139,17 +141,18 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         </span>
     ) : null;
 
+    const howMuchClimb = vario.average > 0.2 ? solid('circle-arrow-up') : vario.average < -0.2 ? solid('circle-arrow-down') : solid('circle-arrow-right');
     const climb =
         vario && (vario.gainXsecond > 0 || vario.lossXsecond > 0) ? (
             <>
                 <span>
                     {vario.Xperiod}s average
                     <Nbsp />
-                    <Icon type="upload" /> {displayHeight(vario.gainXsecond, units)}
+                    <FontAwesomeIcon icon={solid('arrow-up')} /> {displayHeight(vario.gainXsecond, units)}
                     <Nbsp />
-                    <Icon type="download" /> {displayHeight(vario.lossXsecond, units)}
+                    <FontAwesomeIcon icon={solid('arrow-down')} /> {displayHeight(vario.lossXsecond, units)}
                     <Nbsp />
-                    <Icon type="circle-blank" /> {displayClimb(vario.average, units)}
+                    <FontAwesomeIcon icon={howMuchClimb} /> {displayClimb(vario.average, units)}
                 </span>
                 <br />
             </>
@@ -312,7 +315,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
     if (!score && !vario) {
         flightDetails = <div>No tracking yet</div>;
-    } else if (!score.utcStart) {
+    } else if (!score?.utcStart) {
         flightDetails = (
             <div>
                 No start reported yet
@@ -320,7 +323,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 {climb}
             </div>
         );
-    } else if (score.utcFinish) {
+    } else if (score?.utcFinish) {
         flightDetails = (
             <div>
                 {climb}

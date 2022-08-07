@@ -55,7 +55,7 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
 async function iterateAndUpdate(compno: Compno, input: TaskScoresGenerator, updateScore: Function): Promise<void> {
     // Loop till we are told to stop
     try {
-        for (let current = input.next(); !current.done && current.value; current = input.next()) {
+        for (let current = await input.next(); !current.done && current.value; current = await input.next()) {
             updateScore(compno, current.value);
         }
     } catch (e) {

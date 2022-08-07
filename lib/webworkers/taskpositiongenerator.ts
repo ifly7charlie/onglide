@@ -17,7 +17,7 @@ import {cloneDeep as _clonedeep} from 'lodash';
 
 import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper';
 
-export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => Generator<TaskStatus, void, void>;
+export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
 function simplifyPoint(point: PositionMessage): BasePositionMessage {
     return {t: point.t, lat: point.lat, lng: point.lng, a: point.a};
@@ -25,7 +25,7 @@ function simplifyPoint(point: PositionMessage): BasePositionMessage {
 
 //
 // Get a generator to calculate task status
-export const taskPositionGenerator = function* (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function): Generator<TaskStatus, void, void> {
+export const taskPositionGenerator = async function* (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function): AsyncGenerator<TaskStatus, void, void> {
     //
     // Make sure we have some logging
     if (!log)
@@ -120,8 +120,8 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
     // yield with the status object so the downstream scorer can process
     // properly. If it's not suitable to yield then call continue to wait
     // for next point
-    let iterator = pointGenerator();
-    for (let current = iterator.next(); !current.done; current = iterator.next()) {
+    let iterator = pointGenerator(log);
+    for (let current = await iterator.next(); !current.done; current = await iterator.next()) {
         if (!current.value) {
             break;
         }
@@ -155,9 +155,9 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 } else {
                     status.startFound = true;
                     status.startConfirmed = true;
-                    if (task.rules.aat) {
-                        status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng, a: point.a}];
-                    }
+                    //                    if (task.rules.aat) {
+                    status.legs[0].points = [{t: point.t, lat: startLine.nlat, lng: startLine.nlng, a: point.a}];
+                    //                    }
                     status.legs[0].exitTimeStamp = point.t;
                 }
             }
@@ -168,9 +168,9 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 // If we are in the start sector this is now wrong
                 status.utcStart = undefined;
                 status.startFound = false;
-                if (task.rules.aat) {
-                    status.legs[0].points = [];
-                }
+                //                if (task.rules.aat) {
+                status.legs[0].points = [];
+                //                }
                 delete status.legs[0].exitTimeStamp;
             }
             // We have left the start sector, remember we are going forward in time
@@ -180,9 +180,9 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 status.startFound = true;
                 wasInStartSector = false;
                 status.currentLeg = 1;
-                if (task.rules.aat) {
-                    status.legs[0].points = [{t: point.t, a: point.a, lat: startLine.nlat, lng: startLine.nlng}];
-                }
+                //                if (task.rules.aat) {
+                status.legs[0].points = [{t: point.t, a: point.a, lat: startLine.nlat, lng: startLine.nlng}];
+                //                }
                 status.legs[0].exitTimeStamp = point.t;
                 if (point._) yield status;
                 continue;
@@ -255,6 +255,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 legStatus.entryTimeStamp = point.t;
                 delete legStatus.penaltyTimeStamp;
                 legStatus.altitude = point.a;
+                legStatus.points = [simplifyPoint(point)];
                 log('* next tp:' + status.currentLeg + '/' + inSector + ',' + legStatus.legno);
             }
             legStatus.exitTimeStamp = point.t;
@@ -272,6 +273,7 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 if (!legStatus.penaltyTimeStamp) {
                     legStatus.altitude = point.a;
                     legStatus.penaltyTimeStamp = point.t;
+                    legStatus.penaltyPoints = [simplifyPoint(point)];
                 }
                 legStatus.exitTimeStamp = point.t;
             }
@@ -350,17 +352,17 @@ export const taskPositionGenerator = function* (task: Task, pointGenerator: InOr
                 iterator.next(possibleAdvance.rewindTo);
 
                 //
-                if (task.rules.aat) {
-                    legStatus.points.push({
-                        a: null,
-                        t: possibleAdvance.estimatedTurnTime,
-                        lat: possibleAdvance.nearestSectorPoint.geometry.coordinates[1],
-                        lng: possibleAdvance.nearestSectorPoint.geometry.coordinates[0]
-                    });
-                }
+                //                if (task.rules.aat) {
+                legStatus.points.push({
+                    a: null,
+                    t: possibleAdvance.estimatedTurnTime,
+                    lat: possibleAdvance.nearestSectorPoint.geometry.coordinates[1],
+                    lng: possibleAdvance.nearestSectorPoint.geometry.coordinates[0]
+                });
+                //              }
                 legStatus.exitTimeStamp = legStatus.entryTimeStamp = possibleAdvance.estimatedTurnTime;
                 legStatus.estimatedTurn = EstimatedTurnType.dogleg;
-                legStatus.altitude = point.a;
+                legStatus.altitude = null;
                 possibleAdvance = null;
             }
         }
