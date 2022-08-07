@@ -271,13 +271,13 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
 
                         // Update the geoJSON with the scored trackline so we can easily display
                         // what the pilot has been scored for
-                        if (p.scoredPoints && p.scoredPoints.length > 1) {
+                        if (p.scoredPoints && p.scoredPoints.length > 2) {
                             p.scoredGeoJSON = lineString(_chunk(p.scoredPoints, 2), {});
                         }
-                        if (p.minDistancePoints && p.minDistancePoints.length > 1) {
+                        if (p.minDistancePoints && p.minDistancePoints.length > 2) {
                             p.minGeoJSON = lineString(_chunk(p.minDistancePoints, 2), {});
                         }
-                        if (p.maxDistancePoints && p.maxDistancePoints.length > 1) {
+                        if (p.maxDistancePoints && p.maxDistancePoints.length > 2) {
                             p.maxGeoJSON = lineString(_chunk(p.maxDistancePoints, 2), {});
                         }
                         if (p.taskGeoJSON) {
