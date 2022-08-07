@@ -224,8 +224,10 @@ async function main() {
             console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('message', (m) => {
-            console.log('requested pilot track', '' + m);
-            sendPilotTrack(ws, ('' + m) as Compno);
+            if (ws.isAlive) {
+                console.log('requested pilot track', '' + m);
+                sendPilotTrack(ws, ('' + m) as Compno);
+            }
         });
 
         // Send vario etc for all gliders we are tracking
@@ -500,6 +502,7 @@ async function sendPilotTrack(client: WebSocket, compno: Compno) {
     const p = gliders[makeClassname_Compno(channels[client.ognChannel].className, compno)]?.deck;
     const toStream = {};
     if (p) {
+        console.log('sendPilotTrack', client.ognChannel, compno, ', points=', p.posIndex, ', segments=', p.segmentIndex);
         toStream[compno] = {
             compno: compno,
             positions: new Uint8Array(p.positions.buffer, 0, p.posIndex * 3 * 4),
