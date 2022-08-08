@@ -9,7 +9,7 @@ export function Nbsp() {
 
 export function TooltipIcon(props) {
     return (
-        <a href="#" title={props.tooltip}>
+        <a href="#" title={props.tooltip} className="tooltipicon">
             <FontAwesomeIcon {...props} />
         </a>
     );
@@ -45,7 +45,7 @@ export function Icon(props) {
     };
     if (props.tooltip) {
         return (
-            <a href="#" title={props.tooltip}>
+            <a href="#" title={props.tooltip} className="tooltipicon">
                 {inner()}
             </a>
         );
