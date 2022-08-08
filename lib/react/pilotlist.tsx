@@ -28,7 +28,7 @@ import {useContest, usePilots, useTask, Spinner, Error} from './loaders';
 import {Nbsp, Icon, TooltipIcon} from './htmlhelper';
 import {delayToText, formatTime} from './timehelper.js';
 
-import {find as _find, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
+import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
 // Helpers for sorting pilot list
 import {updateSortKeys, nextSortOrder, getSortDescription, ShortDisplayKeys, SortKey} from './pilot-sorting';
@@ -126,6 +126,16 @@ function OptionalDuration(before: string, t: Epoch, tz: TZ, after: string | null
     }
     return '';
 }
+function OptionalDurationHHMM(before: string, t: Epoch, tz: TZ, after: string | null = null) {
+    if (!t) {
+        return '';
+    }
+    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit'});
+    if (v) {
+        return `${before || ''}${v}${after || ''}`;
+    }
+    return '';
+}
 
 export function Details({units, pilot, score, vario, tz}: {score: PilotScore | null; vario: VarioData | null; tz: TZ; units: number; pilot: API_ClassName_Pilots_PilotDetail}) {
     const [viewOptions, setViewOptions] = useState({task: 1, hcapped: 0});
@@ -177,7 +187,9 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 }
                 return <TooltipIcon icon={solid('plane')} tooltip="plane still in sector" fade style={{animationDuration: '10s'}} />;
             }
-            if (leg.estimatedStart || leg.estimatedEnd) {
+            if (leg.legno > score.currentLeg) {
+                return <TooltipIcon icon={solid('hourglass-start')} tooltip="leg not started yet" size="xs" />;
+            } else if (leg.estimatedStart || leg.estimatedEnd) {
                 return <TooltipIcon icon={solid('signal')} tooltip={`warning: estimated ${leg.estimatedStart ? 'leg start ' : ''}${leg.estimatedEnd ? 'leg end' : ''} due to coverage issue`} />;
             }
             return <TooltipIcon icon={regular('square-check')} tooltip="leg completed" />;
@@ -199,6 +211,8 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             }
             return null;
         };
+
+        const actualLegs = _filter(score.legs, (f) => f.legno != 0);
 
         legs = (
             <>
@@ -232,37 +246,43 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                         <thead>
                             <tr>
                                 <td></td>
-                                {_map(score.legs, (x) =>
-                                    x.legno > 0 ? (
-                                        <td>
-                                            Leg {x.legno} {legIcon(x)}
-                                        </td>
-                                    ) : null
-                                )}
+                                {_map(actualLegs, (x) => (
+                                    <td>
+                                        Leg {x.legno} {legIcon(x)}
+                                    </td>
+                                ))}
                             </tr>
                         </thead>
                         <tbody>
+                            <tr style={{fontSize: 'small'}}>
+                                <td>Leg Start Altitude</td>
+                                {_map(actualLegs, (x) => (x?.alt > 0 ? <td>{displayHeight(x?.alt, units)}</td> : null))}
+                            </tr>
                             <tr>
                                 <td>Leg Start</td>
-                                {_map(score.legs, (x) => (x.legno > 0 ? <td>{formatTime(x.time as Epoch, tz)[0]}</td> : null))}
+                                {_map(actualLegs, (x) => (x.time ? <td>{formatTime(x.time as Epoch, tz)[0]}</td> : null))}
+                            </tr>
+                            <tr style={{fontSize: 'small'}}>
+                                <td>Leg Duration</td>
+                                {_map(actualLegs, (x) => (x.duration ? <td>{OptionalDurationHHMM('+', x.duration as Epoch, tz)}</td> : null))}
                             </tr>
                             {!viewOptions.task ? (
                                 <>
                                     <tr>
-                                        <td>Leg Start Altitude</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{RoundNumber(x.agl)}</td> : null))}
+                                        <td>Leg Distance</td>
+                                        {_map(actualLegs, (x) => (
+                                            <td>{accessor(x)?.distance || ''}</td>
+                                        ))}
                                     </tr>
                                     <tr>
                                         <td>Leg Speed</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.legSpeed}</td> : null))}
-                                    </tr>
-                                    <tr>
-                                        <td>Leg Distance</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.distance || ''}</td> : null))}
+                                        {_map(actualLegs, (x) => (
+                                            <td>{accessor(x)?.legSpeed}</td>
+                                        ))}
                                     </tr>
                                     <tr>
                                         <td>Leg Remaining</td>
-                                        {_map(score.legs, (x) => (x.legno == score.currentLeg ? distanceRemaining(x) : null))}
+                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td></td>))}
                                     </tr>
                                 </>
                             ) : null}
@@ -270,17 +290,21 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                 <>
                                     <tr>
                                         <td>Task Speed</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.taskSpeed || ''}</td> : null))}
+                                        {_map(actualLegs, (x) => (
+                                            <td>{accessor(x)?.taskSpeed || ''}</td>
+                                        ))}
                                     </tr>
                                     <tr>
                                         <td>Task Distance</td>
-                                        {_map(score.legs, (x) => (x.legno > 0 ? <td>{accessor(x)?.taskDistance || ''}</td> : null))}
+                                        {_map(actualLegs, (x) => (
+                                            <td>{accessor(x)?.taskDistance || ''}</td>
+                                        ))}
                                     </tr>
-                                    {!score.utcFinish && !pilot.utcFinish && (
+                                    {!score.utcFinish && (
                                         <tr>
                                             <td>Task Remaining</td>
                                             {_map(score.legs, (x) => (
-                                                <td>{x.legno == score.currentLeg - 1 ? distanceRemaining(score) : null}</td>
+                                                <td>{x.legno == score.currentLeg - 1 ? distanceRemaining(score) : <td></td>}</td>
                                             ))}
                                         </tr>
                                     )}
@@ -355,17 +379,17 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     const ognCoverage = uptodate ? (
         <span>
             <Nbsp />
-            <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage">
+            <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
                 <TooltipIcon icon={regular('square-check')} /> {Math.round(vario?.delay)}s delay
             </a>
         </span>
     ) : (
         <span>
             <Nbsp />
-            <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage">
+            <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage" className="tooltipicon">
                 {(vario?.delay || Infinity) < 3600 ? (
                     <>
-                        <FontAwesomeIcon type={solid('spinner')} spin />
+                        <FontAwesomeIcon icon={solid('spinner')} spin />
                         &nbsp; Last point {delayToText(vario.delay)} ago
                     </>
                 ) : (
@@ -381,6 +405,19 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
     const flag = (pilot.country || '') !== '' ? <div className="details-flag">{isoCountryCodeToFlagEmoji(pilot.country)}</div> : null;
 
+    let competitionDelay: any = '';
+    if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
+        competitionDelay = (
+            <a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
+                <span style={{color: 'grey'}}>
+                    &nbsp;+&nbsp;
+                    <FontAwesomeIcon icon={solid('clock-rotate-left')} size="sm" />
+                    &nbsp;{process.env.NEXT_PUBLIC_COMPETITION_DELAY}
+                </span>
+            </a>
+        );
+    }
+
     return (
         <div className="details" style={{paddingTop: '5px'}}>
             {flag}
@@ -389,6 +426,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 <br />
                 <span style={{fontSize: '80%'}}>
                     {ognCoverage}
+                    {competitionDelay}
                     <span>{altitude}</span>
                 </span>
             </h6>
@@ -398,53 +436,59 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     );
 }
 
+//<!--                <a title="Show Wind Shading" href="#" onClick={() => props.setOptions('windshade')}>
+//                  <Icon type="magic" /> -->
+//            </a>
+
 function Sorting(props) {
+    const radarFunction = () => {
+        const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
+        props.setOptions({...props.options, rainRadarAdvance: nextRadar});
+    };
+
     return (
         <>
             <span className="options">
-                <a title="Show Radar" href="#" onClick={() => props.setOptions('radar')}>
-                    <Icon type="umbrella" />
-                </a>
-                <a title="Show Wind Shading" href="#" onClick={() => props.setOptions('windshade')}>
-                    <Icon type="magic" />
+                <a title="Adjust radar timings" href="#" onClick={radarFunction}>
+                    <FontAwesomeIcon icon={solid('umbrella')} />
                 </a>
             </span>
             <span className="sorting">
                 <a title="Sort Automatically" href="#" onClick={() => props.setSort('auto')}>
-                    <Icon type="star" />
+                    <FontAwesomeIcon icon={solid('star')} />
                 </a>
                 <a title="Show Speed" href="#" onClick={() => props.setSort('speed')}>
-                    <Icon type="trophy" />
+                    <FontAwesomeIcon icon={solid('trophy')} />
                 </a>
                 <a title="Show Height" href="#" onClick={() => props.setSort('height')}>
-                    <Icon type="cloud-upload " />
+                    <FontAwesomeIcon icon={solid('cloud-upload')} />
                     &nbsp;
                 </a>
                 <a title="Show Current Climb Average" href="#" onClick={() => props.setSort('climb')}>
-                    <Icon type="upload " />
+                    <FontAwesomeIcon icon={solid('upload')} />
                     &nbsp;
                 </a>
                 <a title="Show L/D Remaining" href="#" onClick={() => props.setSort('ld')}>
-                    <Icon type="fast-forward " />
+                    <FontAwesomeIcon icon={solid('fast-forward')} />
                     &nbsp;
                 </a>
                 <a title="Show Distance Done" href="#" onClick={() => props.setSort('distance')}>
-                    <Icon type="signout " />
+                    <FontAwesomeIcon icon={solid('right-from-bracket')} />
                     &nbsp;
                 </a>
                 <a title="Show Distance Remaining" href="#" onClick={() => props.setSort('remaining')}>
-                    <Icon type="signin " />
+                    <FontAwesomeIcon icon={solid('right-to-bracket')} />
                     &nbsp;
                 </a>
                 <a title="Cycle through times" href="#" onClick={() => props.setSort('times')}>
-                    <Icon type="time " />
+                    <FontAwesomeIcon icon={solid('stopwatch')} />
                     &nbsp;
                 </a>
                 <Nbsp />
 
                 <a href="#" className="d-lg-inline d-none" onClick={() => props.toggleVisible()} title={props.visible ? 'Hide Results' : 'Show Results'} aria-controls="task-collapse" aria-expanded={props.visible}>
-                    <Icon type="tasks" />
-                    <Icon type="caret-down" />
+                    <FontAwesomeIcon icon={solid('tasks')} />
+                    <FontAwesomeIcon icon={props.visible ? solid('caret-up') : solid('caret-down')} />
                 </a>
             </span>
             <div className="d-lg-inline d-none" id="sortdescription">
@@ -487,7 +531,7 @@ function PilotStatusIcon({display}: {display: ShortDisplayKeys}) {
     if (display.icon == 'nosignal') {
         return (
             <span className="pilotstatus">
-                <Icon type="spinner" spin={true} />
+                <FontAwesomeIcon icon={solid('spinner')} spin={true} />
             </span>
         );
     }

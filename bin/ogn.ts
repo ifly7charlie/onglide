@@ -47,7 +47,7 @@ import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, f
 import {groupBy as _groupby, cloneDeep as _clonedeep} from 'lodash';
 
 // Score a single pilot
-import {scorePilot, fetchTaskAndPilots} from '../lib/flightprocessing/scorepilot.js';
+//import {scorePilot, fetchTaskAndPilots} from '../lib/flightprocessing/scorepilot.js';
 import {generatePilotTracks} from '../lib/flightprocessing/tracks.js';
 
 import {BroadcastChannel, Worker} from 'node:worker_threads';
@@ -260,6 +260,11 @@ async function main() {
         }
     }, 1000);
 
+    setInterval(async function () {
+        await updateTrackers();
+        await updateClasses();
+    }, 600 * 1000);
+
     await setTimeout(10000000);
 }
 
@@ -309,16 +314,18 @@ async function updateClasses() {
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: c.class});
             channel.scoring.hookScores((a) => sendScores(channel, a));
+            // Get tracks and configure pilots to score
             await getInitialTrackPoints(channel);
+            // Actually start scoring the tasks
             const task = await updateTasks(c.class);
             if (task) {
                 channel.scoring.setTask(task);
             }
         }
-
-        // replace (do we need to close the old ones?)
-        channels = newchannels;
     }
+    // replace (do we need to close the old ones?)
+    channels = newchannels;
+    console.log(`Updated Channels: ${_map(channels, (c) => c.className + '_' + c.datecode).join(',')}`);
 }
 
 async function updateTasks(className: ClassName): Promise<Task | void> {

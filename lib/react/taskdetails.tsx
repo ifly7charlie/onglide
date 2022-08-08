@@ -2,7 +2,8 @@
 // The turnpoint list
 //
 
-import {Icon} from './htmlhelper';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {useState} from 'react';
 import {useTask, Spinner, Error} from './loaders';
@@ -54,10 +55,10 @@ export function TaskDetails({vc}) {
             <div className={'d-lg-inline d-none'}>
                 <h5>
                     {taskDescription}
-                    <span className="pull-right">
+                    <span className="sorting">
                         <a href="#" onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
-                            <Icon type="tasks" />
-                            <Icon type="caret-down" />
+                            <FontAwesomeIcon icon={solid('tasks')} size="sm" />
+                            <FontAwesomeIcon icon={open ? solid('caret-up') : solid('caret-down')} size="sm" />
                         </a>
                     </span>
                 </h5>

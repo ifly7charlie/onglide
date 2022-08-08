@@ -18,7 +18,6 @@ export type InOrderGeneratorFunction = (log: Function | null) => AsyncGenerator<
 // NOTE: ONLY ONE EXECUTION OF GENERATOR ALLOWED!
 
 export function bindChannelForInOrderPackets(className: ClassName, compno: Compno, initialPoints: PositionMessage[], getNow: () => Epoch = defaultEpochNow): InOrderGeneratorFunction {
-    console.log(`bindChannelForInOrderPackets(${className}:${compno}, ${initialPoints.length})`);
     //
     // And we need a way to notify and wake up our generator
     // that is not asynchronous. Once we have achieved this
@@ -78,14 +77,15 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
         //
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
-        while (position < messageQueue.length && !messageQueue[position]?._) {
+        const now: Epoch = getNow();
+        while (position < messageQueue.length && !messageQueue[position]?._ && messageQueue[position]?.t < now - inOrderDelay) {
             const message = messageQueue[position++];
             log && log(JSON.stringify(message));
-            const nextPoint = yield {...message, _: position == messageQueue.length};
+            const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
 
             // If we need to go backwards then do so
-            while (nextPoint && nextPoint < messageQueue[position].t && position > 0) {
-                position--;
+            if (nextPoint) {
+                for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
             }
         }
 
@@ -101,8 +101,8 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
                 message._ = false;
 
                 // If we need to go backwards then do so
-                while (nextPoint && nextPoint < messageQueue[position].t && position > 0) {
-                    position--;
+                if (nextPoint) {
+                    for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
                 }
             }
 

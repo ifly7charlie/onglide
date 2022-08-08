@@ -32,6 +32,7 @@ import {Epoch, ClassName_Compno, AltitudeAgl, makeClassname_Compno, Compno, Flar
 
 // APRS connection
 let connection;
+const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern4.glidernet.org'];
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
@@ -203,9 +204,11 @@ if (!isMainThread) {
 function startAprsListener(config: AprsListenerConfig) {
     // Settings for connecting to the APRS server
     const PASSCODE = -1;
-    const APRSSERVER = process.env.APRS_SERVER || 'glidern4.glidernet.org';
+    const APRSSERVER = process.env.APRS_SERVER || possibleServers[Math.trunc(possibleServers.length * Math.random())];
     const PORTNUMBER = 14580;
     const FILTER = `r/${config.location.lt}/${config.location.lg}/350`;
+
+    let unstableCount = 0;
 
     // Save away where we are
     airfieldLocation = point([config.location.lt, config.location.lg]);
@@ -257,6 +260,7 @@ function startAprsListener(config: AprsListenerConfig) {
         console.log(`APRS: ${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s`);
         statistics.msgsReceived = statistics.aprsDelay = 0;
         statistics.periodStart = Date.now();
+        unstableCount--;
 
         // send a keepalive
         console.log('sending keepalive', `# ${config.competition} ${process.env.NEXT_PUBLIC_WEBSOCKET_HOST}`);
@@ -272,6 +276,10 @@ function startAprsListener(config: AprsListenerConfig) {
         if (!connection.valid) {
             console.log('failed APRS connection, retrying');
             connection.disconnect(() => {
+                unstableCount += 2;
+                if (unstableCount > 10) {
+                    process.exit();
+                }
                 connection.connect();
             });
         }

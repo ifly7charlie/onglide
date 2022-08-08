@@ -48,7 +48,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // 1. AAT specific turnpoint time
             // 2. The entry to the TP
             // 3. the exit from the TP (ie startLine)
-            const legTime = (leg) => leg.point?.t || leg.entryTimeStamp || leg.exitTimeStamp;
+            const legTime = (leg) => leg.entryTimeStamp || leg.exitTimeStamp || 0;
 
             // Proper turnpoint - startPoint doesn't count
             if (previousLeg) {
@@ -65,17 +65,17 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance) * 10) / 10
                 };
                 if (leg.minPossible) {
-                    sl.actual.minPossible = leg.minPossible.distance;
+                    sl.actual.minPossible = sl.actual.distanceRemaining = leg.minPossible.distance;
                 }
                 if (leg.maxPossible) {
                     sl.actual.maxPossible = leg.maxPossible.distance;
                 }
-                copyPick(sl.actual, leg, 'distanceRemaining');
 
                 // And now do speeds
                 if (sl.time) {
-                    const totalDuration = legTime(leg) - item.utcStart;
-                    sl.duration = sl.time - legTime(previousLeg);
+                    sl.alt = previousLeg?.point?.a;
+                    const totalDuration = (legTime(leg) || leg.point?.t) - item.utcStart;
+                    sl.duration = (legTime(leg) || leg.point?.t) - sl.time;
                     sl.actual.legSpeed = Math.round(sl.actual.distance / (sl.duration / 36000)) / 10;
                     sl.actual.taskSpeed = Math.round(sl.actual.taskDistance / (totalDuration / 36000)) / 10;
                 }
@@ -116,7 +116,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         // Calculate overall speed and remaining GR if there is a need for one
         score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
         if (!item.utcFinish && item.lastProcessedPoint?.a) {
-            score.actual.grRemaining = (score.actual.distanceRemaining || score.actual.minPossible) / item.lastProcessedPoint.a;
+            score.actual.grRemaining = Math.round((score.actual.distanceRemaining || score.actual.minPossible) / (item.lastProcessedPoint.a / 1000));
         }
 
         // Helper for handicapping

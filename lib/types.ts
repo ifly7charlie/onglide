@@ -147,6 +147,7 @@ export interface TaskStatus extends TimeStampType {
 
     //
     lastProcessedPoint?: BasePositionMessage | PositionMessage;
+    compno: Compno;
 }
 
 //

@@ -257,18 +257,6 @@ function addArc(startAngle: Radian, endAngle: Radian, ltlg: LatLong, radius: Dis
 // nearestPoint will be updated with closest point on sector boundary
 //   if it is specified.
 export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [boolean, boolean, DistanceKM] {
-    //
-    // Update nearestPoint if it is required
-    function calcNearestPoint(distanceRemaining: DistanceKM) {
-        if (nearestPoint) {
-            // If they need nearest point then calculate and return it
-            const r = along(lineString([p.geoJSON, turnpoint.point]), distanceRemaining);
-            nearestPoint.geometry = r.geometry;
-            // set dist as it is set by distanceToTPPolygon
-            nearestPoint.properties = {...r.properties, t: p.t, p: p, dist: distanceRemaining};
-        }
-    }
-
     // Quick check to see if it is plausible
     let distanceRemaining = distance(p.geoJSON, turnpoint.point) as DistanceKM;
 
@@ -283,8 +271,13 @@ export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [b
             return [insideSector, !insideSector && insidePenaltyVolume, (insideSector ? 0 : distanceRemaining) as DistanceKM];
         }
 
-        // The are not in the sector
-        calcNearestPoint(distanceRemaining);
+        // The are not in the sector and we have been asked for position
+        if (nearestPoint) {
+            const r = along(lineString([p.geoJSON, turnpoint.point]), distanceRemaining);
+            nearestPoint.geometry = r.geometry;
+            // set dist as it is set by distanceToTPPolygon
+            nearestPoint.properties = {...r.properties, t: p.t, p: p, dist: distanceRemaining};
+        }
         return [false, false, distanceRemaining as DistanceKM];
     }
     //
@@ -292,7 +285,6 @@ export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [b
     // don't need to check if we are in the polygon
     if (distanceRemaining > turnpoint.maxR + 0.5) {
         distanceRemaining = distanceToTPPolygon(turnpoint, p, nearestPoint);
-        calcNearestPoint(distanceRemaining);
         return [false, distanceRemaining < 0.5, distanceRemaining as DistanceKM];
     }
 
@@ -304,7 +296,6 @@ export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [b
     }
 
     distanceRemaining = distanceToTPPolygon(turnpoint, p, nearestPoint);
-    calcNearestPoint(distanceRemaining);
     return [false, distanceRemaining < 0.5, distanceRemaining as DistanceKM];
 }
 

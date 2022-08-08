@@ -404,6 +404,14 @@ z-Index: 10;
     color: #49604c;
 }
 
+.tooltipicon,
+.tooltipicon :hover,
+.tooltipicon :focus {
+    text-decoration: none !important;
+    color: #333;
+    cursor: help;
+}
+
 .small-pic > a:hover,
 .small-pic > a:focus {
     text-decoration: none;

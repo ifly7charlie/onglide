@@ -79,7 +79,6 @@ export class ScoringController {
 
     // Load these points into scoring
     setInitialTrack(compno: Compno, points: PositionMessage[]) {
-        console.log(`setInitialTrack(${compno}) -> ${points.length} points`);
         this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, compno: compno, points: points});
     }
 
@@ -188,19 +187,17 @@ if (!isMainThread) {
             process.exit();
         }
 
+        let start = Date.now();
+
         // Load data for specific tracker and add it to the list
         // of gliders to track
         if (task.action == ScoringCommandEnum.initialTrack) {
-            //            if (Object.keys(gliders).length > 0) {
-            //              return;
-            //        }
             const itTask: ScoringCommandTrack = task;
-            console.log(`${task.className} - ${task.compno}: initial track ${itTask.points.length} points`);
             gliders[makeClassname_Compno(task)] = {
                 className: task.className,
                 compno: task.compno,
                 handicap: task.handicap,
-                inorder: bindChannelForInOrderPackets(task.className, task.compno, itTask.points),
+                inorder: bindChannelForInOrderPackets(task.className, task.compno, itTask.points, () => (1659883036 - 4000) as Epoch),
                 scoring: null
             };
         }
@@ -225,7 +222,7 @@ function startScoring(config: ScoringConfig, task: any) {
         for (const cncn in gliders) {
             const glider: GliderState = gliders[cncn];
 
-            const log = glider.compno == 'N5' ? console.log : () => {};
+            const log = glider.compno == 'LGC' ? console.log : () => {};
 
             // 1. Figure out where in the task we are
             const tpg = taskPositionGenerator(task, glider.inorder, log);
