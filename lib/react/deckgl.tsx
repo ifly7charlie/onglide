@@ -115,7 +115,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         new TextLayer({
             id: 'labels',
             data: data,
-            getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), 100] : (d) => d.coordinates,
+            getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 100 : 80] : (d) => d.coordinates,
             getText: (d) => d.name,
             getTextColor: (d) => (props.t - d.time > gapLength ? [192, 192, 192] : [0, 0, 0]),
             getTextAnchor: 'middle',
@@ -140,7 +140,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 id: 'selected',
                 compno: props.selectedCompno,
                 data: {
-                    length: p.segmentIndex,
+                    length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
                     startIndices: p.indices,
                     timing: p.t,
                     climbRate: p.climbRate,
