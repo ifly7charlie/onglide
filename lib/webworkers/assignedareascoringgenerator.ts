@@ -266,12 +266,12 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
                     // First sum up the total maximum distance - could be different solution than current
                     // score and covers whole flight
-                    scoredStatus.maxTaskDistance = sumPath(longestRemainingPath, maxLegStart, task.legs, (leg, distance, point) => {
+                    scoredStatus.maxPossible = sumPath(longestRemainingPath, maxLegStart, task.legs, (leg, distance, point) => {
                         scoredStatus.legs[leg].maxPossible = {distance, point};
                     });
 
                     // Then add from where we are to the end of the task
-                    scoredStatus.minTaskDistance = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, (leg, distance, point) => {
+                    scoredStatus.minPossible = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, (leg, distance, point) => {
                         scoredStatus.legs[leg].minPossible = {distance, point};
                     });
 
@@ -295,8 +295,9 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 });
 
                 // We can't add this in until we calculate it
-                if (scoredStatus.minTaskDistance) {
-                    scoredStatus.minTaskDistance = (scoredStatus.minTaskDistance + scoredStatus.distance) as DistanceKM;
+                if (scoredStatus.minPossible) {
+                    scoredStatus.distanceRemaining = scoredStatus.minPossible;
+                    scoredStatus.minPossible = (scoredStatus.maxPossible + scoredStatus.distance) as DistanceKM;
                 }
 
                 // We don't need necessary precision

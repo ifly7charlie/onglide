@@ -65,10 +65,10 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance) * 10) / 10
                 };
                 if (leg.minPossible) {
-                    sl.actual.minPossible = sl.actual.distanceRemaining = leg.minPossible.distance;
+                    sl.actual.minPossible = sl.actual.distanceRemaining = Math.round(leg.minPossible.distance * 10) / 10;
                 }
                 if (leg.maxPossible) {
-                    sl.actual.maxPossible = leg.maxPossible.distance;
+                    sl.actual.maxPossible = Math.round(leg.maxPossible.distance * 10) / 10;
                 }
 
                 // And now do speeds
@@ -111,7 +111,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         };
         score.utcDuration = duration;
 
-        copyPick(score.actual, item, 'minPossible', 'maxPossible', 'distanceRemaining');
+        score.actual.distanceRemaining = score.actual.minPossible = Math.round((item.distanceRemaining || item.minPossible) * 10) / 10;
+        score.actual.maxPossible = Math.round(item.maxPossible * 10) / 10;
 
         // Calculate overall speed and remaining GR if there is a need for one
         score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;

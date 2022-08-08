@@ -173,9 +173,9 @@ export interface CalculatedTaskStatus extends TaskStatus {
     //Omit<TaskStatus, 'lastProcessedPoint' > {
     legs: CalculatedTaskLegStatus[];
     distance?: DistanceKM; // flown distance
-    distanceRemaining?: DistanceKM; // how much left
-    maxTaskDistance?: DistanceKM;
-    minTaskDistance?: DistanceKM;
+    distanceRemaining?: DistanceKM; // how much left (for both aat & speed)
+    maxPossible?: DistanceKM; // max task distance remaining
+    minPossible?: DistanceKM; // shortest distance to home (for aat this is smallest task distance based on what has been flown)
 }
 export type CalculatedTaskGenerator = AsyncGenerator<CalculatedTaskStatus, void, void>;
 

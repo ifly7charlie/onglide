@@ -13,9 +13,12 @@ import NavDropdown from 'react-bootstrap/NavDropdown';
 
 import {useState, useRef} from 'react';
 
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+import {faLink, faGears, faPaperPlane} from '@fortawesome/free-solid-svg-icons';
+
 // Helpers for loading contest information etc
 import {useContest} from '../lib/react/loaders';
-import {Nbsp, Icon} from '../lib/react/htmlhelper';
+import {Nbsp} from '../lib/react/htmlhelper';
 
 // And connect to websockets...
 import {OgnFeed} from '../lib/react/ognfeed';
@@ -57,7 +60,7 @@ function Menu(props) {
                 {c.status == 'L' ? (
                     <>
                         <Nbsp />
-                        <Icon type="plane" />
+                        <FontAwesomeIcon icon={faPaperPlane} />
                     </>
                 ) : null}
             </Nav.Link>
@@ -75,13 +78,13 @@ function Menu(props) {
                         <Nav.Link href={comp.competition.mainwebsite} className="d-md-none">
                             {shortName}
                             <Nbsp />
-                            <Icon type="external-link" />
+                            <FontAwesomeIcon icon={faLink} />
                         </Nav.Link>
                         <Nav.Link href={comp.competition.mainwebsite} className="d-none d-md-block" style={{paddingTop: 0, paddingBottom: 0}}>
                             {comp.competition.name}
                             <div style={{fontSize: '70%'}}>
                                 {comp.competition.start} to {comp.competition.end}
-                                <Icon type="external-link" />{' '}
+                                <FontAwesomeIcon icon={faLink} />{' '}
                             </div>
                         </Nav.Link>
                     </Nav.Item>
@@ -94,7 +97,7 @@ function Menu(props) {
                                 Router.push('/settings', undefined, {shallow: true});
                             }}
                         >
-                            <Icon type="cog" />
+                            <FontAwesomeIcon icon={faGears} />
                         </Nav.Link>
                     </Nav.Item>
                 </Nav>

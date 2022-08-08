@@ -121,16 +121,15 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
     // yield with the status object so the downstream scorer can process
     // properly. If it's not suitable to yield then call continue to wait
     // for next point
-    //    let iterator = pointGenerator(log);
-    //    for (let current = await iterator.next(); !current.done; current = await iterator.next()) {
-    //        if (!current.value) {
-    //            break;
-    //        }
-    for await (const current of pointGenerator(log)) {
+    let iterator = pointGenerator(log);
+    for (let current = await iterator.next(); !current.done; current = await iterator.next()) {
+        if (!current.value) {
+            break;
+        }
         try {
             // Keep track of where we are
             previousPoint = point;
-            point = status.lastProcessedPoint = current;
+            point = status.lastProcessedPoint = current.value;
 
             // For distance calculations
             point.geoJSON = turfPoint([point.lng, point.lat]);

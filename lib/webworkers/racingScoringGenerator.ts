@@ -131,7 +131,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 try {
                     // Then add from where we are to the end of the task
                     taskStatus.distanceRemaining = 0 as DistanceKM;
-                    taskStatus.minTaskDistance = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, (leg, distance, point) => {
+                    taskStatus.minPossible = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, (leg, distance, point) => {
                         taskStatus.legs[leg].minPossible = {distance, point};
                         taskStatus.distanceRemaining = (taskStatus.distanceRemaining + distance) as DistanceKM;
                     });

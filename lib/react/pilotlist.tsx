@@ -203,6 +203,8 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 return (
                     <td>
                         {l.minPossible} to {l.maxPossible} km
+                        <br />
+                        {l.distanceRemaining} km to finish
                     </td>
                 );
             }
@@ -538,7 +540,7 @@ function PilotStatusIcon({display}: {display: ShortDisplayKeys}) {
 
     return (
         <span className="pilotstatus">
-            <Icon type={display.icon} spin={false} />
+            <FontAwesomeIcon icon={display.icon} spin={false} />
         </span>
     );
 }

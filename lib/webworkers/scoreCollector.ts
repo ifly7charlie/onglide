@@ -15,7 +15,7 @@ import {MessagePort} from 'node:worker_threads';
  */
 //
 // Get a generator to calculate task status
-export async function scoreCollector(interval: Epoch, port: MessagePort, task: Task, scoreStreams: Record<Compno, TaskScoresGenerator>, log?: Function) {
+export async function scoreCollector(interval: Epoch, port: MessagePort, task: Task, scoreStreams: Record<Compno, TaskScoresGenerator>, log?: Function): Promise<void> {
     // Generate log function as it's quite slow to read environment all the time
     if (!log)
         log = (...a) => {
@@ -41,7 +41,7 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     }
 
     // And a timer callback that posts the message to front end
-    setInterval(() => {
+    const timer = setInterval(() => {
         if (!latestSent) {
             composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore);
             latestSent = true;
@@ -52,7 +52,12 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
         composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore);
     }, 10000);
 
-    Promise.allSettled(promises);
+    // Wait for all the scoring to finish
+    await Promise.allSettled(promises);
+
+    // And then clear the interval and return - no need to keep running it if nothing is
+    // scoring any longer
+    clearInterval(timer);
 }
 
 async function iterateAndUpdate(compno: Compno, input: TaskScoresGenerator, updateScore: Function): Promise<void> {
@@ -63,8 +68,9 @@ async function iterateAndUpdate(compno: Compno, input: TaskScoresGenerator, upda
             updateScore(compno, value); // .value);
         }
     } catch (e) {
-        console.log(e);
+        console.log(compno, e);
     }
+    console.log(`Completed scoring iteration for ${compno}`);
 }
 
 function composeAndSendProtobuf(className: ClassName, taskId: string, port: MessagePort, recent: Record<Compno, PilotScore>) {

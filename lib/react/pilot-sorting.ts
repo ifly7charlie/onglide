@@ -10,6 +10,9 @@ import {API_ClassName_Pilots} from '../rest-api-types';
 
 import {sortBy as _sortBy} from 'lodash';
 
+import {faCircleQuestion} from '@fortawesome/free-regular-svg-icons';
+import {faCloudArrowUp, faPaperPlane, faSignal, faClock} from '@fortawesome/free-solid-svg-icons';
+
 export interface ShortDisplayKeys {
     compno: Compno;
     sortKey: string | number;
@@ -35,7 +38,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
 
         // Make sure we actually have data..
         if (!pilotScore && !vario) {
-            return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon: 'question'};
+            return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon: faCircleQuestion};
         }
 
         // Update delay numbers
@@ -51,17 +54,17 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
             //              icon = 'home';
             //        }
             else if (vario?.agl < 100) {
-                icon = 'question';
+                icon = faCircleQuestion;
             } else if (vario?.average > 1) {
-                icon = 'upload';
+                icon = faCloudArrowUp;
             } else {
-                icon = 'plane';
+                icon = faPaperPlane;
             }
             //            if (pilot.heightColour) {
             //                icon = icon + ` h${pilot.heightColour}`;
             //            }
         } else {
-            icon = delay > 300 ? 'nosignal' : 'cloud-upload';
+            icon = delay > 300 ? faSignal : faClock;
         }
 
         if (vario) {
