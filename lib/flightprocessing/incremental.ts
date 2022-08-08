@@ -140,45 +140,53 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
 // If the pilot has started we can prune before the startline
 export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     // Keep 30 seconds before start
-    if (!deck || deck.t[0] > startTime - 30) {
+    if (!deck || deck.t[0] >= startTime) {
         return false;
     }
 
-    let indexRemove = _sortedIndex(deck.t, startTime - 20);
+    // Find the point in the array of times
+    let indexRemove = _sortedIndex(deck.t, startTime);
     if (!indexRemove) {
         return false;
     }
 
+    // Find the index into the segments that is the index or above
+    let segmentPos = _sortedIndex(deck.indices, indexRemove);
+
+    // A segment starts on this position - we can remove all before
+    if (deck.indices[segmentPos] == indexRemove) {
+    }
+    // A segment starts one afterwards - this is tricky it means
+    // the start point was the last point of previous segment
+    // ie indexRemove points to the last point in the previous segment
+    else if (deck.indices[segmentPos] == indexRemove + 1) {
+        // in this case we will truncate the previous segment and keep one
+        // more point
+        segmentPos--;
+        indexRemove--;
+    }
+    // in segment keep this segment but remove the segment before
+    else {
+        segmentPos--;
+    }
+
     // first we need to remove old segments - start with the older list as may be points in it
-    deck.recentIndices[0] = Math.max(indexRemove, deck.recentIndices[0]);
-    deck.recentIndices[1] = Math.max(indexRemove, deck.recentIndices[1]);
+    deck.recentIndices[0] = Math.max(deck.recentIndices[0], indexRemove);
+    deck.recentIndices[1] = Math.max(deck.recentIndices[1], indexRemove);
 
-    // now go through the segment list
-    let pruneIndex = 0;
-    for (let index = 0; index < deck.indices.length; index += 2) {
-        // If both are greater then we will discard
-        if (deck.indices[index + 1] < indexRemove) {
-            pruneIndex = index;
-            continue;
-        }
-        // If the first is then we update that
-        else if (deck.indices[index] < indexRemove) {
-            deck.indices[index] = 0;
-        } else {
-            deck.indices[index] -= indexRemove;
-            deck.indices[index + 1] -= indexRemove;
-        }
-    }
+    // Remove before
+    deck.indices = new Uint32Array(deck.indices.subarray(segmentPos).map((p) => Math.max(0, p - indexRemove)));
 
-    if (pruneIndex) {
-        deck.indices = new Uint32Array(deck.indices.buffer, pruneIndex * 2 * Uint32Array.BYTES_PER_ELEMENT);
-    }
+    // Adjust the offsets and If we are removing anything then resze it down
+    deck.segmentIndex -= segmentPos;
+    deck.posIndex -= indexRemove;
 
-    // And prune it out
-    deck.positions = new Float32Array(deck.positions.buffer, indexRemove * 3 * Float32Array.BYTES_PER_ELEMENT);
-    deck.agl = new Int16Array(deck.agl.buffer, indexRemove * Int16Array.BYTES_PER_ELEMENT);
-    deck.t = new Uint32Array(deck.t.buffer, indexRemove * Uint32Array.BYTES_PER_ELEMENT);
-    deck.climbRate = new Int8Array(deck.climbRate.buffer, indexRemove * Int8Array.BYTES_PER_ELEMENT);
+    // And then take the end of the buffer for displaying data
+    deck.positions = deck.positions.subarray(indexRemove * 3);
+    deck.agl = deck.agl.subarray(indexRemove);
+    deck.t = deck.t.subarray(indexRemove);
+    deck.climbRate = deck.climbRate.subarray(indexRemove);
+
     return true;
 }
 
