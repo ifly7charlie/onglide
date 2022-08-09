@@ -1,5 +1,4 @@
-import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName, Compno} from '../types';
+import {Epoch, ClassName, Compno, PositionMessage} from '../types';
 import {inOrderDelay} from '../constants';
 
 import {sortedLastIndexBy as _sortedLastIndexBy} from 'lodash';
