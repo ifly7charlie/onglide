@@ -1,4 +1,4 @@
-import {Compno, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task} from '../types';
+import {Compno, PositionStatus, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task} from '../types';
 
 import {PilotScore, PilotScoreLeg} from '../protobuf/onglide';
 
@@ -62,14 +62,17 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
                 // Figure out actuals for the leg/copy them over
                 sl.actual = {
-                    distance: leg.distance,
+                    distance: Math.round(leg.distance * 10) / 10,
                     taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance) * 10) / 10
                 };
                 if (leg.minPossible) {
-                    sl.actual.minPossible = sl.actual.distanceRemaining = Math.round(leg.minPossible.distance * 10) / 10;
+                    sl.actual.minPossible = Math.round(leg.minPossible.distance * 10) / 10;
                 }
                 if (leg.maxPossible) {
                     sl.actual.maxPossible = Math.round(leg.maxPossible.distance * 10) / 10;
+                }
+                if (leg.distanceRemaining || leg.minPossible) {
+                    sl.actual.distanceRemaining = Math.round((leg.distanceRemaining || leg.minPossible.distance) * 10) / 10;
                 }
 
                 // And now do speeds
@@ -112,13 +115,23 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         };
         score.utcDuration = duration;
 
-        score.actual.distanceRemaining = score.actual.minPossible = Math.round((item.distanceRemaining || item.minPossible) * 10) / 10;
-        score.actual.maxPossible = Math.round(item.maxPossible * 10) / 10;
+        // Looks weird but take it if it is there, if it isn't then take the alternative
+        // AAT uses all three, racing uses dR
+        score.actual.distanceRemaining = Math.round((item.distanceRemaining || item.minPossible) * 10) / 10;
+        score.actual.minPossible = Math.round((item.minPossible || item.distanceRemaining) * 10) / 10;
+        if (item.maxPossible) {
+            score.actual.maxPossible = Math.round(item.maxPossible * 10) / 10;
+        }
 
-        // Calculate overall speed and remaining GR if there is a need for one
-        score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
-        if (!item.utcFinish && item.lastProcessedPoint?.a) {
-            score.actual.grRemaining = Math.round((score.actual.distanceRemaining || score.actual.minPossible) / (item.lastProcessedPoint.a / 1000));
+        // Speeds only appropriate at some points in the flight
+        // If we haven't landed out or come home without a finish
+        if (item.flightStatus != PositionStatus.Landed && (item.utcFinish || item.flightStatus != PositionStatus.Home)) {
+            //
+            // Calculate overall speed and remaining GR if there is a need for one
+            score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
+            if (!item.utcFinish && item.lastProcessedPoint?.a) {
+                score.actual.grRemaining = Math.round((score.actual.distanceRemaining || score.actual.minPossible) / (item.lastProcessedPoint.a / 1000));
+            }
         }
 
         // Helper for handicapping

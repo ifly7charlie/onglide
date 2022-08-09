@@ -387,10 +387,6 @@ export function distHaversine(p1: BasePositionMessage, p2: BasePositionMessage):
 export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs: TaskLeg[], saveLeg: Function = (_leg: number, _distance: DistanceKM, _point?: BasePositionMessage): void => {}): DistanceKM {
     let previousPoint: BasePositionMessage | null = null;
     let distance = 0;
-    if (!startLeg) {
-        previousPoint = path.shift();
-        startLeg++;
-    }
     let leg = startLeg;
     for (const point of path) {
         const legDistance = Math.max((previousPoint !== null ? Math.round(distHaversine(previousPoint, point) * 20) / 20 : 0) - (legs[leg]?.legDistanceAdjust || 0), 0);

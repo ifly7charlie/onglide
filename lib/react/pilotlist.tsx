@@ -196,7 +196,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     <td style={{fontSize: 'small'}}>
                         {l.minPossible} to {l.maxPossible}
                         <br />
-                        {l.distanceRemaining} to finish
+                        {l.distanceRemaining}
                     </td>
                 );
             }

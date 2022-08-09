@@ -195,7 +195,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 }
                 // Before they start show altitude, sort to the end of the list
                 else */
-                if (!pilotScore?.utcStart) {
+                if (!pilotScore?.utcStart || pilotScore?.flightStatus == PositionStatus.Low) {
                     newKey = vario?.agl / 10000;
                     [displayAs, suffix] = convertHeight(vario?.agl || 0, units);
                 } else if (!vario) {
@@ -207,7 +207,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                     var speed = pilotScore?.handicapped?.taskSpeed || pilotScore?.actual?.taskSpeed;
                     var distance = pilotScore?.handicapped?.taskDistance || pilotScore?.actual?.taskDistance;
 
-                    if ((speed > 5 && delay < 3600) || pilotScore?.utcFinish) {
+                    if ((speed > 5 && delay < 3600 && pilotScore.flightStatus == PositionStatus.Airborne) || pilotScore?.utcFinish) {
                         newKey = 10000 + Math.round(speed * 10);
                         displayAs = Math.round(speed);
                         suffix = 'kph';

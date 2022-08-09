@@ -5,7 +5,7 @@
  *
  */
 
-import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task} from '../types';
+import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus} from '../types';
 
 import {EnrichedPositionGenerator, EnrichedPosition} from '../types';
 
@@ -133,8 +133,17 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
             status.t = point.t;
             status.pointsProcessed++;
             status.lastProcessedPoint = simplifyPoint(point);
-            status.flightStatus = point.ps;
             status.compno = point.c as Compno;
+
+            if (status.flightStatus != point.ps) {
+                status.flightStatus = point.ps;
+                yield status;
+            }
+
+            // Skip if we are not flying
+            if (status.flightStatus != PositionStatus.Low && status.flightStatus != PositionStatus.Airborne) {
+                continue;
+            }
 
             // Helper
             let legStatus = status.legs[status.currentLeg];
@@ -165,6 +174,9 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                     status.utcStart = undefined;
                     status.startFound = false;
                     status.legs[0].points = [];
+                    status.closestToNext = Infinity as DistanceKM;
+                    status.currentLeg = 0;
+                    delete status.closestToNextSectorPoint;
                     delete status.legs[0].exitTimeStamp;
                 }
                 // We have left the start sector, remember we are going forward in time
@@ -213,6 +225,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 status.closestToNextSectorPoint = simplifyPoint(point);
                 nearestSectorPoint.properties.t = point.t;
                 closestSectorPoint = _clonedeep(nearestSectorPoint);
+                status.closestSectorPoint = {t: -status.currentLeg as Epoch, a: 0, lat: closestSectorPoint.geometry.coordinates[1], lng: closestSectorPoint.geometry.coordinates[0]};
             }
 
             // Check for the finish, if it is then only one point counts and we can stop tracking

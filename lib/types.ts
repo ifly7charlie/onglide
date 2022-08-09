@@ -165,8 +165,9 @@ export interface TaskStatus extends TimeStampType {
     inSector: boolean;
     inPenalty: boolean;
 
-    closestToNext?: DistanceKM;
-    closestToNextSectorPoint?: any;
+    closestToNext?: DistanceKM; // closest point to next sector (dist)
+    closestToNextSectorPoint?: BasePositionMessage; // positionmessage
+    closestSectorPoint?: BasePositionMessage; // point on next sector that matches above
 
     //
     pointsProcessed: number;
@@ -187,6 +188,7 @@ export interface CalculatedTaskLegStatus extends TaskLegStatus {
     //extends Omit<TaskLegStatus, //'points' | 'penaltyPoints'> {
     point?: BasePositionMessage; // where is the turn scored to
     distance?: DistanceKM; // how long is this leg (to previous)
+    distanceRemaining?: DistanceKM; // if it's available (aat only)
     maxPossible?: {
         // end of leg for max
         distance: DistanceKM;
