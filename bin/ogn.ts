@@ -27,29 +27,28 @@ import {setTimeout} from 'timers/promises';
 import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
+// Add points to the deck structures
 import {mergePoint} from '../lib/flightprocessing/incremental';
+
+// Figure out what the task is and make GeoJSONs of it
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage} from '../lib/webworkers/positionmessage';
-
-// Launch our listener
-import {spawnAprsContestListener, AprsCommandTrack, AprsCommandEnum} from '../lib/webworkers/aprs';
+import {PositionMessage} from '../lib/types';
 
 let db = undefined;
 
 // lodash
-
 import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove} from 'lodash';
 
 //import _remove from 'lodash.remove';
 //import _groupby from 'lodash.groupby';
 import {groupBy as _groupby, cloneDeep as _clonedeep} from 'lodash';
 
-// Score a single pilot
-//import {scorePilot, fetchTaskAndPilots} from '../lib/flightprocessing/scorepilot.js';
-import {generatePilotTracks} from '../lib/flightprocessing/tracks.js';
+// Launch our listener
+import {spawnAprsContestListener, AprsCommandTrack, AprsCommandEnum} from '../lib/webworkers/aprs';
 
+// Communication with the workers
 import {BroadcastChannel, Worker} from 'node:worker_threads';
 let unknownChannel: BroadcastChannel;
 let aprsListener: Worker;
@@ -103,6 +102,7 @@ interface Glider {
     greg: string;
     dbTrackerId: string;
     duplicate: number;
+    scoringConfigured?: boolean;
 
     deck: DeckData;
 }
@@ -651,10 +651,18 @@ async function getInitialTrackPoints(channel: Channel): Promise<void> {
 
         // And pass the whole set to scoring to be loaded into the glider history
         channel.scoring.setInitialTrack(compno as Compno, groupedPoints[compno]);
+        glider.scoringConfigured = true;
     }
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
     console.log(`${channel.className} reloaded all points`);
+
+    // We also need to go through all the gliders that don't have track points and set them up as well.
+    for (const compno in gliders) {
+        if (!gliders[compno].scoringConfigured && gliders[compno].className == channel.className) {
+            channel.scoring.setInitialTrack(compno as Compno, []);
+        }
+    }
 }
 
 //
