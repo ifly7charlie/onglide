@@ -5,13 +5,13 @@ import {map as _map} from 'lodash';
 import {convertHeight, convertClimb} from './displayunits';
 import {delayToText, formatTime} from './timehelper.js';
 
-import {Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData} from '../types';
+import {Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData, PositionStatus} from '../types';
 import {API_ClassName_Pilots} from '../rest-api-types';
 
 import {sortBy as _sortBy} from 'lodash';
 
 import {faCircleQuestion} from '@fortawesome/free-regular-svg-icons';
-import {faCloudArrowUp, faPaperPlane, faSignal, faClock} from '@fortawesome/free-solid-svg-icons';
+import {faCloudArrowUp, faCow, faHouse, faCirclePause, faPaperPlane, faSignal, faClock, faTrophy} from '@fortawesome/free-solid-svg-icons';
 
 export interface ShortDisplayKeys {
     compno: Compno;
@@ -43,32 +43,33 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
 
         // Update delay numbers
         const delay = now - (t || 0);
-        //        console.log('wsStatus:', wsStatus);
+        if (vario) {
+            vario.delay = delay;
+        }
 
-        let icon;
-        if (pilotScore?.utcStart) {
-            if (pilotScore?.utcFinish) {
-                icon = 'trophy';
-            }
-            //        if( pilotScore.landBack ) {
-            //              icon = 'home';
-            //        }
-            else if (vario?.agl < 100) {
-                icon = faCircleQuestion;
-            } else if (vario?.average > 1) {
-                icon = faCloudArrowUp;
-            } else {
-                icon = faPaperPlane;
-            }
-            //            if (pilot.heightColour) {
-            //                icon = icon + ` h${pilot.heightColour}`;
-            //            }
-        } else {
+        let icon = faCircleQuestion;
+        if (delay > 100) {
             icon = delay > 300 ? faSignal : faClock;
         }
 
-        if (vario) {
-            vario.delay = delay;
+        if (!pilotScore) {
+            // make sure we have one before doing rest
+        } else if (pilotScore.flightStatus == PositionStatus.Landed) {
+            icon = faCow;
+        } else if (pilotScore.flightStatus == PositionStatus.Home) {
+            icon = faHouse;
+        } else if (pilotScore.flightStatus == PositionStatus.Grid) {
+            icon = faCirclePause;
+        }
+
+        if (pilotScore?.utcFinish) {
+            icon = faTrophy;
+        } else if (vario?.agl < 50) {
+            // noop - done above
+        } else if (vario?.average > 1) {
+            icon = faCloudArrowUp;
+        } else {
+            icon = faPaperPlane;
         }
 
         //        console.log(pilotScore);

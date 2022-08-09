@@ -135,6 +135,8 @@ message PilotScore {
 	optional bool inPenalty = 8;
 	optional bool stationary = 9;
 
+	// What phase of flight (see PositionStatus in types.ts)
+	optional uint32 flightStatus = 12;
 
     // Scores
     optional SpeedDist actual = 10;

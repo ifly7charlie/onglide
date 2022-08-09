@@ -39,6 +39,18 @@ export interface TimeStampType {
     t: Epoch;
 }
 
+import {Point, Feature} from '@turf/helpers';
+
+// Where is the airfield
+export interface AirfieldLocation {
+    name: string;
+    tz: TZ;
+    lat: number;
+    lng: number;
+    altitude?: AltitudeAMSL;
+    point?: Feature<Point>;
+}
+
 type ComparableCompareFunction<T> = (a: T, b: T) => number;
 
 export interface Comparable<T> {
@@ -60,6 +72,21 @@ export interface PositionMessage extends BasePositionMessage {
     v?: string; // vario string
     l?: boolean | null; // is late
     _?: boolean; // live
+}
+
+export enum PositionStatus {
+    Unknown = 0,
+    Stationary = 1,
+    Grid = 2,
+    Low = 3,
+    Airborne = 4,
+    Home = 5,
+    Landed = 6
+}
+
+export interface EnrichedPosition extends PositionMessage {
+    ps: PositionStatus;
+    geoJSON?: Feature<Point>;
 }
 
 // A leg in the task
@@ -109,6 +136,7 @@ export interface Task {
 export enum EstimatedTurnType {
     none = 'none',
     dogleg = 'dogleg',
+    crossing = 'crossing',
     penalty = 'penalty'
 }
 
@@ -126,7 +154,6 @@ export interface TaskLegStatus {
     estimatedTurn?: EstimatedTurnType;
 }
 
-export type TaskStatusGenerator = AsyncGenerator<TaskStatus, void, void>;
 export interface TaskStatus extends TimeStampType {
     utcStart: Epoch | null;
     utcFinish: Epoch | null;
@@ -145,8 +172,11 @@ export interface TaskStatus extends TimeStampType {
     pointsProcessed: number;
     legs: TaskLegStatus[];
 
-    //
+    // Details from flight directly
     lastProcessedPoint?: BasePositionMessage | PositionMessage;
+    flightStatus?: PositionStatus;
+
+    // Who are we ;)
     compno: Compno;
 }
 
@@ -177,11 +207,23 @@ export interface CalculatedTaskStatus extends TaskStatus {
     maxPossible?: DistanceKM; // max task distance remaining
     minPossible?: DistanceKM; // shortest distance to home (for aat this is smallest task distance based on what has been flown)
 }
+
+// points re-ordered if necessary
+export type InOrderGenerator = AsyncGenerator<PositionMessage, void, Epoch | void>;
+export type InOrderGeneratorFunction = (log: Function | null) => InOrderGenerator;
+
+// Figure out what is happening in the flight
+export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition, void, Epoch | void>;
+
+// Figure out where in a task somebody is
+export type TaskStatusGenerator = AsyncGenerator<TaskStatus, void, void>;
+
+// Calculate tasks speeds/distances
 export type CalculatedTaskGenerator = AsyncGenerator<CalculatedTaskStatus, void, void>;
 
-//
 // Final scores for sending to websocket
 export type TaskScoresGenerator = AsyncGenerator<PilotScore, void, void>;
+
 // For serialising to the client
 export type ProtobufGenerator = AsyncGenerator<Uint8Array, void, void>;
 

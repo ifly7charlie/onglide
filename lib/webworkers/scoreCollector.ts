@@ -46,7 +46,7 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
             composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore);
             latestSent = true;
         }
-    }, 30000);
+    }, interval * 1000);
 
     setTimeout(() => {
         composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore);

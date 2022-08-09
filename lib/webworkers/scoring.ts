@@ -14,15 +14,16 @@
 // Import the APRS server
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno} from '../types';
+import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno, InOrderGeneratorFunction, AirfieldLocation} from '../types';
 
-import {Worker, parentPort, isMainThread, SHARE_ENV} from 'node:worker_threads';
+import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:worker_threads';
 
-import {bindChannelForInOrderPackets, InOrderGeneratorFunction} from './inordergenerator';
+import {bindChannelForInOrderPackets} from './inordergenerator';
 
 // Scoring types
 import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 import {racingScoringGenerator} from './racingScoringGenerator';
+import {enrichedPositionGenerator} from './enrichedPositionGenerator';
 
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
@@ -66,6 +67,7 @@ import {everySoOftenGenerator} from './everysooftengenerator';
 
 export interface ScoringConfig {
     className: ClassName;
+    airfield: AirfieldLocation;
 }
 
 export class ScoringController {
@@ -204,7 +206,7 @@ if (!isMainThread) {
 
         // Actually start scoring the task, will score all the gliders we have tracks for
         if (task.action == ScoringCommandEnum.newtask) {
-            startScoring({className: task.className}, task.task);
+            startScoring({className: task.className, airfield: workerData.airfield}, task.task);
         }
     });
 }
@@ -222,10 +224,18 @@ function startScoring(config: ScoringConfig, task: any) {
         for (const cncn in gliders) {
             const glider: GliderState = gliders[cncn];
 
-            const log = glider.compno == 'LGC' ? console.log : () => {};
+            const log =
+                glider.compno == 'LEO'
+                    ? console.log
+                    : () => {
+                          /*noop*/
+                      };
+
+            // 0. Check if we are flying etc
+            const epg = enrichedPositionGenerator(config.airfield, glider.inorder, log);
 
             // 1. Figure out where in the task we are
-            const tpg = taskPositionGenerator(task, glider.inorder, log);
+            const tpg = taskPositionGenerator(task, epg, log);
 
             // 2. Figure out what that means for leg distances
             const distances = task.rules.aat // what kind of scoring do we do

@@ -32,6 +32,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
             utcStart: item.utcStart,
             utcFinish: item.utcFinish,
+            flightStatus: item.flightStatus,
 
             currentLeg: item.currentLeg,
 
@@ -76,8 +77,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     sl.alt = previousLeg?.point?.a;
                     const totalDuration = (legTime(leg) || leg.point?.t) - item.utcStart;
                     sl.duration = (legTime(leg) || leg.point?.t) - sl.time;
-                    sl.actual.legSpeed = Math.round(sl.actual.distance / (sl.duration / 36000)) / 10;
-                    sl.actual.taskSpeed = Math.round(sl.actual.taskDistance / (totalDuration / 36000)) / 10;
+                    sl.actual.legSpeed = Math.max(0, Math.round(sl.actual.distance / (sl.duration / 36000)) / 10);
+                    sl.actual.taskSpeed = Math.max(Math.round(sl.actual.taskDistance / (totalDuration / 36000)) / 10);
                 }
             }
             // otherwise we are start leg

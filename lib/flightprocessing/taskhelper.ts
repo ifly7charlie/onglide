@@ -393,7 +393,7 @@ export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs:
     }
     let leg = startLeg;
     for (const point of path) {
-        const legDistance = Math.max((previousPoint !== null ? Math.round(distHaversine(previousPoint, point) * 20) / 20 : 0) - (legs[leg].legDistanceAdjust || 0), 0);
+        const legDistance = Math.max((previousPoint !== null ? Math.round(distHaversine(previousPoint, point) * 20) / 20 : 0) - (legs[leg]?.legDistanceAdjust || 0), 0);
         saveLeg(leg, legDistance, point);
         distance += legDistance;
         leg++;

@@ -7,17 +7,18 @@
 
 import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task} from '../types';
 
-import {InOrderGeneratorFunction} from './inordergenerator';
+import {EnrichedPositionGenerator, EnrichedPosition} from '../types';
 
 import {Point, Feature, lineString, point as turfPoint} from '@turf/helpers';
 import length from '@turf/length';
 import distance from '@turf/distance';
+import lineIntersect from '@turf/line-intersect';
 
 import {cloneDeep as _clonedeep} from 'lodash';
 
 import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper';
 
-export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
+//export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
 function simplifyPoint(point: PositionMessage): BasePositionMessage {
     return {t: point.t, lat: point.lat, lng: point.lng, a: point.a};
@@ -25,7 +26,7 @@ function simplifyPoint(point: PositionMessage): BasePositionMessage {
 
 //
 // Get a generator to calculate task status
-export const taskPositionGenerator = async function* (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function): AsyncGenerator<TaskStatus, void, void> {
+export const taskPositionGenerator = async function* (task: Task, iterator: EnrichedPositionGenerator, log?: Function): AsyncGenerator<TaskStatus, void, void> {
     //
     // Make sure we have some logging
     if (!log)
@@ -94,9 +95,10 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
         nearestSectorPoint: NearestSectorPoint;
         estimatedTurnTime: Epoch;
         rewindTo: Epoch;
+        ld: number;
     }
 
-    let possibleAdvance: PossibleAdvance | null = null;
+    let possibleAdvances: PossibleAdvance[] = [];
 
     // Shortcut to the startline/finishline which is expected to always be the first/last points
     var startLine = task.legs[0];
@@ -105,10 +107,6 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
     if (startLine.type !== 'sector') {
         log('please write line cross stuff!');
         return;
-    }
-
-    interface EnrichedPosition extends PositionMessage {
-        geoJSON?: Feature<Point>;
     }
 
     let previousPoint: EnrichedPosition | null = null;
@@ -121,7 +119,7 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
     // yield with the status object so the downstream scorer can process
     // properly. If it's not suitable to yield then call continue to wait
     // for next point
-    let iterator = pointGenerator(log);
+    //    let iterator = pointGenerator(log);
     for (let current = await iterator.next(); !current.done; current = await iterator.next()) {
         if (!current.value) {
             break;
@@ -131,13 +129,11 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
             previousPoint = point;
             point = status.lastProcessedPoint = current.value;
 
-            // For distance calculations
-            point.geoJSON = turfPoint([point.lng, point.lat]);
-
             // What time have we scored to
             status.t = point.t;
             status.pointsProcessed++;
             status.lastProcessedPoint = simplifyPoint(point);
+            status.flightStatus = point.ps;
             status.compno = point.c as Compno;
 
             // Helper
@@ -168,9 +164,7 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
                     // If we are in the start sector this is now wrong
                     status.utcStart = undefined;
                     status.startFound = false;
-                    //                if (task.rules.aat) {
                     status.legs[0].points = [];
-                    //                }
                     delete status.legs[0].exitTimeStamp;
                 }
                 // We have left the start sector, remember we are going forward in time
@@ -208,19 +202,7 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
             // Find what point would be closest
             let nearestSectorPoint: NearestSectorPoint = {};
 
-            let r;
-
-            try {
-                r = checkIsInTP(tp, point, nearestSectorPoint);
-            } catch (e) {
-                console.log(e);
-                console.log('tp:', JSON.stringify(tp, null, 4));
-                console.log('point:', JSON.stringify(point, null, 4));
-                console.log(JSON.stringify(status));
-                return;
-            }
-            // Check if the point is in the next turnpoint and save away the closest point on that sector in case we need it
-            const [inSector, inPenalty, distanceRemaining]: [boolean, boolean, DistanceKM] = r;
+            const [inSector, inPenalty, distanceRemaining]: [boolean, boolean, DistanceKM] = checkIsInTP(tp, point, nearestSectorPoint);
             status.inPenalty = inPenalty;
             status.inSector = inSector;
 
@@ -314,6 +296,7 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
                 if (!status.inPenalty && distanceRemaining > Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, task.rules.aat ? 10 : 2)) {
                     status.currentLeg++;
                     status.closestToNext = Infinity as DistanceKM;
+                    possibleAdvances = [];
                     delete status.closestToNextSectorPoint;
                 }
             }
@@ -331,67 +314,107 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
                 if (elapsedTime > 20) {
                     const interpointDistance = distance(point.geoJSON, previousPoint.geoJSON);
 
-                    // Make sure that they have actually moved between the two points, 300m should be enough
+                    // Make sure that they have actually moved between the two points, 250m should be enough
                     // as it's a bit more than a thermal circle. This should stop us picking up a jump when
                     // they are stationary with a gap
-                    if (interpointDistance > 0.3) {
-                        // How far from previous point, to closest point on sector to current point
-                        // NOTE: this is closest point from most recent not from previous which is
-                        //       slightly wrong as you turn a turnpoint on entry not departure
-                        //       but we are just making sure they could have put a point in the
-                        //       sector so I'm not sure it matters
-                        const distanceNeeded = length(lineString([point.geoJSON.geometry.coordinates, closestSectorPoint.geometry.coordinates, previousPoint.geoJSON.geometry.coordinates]));
+                    if (interpointDistance > 0.25) {
+                        //
+                        // Check for intersection of the line and the turnpoint
+                        const line = lineString([point.geoJSON.geometry.coordinates, previousPoint.geoJSON.geometry.coordinates]);
+                        const intersections = lineIntersect(line, task.legs[status.currentLeg].geoJSON);
+                        if (intersections.features.length >= 2) {
+                            log(`* turnpoint ${status.currentLeg} intersection between ${previousPoint.t} and ${point.t} `);
 
-                        const neededSpeed = distanceNeeded / (elapsedTime / 3600); // kph
-                        const ld = (point.a - previousPoint.a) / distanceNeeded;
+                            const speedKps = interpointDistance / elapsedTime; // kps
+                            const altPs = (point.a - previousPoint.a) / elapsedTime; //mps
 
-                        // What kind of speeds do we accept?
-                        // >10 minutes -> 160kph
-                        // >2  minutes -> 210kph
-                        // <2  minutes -> 330kph (final glide - should we confirm height loss?)
-                        // accept 50% higher with current LD for the glide in the 10 to 35 range - perhaps
-                        // this should be LD to finish but we don't calculate that till end of points as it's around turnpoints...
-                        const possibleSpeed = elapsedTime > 600 ? 160 : (ld > 10 && ld < 35 ? 1.5 : 1) * (elapsedTime < 120 ? 330 : 210);
+                            for (const intersection of intersections.features) {
+                                const intersectionDistance = distance(previousPoint.geoJSON, intersection);
+                                const estimatedTime = Math.round(intersectionDistance * speedKps + previousPoint.t);
+                                const estimatedAlt = Math.round(intersectionDistance * altPs + previousPoint.a);
 
-                        // Make sure we meet the constrants
-                        if (neededSpeed < possibleSpeed) {
-                            log(`* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` + ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`);
-                            possibleAdvance = {
-                                nearestSectorPoint: _clonedeep(closestSectorPoint),
-                                estimatedTurnTime: Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch,
-                                rewindTo: point.t
-                            };
+                                legStatus.points.push({t: estimatedTime as Epoch, a: estimatedAlt, lat: intersection.geometry.coordinates[1], lng: intersection.geometry.coordinates[0]});
+
+                                if (!task.rules.aat) {
+                                    // If we are not an AAT then we only take the first point
+                                    break;
+                                }
+                            }
+                            legStatus.exitTimeStamp = legStatus.points[legStatus.points.length - 1].t;
+                            legStatus.entryTimeStamp = legStatus.points[0].t;
+                            legStatus.estimatedTurn = EstimatedTurnType.crossing;
+
+                            status.currentLeg++;
+                            status.closestToNext = Infinity as DistanceKM;
+                            delete status.closestToNextSectorPoint;
+                            possibleAdvances = [];
+
+                            // Otherwise check for a dogleg
                         } else {
-                            log(`- no dog log possible ${neededSpeed.toFixed(1)} kph over ${distanceNeeded.toFixed(1)} km (ld: ${ld}) is too fast, gap: ${elapsedTime} [${point.t}-${previousPoint.t}]`);
+                            // How far from previous point, to closest point on sector to current point
+                            // NOTE: this is closest point from most recent not from previous which is
+                            //       slightly wrong as you turn a turnpoint on entry not departure
+                            //       but we are just making sure they could have put a point in the
+                            //       sector so I'm not sure it matters
+                            const distanceNeeded = length(lineString([point.geoJSON.geometry.coordinates, closestSectorPoint.geometry.coordinates, previousPoint.geoJSON.geometry.coordinates]));
+
+                            const neededSpeed = distanceNeeded / (elapsedTime / 3600); // kph
+                            const ld = (point.a - previousPoint.a) / distanceNeeded;
+
+                            // What kind of speeds do we accept?
+                            // >10 minutes -> 160kph
+                            // >2  minutes -> 210kph
+                            // <2  minutes -> 330kph (final glide - should we confirm height loss?)
+                            // accept 50% higher with current LD for the glide in the 10 to 35 range - perhaps
+                            // this should be LD to finish but we don't calculate that till end of points as it's around turnpoints...
+                            const possibleSpeed = elapsedTime > 600 ? 160 : (ld > 10 && ld < 35 ? 1.5 : 1) * (elapsedTime < 120 ? 330 : 210);
+
+                            // Make sure we meet the constrants
+                            if (neededSpeed < possibleSpeed) {
+                                log(`* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` + ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`);
+                                possibleAdvances.push({
+                                    nearestSectorPoint: _clonedeep(closestSectorPoint),
+                                    estimatedTurnTime: Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch,
+                                    rewindTo: point.t,
+                                    ld: ld
+                                });
+                            } else {
+                                log(`- no dog log possible ${neededSpeed.toFixed(1)} kph over ${distanceNeeded.toFixed(1)} km (ld: ${ld}) is too fast, gap: ${elapsedTime} [${point.t}-${previousPoint.t}]`);
+                            }
                         }
                     } else {
-                        log(`- no dog leg, insufficient distance between previous point and this ${interpointDistance.toFixed(2)} km < 0.3 km, gap: ${elapsedTime}`);
+                        //                        log(`- no dog leg, insufficient distance between previous point and this ${interpointDistance.toFixed(2)} km < 0.3 km, gap: ${elapsedTime}`);
                     }
                 }
 
                 // Or are they are further away now,
-                if (possibleAdvance && distanceRemaining > status.closestToNext + Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, 2)) {
-                    log(`* using previously identified dogleg advance for sector, estimating turn @ ${possibleAdvance.estimatedTurnTime} and backtracking`);
+                if (possibleAdvances.length && distanceRemaining > status.closestToNext + Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, 2)) {
+                    // We pick the advance based on - lowest ld
+                    const advanceChosen = possibleAdvances.sort((paA, paB) => paA.ld - paB.ld)[0];
+                    log(`* using previously identified dogleg advance for sector, estimating turn @ ${advanceChosen.estimatedTurnTime} [1 of ${possibleAdvances.length} candidates] and backtracking`);
                     //
                     // backtrack to immediately after the dogleg so we don't miss new sectors if the gap finishes inside the sector or
                     // there is only one point between them, we can ignore the point it will be dealt with on next pass of for loop
-                    iterator.next(possibleAdvance.rewindTo);
+                    iterator.next(advanceChosen.rewindTo);
 
                     legStatus.points.push({
                         a: null,
-                        t: possibleAdvance.estimatedTurnTime,
-                        lat: possibleAdvance.nearestSectorPoint.geometry.coordinates[1],
-                        lng: possibleAdvance.nearestSectorPoint.geometry.coordinates[0]
+                        t: advanceChosen.estimatedTurnTime,
+                        lat: advanceChosen.nearestSectorPoint.geometry.coordinates[1],
+                        lng: advanceChosen.nearestSectorPoint.geometry.coordinates[0]
                     });
 
-                    legStatus.exitTimeStamp = legStatus.entryTimeStamp = possibleAdvance.estimatedTurnTime;
+                    legStatus.exitTimeStamp = legStatus.entryTimeStamp = advanceChosen.estimatedTurnTime;
                     legStatus.estimatedTurn = EstimatedTurnType.dogleg;
+                    status.closestToNext = Infinity as DistanceKM;
+                    delete status.closestToNextSectorPoint;
                     status.currentLeg++;
-                    possibleAdvance = null;
+                    possibleAdvances = [];
                 }
             }
 
             // If we are live then we should return the scoring
+            log(status);
             if (point._) yield status;
         } catch (e) {
             console.log('Exception in taskPositionGenerator');
@@ -400,5 +423,6 @@ export const taskPositionGenerator = async function* (task: Task, pointGenerator
         }
     }
 
+    log(`Sending final startings for ${status.compno}`);
     yield status;
 };

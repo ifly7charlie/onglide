@@ -1,4 +1,4 @@
-import {Epoch, ClassName, Compno, PositionMessage} from '../types';
+import {Epoch, ClassName, Compno, PositionMessage, InOrderGeneratorFunction, InOrderGenerator} from '../types';
 import {inOrderDelay} from '../constants';
 
 import {sortedLastIndexBy as _sortedLastIndexBy} from 'lodash';
@@ -6,8 +6,6 @@ import {BroadcastChannel} from 'node:worker_threads';
 
 // Helper in case we are overriding current time
 const defaultEpochNow = (): Epoch => Math.trunc(Date.now() / 1000) as Epoch;
-
-export type InOrderGeneratorFunction = (log: Function | null) => AsyncGenerator<PositionMessage, void, Epoch | void>;
 
 //
 // This subscribes to broadcast channel and ensures that the messages
@@ -61,7 +59,7 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
 
     // Generate the next item in the sequence this will block until
     // values are ready and have been waiting for 30 seconds
-    const inOrderGenerator = async function* (log: Function | null): AsyncGenerator<PositionMessage, void, Epoch | void> {
+    const inOrderGenerator = async function* (log: Function | null): InOrderGenerator {
         // Singleton enforcement - because of the way we wait on a changing promise
         if (running) {
             throw new Error('Only one iterator allowed');
@@ -79,7 +77,6 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
         const now: Epoch = getNow();
         while (position < messageQueue.length && !messageQueue[position]?._ && messageQueue[position]?.t < now - inOrderDelay) {
             const message = messageQueue[position++];
-            log && log(JSON.stringify(message));
             const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
 
             // If we need to go backwards then do so
@@ -95,7 +92,6 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
             const now: Epoch = getNow();
             if (position < messageQueue.length && messageQueue[position]?.t < now - inOrderDelay) {
                 const message = messageQueue[position++];
-                log && log(JSON.stringify(message));
                 const nextPoint = yield message;
                 message._ = false;
 

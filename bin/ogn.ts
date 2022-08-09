@@ -159,7 +159,7 @@ async function main() {
 
     // Location comes from the competition table in the database
     location = (await db.query('SELECT name, lt,lg,tz FROM competition LIMIT 1'))[0];
-    location.point = point([location.lt, location.lg]);
+    location.point = point([location.lg, location.lt]);
 
     // Save the tz for use
     setSiteTz(location.tz);
@@ -312,7 +312,7 @@ async function updateClasses() {
 
         // And configure scoring for it as well
         if (!channel.scoring) {
-            channel.scoring = new ScoringController({className: c.class});
+            channel.scoring = new ScoringController({className: c.class, airfield: location});
             channel.scoring.hookScores((a) => sendScores(channel, a));
             // Get tracks and configure pilots to score
             await getInitialTrackPoints(channel);
