@@ -197,7 +197,7 @@ if (!isMainThread) {
                 className: task.className,
                 compno: task.compno,
                 handicap: task.handicap,
-                inorder: bindChannelForInOrderPackets(task.className, task.compno, itTask.points, () => (1659883036 - 4000) as Epoch),
+                inorder: bindChannelForInOrderPackets(task.className, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
                 scoring: null
             };
         }
