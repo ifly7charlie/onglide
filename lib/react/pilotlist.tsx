@@ -1,30 +1,18 @@
-import next from 'next';
-
-import {useRouter} from 'next/router';
-
 // What do we need to render the bootstrap part of the page
-import Container from 'react-bootstrap/Container';
-import Row from 'react-bootstrap/Row';
-import Col from 'react-bootstrap/Col';
 import Collapse from 'react-bootstrap/Collapse';
-import Navbar from 'react-bootstrap/Navbar';
-import Nav from 'react-bootstrap/Nav';
-import NavDropdown from 'react-bootstrap/NavDropdown';
 import ButtonGroup from 'react-bootstrap/ButtonGroup';
-import ToggleButton from 'react-bootstrap/ToggleButton';
+
 import Button from 'react-bootstrap/Button';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch} from '../types';
+import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus} from '../types';
 import {PilotScoreLeg} from '../protobuf/onglide';
-import {API_ClassName_Pilots_PilotDetail} from '../rest-api-types';
-import {API_ClassName_Pilots} from './react-api-types';
+import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
 import {useState} from 'react';
 
 // Helpers for loading contest information etc
-import {useContest, usePilots, useTask, Spinner, Error} from './loaders';
 import {Nbsp, Icon, TooltipIcon} from './htmlhelper';
 import {delayToText, formatTime} from './timehelper.js';
 
@@ -184,8 +172,12 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             if (leg.legno == score.currentLeg) {
                 if (score.utcFinish) {
                     return <TooltipIcon icon={solid('trophy')} tooltip="Finished!" />;
+                } else if (score.flightStatus == PositionStatus.Landed) {
+                    return <TooltipIcon icon={solid('cow')} tooltip="Landout on leg" />;
+                } else if (score.flightStatus == PositionStatus.Home) {
+                    return <TooltipIcon icon={solid('house')} tooltip="Returned home" />;
                 }
-                return <TooltipIcon icon={solid('plane')} tooltip="plane still in sector" fade style={{animationDuration: '10s'}} />;
+                return <TooltipIcon icon={solid('paper-plane')} tooltip="plane still in sector" fade style={{animationDuration: '10s'}} />;
             }
             if (leg.legno > score.currentLeg) {
                 return <TooltipIcon icon={solid('hourglass-start')} tooltip="leg not started yet" size="xs" />;
@@ -201,10 +193,10 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             const l = accessor(x);
             if (l && l.maxPossible) {
                 return (
-                    <td>
-                        {l.minPossible} to {l.maxPossible} km
+                    <td style={{fontSize: 'small'}}>
+                        {l.minPossible} to {l.maxPossible}
                         <br />
-                        {l.distanceRemaining} km to finish
+                        {l.distanceRemaining} to finish
                     </td>
                 );
             }
