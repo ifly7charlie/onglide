@@ -14,6 +14,8 @@ import length from '@turf/length';
 import distance from '@turf/distance';
 import lineIntersect from '@turf/line-intersect';
 
+import {setTimeout} from 'timers/promises';
+
 import {cloneDeep as _clonedeep} from 'lodash';
 
 import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper';
@@ -429,6 +431,11 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
             // If we are live then we should return the scoring
             log(status);
             if (point._) yield status;
+
+            // If we are live we only score so often
+            if (point._) {
+                await setTimeout(30);
+            }
         } catch (e) {
             console.log('Exception in taskPositionGenerator');
             console.log(e);

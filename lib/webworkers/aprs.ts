@@ -206,7 +206,7 @@ function startAprsListener(config: AprsListenerConfig) {
     const PASSCODE = -1;
     const APRSSERVER = process.env.APRS_SERVER || possibleServers[Math.trunc(possibleServers.length * Math.random())];
     const PORTNUMBER = 14580;
-    const FILTER = `r/${config.location.lt}/${config.location.lg}/350`;
+    const FILTER = `r/${config.location.lt}/${config.location.lg}/250`;
 
     let unstableCount = 0;
 
@@ -245,6 +245,12 @@ function startAprsListener(config: AprsListenerConfig) {
     connection.on('error', (err) => {
         console.log('Error: ' + err);
         connection.disconnect();
+        unstableCount += 2;
+        if (unstableCount > 5) {
+            console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+            clearInterval(kaInterval);
+            startAprsListener(config);
+        }
         connection.connect();
     });
 
@@ -253,7 +259,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // And every minute we need to confirm the APRS
     // connection has had some traffic
-    setInterval(function () {
+    const kaInterval = setInterval(function () {
         // Log and reset statistics
         const period = (Date.now() - statistics.periodStart) / 1000;
         console.log(period);
@@ -274,11 +280,13 @@ function startAprsListener(config: AprsListenerConfig) {
 
         // Re-establish the APRS connection if we haven't had anything in
         if (!connection.valid) {
-            console.log('failed APRS connection, retrying');
+            console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
             connection.disconnect(() => {
                 unstableCount += 2;
-                if (unstableCount > 10) {
-                    process.exit();
+                if (unstableCount > 5) {
+                    console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+                    clearInterval(kaInterval);
+                    startAprsListener(config);
                 }
                 connection.connect();
             });

@@ -5,7 +5,7 @@
  *
  */
 
-import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGeneratorFunction} from '../types';
+import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator} from '../types';
 
 import {Point, Feature, point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
@@ -14,7 +14,7 @@ import {cloneDeep as _clonedeep} from 'lodash';
 
 //
 // Get a generator to calculate task status
-export const enrichedPositionGenerator = async function* (airfield: AirfieldLocation, pointGenerator: InOrderGeneratorFunction, log?: Function): EnrichedPositionGenerator {
+export const enrichedPositionGenerator = async function* (airfield: AirfieldLocation, pointGenerator: InOrderGenerator, log?: Function): EnrichedPositionGenerator {
     //
     // Make sure we have some logging
     if (!log)
@@ -39,8 +39,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
     // yield with the status object so the downstream scorer can process
     // properly. If it's not suitable to yield then call continue to wait
     // for next point
-    let iterator = pointGenerator(log);
-    for (let current = await iterator.next(); !current.done; current = await iterator.next(nextArg)) {
+    for (let current = await pointGenerator.next(); !current.done; current = await pointGenerator.next(nextArg)) {
         if (!current.value) {
             break;
         }

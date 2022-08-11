@@ -20,5 +20,5 @@
         "jsx": "preserve"
     },
     "exclude": ["dist", "node_modules"],
-    "include": ["bin/*ts", "lib/**ts"]
+    "include": ["bin/*ts", "lib/**ts", "test/**ts"]
 }

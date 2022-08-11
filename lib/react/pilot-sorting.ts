@@ -31,7 +31,7 @@ export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'a
 export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreData, trackData: TrackData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ) {
     //
     // Map function
-    function pilotSortKey(compno: Compno, pilotScore: PilotScore, vario: VarioData, t: Epoch, sortKey: SortKey, units: Units, now: Epoch, tz: TZ): ShortDisplayKeys {
+    function pilotSortKey(compno: Compno, pilotScore: PilotScore, vario: VarioData, t: Epoch): ShortDisplayKeys {
         var newKey;
         var suffix = '';
         var displayAs = null;
@@ -48,18 +48,16 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
         }
 
         let icon = faCircleQuestion;
-        if (delay > 100) {
-            icon = delay > 300 ? faSignal : faClock;
-        }
 
         if (!pilotScore) {
-            // make sure we have one before doing rest
-        } else if (pilotScore.flightStatus == PositionStatus.Landed) {
+        } else if (pilotScore?.flightStatus == PositionStatus.Landed) {
             icon = faCow;
-        } else if (pilotScore.flightStatus == PositionStatus.Home) {
+        } else if (pilotScore?.flightStatus == PositionStatus.Home) {
             icon = faHouse;
-        } else if (pilotScore.flightStatus == PositionStatus.Grid) {
+        } else if (pilotScore?.flightStatus == PositionStatus.Grid) {
             icon = faCirclePause;
+        } else if (delay > 100) {
+            icon = delay > 300 ? faSignal : faClock;
         }
 
         if (pilotScore?.utcFinish) {
@@ -248,7 +246,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
     }
 
     return _sortBy(
-        _map(pilots, (pilot) => pilotSortKey(pilot.compno as Compno, pilotScores[pilot.compno], trackData[pilot.compno]?.vario, trackData[pilot.compno]?.t, sortKey, units, now, tz)),
+        _map(pilots, (pilot) => pilotSortKey(pilot.compno as Compno, pilotScores[pilot.compno], trackData[pilot.compno]?.vario, trackData[pilot.compno]?.t)),
         ['sortKey', 'compno']
     );
 }

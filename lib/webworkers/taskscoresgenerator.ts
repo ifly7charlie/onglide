@@ -21,7 +21,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             return;
         }
 
-        log(item);
+        //        log(item);
 
         // We will get called every time a calculation is ready for final scoring.
         // Our job is to calculate & populate the structure that goes to the front end
@@ -139,8 +139,11 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             return (100.0 * dist) / Math.max(handicap + leg.Hi, 25);
         };
 
-        log('--------> score [', compno, '] <--------');
-        log(JSON.stringify(score, null, 2));
+        if (Date.now() / 1000 - score.t > 60) {
+            console.log(score.compno, 'scored delay:', ((Date.now() - score.t) / 1000).toFixed(0));
+        }
+        //        log('--------> score [', compno, '] <--------');
+        //        log(JSON.stringify(score, null, 2));
         yield score;
     }
 };

@@ -181,7 +181,6 @@ message Positions {
 // Are we connected?
 message KeepAlive {
     bool keepalive = 1;
-    string t = 2;
     uint32 at = 3;
     uint32 listeners = 4;
     uint32 airborne = 5;

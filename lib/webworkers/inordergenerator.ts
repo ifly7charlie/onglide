@@ -14,7 +14,7 @@ const defaultEpochNow = (): Epoch => Math.trunc(Date.now() / 1000) as Epoch;
 // order
 // NOTE: ONLY ONE EXECUTION OF GENERATOR ALLOWED!
 
-export function bindChannelForInOrderPackets(className: ClassName, compno: Compno, initialPoints: PositionMessage[], getNow: () => Epoch = defaultEpochNow): InOrderGeneratorFunction {
+export function bindChannelForInOrderPackets(className: ClassName, compno: Compno, initialPoints: PositionMessage[], tick: boolean = false): InOrderGeneratorFunction {
     //
     // And we need a way to notify and wake up our generator
     // that is not asynchronous. Once we have achieved this
@@ -26,6 +26,8 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
     // We need somewhere to store the unprocessed message queue
     let messageQueue: PositionMessage[] = initialPoints;
     let running: boolean = false;
+
+    console.log(`bound ${initialPoints.length} points to ${compno}/${className}`);
 
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
@@ -46,7 +48,6 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
         // and then choose when to accept their messages or not
         if (messageQueue[insertIndex]?.t != message.t) {
             // Actually insert the point into the array
-            message._ = true;
             messageQueue.splice(insertIndex, 0, message);
 
             const toNotify = resolveNotification;
@@ -57,15 +58,30 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
         }
     };
 
+    // We may want to check regularily for replay
+    if (tick) {
+        setInterval(() => {
+            const toNotify = resolveNotification;
+            resolveNotification = null;
+            if (toNotify) {
+                toNotify(messageQueue.length + 1);
+            }
+        }, 1000);
+    }
+
     // Generate the next item in the sequence this will block until
     // values are ready and have been waiting for 30 seconds
-    const inOrderGenerator = async function* (log: Function | null): InOrderGenerator {
+    const inOrderGenerator = async function* (getNow: () => Epoch | null = null): InOrderGenerator {
         // Singleton enforcement - because of the way we wait on a changing promise
         if (running) {
             throw new Error('Only one iterator allowed');
             return;
         }
         running = true;
+
+        if (!getNow) {
+            getNow = () => Math.trunc(Date.now() / 1000) as Epoch;
+        }
 
         //
         // How far through are we
@@ -85,15 +101,17 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
             }
         }
 
+        console.log('initial replay done', compno, position, now, messageQueue[position]?.t);
+
         // Loop till we are told to stop
         while (running) {
             // Check to see if there is an eligible message in the queue
             // we won't forward it on until it's been there long enough
             const now: Epoch = getNow();
+
             if (position < messageQueue.length && messageQueue[position]?.t < now - inOrderDelay) {
                 const message = messageQueue[position++];
-                const nextPoint = yield message;
-                message._ = false;
+                const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
 
                 // If we need to go backwards then do so
                 if (nextPoint) {

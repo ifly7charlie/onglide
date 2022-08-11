@@ -145,7 +145,6 @@ export default class Graph<VertexType, WeightType extends number> {
             }
 
             if (!smallest || distances.get(smallest) === INFINITY) {
-                console.log('<-) restart');
                 continue;
             }
 

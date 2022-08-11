@@ -176,7 +176,7 @@ function spawnScoringContestListener(config: ScoringConfig): Worker {
 }
 
 if (!isMainThread) {
-    console.log(`Started Scoring  worker thread`);
+    console.log(`Started Scoring Thread for class ${workerData.className} :)`);
 
     // The parent can post a few different messages to us
     //
@@ -225,14 +225,14 @@ function startScoring(config: ScoringConfig, task: any) {
             const glider: GliderState = gliders[cncn];
 
             const log =
-                glider.compno == 'LEO'
+                glider.compno == 'FL'
                     ? console.log
                     : () => {
                           /*noop*/
                       };
 
             // 0. Check if we are flying etc
-            const epg = enrichedPositionGenerator(config.airfield, glider.inorder, log);
+            const epg = enrichedPositionGenerator(config.airfield, glider.inorder(null), log);
 
             // 1. Figure out where in the task we are
             const tpg = taskPositionGenerator(task, epg, log);

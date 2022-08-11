@@ -47,6 +47,7 @@ export interface AirfieldLocation {
     tz: TZ;
     lat: number;
     lng: number;
+    officialDelay: Epoch;
     altitude?: AltitudeAMSL;
     point?: Feature<Point>;
 }
@@ -211,6 +212,8 @@ export interface CalculatedTaskStatus extends TaskStatus {
 }
 
 // points re-ordered if necessary
+export type SoftenGenerator<Type extends TimeStampType> = AsyncGenerator<Type, Type | void, void>;
+
 export type InOrderGenerator = AsyncGenerator<PositionMessage, void, Epoch | void>;
 export type InOrderGeneratorFunction = (log: Function | null) => InOrderGenerator;
 

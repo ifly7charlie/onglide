@@ -104,7 +104,7 @@ function OptionalTime(before: string, t: Epoch | number, tz: TZ, after: string |
     }
     return '';
 }
-function OptionalDuration(before: string, t: Epoch, tz: TZ, after: string | null = null) {
+function OptionalDuration(before: string, t: Epoch, after: string | null = null) {
     if (!t) {
         return '';
     }
@@ -114,11 +114,21 @@ function OptionalDuration(before: string, t: Epoch, tz: TZ, after: string | null
     }
     return '';
 }
-function OptionalDurationHHMM(before: string, t: Epoch, tz: TZ, after: string | null = null) {
+function OptionalDurationHHMM(before: string, t: Epoch, after: string | null = null) {
     if (!t) {
         return '';
     }
     const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit'});
+    if (v) {
+        return `${before || ''}${v}${after || ''}`;
+    }
+    return '';
+}
+function OptionalDurationMM(before: string, t: Epoch, after: string | null = null) {
+    if (!t) {
+        return '';
+    }
+    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', minute: '2-digit'});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
@@ -163,6 +173,14 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             Speed:&nbsp;
             {hasHandicappedResults && score.handicapped?.taskSpeed ? <>{score.handicapped.taskSpeed.toFixed(1)} kph hcap</> : null}
             {score.actual?.taskSpeed?.toFixed(1) || '-'} kph
+        </>
+    ) : null;
+
+    const distance = score ? (
+        <>
+            Speed:&nbsp;
+            {hasHandicappedResults && score.handicapped?.taskDistance ? <>{score.handicapped.taskDistance.toFixed(1)} km hcap</> : null}
+            {score.actual?.taskDistance?.toFixed(1) || '-'} km
         </>
     ) : null;
 
@@ -258,7 +276,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                             </tr>
                             <tr style={{fontSize: 'small'}}>
                                 <td>Leg Duration</td>
-                                {_map(actualLegs, (x) => (x.duration ? <td>{OptionalDurationHHMM('+', x.duration as Epoch, tz)}</td> : null))}
+                                {_map(actualLegs, (x) => (x.duration ? <td>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
                             </tr>
                             {!viewOptions.task ? (
                                 <>
@@ -325,7 +343,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     if (score?.utcStart) {
         times = (
             <div>
-                {OptionalTime('Start ', score.utcStart as Epoch, tz)} {OptionalDuration(' +', score.utcDuration as Epoch, tz)} {OptionalTime(' Finish ', score.utcFinish as Epoch, tz)}
+                {OptionalTime('Start ', score.utcStart as Epoch, tz)} {OptionalDuration(' +', score.utcDuration as Epoch)} {OptionalTime(' Finish ', score.utcFinish as Epoch, tz)}
             </div>
         );
     }
@@ -336,13 +354,17 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     if (!score && !vario) {
         flightDetails = <div>No tracking yet</div>;
     } else if (!score?.utcStart) {
-        flightDetails = (
-            <div>
-                No start reported yet
-                <br />
-                {climb}
-            </div>
-        );
+        if (score?.flightStatus == PositionStatus.Grid) {
+            flightDetails = <div>Gridded, waiting to fly</div>;
+        } else {
+            flightDetails = (
+                <div>
+                    No start reported yet
+                    <br />
+                    {climb}
+                </div>
+            );
+        }
     } else if (score?.utcFinish) {
         flightDetails = (
             <div>
@@ -354,15 +376,34 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             </div>
         );
     } else {
-        flightDetails = (
-            <div>
-                {climb}
-                {times}
-                {legs}
-                <Optional b="Glide Ratio to Finish" v={score.actual?.grRemaining} e=":1" />
-                <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining} e=":1" />
-            </div>
-        );
+        if (score?.flightStatus == PositionStatus.Landed) {
+            flightDetails = (
+                <div>
+                    Landed out
+                    <br />
+                    {distance}
+                </div>
+            );
+        } else if (score?.flightStatus == PositionStatus.Home) {
+            flightDetails = (
+                <div>
+                    Landed back
+                    <br />
+                    {distance}
+                </div>
+            );
+        } else {
+            flightDetails = (
+                <div>
+                    {climb}
+                    {times}
+                    {speed}
+                    {legs}
+                    <Optional b="Glide Ratio to Finish" v={score.actual?.grRemaining} e=":1" />
+                    <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining} e=":1" />
+                </div>
+            );
+        }
     }
 
     // Check at render if we are up to date or not, delay calculated in sorting which
@@ -406,7 +447,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 <span style={{color: 'grey'}}>
                     &nbsp;+&nbsp;
                     <FontAwesomeIcon icon={solid('clock-rotate-left')} size="sm" />
-                    &nbsp;{process.env.NEXT_PUBLIC_COMPETITION_DELAY}
+                    &nbsp;{OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
                 </span>
             </a>
         );

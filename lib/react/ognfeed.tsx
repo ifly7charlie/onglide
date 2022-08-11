@@ -95,7 +95,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
 
     function setCompno(cn) {
         setSelectedCompno(cn);
-        if (cn && pilots[cn]) {
+        if (cn && pilots && pilots[cn]) {
             setFollow(true);
             console.log(cn, trackData[cn]?.deck?.partial);
             if (!trackData[cn]?.deck || trackData[cn]?.deck?.partial) {
@@ -186,15 +186,10 @@ function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
         cp = trackData[compno] = {};
     }
 
-    // If the pilot isn't here or this is a duplicate update then noop
-    if (cp?.lastUpdated >= point.t) {
-        return;
-    }
-
-    cp.lastUpdated = point.t;
-
-    // Merge into the geoJSON objects as needed
-    mergePoint(point, cp);
+    // Merge into the geoJSON objects as needed - allow it to create
+    // a new deck it will be incompleted so clicking on pilot will
+    // cause a reload
+    mergePoint(point, cp, false);
 }
 
 export function AlertDisconnected({mutatePilots, attempt}) {
