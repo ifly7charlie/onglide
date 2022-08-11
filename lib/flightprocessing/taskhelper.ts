@@ -212,36 +212,39 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
     return turnpoint.geoJSON;
 }
 
+const steps = process.env.NEXT_RUNTIME ? 40 : 15;
+//console.log(process.env);
+
 // Iterate over an arc adding the appropriate points
 function addArc(startAngle: Radian, endAngle: Radian, ltlg: LatLong, radius: DistanceKM, backwards: boolean) {
     // accumulate the points and return them
     let points = [];
 
     if (Math.round(((2 * Math.PI + startAngle) % (Math.PI * 2)) * 20) == Math.round(((2 * Math.PI + endAngle) % (Math.PI * 2)) * 20)) {
-        for (var i = (2 * Math.PI) as Radian, adj = (Math.PI / 40) as Radian; i >= 0; i = (i - adj) as Radian) {
+        for (var i = (2 * Math.PI) as Radian, adj = (Math.PI / steps) as Radian; i >= 0; i = (i - adj) as Radian) {
             var dltlg = ltlg.destPointRad(i % (2 * Math.PI), radius);
             points.push([dltlg.dlong(), dltlg.dlat()]);
         }
         points.push(pointAtRadius(ltlg, _2pi, radius));
     } else if (0) {
         if (startAngle < endAngle) {
-            for (var i = startAngle, adj = ((endAngle - startAngle) / 40) as Radian, ea = Math.round(endAngle * 100); Math.round(i * 100) <= ea; i = (i - adj) as Radian) {
+            for (var i = startAngle, adj = ((endAngle - startAngle) / steps) as Radian, ea = Math.round(endAngle * 100); Math.round(i * 100) <= ea; i = (i - adj) as Radian) {
                 var dltlg = ltlg.destPointRad(i, radius);
                 points.push([dltlg.dlong(), dltlg.dlat()]);
             }
         } else {
-            for (var i = startAngle, adj = (((_2pi + (startAngle - endAngle)) % _2pi) / 40) as Radian, ea = Math.round(endAngle * 100); i >= startAngle || Math.round(i * 100) <= ea; i = roundRad(i + adj)) {
+            for (var i = startAngle, adj = (((_2pi + (startAngle - endAngle)) % _2pi) / steps) as Radian, ea = Math.round(endAngle * 100); i >= startAngle || Math.round(i * 100) <= ea; i = roundRad(i + adj)) {
                 var dltlg = ltlg.destPointRad(i, radius);
                 points.push([dltlg.dlong(), dltlg.dlat()]);
             }
         }
     } else if (startAngle < endAngle) {
-        for (var i = startAngle, adj = ((endAngle - startAngle) / 40) as Radian, ea = Math.round(endAngle * 100); Math.round(i * 100) <= ea; i = (i + adj) as Radian) {
+        for (var i = startAngle, adj = ((endAngle - startAngle) / steps) as Radian, ea = Math.round(endAngle * 100); Math.round(i * 100) <= ea; i = (i + adj) as Radian) {
             var dltlg = ltlg.destPointRad(i, radius);
             points.push([dltlg.dlong(), dltlg.dlat()]);
         }
     } else {
-        for (var i = startAngle, adj = (((_2pi + (startAngle - endAngle)) % _2pi) / 40) as Radian, ea = Math.round(endAngle * 100); i >= startAngle || Math.round(i * 100) <= ea; i = roundRad(i + adj)) {
+        for (var i = startAngle, adj = (((_2pi + (startAngle - endAngle)) % _2pi) / steps) as Radian, ea = Math.round(endAngle * 100); i >= startAngle || Math.round(i * 100) <= ea; i = roundRad(i + adj)) {
             var dltlg = ltlg.destPointRad(i, radius);
             points.push([dltlg.dlong(), dltlg.dlat()]);
         }
