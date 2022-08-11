@@ -13,7 +13,7 @@ import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-ap
 import {useState} from 'react';
 
 // Helpers for loading contest information etc
-import {Nbsp, Icon, TooltipIcon} from './htmlhelper';
+import {Nbsp, TooltipIcon} from './htmlhelper';
 import {delayToText, formatTime} from './timehelper.js';
 
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
@@ -228,7 +228,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
         legs = (
             <>
-                <ButtonGroup name="taskleg" role="group" aria-label="task or leg" value={viewOptions.task} className={'smallbuttons goleft'}>
+                <ButtonGroup key="taskleg" role="group" aria-label="task or leg" className={'smallbuttons goleft'}>
                     {['leg', 'task', 'stats'].map((radio, idx) => (
                         <Button key={idx} variant={idx == viewOptions.task ? 'primary' : 'secondary'} value={idx} onClick={(e) => setViewOptions({...viewOptions, task: idx})}>
                             {radio}
@@ -237,7 +237,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 </ButtonGroup>
 
                 {hasHandicappedResults ? (
-                    <ButtonGroup name="hcapped" role="group" aria-label="actual or handicapped" value={viewOptions.hcapped} className={'smallbuttons goright'}>
+                    <ButtonGroup key="hcapped" role="group" aria-label="actual or handicapped" className={'smallbuttons goright'}>
                         {['actuals', 'handicapped'].map((radio, idx) => (
                             <Button
                                 key={radio}
@@ -326,7 +326,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     </table>
                 ) : (
                     <>
-                        <br clear="both" />
+                        <br style={{clear: 'both'}} />
                         {score.wind?.speed ? (
                             <>
                                 Recent Wind {score.wind.speed} kph @ {score.wind.direction}
@@ -457,7 +457,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         <div className="details" style={{paddingTop: '5px'}}>
             {flag}
             <h6>
-                {pilot.compno}:<b>{pilot.name}</b> {pilot.gliderType.substring(0, 15)} <div className={'pull-right'}>{false /*track.follow*/ ? <Icon type="screenshot" /> : ''}</div>
+                {pilot.compno}:<b>{pilot.name}</b> {pilot.gliderType.substring(0, 15)} <div className={'pull-right'}>{false /*track.follow*/ ? <FontAwesomeIcon icon={solid('crosshairs')} /> : ''}</div>
                 <br />
                 <span style={{fontSize: '80%'}}>
                     {ognCoverage}

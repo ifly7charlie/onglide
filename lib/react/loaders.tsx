@@ -10,7 +10,8 @@ import useSWR from 'swr';
 import {ClassName} from '../types';
 import {API_ClassName_Pilots} from '../rest-api-types';
 
-import {Icon} from './htmlhelper';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+import {faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -20,8 +21,8 @@ const trackRefreshInterval = process.env.NEXT_TRACK_REFRESH_INTERVAL ? process.e
 
 //
 // Get name and details of the contest
-export function useContest(initialData) {
-    const {data, error} = useSWR('/api/contest', fetcher); //, {initialData});
+export function useContest() {
+    const {data, error} = useSWR('/api/contest', fetcher);
     return {
         comp: data,
         isLoading: !error && !data,
@@ -65,7 +66,7 @@ export function usePilots(vc: ClassName): {pilots: API_ClassName_Pilots; isPLoad
 export function Spinner() {
     return (
         <div>
-            <Icon type="plane" spin={true} />
+            <FontAwesomeIcon icon={faSpinner} spin={true} />
         </div>
     );
 }

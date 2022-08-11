@@ -18,7 +18,7 @@ export interface ShortDisplayKeys {
     sortKey: string | number;
     displayAs: string | number | null;
     units: string;
-    icon: string;
+    icon: any;
 }
 
 export enum Units {

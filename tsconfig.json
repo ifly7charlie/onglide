@@ -15,7 +15,6 @@
         "isolatedModules": true,
         "jsx": "preserve"
     },
-    "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
-    "exclude": ["node_modules","lib/webworkers/*ts","lib/flightprocessing/dijkstras.ts"]
-
+    "include": ["next-env.d.ts", "lib/react/*.ts", "pages/*.tsx", "pages/**/*.tsx", "lib/flightprocessing/taskhelper.ts"],
+    "exclude": ["node_modules", "lib/webworkers/*ts", "lib/flightprocessing/dijkstras.ts", "test"]
 }

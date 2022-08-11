@@ -297,7 +297,7 @@ export default function MApp(props: {
             if (object.time) {
                 // Figure out what the local language is for international date strings
                 const dt = new Date(object.time * 1000);
-                response += `${object.compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
+                response += `${object.compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})} - ${object.time}<br/>`;
             }
 
             if (object.alt && !isNaN(object.alt)) {

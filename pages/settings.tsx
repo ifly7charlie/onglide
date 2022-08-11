@@ -16,7 +16,7 @@ import NavDropdown from 'react-bootstrap/NavDropdown';
 import ButtonGroup from 'react-bootstrap/ButtonGroup';
 import ToggleButton from 'react-bootstrap/ToggleButton';
 
-import {Nbsp, Icon} from '../lib/react/htmlhelper';
+import {Nbsp} from '../lib/react/htmlhelper';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faLink, faGears, faPaperPlane} from '@fortawesome/free-solid-svg-icons';
@@ -107,13 +107,13 @@ function SettingsPage({options, setOptions, tz}) {
     const router = useRouter();
     let {mapType} = router.query;
     if (mapType) {
-        options.mapType = parseInt(mapType);
+        options.mapType = parseInt(mapType as string);
         console.log('mapType:', mapType);
     }
 
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
-    const {comp, isLoading, error} = useContest();
+    const {comp, isLoading, isError} = useContest();
 
     function setOptionsAndCookie(o) {
         document.cookie = `options=${JSON.stringify(o)}; path=/`;
@@ -122,14 +122,9 @@ function SettingsPage({options, setOptions, tz}) {
     console.log(options);
 
     // And display in progress until they are loaded
-    if (isLoading)
-        return (
-            <div className="loading">
-                <div className="loadinginner" />
-            </div>
-        );
+    if (isLoading) return <Spinner />;
 
-    if (error || !comp.competition)
+    if (isError || !comp.competition)
         return (
             <div>
                 <div style={{position: 'fixed', zIndex: '10', marginLeft: '10px'}}>
@@ -154,7 +149,7 @@ function SettingsPage({options, setOptions, tz}) {
                 <IncludeJavascript />
             </Head>
             <Menu comp={comp} />
-            <br clear="both" />
+            <br style={{clear: 'both'}} />
             <Container fluid>
                 <Row>
                     <Col sm={7}>
@@ -163,7 +158,7 @@ function SettingsPage({options, setOptions, tz}) {
                         <Row>
                             <Col sm={3}>Display Units</Col>
                             <Col>
-                                <ButtonGroup toggle="true" type="radio" name="units" aria-label="Display Units">
+                                <ButtonGroup key="units">
                                     {['metric', 'imperial'].map((radio, idx) => (
                                         <ToggleButton key={idx} id={'units' + idx} variant="secondary" type="radio" value={idx} checked={idx === options.units} onChange={(e) => setOptionsAndCookie({...options, units: idx})}>
                                             {radio}
@@ -176,7 +171,7 @@ function SettingsPage({options, setOptions, tz}) {
                         <Row>
                             <Col sm={3}>Map orientation when following</Col>
                             <Col>
-                                <ButtonGroup toggle type="radio" name="mapOrientation">
+                                <ButtonGroup key="mapOrientation">
                                     {['North Up', 'Next Turnpoint Up', "Don't Change"].map((radio, idx) => (
                                         <ToggleButton key={idx} id={'mapOrientation' + idx} variant="secondary" type="radio" value={idx} checked={idx === options.taskUp} onChange={(e) => setOptionsAndCookie({...options, taskUp: idx})}>
                                             {radio}
@@ -189,7 +184,7 @@ function SettingsPage({options, setOptions, tz}) {
                             <br />
                             <Col sm={3}>Map Type</Col>
                             <Col>
-                                <ButtonGroup toggle type="radio" name="mapType">
+                                <ButtonGroup key="mapType">
                                     {['3D satellite', '3D road', '2D satellite', '2D road'].map((radio, idx) => (
                                         <ToggleButton key={idx} id={'mapType' + idx} variant="secondary" type="radio" value={idx} checked={idx === options.mapType} onChange={(e) => setOptionsAndCookie({...options, mapType: idx})}>
                                             {radio}
@@ -202,7 +197,7 @@ function SettingsPage({options, setOptions, tz}) {
                         <Row>
                             <Col sm={3}>Rain Radar</Col>
                             <Col>
-                                <ButtonGroup toggle type="radio" name="rain">
+                                <ButtonGroup key="rain">
                                     {['off', 'actual', 'forecast +10m', 'forecast +20m'].map((radio, idx) => (
                                         <ToggleButton key={idx} id={'rain' + idx} variant="secondary" type="radio" value={radio} checked={idx === options.rainRadarAdvance + 1} onChange={(e) => setOptionsAndCookie({...options, rainRadarAdvance: idx - 1, rainRadar: idx > 0})}>
                                             {radio}

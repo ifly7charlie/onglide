@@ -14,7 +14,7 @@ export function TooltipIcon(props) {
         </a>
     );
 }
-
+/*
 export function Icon(props) {
     const size = props.size ? props.size : '';
 
@@ -25,7 +25,7 @@ export function Icon(props) {
 
         if (props.typeinverted) {
             return (
-                <span class="icon-stack">
+                <span className="icon-stack">
                     <i className={`icon-${props.base} icon-stack-base`} />
                     <i className={`icon-${props.typeinverted} icon-light`} />
                 </span>
@@ -34,7 +34,7 @@ export function Icon(props) {
 
         if (props.base) {
             return (
-                <span class="icon-stack">
+                <span className="icon-stack">
                     <i className={`icon-${props.base} ${size} icon-stack-base}`} />
                     <i className={`icon-${props.type} ${size}`} />
                 </span>
@@ -53,3 +53,4 @@ export function Icon(props) {
         return inner();
     }
 }
+*/

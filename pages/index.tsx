@@ -3,15 +3,10 @@ import {useRouter} from 'next/router';
 import Head from 'next/head';
 
 // What do we need to render the bootstrap part of the page
-import Container from 'react-bootstrap/Container';
-import Row from 'react-bootstrap/Row';
-import Col from 'react-bootstrap/Col';
-import Collapse from 'react-bootstrap/Collapse';
 import Navbar from 'react-bootstrap/Navbar';
 import Nav from 'react-bootstrap/Nav';
-import NavDropdown from 'react-bootstrap/NavDropdown';
 
-import {useState, useRef} from 'react';
+import {useState} from 'react';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faLink, faGears, faPaperPlane} from '@fortawesome/free-solid-svg-icons';
@@ -28,7 +23,7 @@ import Router from 'next/router';
 //import {pilotsorting} from '../lib/react/pilot-sorting.js';
 import {query} from '../lib/react/db';
 
-import * as cookies from 'next-cookies';
+import cookies from 'next-cookies';
 
 import _find from 'lodash.find';
 
@@ -109,7 +104,7 @@ function Menu(props) {
 
 //
 // Main page rendering :)
-function CombinePage(props) {
+export default function CombinePage(props) {
     // First step is to extract the class from the query, we use
     // query because that stops page reload when switching between the
     // classes. If no class is set then assume the first one
@@ -121,7 +116,7 @@ function CombinePage(props) {
 
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
-    const {comp, isLoading, error} = useContest();
+    const {comp, isLoading, isError} = useContest();
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
@@ -149,7 +144,7 @@ function CombinePage(props) {
             </div>
         );
 
-    if (error || !comp?.competition)
+    if (isError || !comp?.competition)
         return (
             <div>
                 <div style={{position: 'fixed', zIndex: '10', marginLeft: '10px'}}>
@@ -197,5 +192,3 @@ export async function getServerSideProps(context) {
         props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : '', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1}}
     };
 }
-
-export default CombinePage;

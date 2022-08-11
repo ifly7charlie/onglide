@@ -12,11 +12,11 @@ import Collapse from 'react-bootstrap/Collapse';
 
 //
 export function TaskDetails({vc}) {
-    const {data, isLoading, error} = useTask(vc);
+    const {data, isLoading, isError} = useTask(vc);
     const [open, setOpen] = useState(false);
 
     if (isLoading) return <Spinner />;
-    if (error) return <Error />;
+    if (isError) return <Error />;
 
     if (!data || !data.contestday) {
         return (
@@ -26,7 +26,7 @@ export function TaskDetails({vc}) {
         );
     }
     const fClass = data.contestday.class;
-    let taskDescription = '';
+    let taskDescription: any = '';
     switch (data.task.type) {
         case 'S':
             taskDescription = <>Speed Task: {data.task.distance}km</>;

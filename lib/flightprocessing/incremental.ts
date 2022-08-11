@@ -202,7 +202,7 @@ export function updateVarioFromDeck(deck: DeckData, vario: VarioData): [Epoch, V
     try {
         const lastPos = deck.t.length - 1;
         cp.agl = deck.agl[lastPos];
-        [cp.lng, cp.lat, cp.altitude] = deck.positions.subarray(lastPos * 3);
+        [cp.lng, cp.lat, cp.altitude] = [].concat(deck.positions.subarray(lastPos * 3));
 
         cp.lossXsecond = cp.gainXsecond = cp.total = cp.average = cp.Xperiod = 0;
 

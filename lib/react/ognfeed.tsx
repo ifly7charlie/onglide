@@ -10,7 +10,7 @@ import {useState, useMemo, useRef} from 'react';
 
 import {useTaskGeoJSON, usePilots, Spinner, Error} from './loaders';
 
-import {Nbsp, Icon} from './htmlhelper';
+import {Nbsp} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
@@ -81,7 +81,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
 
     const connectionStatus = {
         [ReadyState.CONNECTING]: '<span style="color:\'orange\'">Connecting</span>',
-        [ReadyState.OPEN]: "Connected <Icon type='time'/>",
+        [ReadyState.OPEN]: 'Connected',
         [ReadyState.CLOSING]: '<span style="color:\'red\'">Closed</span>',
         [ReadyState.CLOSED]: '<span style="color:\'red\'">Closed</span>',
         [ReadyState.UNINSTANTIATED]: '<span style="color:\'orange\'">Preparing</span>'
