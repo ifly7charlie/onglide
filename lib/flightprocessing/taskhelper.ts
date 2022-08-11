@@ -30,13 +30,14 @@ export function calculateTask(task: Task) {
 
 // Between LEGS, less finish/start rings!
 export function calculateTaskLength(legs: TaskLeg[]): DistanceKM {
-    const first = legs[legs.length - 1];
+    const first = legs[0];
     if (first.type == 'sector' && first.a1 == 180) {
         first.legDistanceAdjust = first.r1;
         first.length = (first.length - first.legDistanceAdjust) as DistanceKM;
     }
 
     const last = legs[legs.length - 1];
+
     if (last.type == 'sector' && last.a1 == 180) {
         last.legDistanceAdjust = last.r1;
         last.length = (last.length - last.legDistanceAdjust) as DistanceKM;
