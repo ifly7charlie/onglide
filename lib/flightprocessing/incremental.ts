@@ -2,7 +2,7 @@ import {sortedIndex as _sortedIndex} from 'lodash';
 
 import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants';
 
-import {PositionMessage, PilotTrackData, Epoch, DeckData, VarioData} from '../types';
+import {Compno, PositionMessage, PilotTrackData, Epoch, DeckData, VarioData} from '../types';
 import {PilotPosition} from '../protobuf/onglide';
 
 /*
@@ -23,24 +23,30 @@ function resize<T extends Int8Array | Int16Array | Uint32Array | Float32Array>(a
     return c;
 }
 
+export function initialiseDeck(compno: Compno, glider: PilotTrackData): void {
+    glider.deck = {
+        compno: compno,
+        positions: new Float32Array(deckPointIncrement * 3),
+        indices: new Uint32Array(deckSegmentIncrement),
+        agl: new Int16Array(deckPointIncrement),
+        t: new Uint32Array(deckPointIncrement),
+        recentIndices: new Uint32Array(2),
+        climbRate: new Int8Array(deckPointIncrement),
+        partial: true,
+        posIndex: 0,
+        segmentIndex: 0
+    };
+}
+
 export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true, now = Date.now() / 1000): void {
     // Ignore if before start
-    const compno = glider.compno;
     let lastTime: number | null = null;
 
     if (!glider.deck) {
-        glider.deck = {
-            compno: compno,
-            positions: new Float32Array(deckPointIncrement * 3),
-            indices: new Uint32Array(deckSegmentIncrement),
-            agl: new Int16Array(deckPointIncrement),
-            t: new Uint32Array(deckPointIncrement),
-            recentIndices: new Uint32Array(2),
-            climbRate: new Int8Array(deckPointIncrement),
-            partial: true,
-            posIndex: 0,
-            segmentIndex: 0
-        };
+        if (latest) {
+            return;
+        }
+        initialiseDeck(glider.compno, glider);
     } else {
         // If not first point then make sure we are in order!
         lastTime = glider.deck.t[glider.deck.posIndex - 1];
@@ -171,8 +177,8 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     }
 
     // first we need to remove old segments - start with the older list as may be points in it
-    deck.recentIndices[0] = Math.max(deck.recentIndices[0], indexRemove);
-    deck.recentIndices[1] = Math.max(deck.recentIndices[1], indexRemove);
+    deck.recentIndices[0] = Math.max(deck.recentIndices[0] - indexRemove, 0);
+    deck.recentIndices[1] = Math.max(deck.recentIndices[1] - indexRemove, 0);
 
     // Remove before
     deck.indices = new Uint32Array(deck.indices.subarray(segmentPos).map((p) => Math.max(0, p - indexRemove)));
@@ -180,6 +186,7 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     // Adjust the offsets and If we are removing anything then resze it down
     deck.segmentIndex -= segmentPos;
     deck.posIndex -= indexRemove;
+    deck.indices[deck.segmentIndex] = deck.posIndex;
 
     // And then take the end of the buffer for displaying data
     deck.positions = deck.positions.subarray(indexRemove * 3);
