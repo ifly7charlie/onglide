@@ -276,19 +276,21 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     const shortestRemainingPath = minGraph.findPath(startPoint, fakeFinishPoint).reverse();
                     log('shortestRemainingPath', shortestRemainingPath);
 
-                    // We also need a slight tweak on shortest to get the shortest distance around and home - we don't
-                    // need points just distances
-                    for (const point of aatLegStatus[taskStatus.currentLeg].taskPoints) {
-                        minGraph.addLink(intermediatePoint, point, distHaversine(intermediatePoint, point) as DistanceKM);
-                    }
-                    scoredStatus.distanceRemaining = sumPath(
-                        minGraph.findPath(intermediatePoint, fakeFinishPoint).reverse(), //
-                        taskStatus.inSector ? taskStatus.currentLeg : taskStatus.currentLeg - 1,
-                        task.legs,
-                        (leg, distance) => {
-                            scoredStatus.legs[leg].distanceRemaining = distance;
+                    if (!taskStatus.inSector && !taskStatus.inPenalty) {
+                        // We also need a slight tweak on shortest to get the shortest distance around and home - we don't
+                        // need points just distances
+                        for (const point of aatLegStatus[taskStatus.currentLeg].taskPoints) {
+                            minGraph.addLink(intermediatePoint, point, distHaversine(intermediatePoint, point) as DistanceKM);
                         }
-                    );
+                    } else {
+                        // I'm guessing the problem is the intermediate
+                    }
+                    const drPath = minGraph.findPath(intermediatePoint, fakeFinishPoint).reverse(); //.shift(), //
+                    log(drPath);
+                    scoredStatus.distanceRemaining = sumPath(drPath, taskStatus.inSector ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
+                        log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
+                        scoredStatus.legs[leg].distanceRemaining = distance;
+                    });
 
                     // First sum up the total maximum distance - could be different solution than current
                     // score and covers whole flight

@@ -36,17 +36,17 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             }
 
             taskStatus.distance = 0 as DistanceKM;
-            const previousLeg = taskStatus.legs[0];
-
-            log(previousLeg);
 
             // Where is the scoring from
+            const previousLeg = taskStatus.legs[0];
             previousLeg.point = {
                 t: taskStatus.utcStart,
                 lat: task.legs[0].nlat,
                 lng: task.legs[0].nlng,
                 a: previousLeg.points[0]?.a
             };
+
+            delete previousLeg.minPossible;
 
             // 1. Calculate all the completed legs - simply task length and
             //    positions
@@ -62,6 +62,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                         lng: task.legs[legno].nlng,
                         a: leg.points[0]?.a || 0
                     };
+                    delete leg.minPossible;
                 }
             }
 
@@ -75,7 +76,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 currentLeg.point = taskStatus.closestToNextSectorPoint;
                 // figure out where the scored point is
                 const scoredTo = along(
-                    lineString([task.legs[taskStatus.currentLeg].point, task.legs[taskStatus.currentLeg - 1].point]), //
+                    lineString([task.legs[taskStatus.currentLeg].point.geometry.coordinates, task.legs[taskStatus.currentLeg - 1].point.geometry.coordinates]), //
                     Math.min(Math.max(taskStatus.closestToNext, 0), task.legs[taskStatus.currentLeg].length)
                 );
                 [currentLeg.point.lng, currentLeg.point.lat] = scoredTo.geometry.coordinates;
@@ -147,6 +148,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             console.log('Exception in racingScoringGenerator');
             console.log(e);
             console.log(JSON.stringify(current));
+            console.log(JSON.stringify(task));
         }
     }
 };
