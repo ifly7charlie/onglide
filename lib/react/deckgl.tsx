@@ -45,11 +45,15 @@ import {OgnPathLayer} from './ognpathlayer';
 //
 function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d) {
     if (!props.trackData) {
+        console.log('missing layers');
         return [];
     }
 
+    console.log('makeLayers', props.t);
+
     // Add a layer for the recent points for each pilot
-    let layers = _reduce(
+    let layers = [];
+    _reduce(
         props.trackData,
         (result, track, compno) => {
             // Don't include current pilot in list of all
@@ -57,6 +61,10 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 return result;
             }
             const p = track.deck;
+            if (!p) {
+                console.log(`deck missing from ${compno}`, track);
+                return result;
+            }
             result.push(
                 new OgnPathLayer({
                     id: compno,
@@ -101,6 +109,9 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
     // the point is
     const data = _map(props.trackData, (track) => {
         const p = track.deck;
+        if (!p) {
+            return {};
+        }
         return {
             name: track.compno,
             compno: track.compno,
@@ -135,35 +146,37 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
     //
     if (props.selectedCompno && props.trackData[props.selectedCompno]?.deck) {
         const p = props.trackData[props.selectedCompno].deck;
-        layers.push(
-            new OgnPathLayer({
-                id: 'selected' + props.selectedCompno,
-                compno: props.selectedCompno,
-                data: {
-                    length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
-                    startIndices: p.indices,
-                    timing: p.t,
-                    climbRate: p.climbRate,
-                    agl: p.agl,
-                    attributes: {
-                        getPath: {value: p.positions, size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0}
+        if (p.posIndex) {
+            layers.push(
+                new OgnPathLayer({
+                    id: 'selected' + props.selectedCompno + p.partial,
+                    compno: props.selectedCompno,
+                    data: {
+                        length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
+                        startIndices: p.indices,
+                        timing: p.t,
+                        climbRate: p.climbRate,
+                        agl: p.agl,
+                        attributes: {
+                            getPath: {value: p.positions, size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0}
+                        }
+                    },
+                    _pathType: 'open',
+                    positionFormat: map2d ? 'XY' : 'XYZ',
+                    getWidth: 5,
+                    billboard: true,
+                    getColor: [255, 0, 255, 192],
+                    jointRounded: true,
+                    widthMinPixels: 3,
+                    fp64: false,
+                    pickable: true,
+                    tt: true,
+                    updateTriggers: {
+                        getPath: p.posIndex
                     }
-                },
-                _pathType: 'open',
-                positionFormat: map2d ? 'XY' : 'XYZ',
-                getWidth: 5,
-                billboard: true,
-                getColor: [255, 0, 255, 192],
-                jointRounded: true,
-                widthMinPixels: 3,
-                fp64: false,
-                pickable: true,
-                tt: true,
-                updateTriggers: {
-                    getPath: p.posIndex
-                }
-            })
-        );
+                })
+            );
+        }
     }
 
     return layers;
@@ -197,7 +210,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError} = useTaskGeoJSON(vc);
-    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d), [t, pilots, selectedCompno, taskGeoJSON, map2d]);
+    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial]);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
@@ -372,17 +385,17 @@ export default function MApp(props: {
                     </>
                 ) : null}
                 {selectedPilotData && selectedPilotData?.score?.scoredGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_' + selectedCompno}>
+                    <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_'}>
                         <Layer {...scoredLineStyle} />
                     </Source>
                 ) : null}
                 {selectedPilotData && selectedPilotData.score?.minGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_' + selectedCompno}>
+                    <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_'}>
                         <Layer {...minLineStyle} />
                     </Source>
                 ) : null}
                 {selectedPilotData && selectedPilotData.score?.maxGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_' + selectedCompno}>
+                    <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_'}>
                         <Layer {...maxLineStyle} />
                     </Source>
                 ) : null}
