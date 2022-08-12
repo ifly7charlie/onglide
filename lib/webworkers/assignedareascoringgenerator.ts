@@ -43,7 +43,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             convexHull: [],
             lengthConvexHullGeneratedAt: 0,
             fingerPrint: '',
-            taskPoints: task.legs[tl.legno].geoJSON.coordinates[0].map((sPoint: [number, number]) => {
+            taskPoints: task.legs[tl.legno].coordinates.map((sPoint: [number, number]) => {
                 return {t: -tl.legno as Epoch, lat: sPoint[1], lng: sPoint[0]};
             })
         };

@@ -111,7 +111,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                     let thisLegPoints: BasePositionMessage[] =
                         legno == finishLeg
                             ? [finishPoint]
-                            : task.legs[legno].geoJSON.coordinates[0].map((sPoint: [number, number]) => {
+                            : task.legs[legno].coordinates.map((sPoint: [number, number]) => {
                                   return {t: legno as Epoch, lat: sPoint[1], lng: sPoint[0]};
                               });
 
