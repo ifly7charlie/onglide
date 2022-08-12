@@ -1,6 +1,6 @@
 {
     "name": "OnGlide",
-    "version": "1.0.1",
+    "version": "3.0.1",
     "description": "OnGlide competition website",
     "main": "index.js",
     "author": "Melissa Jenkins",
@@ -27,7 +27,9 @@
         "@turf/along": "^6.5.0",
         "@turf/boolean-point-in-polygon": ">=6.0.1",
         "@turf/distance": ">=6.0.1",
+        "@turf/line-chunk": "^6.5.0",
         "@turf/line-intersect": "^6.5.0",
+        "@turf/line-to-polygon": "^6.5.0",
         "@turf/turf": ">=5.1.6",
         "@types/node-fetch": "^2.6.2",
         "babel-plugin-macros": "^3.1.0",
