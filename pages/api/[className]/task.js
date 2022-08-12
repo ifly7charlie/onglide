@@ -45,7 +45,6 @@ export default async function taskHandler(req, res) {
     }
 
     const taskid = taskdetails[0].taskid;
-    console.log(taskid);
 
     const tasklegs = await query(escape`
       SELECT taskleg.*, nname name
@@ -65,7 +64,7 @@ export default async function taskHandler(req, res) {
     `);
 
     // How long should it be cached - 60 seconds is good
-    res.setHeader('Cache-Control', 'max-age=60');
+    res.setHeader('Cache-Control', 'max-age=300');
 
     // And we succeeded - here is the json
     res.status(200).json({legs: tasklegs, task: taskdetails[0], classes: classes[0], rules: '', contestday: contestday[0]});

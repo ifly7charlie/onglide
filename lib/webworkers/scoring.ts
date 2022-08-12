@@ -21,13 +21,13 @@ import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:work
 import {bindChannelForInOrderPackets} from './inordergenerator';
 
 // Scoring types
-import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
+import {assignedAreaScoringGenerator} from './assignedareascoringgenerator';
 import {racingScoringGenerator} from './racingScoringGenerator';
-import {enrichedPositionGenerator} from './enrichedPositionGenerator';
+import {enrichedPositionGenerator} from './enrichedpositiongenerator';
 
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
-import {taskScoresGenerator} from './taskScoresGenerator';
+import {taskScoresGenerator} from './taskscoresgenerator';
 import {scoreCollector} from './scoreCollector';
 
 import {cloneDeep as _clonedeep} from 'lodash';
@@ -225,7 +225,7 @@ function startScoring(config: ScoringConfig, task: any) {
             const glider: GliderState = gliders[cncn];
 
             const log =
-                glider.compno == 'FL'
+                glider.compno == 'JPA'
                     ? console.log
                     : () => {
                           /*noop*/

@@ -8,6 +8,8 @@
 import {ISSocket} from 'js-aprs-is';
 import {aprsParser} from 'js-aprs-fap';
 
+import http from 'node:http';
+
 // Helper function
 //import distance from '@turf/distance';
 import {point} from '@turf/helpers';
@@ -200,12 +202,19 @@ async function main() {
     await updateTrackers();
     await updateClasses();
 
-    //    await sendScores();
+    const server = http.createServer((req, res) => {
+        const body = http.STATUS_CODES[200];
+
+        res.writeHead(200, {
+            'Content-Length': body.length,
+            'Content-Type': 'text/plain'
+        });
+        res.end(body);
+    });
+    server.listen(process.env.WEBSOCKET_PORT || 8080);
 
     // And start our websocket server
-    const wss = new WebSocketServer({
-        port: process.env.WEBSOCKET_PORT || 8080
-    });
+    const wss = new WebSocketServer({server});
 
     // What to do when a client connects
     wss.on('connection', (ws, req) => {

@@ -117,6 +117,8 @@ export default function CombinePage(props) {
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
     const {comp, isLoading, isError} = useContest();
+    console.log(props);
+    console.log(comp);
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
@@ -185,10 +187,17 @@ export default function CombinePage(props) {
 //
 // Determine the default class
 export async function getServerSideProps(context) {
-    const location = (await query('SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1'))?.[0];
-    const classes = await query('SELECT class FROM classes ORDER BY class');
+    try {
+        const location = (await query('SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1'))?.[0];
+        const classes = await query('SELECT class FROM classes ORDER BY class');
 
-    return {
-        props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : '', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1}}
-    };
+        return {
+            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : '', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1}}
+        };
+    } catch (e) {
+        console.log(e);
+        return {
+            props: {lat: 52.4393, lng: -1.04162, tzoffset: 3600, tz: 'Europe/London', defaultClass: '18Metre', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1}}
+        };
+    }
 }

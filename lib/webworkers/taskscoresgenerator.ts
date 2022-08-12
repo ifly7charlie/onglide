@@ -61,6 +61,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
     for (let current = await input.next(); !current.done && current.value; current = await input.next()) {
         const item = current.value;
         if (!item) {
+            console.log(`TSG: no value received in iterator for ${compno}`, current);
             return;
         }
 
@@ -188,11 +189,11 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             }
         }
 
-        if (Date.now() / 1000 - score.t > 60) {
-            console.log(score.compno, 'scored delay:', ((Date.now() - score.t) / 1000).toFixed(0));
+        if (Date.now() / 1000 - score.t > 930) {
+            console.log(score.compno, 'scored delay:', (Date.now() / 1000 - score.t).toFixed(0));
         }
-        //        log('--------> score [', compno, '] <--------');
-        //        log(JSON.stringify(score, null, 2));
         yield score;
     }
+
+    console.log(`TSG: ${compno} leaving function`);
 };

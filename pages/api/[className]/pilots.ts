@@ -45,7 +45,7 @@ export default async function taskHandler(req, res) {
     }
 
     // How long should it be cached - 60 seconds is good
-    res.setHeader('Cache-Control', 'max-age=60');
+    res.setHeader('Cache-Control', 'max-age=120');
 
     // And we succeeded - here is the json
     res.status(200).json({pilots: _keyBy(pilots, 'compno')});

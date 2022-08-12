@@ -124,6 +124,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
     //    let iterator = pointGenerator(log);
     for (let current = await iterator.next(); !current.done; current = await iterator.next()) {
         if (!current.value) {
+            console.log(`TPG: no value received in iterator for ${previousPoint?.c || 'unknown'}`, current);
             break;
         }
         try {

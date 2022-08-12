@@ -16,9 +16,6 @@ import {faSpinner} from '@fortawesome/free-solid-svg-icons';
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
 // How often to refresh the score or the track
-const scoreRefreshInterval = process.env.NEXT_SCORE_REFRESH_INTERVAL ? process.env.NEXT_SCORE_REFRESH_INTERVAL : 60 * 1000;
-const trackRefreshInterval = process.env.NEXT_TRACK_REFRESH_INTERVAL ? process.env.NEXT_TRACK_REFRESH_INTERVAL : 60 * 1000;
-
 //
 // Get name and details of the contest
 export function useContest() {

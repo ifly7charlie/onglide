@@ -6,4 +6,4 @@ export const deckPointIncrement = 2500;
 export const deckSegmentIncrement = 20;
 
 // How long to delay track to ensure we aren't missing packets
-export const inOrderDelay = 14;
+export const inOrderDelay = 10;

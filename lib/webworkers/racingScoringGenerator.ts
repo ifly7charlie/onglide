@@ -24,6 +24,8 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             console.log(...a);
         };
 
+    let compno = '';
+
     for await (const current of taskStatusGenerator) {
         try {
             // Get current position in the task, we will update this
@@ -34,6 +36,8 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             if (!taskStatus.utcStart) {
                 continue;
             }
+
+            compno = taskStatus.compno;
 
             taskStatus.distance = 0 as DistanceKM;
 
@@ -151,4 +155,5 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             console.log(JSON.stringify(task));
         }
     }
+    console.log(`RSG: ${compno} done`);
 };

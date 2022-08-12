@@ -4,35 +4,37 @@
  *
  */
 
-import { query } from '../../../lib/react/db';
+import {query} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
-
-export default async function image( req, res ) {
+export default async function image(req, res) {
     const {
-        query: { className, compno },
+        query: {className, compno}
     } = req;
 
-    if( !className || !compno) {
-        console.log( "no className/compno" );
-        res.status(404).json({error: "missing parameter(s)"});
+    if (!className || !compno) {
+        console.log('no className/compno');
+        res.status(404).json({error: 'missing parameter(s)'});
         return;
     }
 
     // We need to figure out what date is needed as this isn't passed in to the webpage
-    const imageBlob = (await query(escape`
+    const imageBlob = (
+        await query(escape`
       SELECT image
       FROM images
       WHERE class = ${className} and compno=${compno}
-    `))[0]?.image;
+    `)
+    )[0]?.image;
 
-	if( !imageBlob ) {
-        console.log( "no image" );
-        res.status(404).json({error: "no image found"});
+    if (!imageBlob) {
+        console.log('no image');
+        res.status(404).json({error: 'no image found'});
         return;
     }
 
-	res.setHeader( 'Content-type', 'image/jpeg' );
-	res.write( imageBlob, 'binary' );
-	res.end();
+    res.setHeader('Content-type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'max-age=7200');
+    res.write(imageBlob, 'binary');
+    res.end();
 }

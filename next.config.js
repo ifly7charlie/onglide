@@ -5,7 +5,7 @@ module.exports = (phase, { defaultConfig }) => {
     console.log( "Next config" + process.env.SHORT_NAME );
   const nextConfig = {
       /* config options here */
-      distDir: ".build"+process.env.SHORT_NAME
+      distDir: ".build"
   }
   return nextConfig
 }

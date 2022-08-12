@@ -116,6 +116,8 @@ dist
 .env.backup
 .DS_Store
 
+out/
+
 lib/.#htmlhelper.js
 lib/protobuf/onglide.ts
 lib/protobuf/onglide.ts
