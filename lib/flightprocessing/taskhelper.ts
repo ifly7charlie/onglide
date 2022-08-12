@@ -7,6 +7,9 @@ import along from '@turf/along';
 import distance from '@turf/distance';
 
 import {lineString, point as turfPoint} from '@turf/helpers';
+import lineChunk from '@turf/line-chunk';
+import {coordReduce} from '@turf/meta';
+import {uniqWith as _uniqWith} from 'lodash';
 
 import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage} from '../types';
 
@@ -14,6 +17,9 @@ let hit = 0;
 let miss = 0;
 
 type Radian = number & As<'Radian'>;
+
+const steps = process.env.NEXT_RUNTIME ? 40 : 15;
+const scoring = !(process.env.NEXT_RUNTIME || false);
 
 var _2pi: Radian = (Math.PI * 2) as Radian;
 
@@ -208,12 +214,26 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
         type: geoJSONtype,
         coordinates: [polypoints]
     };
+    if (scoring) {
+        turnpoint.coordinates = _uniqWith(
+            coordReduce(
+                lineChunk(lineString(polypoints), 2),
+                (prev, current) => {
+                    prev.push(current);
+                    return prev;
+                },
+                []
+            ),
+            (a, b) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000)
+        );
+        console.log(turnpoint.legno, JSON.stringify(turnpoint.coordinates));
+    }
     turnpoint.lineString = lineString(polypoints);
+
     turnpoint.point = turfPoint([tp.nlng, tp.nlat]);
     return turnpoint.geoJSON;
 }
 
-const steps = process.env.NEXT_RUNTIME ? 40 : 15;
 //console.log(process.env);
 
 // Iterate over an arc adding the appropriate points
@@ -221,7 +241,7 @@ function addArc(startAngle: Radian, endAngle: Radian, ltlg: LatLong, radius: Dis
     // accumulate the points and return them
     let points = [];
 
-    if (Math.round(((2 * Math.PI + startAngle) % (Math.PI * 2)) * 20) == Math.round(((2 * Math.PI + endAngle) % (Math.PI * 2)) * 20)) {
+    if (Math.round(((2 * Math.PI + startAngle) % (Math.PI * 2)) * steps) == Math.round(((2 * Math.PI + endAngle) % (Math.PI * 2)) * steps)) {
         for (var i = (2 * Math.PI) as Radian, adj = (Math.PI / steps) as Radian; i >= 0; i = (i - adj) as Radian) {
             var dltlg = ltlg.destPointRad(i % (2 * Math.PI), radius);
             points.push([dltlg.dlong(), dltlg.dlat()]);
