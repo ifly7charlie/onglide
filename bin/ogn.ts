@@ -141,8 +141,8 @@ let ddb: Record<string, DDBEntry> = {};
 const error = dotenv.config({path: '.env.local'}).error;
 let readOnly = process.env.OGN_READ_ONLY == undefined ? false : !!parseInt(process.env.OGN_READ_ONLY);
 
-const replayBase = process.env.REPLAY ? parseInt(process.env.REPLAY) : 0;
 const start = Math.trunc(Date.now() / 1000);
+const replayBase = process.env.REPLAY ? parseInt(process.env.REPLAY) : start;
 
 async function main() {
     if (error) {
