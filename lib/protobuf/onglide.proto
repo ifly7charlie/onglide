@@ -66,9 +66,10 @@ message SpeedDist {
 message PilotScoreLeg {
     uint32 legno = 1;
     uint32 time = 2;
-	optional uint32 duration = 3; // time from previous point to this one
+	optional uint32 duration = 3; // time from previous point to this one 
+	optional uint32 taskDuration = 4; // time from start to this
 
-	optional BasePositionMessage point = 4;
+	optional BasePositionMessage point = 5;
 
     optional uint32 alt = 6;
     optional uint32 agl = 7;
@@ -128,7 +129,7 @@ message PilotScore {
     // Start/Finish details
     uint32 utcStart = 3;
     uint32 utcFinish = 4;
-	optional uint32 utcDuration = 5; // scored to when
+	optional uint32 taskDuration = 5; // scored to when
 	
 	//    bool startFound = 6;
 	optional bool inSector = 7;
