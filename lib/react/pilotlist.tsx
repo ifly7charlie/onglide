@@ -229,7 +229,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         legs = (
             <>
                 <ButtonGroup key="taskleg" role="group" aria-label="task or leg" className={'smallbuttons goleft'}>
-                    {['leg', 'task', 'stats'].map((radio, idx) => (
+                    {['leg', 'task'].map((radio, idx) => (
                         <Button key={idx} variant={idx == viewOptions.task ? 'primary' : 'secondary'} value={idx} onClick={(e) => setViewOptions({...viewOptions, task: idx})}>
                             {radio}
                         </Button>
@@ -343,7 +343,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     if (score?.utcStart) {
         times = (
             <div>
-                {OptionalTime('Start ', score.utcStart as Epoch, tz)} {OptionalDuration(' +', score.utcDuration as Epoch)} {OptionalTime(' Finish ', score.utcFinish as Epoch, tz)}
+                {OptionalTime('Start ', score.utcStart as Epoch, tz)} {OptionalDuration(' +', score.taskDuration as Epoch)} {OptionalTime(' Finish ', score.utcFinish as Epoch, tz)}
             </div>
         );
     }
