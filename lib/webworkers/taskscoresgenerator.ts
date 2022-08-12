@@ -1,6 +1,6 @@
-import {Compno, PositionStatus, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task} from '../types';
+import {Compno, PositionStatus, AltitudeAgl, BasePositionMessage, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task} from '../types';
 
-import {PilotScore, PilotScoreLeg} from '../protobuf/onglide';
+import {PilotScore, PilotScoreLeg, SpeedDist} from '../protobuf/onglide';
 
 //
 function copyPick(d, o, ...props) {
@@ -13,6 +13,49 @@ function selectPick(o, ...props) {
 
 //export function everySoOftenGenerator<Type extends TimeStampType> *(interval: Epoch, input: SoftenGenerator<Type>): SoftenGenerator<Type> {
 export const taskScoresGenerator = async function* (task: Task, compno: Compno, handicap: number, input: CalculatedTaskGenerator, log: Function): TaskScoresGenerator {
+    // Helper for handicapping
+    function calcHandicap(dist) {
+        return Math.round((1000.0 * dist) / handicap) / 10;
+    }
+
+    const doSpeedCalc = (sd: SpeedDist, legDuration: number, taskDuration: number) => {
+        if (!sd) {
+            return;
+        }
+        if (legDuration) {
+            sd.legSpeed = Math.max(0, Math.round(sd.distance / (legDuration / 36000)) / 10);
+        }
+        if (taskDuration) {
+            sd.taskSpeed = Math.max(Math.round(sd.taskDistance / (taskDuration / 36000)) / 10);
+        }
+    };
+
+    const doGrCalc = (sd: SpeedDist | null, agl: AltitudeAgl) => {
+        if (sd && agl) {
+            sd.grRemaining = Math.round((sd.distanceRemaining || sd.minPossible) / (agl / 1000));
+        }
+    };
+
+    const doHandicapping = !task.rules.handicapped
+        ? () => {}
+        : (container: PilotScore | PilotScoreLeg) => {
+              // Make sure we have a holder for it
+              if (!container.handicapped) {
+                  container.handicapped = {taskDistance: 0};
+              }
+              const handicapped = container.handicapped;
+
+              // Calculate the handicapped distances from the actuals
+              for (const i of ['distance', 'taskDistance', 'distanceRemaining', 'maxPossible', 'minPossible']) {
+                  if (i in container.actual) {
+                      handicapped[i] = calcHandicap(container.actual[i]);
+                  }
+              }
+
+              //
+              handicapped.taskSpeed = Math.round(handicapped.taskDistance / (container.taskDuration / 36000)) / 10;
+          };
+
     //
     // Loop till we are told to stop
     for (let current = await input.next(); !current.done && current.value; current = await input.next()) {
@@ -65,6 +108,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     distance: Math.round(leg.distance * 10) / 10,
                     taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance) * 10) / 10
                 };
+                if (previousLeg?.point?.a) {
+                    sl.alt = previousLeg?.point?.a;
+                }
                 if (leg.minPossible) {
                     sl.actual.minPossible = Math.round(leg.minPossible.distance * 10) / 10;
                 }
@@ -75,14 +121,17 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     sl.actual.distanceRemaining = Math.round((leg.distanceRemaining || leg.minPossible.distance) * 10) / 10;
                 }
 
+                doHandicapping(sl);
+                doGrCalc(sl.actual, sl.alt);
+                doGrCalc(sl.handicapped, sl.alt);
+
+                //
+                sl.duration = (legTime(leg) || leg.point?.t) - sl.time;
+                sl.taskDuration = (legTime(leg) || leg.point?.t) - item.utcStart;
+
                 // And now do speeds
-                if (sl.time) {
-                    sl.alt = previousLeg?.point?.a;
-                    const totalDuration = (legTime(leg) || leg.point?.t) - item.utcStart;
-                    sl.duration = (legTime(leg) || leg.point?.t) - sl.time;
-                    sl.actual.legSpeed = Math.max(0, Math.round(sl.actual.distance / (sl.duration / 36000)) / 10);
-                    sl.actual.taskSpeed = Math.max(Math.round(sl.actual.taskDistance / (totalDuration / 36000)) / 10);
-                }
+                doSpeedCalc(sl.actual, sl.duration, sl.taskDuration);
+                doSpeedCalc(sl.handicapped, sl.duration, sl.taskDuration);
             }
             // otherwise we are start leg
             else {
@@ -113,7 +162,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         score.actual = {
             taskDistance: item.distance
         };
-        score.utcDuration = duration;
+        score.taskDuration = duration;
 
         // Looks weird but take it if it is there, if it isn't then take the alternative
         // AAT uses all three, racing uses dR
@@ -123,21 +172,21 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             score.actual.maxPossible = Math.round(item.maxPossible * 10) / 10;
         }
 
+        doHandicapping(score);
+
         // Speeds only appropriate at some points in the flight
         // If we haven't landed out or come home without a finish
         if (item.flightStatus != PositionStatus.Landed && (item.utcFinish || item.flightStatus != PositionStatus.Home)) {
+            doSpeedCalc(score.actual, 0, duration);
+            doSpeedCalc(score.handicapped, 0, duration);
             //
             // Calculate overall speed and remaining GR if there is a need for one
             score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
             if (!item.utcFinish && item.lastProcessedPoint?.a) {
-                score.actual.grRemaining = Math.round((score.actual.distanceRemaining || score.actual.minPossible) / (item.lastProcessedPoint.a / 1000));
+                doGrCalc(score.actual, item.lastProcessedPoint.a);
+                doGrCalc(score.handicapped, item.lastProcessedPoint.a);
             }
         }
-
-        // Helper for handicapping
-        const calcHandicap = (dist, leg) => {
-            return (100.0 * dist) / Math.max(handicap + leg.Hi, 25);
-        };
 
         if (Date.now() / 1000 - score.t > 60) {
             console.log(score.compno, 'scored delay:', ((Date.now() - score.t) / 1000).toFixed(0));
