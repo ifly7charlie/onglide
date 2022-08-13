@@ -579,7 +579,7 @@ async function sendPilotTrack(client: WebSocket, compno: Compno) {
         toStream[compno] = {
             compno: compno,
             positions: new Uint8Array(p.positions.buffer, 0, p.posIndex * 3 * 4),
-            indices: new Uint8Array(p.indices.buffer, 0, p.segmentIndex * 4),
+            indices: new Uint8Array(p.indices.buffer, 0, (p.segmentIndex + 1) * 4),
             t: new Uint8Array(p.t.buffer, 0, p.posIndex * 4),
             climbRate: new Uint8Array(p.climbRate.buffer, 0, p.posIndex),
             recentIndices: new Uint8Array(p.recentIndices.buffer),
@@ -687,6 +687,15 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
 
     // Reset for next iteration
     channel.activeGliders = {};
+
+    // Prune startline
+    for (const compno in recentStarts) {
+        const deck = gliders[makeClassname_Compno(channel.className, compno as Compno)]?.deck;
+        if (deck) {
+            console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}`);
+            pruneStartline(deck, recentStarts[compno]);
+        }
+    }
 }
 
 //
