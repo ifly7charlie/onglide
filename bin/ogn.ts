@@ -82,7 +82,7 @@ interface Channel {
 
     toSend: PositionMessage[]; // messages waiting to be sent
 
-    activeGliders: Record<Compno, boolean>; // map of active compno
+    activeGliders: Set<Compno>; // map of active compno
     lastSentPositions: Epoch;
     clients: any[]; // all websockets for the channel
 
@@ -351,7 +351,7 @@ async function updateClasses() {
             channel = {
                 clients: [],
                 launching: false,
-                activeGliders: {},
+                activeGliders: new Set(),
                 lastSentPositions: 0 as Epoch,
                 toSend: [],
                 className: c.class,
@@ -653,13 +653,11 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
         client.terminate();
     });
 
-    const airborne = Object.keys(channel.activeGliders)?.length || 0;
-
     // If we have nothing then do nothing...
     if (!channel.clients.length) {
         console.log(`${channel.className}: no clients subscribed`);
     } else {
-        console.log(`${channel.className}: ${channel.clients.length} subscribed, ${airborne} gliders airborne`);
+        console.log(`${channel.className}: ${channel.clients.length} subscribed, ${channel.activeGliders.size} gliders airborne`);
     }
 
     // For sending the keepalive
@@ -668,12 +666,15 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
             keepalive: true,
             at: Math.floor(now - location.officialDelay),
             listeners: channel.clients.length,
-            airborne: airborne
+            airborne: channel.activeGliders.size
         }
     }).finish();
 
     // Protobuf encode the scores message
     channel.lastScores = scores;
+
+    // Reset for next iteration
+    channel.activeGliders.clear();
 
     // Send to each client and if they don't respond they will be cleaned up next time around
     channel.clients.forEach((client) => {
@@ -684,9 +685,6 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
         client.isAlive = false;
         client.ping(function () {});
     });
-
-    // Reset for next iteration
-    channel.activeGliders = {};
 
     // Prune startline
     for (const compno in recentStarts) {
@@ -796,10 +794,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
 // it's complete with the vario elevation etc
 function processAprsMessage(className: string, channel: Channel, message: PositionMessage) {
     // how many gliders are we tracking for this channel
-    if (!('activeGliders' in channel)) {
-        channel.activeGliders = {};
-    }
-    channel.activeGliders[message.c] = true;
+    channel.activeGliders.add(message.c as Compno);
 
     // Lookup the glider
     const glider = gliders[className + '_' + message.c];

@@ -333,7 +333,7 @@ export default function MApp(props: {
         }
     }
 
-    const attribution = <AttributionControl key={radarOverlay.key + (status?.substring(0, 2) || 'no')} customAttribution={[radarOverlay.attribution, status].join(' | ')} style={attributionStyle} />;
+    const attribution = <AttributionControl key={radarOverlay.key + (props.status?.substring(12, 6) || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
 
     // Update the view and synchronise with mapbox
     const onViewStateChange = ({viewState}) => {

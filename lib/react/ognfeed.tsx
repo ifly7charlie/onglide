@@ -50,7 +50,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
     const [pilotScores, setPilotScores] = useState<ScoreData>({});
     const {pilots, isPLoading} = usePilots(vc);
     const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
-    const [wsStatus, setWsStatus] = useState({c: 1, p: 0, timeStamp: 0, at: 0});
+    const [wsStatus, setWsStatus] = useState({listeners: 1, airborne: 0, timeStamp: 0, at: 0});
     const [follow, setFollow] = useState(false);
     const [attempt, setAttempt] = useState(0);
 
@@ -131,12 +131,13 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
         : null;
 
     // Cache the calculated times and only refresh every 60 seconds
-    const status = useMemo(
-        () =>
-            `${connectionStatus} @ ${wsStatus && wsStatus.at ? formatTimes(wsStatus.at, tz) : ''}` + //
-            ` | <a href='#' title='number of viewers'>${wsStatus.c} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.p} ✈️  </a>`,
-        [connectionStatus, Math.round(wsStatus.at / 60), wsStatus.p, wsStatus.c]
-    );
+
+    const status = useMemo(() => {
+        return (
+            (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
+            ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
+        );
+    }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne]);
 
     return (
         <>
