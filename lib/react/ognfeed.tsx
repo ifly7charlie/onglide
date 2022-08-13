@@ -8,9 +8,9 @@
 
 import {useState, useMemo, useRef} from 'react';
 
-import {useTaskGeoJSON, usePilots, Spinner, Error} from './loaders';
+import {usePilots, Spinner} from './loaders';
 
-import {Nbsp} from './htmlhelper';
+import {Nbsp, TooltipIcon} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
@@ -18,6 +18,8 @@ import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as
 
 import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
 import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
+
+import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
@@ -60,15 +62,12 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
 
     // We are using a webSocket to update our data here
     const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
-        reconnectAttempts: 3,
-        reconnectInterval: 30000,
-        shouldReconnect: (closeEvent) => {
-            console.log(closeEvent);
-            return online;
+        reconnectAttempts: 40,
+        reconnectInterval: 16000,
+        onReconnectStop: () => {
+            setAttempt(-100);
         },
-        onOpen: () => {
-            setAttempt(attempt + 1);
-        }
+        retryOnError: true
     });
 
     // Do we have a loaded set of details?
@@ -83,13 +82,27 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
         }
     }
 
-    const connectionStatus = {
-        [ReadyState.CONNECTING]: '<span style="color:\'orange\'">Connecting</span>',
-        [ReadyState.OPEN]: 'Connected',
-        [ReadyState.CLOSING]: '<span style="color:\'red\'">Closed</span>',
-        [ReadyState.CLOSED]: '<span style="color:\'red\'">Closed</span>',
-        [ReadyState.UNINSTANTIATED]: '<span style="color:\'orange\'">Preparing</span>'
-    }[readyState];
+    const connectionStatus = useMemo(() => {
+        const connectionStatusO = {
+            [ReadyState.CONNECTING]: ['Connecting', faSpinner],
+            [ReadyState.CLOSING]: ['Closing', faSpinner],
+            [ReadyState.CLOSED]: ['Closed', faLinkSlash],
+            [ReadyState.UNINSTANTIATED]: ['Messed Up', faSpinner]
+        }[readyState];
+
+        if (connectionStatusO) {
+            return (
+                <div>
+                    <TooltipIcon icon={connectionStatusO[1]} tooltip={connectionStatusO[0]} />
+                    <Nbsp />
+                    Connection to tracking is <b>{connectionStatusO[0]}</b> {attempt < 0 ? 'Please reload page to reconnect' : 'will retry automatically'}
+                    <br style={{clear: 'both'}} />
+                    <hr />
+                </div>
+            );
+        }
+        return null;
+    }, [readyState, attempt]);
 
     if (socketUrl != proposedUrl(vc, datecode)) {
         setPilotScores({});
@@ -150,6 +163,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
             </div>
             <div className="resultsOverlay">
                 <div className="resultsUnderlay">
+                    {connectionStatus}
                     <TaskDetails vc={vc} />
                     {valid && (
                         <PilotList
@@ -166,7 +180,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
                     )}
                 </div>
             </div>
-            {selectedPilotData ? <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} /> : <Sponsors at={wsStatus.at} />}
+            {selectedPilotData?.pilot ? <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} /> : <Sponsors at={wsStatus.at} />}
         </>
     );
 }
