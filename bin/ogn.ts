@@ -445,7 +445,7 @@ async function updateTasks(className: ClassName): Promise<Task | void> {
 
 async function updateTrackers() {
     // Now get the trackers
-    const cTrackers = await db.query(`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate,
+    const cTrackers = await db.query(`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className
                                         FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join compstatus c on c.class=p.class
                                       WHERE p.class = c.class`);
