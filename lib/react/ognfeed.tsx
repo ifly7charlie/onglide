@@ -28,6 +28,7 @@ import {TaskDetails} from './taskdetails';
 import {lineString} from '@turf/helpers';
 
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
+import Sponsors from './sponsors';
 
 import MApp from './deckgl';
 
@@ -36,6 +37,9 @@ const httpsTest = new RegExp(/^https/i, 'i');
 
 function proposedUrl(vc, datecode) {
     const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
+    if (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) {
+        return process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX + hn + '/' + (vc + datecode).toUpperCase();
+    }
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) ? 'wss://' : 'ws://') + hn + '/' + (vc + datecode).toUpperCase();
 }
 
@@ -147,20 +151,22 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
             <div className="resultsOverlay">
                 <div className="resultsUnderlay">
                     <TaskDetails vc={vc} />
-                    <PilotList
-                        pilots={pilots}
-                        pilotScores={pilotScores} //
-                        trackData={trackData}
-                        selectedPilot={selectedCompno}
-                        setSelectedCompno={(x) => setCompno(x)}
-                        now={wsStatus.at as Epoch}
-                        tz={tz}
-                        options={options}
-                        setOptions={setOptions}
-                    />
+                    {valid && (
+                        <PilotList
+                            pilots={pilots}
+                            pilotScores={pilotScores} //
+                            trackData={trackData}
+                            selectedPilot={selectedCompno}
+                            setSelectedCompno={(x) => setCompno(x)}
+                            now={wsStatus.at as Epoch}
+                            tz={tz}
+                            options={options}
+                            setOptions={setOptions}
+                        />
+                    )}
                 </div>
             </div>
-            <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} />
+            {selectedPilotData ? <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} /> : <Sponsors at={wsStatus.at} />}
         </>
     );
 }

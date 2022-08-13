@@ -4,7 +4,7 @@
  *
  */
 
-import {query} from '../../../lib/react/db';
+import {query, mysqlEnd} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
 // Helpers to deal with sectors and tasks etc.
@@ -35,8 +35,9 @@ export default async function taskHandler(req, res) {
     `);
 
     if (!task.length || !task[0].taskid) {
-        console.log(task);
-        res.status(404).json({tp: '', track: ''});
+        console.log(`geoTask: no task for ${className}`, task);
+        res.setHeader('Cache-Control', 's-maxage=60');
+        res.status(204).end();
         return;
     }
 
@@ -44,8 +45,14 @@ export default async function taskHandler(req, res) {
       SELECT taskleg.*, nname name, 0 altitude
       FROM taskleg
       WHERE taskleg.taskid = ${task[0].taskid}
-      ORDER BY legno
-    `);
+      ORDER BY legno`);
+
+    if (!tasklegs?.length) {
+        console.log(`geoTask: invalid task for ${className}`, task, tasklegs);
+        res.setHeader('Cache-Control', 's-maxage=90');
+        res.status(204).end();
+        return;
+    }
 
     // Get the legs ready for handling
     tasklegs.forEach((leg) => {
@@ -112,8 +119,10 @@ export default async function taskHandler(req, res) {
     );
 
     // How long should it be cached
-    res.setHeader('Cache-Control', 'max-age=600');
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=300');
 
     // And we succeeded - here is the json
     res.status(200).json({tp: geoJSON, track: trackLineGeoJSON});
+    // Done
+    mysqlEnd();
 }

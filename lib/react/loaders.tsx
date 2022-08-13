@@ -13,13 +13,13 @@ import {API_ClassName_Pilots} from '../rest-api-types';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faSpinner} from '@fortawesome/free-solid-svg-icons';
 
-const fetcher = (url) => fetch(url).then((res) => res.json());
+const fetcher = (url) => fetch(url).then((res): any => (res.status == 200 ? res.json() : {}));
 
 // How often to refresh the score or the track
 //
 // Get name and details of the contest
 export function useContest() {
-    const {data, error} = useSWR('/api/contest', fetcher);
+    const {data, error}: {data?: any; error?: boolean} = useSWR('/api/contest', fetcher, {refreshInterval: 5 * 60 * 1000});
     return {
         comp: data,
         isLoading: !error && !data,
@@ -30,7 +30,7 @@ export function useContest() {
 //
 // Get the task details
 export function useTask(vc: ClassName) {
-    const {data, error} = useSWR(() => (vc ? '/api/' + vc + '/task' : null), fetcher);
+    const {data, error}: {data?: any; error?: boolean} = useSWR(() => (vc ? '/api/' + vc + '/task' : null), fetcher, {refreshInterval: 5 * 60 * 1000});
     return {
         data: data,
         isLoading: !error && !data,
@@ -41,7 +41,7 @@ export function useTask(vc: ClassName) {
 //
 // Get the GeoJSON representing the task, this includes sectors, tracklines and markers
 export function useTaskGeoJSON(vc: ClassName) {
-    const {data, error} = useSWR(() => '/api/' + vc + '/geoTask', fetcher);
+    const {data, error}: {data?: any; error?: boolean} = useSWR(() => '/api/' + vc + '/geoTask', fetcher, {refreshInterval: 5 * 60 * 1000});
     return {
         taskGeoJSON: data,
         isTLoading: !error && !data,
@@ -50,7 +50,7 @@ export function useTaskGeoJSON(vc: ClassName) {
 }
 
 export function usePilots(vc: ClassName): {pilots: API_ClassName_Pilots; isPLoading: boolean; isPError: boolean} {
-    const {data, error} = useSWR(() => '/api/' + vc + '/pilots', fetcher);
+    const {data, error}: {data?: any; error?: boolean} = useSWR(() => '/api/' + vc + '/pilots', fetcher, {refreshInterval: 10 * 60 * 1000});
     return {
         pilots: data?.pilots,
         isPLoading: !error && !data,
@@ -69,5 +69,5 @@ export function Spinner() {
 }
 
 export function Error() {
-    return <div>Oops!</div>;
+    return <div></div>;
 }

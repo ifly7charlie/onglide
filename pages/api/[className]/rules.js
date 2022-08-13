@@ -1,4 +1,4 @@
-import {query} from '../../../lib/react/db';
+import {query, mysqlEnd} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
 import {calculateTaskLength} from '../../../lib/flightprocessing/taskhelper';
@@ -23,4 +23,6 @@ export default async function taskHandler(req, res) {
 
     // And we succeeded - here is the json
     res.status(200).json(rules);
+    // Done
+    mysqlEnd();
 }

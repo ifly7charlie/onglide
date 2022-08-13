@@ -49,8 +49,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         return [];
     }
 
-    console.log('makeLayers', props.t);
-
     // Add a layer for the recent points for each pilot
     let layers = [];
     _reduce(
@@ -209,7 +207,7 @@ export default function MApp(props: {
     const mapStreet = options.mapType % 2;
 
     // Track and Task Overlays
-    const {taskGeoJSON, isTLoading, isTError} = useTaskGeoJSON(vc);
+    const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
     const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial]);
 
     // Rain Radar

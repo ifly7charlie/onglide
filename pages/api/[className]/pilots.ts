@@ -1,4 +1,4 @@
-import {query} from '../../../lib/react/db';
+import {query, mysqlEnd} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
 import {keyBy as _keyBy} from 'lodash';
@@ -9,8 +9,8 @@ export default async function taskHandler(req, res) {
     } = req;
 
     if (!className) {
-        console.log('no class');
-        res.status(404).json({error: 'missing parameter(s)'});
+        console.log('api/pilots no class');
+        res.status(404);
         return;
     }
 
@@ -34,19 +34,23 @@ export default async function taskHandler(req, res) {
 			WHERE pilots.compno = pr.compno and pr.class = pilots.class
                           and cs.datecode = pr.datecode
                           and cs.class = pilots.class
-			  and pilots.class = ${className}
-     `);
+			  and pilots.class = ${className}`);
 
     if (!pilots || !pilots.length) {
-        console.log('invalid class');
+        console.log('api/pilots: invalid class or day not started');
         console.log(pilots);
-        res.status(404).json({error: 'invalid class'});
+        res.setHeader('Cache-Control', 'max-age=30');
+        res.status(204).end();
         return;
     }
 
+    console.log(pilots);
+
     // How long should it be cached - 60 seconds is good
-    res.setHeader('Cache-Control', 'max-age=120');
+    res.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=60');
 
     // And we succeeded - here is the json
     res.status(200).json({pilots: _keyBy(pilots, 'compno')});
+    // Done
+    mysqlEnd();
 }

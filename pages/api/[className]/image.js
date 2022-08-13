@@ -4,7 +4,7 @@
  *
  */
 
-import {query} from '../../../lib/react/db';
+import {query, mysqlEnd} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
 export default async function image(req, res) {
@@ -27,6 +27,7 @@ export default async function image(req, res) {
     `)
     )[0]?.image;
 
+    mysqlEnd();
     if (!imageBlob) {
         console.log('no image');
         res.status(404).json({error: 'no image found'});
@@ -37,4 +38,5 @@ export default async function image(req, res) {
     res.setHeader('Cache-Control', 'max-age=7200');
     res.write(imageBlob, 'binary');
     res.end();
+    // Done
 }

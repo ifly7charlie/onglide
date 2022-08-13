@@ -1,4 +1,4 @@
-import {query} from '../../../lib/react/db';
+import {query, mysqlEnd} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
 import {calculateTaskLength} from '../../../lib/flightprocessing/taskhelper';
@@ -22,8 +22,10 @@ export default async function taskHandler(req, res) {
     `);
 
     if (!contestday || !contestday.length) {
-        console.log('invalid class', className, contestday);
-        res.status(404).json({error: 'invalid class'});
+        console.log('task.js: date not yet started', className, contestday);
+        res.setHeader('Cache-Control', 's-maxage=300');
+        res.status(204).end();
+        mysqlEnd();
         return;
     }
 
@@ -40,7 +42,9 @@ export default async function taskHandler(req, res) {
 
     if (!taskdetails || !taskdetails.length) {
         console.log('/api/task.js: no active task');
-        res.status(404).json({error: 'no active task'});
+        res.setHeader('Cache-Control', 's-maxage=60');
+        res.status(204).end();
+        mysqlEnd();
         return;
     }
 
@@ -64,8 +68,11 @@ export default async function taskHandler(req, res) {
     `);
 
     // How long should it be cached - 60 seconds is good
-    res.setHeader('Cache-Control', 'max-age=300');
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=60');
 
     // And we succeeded - here is the json
     res.status(200).json({legs: tasklegs, task: taskdetails[0], classes: classes[0], rules: '', contestday: contestday[0]});
+
+    // Done
+    mysqlEnd();
 }
