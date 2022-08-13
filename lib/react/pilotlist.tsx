@@ -228,6 +228,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
         legs = (
             <>
+                <br style={{clear: 'both'}} />
                 <ButtonGroup key="taskleg" role="group" aria-label="task or leg" className={'smallbuttons goleft'}>
                     {['leg', 'task'].map((radio, idx) => (
                         <Button key={idx} variant={idx == viewOptions.task ? 'primary' : 'secondary'} value={idx} onClick={(e) => setViewOptions({...viewOptions, task: idx})}>
@@ -371,7 +372,6 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 {climb}
                 {times}
                 {speed}
-                <br />
                 {legs}
             </div>
         );

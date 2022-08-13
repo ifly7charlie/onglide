@@ -128,7 +128,6 @@ function spawnReplayContestListener(config: ReplayConfig): Worker {
 if (!isMainThread) {
     console.log(`Started Replay Thread for class ${workerData.className} :)`);
 
-    const replayBase = parseInt(process.env.REPLAY);
     // The parent can post a few different messages to us
     //
     // action: shutdown
@@ -140,8 +139,6 @@ if (!isMainThread) {
             process.exit();
         }
 
-        let start = Math.trunc(Date.now() / 1000);
-
         // Load data for specific tracker and add it to the list
         // of gliders to track
         if (task.action == ReplayCommandEnum.initialTrack) {
@@ -149,6 +146,12 @@ if (!isMainThread) {
             if (!channels[task.className]) {
                 channels[task.className] = new BroadcastChannel(task.className);
             }
+
+            let start = Math.trunc(Date.now() / 1000);
+            let multiplier = parseInt(process.env.REPLAY_MULTIPLIER || '1');
+            const replayBase = parseInt(process.env.REPLAY);
+
+            // base + time elapsed * multiplier
 
             gliders[makeClassname_Compno(task)] = {
                 className: task.className,
@@ -160,7 +163,10 @@ if (!isMainThread) {
                     itTask.points,
                     true
                 )((): Epoch => {
-                    return (Math.trunc(Date.now() / 1000) - (start - replayBase)) as Epoch;
+                    const now = Math.trunc(Date.now() / 1000);
+                    const elapsed = now - start;
+                    const effectiveElapsed = elapsed * multiplier;
+                    return (replayBase + effectiveElapsed) as Epoch;
                 }),
                 channel: channels[task.className]
             };

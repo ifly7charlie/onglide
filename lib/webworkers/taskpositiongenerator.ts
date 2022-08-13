@@ -244,6 +244,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                     delete status.closestToNextSectorPoint;
                     // we are done scoring at this point so we can close the iterator and
                     // return the status
+                    console.log(`TPG: ${status.compno} finish found at ${point.t}`);
                     yield status;
                     return;
                 } else {

@@ -43,15 +43,16 @@ import {OgnPathLayer} from './ognpathlayer';
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d) {
+function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d, mapStreet) {
     if (!props.trackData) {
         console.log('missing layers');
         return [];
     }
 
+    //    console.log('deckgl', props.trackData.length);
+
     // Add a layer for the recent points for each pilot
-    let layers = [];
-    _reduce(
+    let layers = _reduce(
         props.trackData,
         (result, track, compno) => {
             // Don't include current pilot in list of all
@@ -80,7 +81,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     _pathType: 'open',
                     positionFormat: map2d ? 'XY' : 'XYZ',
                     getWidth: 5,
-                    getColor: [120, 120, 120, 128],
+                    getColor: mapStreet ? [80, 80, 80, 128] : [224, 224, 224, 224],
                     jointRounded: true,
                     fp64: false,
                     widthMinPixels: 2,
@@ -208,7 +209,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial]);
+    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d, mapStreet), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial, mapStreet]);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);

@@ -62,6 +62,8 @@ import {cloneDeep as _clonedeep} from 'lodash';
 //     process
 //
 
+export type scoresCallback = (message: {scores: Buffer; recentStarts: Record<Compno, Epoch>}) => void;
+
 export interface ScoringConfig {
     className: ClassName;
     airfield: AirfieldLocation;
@@ -77,8 +79,8 @@ export class ScoringController {
     }
 
     // Load these points into scoring
-    setInitialTrack(compno: Compno, points: PositionMessage[]) {
-        this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, compno: compno, points: points});
+    setInitialTrack(compno: Compno, handicap: number, points: PositionMessage[]) {
+        this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, compno, points, handicap});
     }
 
     // This actually starts scoring for the task
@@ -90,7 +92,7 @@ export class ScoringController {
         this.worker.postMessage({action: ScoringCommandEnum.shutdown});
     }
 
-    hookScores(callback) {
+    hookScores(callback: scoresCallback) {
         this.worker.on('message', callback);
     }
 }

@@ -25,12 +25,20 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     // Record of scores per pilot and a flag to optimise transfer
     // of scores when nothing happening
     const mostRecentScore: Record<Compno, PilotScore> = {};
+    const mostRecentStart: Record<Compno, Epoch> = {};
+    let startsToSend: Record<Compno, Epoch> = {};
     let latestSent = false;
 
     // Called when a new score is available, save it in the
     // object structure and flag that it's there
     function updateScore(compno: Compno, score: PilotScore) {
         mostRecentScore[compno] = score;
+
+        if (score.utcStart && mostRecentStart[compno] != score.utcStart) {
+            console.log(`SC: Start found for ${compno} @ ${score.utcStart}`);
+            startsToSend[compno] = mostRecentStart[compno] = score.utcStart as Epoch;
+        }
+
         latestSent = false;
     }
 
@@ -43,13 +51,15 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     // And a timer callback that posts the message to front end
     const timer = setInterval(() => {
         if (!latestSent) {
-            composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore);
+            composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore, startsToSend);
+            startsToSend = {};
             latestSent = true;
         }
     }, interval * 1000);
 
     setTimeout(() => {
-        composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore);
+        composeAndSendProtobuf(task.details.class, task.details.task, port, mostRecentScore, startsToSend);
+        startsToSend = {};
     }, 10000);
 
     // Wait for all the scoring to finish
@@ -70,10 +80,10 @@ async function iterateAndUpdate(compno: Compno, input: TaskScoresGenerator, upda
     } catch (e) {
         console.log(compno, e);
     }
-    console.log(`Completed scoring iteration for ${compno}`);
+    console.log(`SC: Completed scoring iteration for ${compno}`);
 }
 
-function composeAndSendProtobuf(className: ClassName, taskId: string, port: MessagePort, recent: Record<Compno, PilotScore>) {
+function composeAndSendProtobuf(className: ClassName, taskId: string, port: MessagePort, recent: Record<Compno, PilotScore>, startsToSend: Record<Compno, Epoch>) {
     //
     // Encoe this as a protobuf
     const msg = OnglideWebSocketMessage.encode({scores: {pilots: recent}, t: Math.trunc(Date.now() / 1000)}).finish();
@@ -81,5 +91,5 @@ function composeAndSendProtobuf(className: ClassName, taskId: string, port: Mess
 
     // Now we need to send it back to the main thread - allow transfer, we don't
     // need the buffer again
-    port.postMessage(msg, [msg.buffer]);
+    port.postMessage({scores: msg, recentStarts: startsToSend}, [msg.buffer]);
 }

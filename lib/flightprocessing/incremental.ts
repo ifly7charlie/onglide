@@ -151,13 +151,13 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     }
 
     // Find the point in the array of times
-    let indexRemove = _sortedIndex(deck.t, startTime);
+    let indexRemove = _sortedIndex(deck.t.subarray(0, deck.posIndex - 1), startTime);
     if (!indexRemove) {
         return false;
     }
 
     // Find the index into the segments that is the index or above
-    let segmentPos = _sortedIndex(deck.indices, indexRemove);
+    let segmentPos = _sortedIndex(deck.indices.subarray(0, deck.segmentIndex), indexRemove);
 
     // A segment starts on this position - we can remove all before
     if (deck.indices[segmentPos] == indexRemove) {

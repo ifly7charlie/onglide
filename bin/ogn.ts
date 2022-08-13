@@ -30,7 +30,7 @@ import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
 // Add points to the deck structures
-import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
+import {mergePoint, initialiseDeck, pruneStartline} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
@@ -86,11 +86,11 @@ interface Channel {
     lastSentPositions: Epoch;
     clients: any[]; // all websockets for the channel
 
-    broadcastChannel: BroadcastChannel;
-    scoring: ScoringController;
+    broadcastChannel?: BroadcastChannel;
+    scoring?: ScoringController;
 
-    lastKeepAliveMsg: any;
-    lastScores: any;
+    lastKeepAliveMsg?: any;
+    lastScores?: any;
 }
 
 let channels: Record<ClassName, Channel> = {};
@@ -104,6 +104,7 @@ interface Glider {
     //    flarmid?: FlarmID;
 
     greg: string;
+    handicap: number;
     dbTrackerId: string;
     duplicate: number;
     scoringConfigured?: boolean;
@@ -344,17 +345,20 @@ async function updateClasses() {
         const cname = channelName(c.class, c.datecode);
         let channel = channels[cname];
 
-        // Update the saved data with the new values
-        newchannels[cname] = channel = {
-            clients: [],
-            launching: false,
-            activeGliders: {},
-            lastSentPositions: 0,
-            toSend: [],
-            ...channel, // keep old data
-            className: c.class,
-            datecode: c.datecode
-        };
+        // Existing channel do nothing to it
+        if (!channel) {
+            // Update the saved data with the new values
+            channel = {
+                clients: [],
+                launching: false,
+                activeGliders: {},
+                lastSentPositions: 0 as Epoch,
+                toSend: [],
+                className: c.class,
+                datecode: c.datecode
+            };
+        }
+        newchannels[cname] = channel;
 
         // Make sure we have a broadcast channel for the class
         if (!channel.broadcastChannel) {
@@ -369,7 +373,7 @@ async function updateClasses() {
         // And configure scoring for it as well
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: c.class, airfield: location});
-            channel.scoring.hookScores((a) => sendScores(channel, a));
+            channel.scoring.hookScores(({scores, recentStarts}) => sendScores(channel, scores, recentStarts));
             // Get tracks and configure pilots to score
 
             const updateTaskPromise = updateTasks(c.class);
@@ -462,11 +466,7 @@ async function updateTrackers() {
         //            gliders[gliderKey] = {};
         //        }
 
-        gliders[gliderKey] = {
-            ...gliders[gliderKey],
-            ...t,
-            greg: t?.greg?.replace(/[^A-Z0-9]/i, '')
-        };
+        gliders[gliderKey] = Object.assign(gliders[gliderKey] || {}, {...t, greg: t?.greg?.replace(/[^A-Z0-9]/i, '')});
 
         // If we have a tracker for it then we need to link that as well
         if (t.dbTrackerId && t.dbTrackerId != 'unknown') {
@@ -502,6 +502,7 @@ async function updateTrackers() {
             forEach(g.dbTrackerId.split(','), (tid: string, i: number) => {
                 let flarmId = tid.match(/[0-9A-F]{6}$/i);
                 // Tell APRS to start listening for the flarmid
+                console.log(`Stopping APRS Listener for glider ${g.className}:${g.compno} => ${flarmId}`);
                 const command: AprsCommandTrack = {action: AprsCommandEnum.untrack, compno: g.compno, className: g.className, trackerId: flarmId};
                 aprsListener.postMessage(command);
             });
@@ -635,7 +636,7 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
 // We need to fetch and repeat the scores for each class, enriched with vario information
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
-async function sendScores(channel: any, scores: Buffer) {
+async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Compno, Epoch>) {
     //    const now = Date.now() / 1000;
     const now = Math.trunc(Date.now() / 1000) - (start - replayBase);
     // For each channel (aka class)
@@ -717,8 +718,16 @@ async function getInitialTrackPoints(channel: Channel): Promise<void> {
         }
 
         // And pass the whole set to scoring to be loaded into the glider history
-        channel.scoring.setInitialTrack(compno as Compno, groupedPoints[compno]);
+        channel.scoring.setInitialTrack(compno as Compno, glider.handicap, groupedPoints[compno]);
         glider.scoringConfigured = true;
+    }
+
+    // We also need to go through all the gliders that don't have track points and set them up as well.
+    for (const gn in gliders) {
+        if (!gliders[gn].scoringConfigured) {
+            channel.scoring.setInitialTrack(gliders[gn].compno as Compno, gliders[gn].handicap, []);
+            initialiseDeck(gliders[gn].compno as Compno, gliders[gn]);
+        }
     }
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
@@ -750,8 +759,8 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
         initialiseDeck(compno as Compno, glider);
         for (const point of groupedPoints[compno]) {
             mergePoint(point, glider);
-            channel.scoring.setInitialTrack(compno as Compno, [point]);
-            break;
+            channel.scoring.setInitialTrack(compno as Compno, glider.handicap, [point]);
+            break; // only score the first point as it's a replay
         }
         // And pass the whole set to scoring to be loaded into the glider history
         glider.scoringConfigured = true;
@@ -760,7 +769,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
     // We also need to go through all the gliders that don't have track points and set them up as well.
     for (const gn in gliders) {
         if (!gliders[gn].scoringConfigured) {
-            channel.scoring.setInitialTrack(gliders[gn].compno as Compno, []);
+            channel.scoring.setInitialTrack(gliders[gn].compno as Compno, gliders[gn].handicap, []);
             initialiseDeck(gliders[gn].compno as Compno, gliders[gn]);
         }
     }
@@ -796,7 +805,7 @@ function processAprsMessage(className: string, channel: Channel, message: Positi
     if (!message.l) {
         // Buffer the message they get batched every second
         channel.toSend.push(message);
-        //        console.log(`${message.c}: ${message.t}`);
+        //        console.log(`${message.c}: ${message.t}: sending`);
 
         // Merge into the display data structure
         mergePoint(message, glider);
