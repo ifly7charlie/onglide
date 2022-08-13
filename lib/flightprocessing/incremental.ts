@@ -152,7 +152,8 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
 
     // Find the point in the array of times
     let indexRemove = _sortedIndex(deck.t.subarray(0, deck.posIndex - 1), startTime);
-    if (!indexRemove) {
+    if (!indexRemove || indexRemove == deck.posIndex - 1) {
+        console.log(`can't prune startline for ${deck.compno} no enough points yet ${indexRemove} <> ${deck.posIndex}`);
         return false;
     }
 
@@ -189,10 +190,11 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     deck.indices[deck.segmentIndex] = deck.posIndex;
 
     // And then take the end of the buffer for displaying data
-    deck.positions = deck.positions.subarray(indexRemove * 3);
-    deck.agl = deck.agl.subarray(indexRemove);
-    deck.t = deck.t.subarray(indexRemove);
-    deck.climbRate = deck.climbRate.subarray(indexRemove);
+    deck.positions = deck.positions.slice(indexRemove * 3);
+    deck.agl = deck.agl.slice(indexRemove);
+    deck.t = deck.t.slice(indexRemove);
+    deck.climbRate = deck.climbRate.slice(indexRemove);
+
 
     return true;
 }
