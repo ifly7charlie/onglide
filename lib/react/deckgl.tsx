@@ -148,7 +148,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         if (p.posIndex) {
             layers.push(
                 new OgnPathLayer({
-                    id: 'selected' + props.selectedCompno + p.partial,
+                    id: 'selected' + props.selectedCompno + p.partial + p.posIndex,
                     compno: props.selectedCompno,
                     data: {
                         length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)

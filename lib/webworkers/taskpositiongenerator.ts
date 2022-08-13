@@ -436,7 +436,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
 
             // If we are live we only score so often
             if (point._) {
-                await setTimeout(30);
+                await setTimeout(15);
             }
         } catch (e) {
             console.log('Exception in taskPositionGenerator');

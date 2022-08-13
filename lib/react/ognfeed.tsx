@@ -249,7 +249,7 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                         });
                         //                        result[compno].colors = new Uint8Array(_map(result[compno].t, (_) => [Math.floor(Math.random() * 255), 128, 128]).flat());
                         console.log(`track  for ${compno}, ${p.climbRate.length} points, partial: ${p.partial}`);
-                        if (pilotScores[compno]?.utcStart) {
+                        if (!p.partial && pilotScores[compno]?.utcStart) {
                             pruneStartline(deck, pilotScores[compno].utcStart);
                         }
                         [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
