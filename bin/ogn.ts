@@ -161,7 +161,24 @@ async function main() {
         },
         onError: (e) => {
             console.log(e);
-        }
+        },
+        onConnectError: (x) => {
+            console.log('mysql connect errror', x);
+        },
+        onKill: (x) => {
+            console.log('mysql killed xx', x);
+        },
+        onClose: (x) => {
+            console.log('mysql connection closed', x);
+        },
+        onConnect: (x) => {
+            console.log(`mysql connection opened ${x.config.host}:${x.config.port} user: ${x.config.user} state: ${x.state}`);
+        },
+        maxConnsFreq: 15 * 60 * 1000,
+        usedConnsFreq: 10 * 60 * 1000,
+        maxRetries: 2,
+        zombieMaxTimeout: 60,
+        connUtilization: 0.1
     });
 
     // Location comes from the competition table in the database
@@ -287,6 +304,18 @@ async function main() {
     }, 1000);
 
     setInterval(async function () {
+        db.getClient()?.ping((e) => {
+            if (e) {
+                console.log('db ping failed', e);
+                db.quit();
+            } else {
+                console.log('db pong');
+            }
+        });
+        db.end();
+    }, 60 * 1000);
+
+    setInterval(async function () {
         await updateTrackers();
         await updateClasses();
     }, 300 * 1000);
@@ -294,7 +323,7 @@ async function main() {
     //    await setTimeout(10000000);
 }
 
-main().then(() => console.log('exiting'));
+main().then(() => console.log('Started'));
 
 //
 // Fetch the trackers from the database
@@ -777,9 +806,14 @@ function processAprsMessage(className: string, channel: Channel, message: Positi
 
     // Pop into the database
     if (!readOnly) {
-        db.query(escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
+        db.query(
+            Object.assign(
+                escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
-                                                           ${message.lat}, ${message.lng}, ${message.a}, ${message.g}, ${message.t}, ${message.b}, ${message.s}, ${message.f} )`);
+                                                           ${message.lat}, ${message.lng}, ${message.a}, ${message.g}, ${message.t}, ${message.b}, ${message.s}, ${message.f} )`,
+                {timeout: 200}
+            )
+        );
     }
 }
 
