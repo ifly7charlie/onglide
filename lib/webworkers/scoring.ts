@@ -21,19 +21,16 @@ import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:work
 import {bindChannelForInOrderPackets} from './inordergenerator';
 
 // Scoring types
-import {assignedAreaScoringGenerator} from './assignedareascoringgenerator';
+import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 import {racingScoringGenerator} from './racingScoringGenerator';
-import {enrichedPositionGenerator} from './enrichedpositiongenerator';
+import {enrichedPositionGenerator} from './enrichedPositionGenerator';
 
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
-import {taskScoresGenerator} from './taskscoresgenerator';
+import {taskScoresGenerator} from './taskScoresGenerator';
 import {scoreCollector} from './scoreCollector';
 
 import {cloneDeep as _clonedeep} from 'lodash';
-
-// Downsample something with a timestamp
-import {everySoOftenGenerator} from './everysooftengenerator';
 
 // FLOW:
 //
