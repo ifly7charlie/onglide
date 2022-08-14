@@ -104,6 +104,16 @@ function OptionalTime(before: string, t: Epoch | number, tz: TZ, after: string |
     }
     return '';
 }
+function OptionalTimeHHMM(before: string, t: Epoch | number, tz: TZ, after: string | null = null) {
+    if (!t) {
+        return '';
+    }
+    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    if (v) {
+        return `${before || ''}${v}${after || ''}`;
+    }
+    return '';
+}
 function OptionalDuration(before: string, t: Epoch, after: string | null = null) {
     if (!t) {
         return '';
@@ -170,16 +180,15 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
     const speed = score ? (
         <>
-            Speed:&nbsp;
-            {hasHandicappedResults && score.handicapped?.taskSpeed ? <>{score.handicapped.taskSpeed.toFixed(1)} kph hcap</> : null}
+            {hasHandicappedResults && score.handicapped?.taskSpeed ? <>{score.handicapped.taskSpeed.toFixed(1)} kph hcap/</> : null}
             {score.actual?.taskSpeed?.toFixed(1) || '-'} kph
         </>
     ) : null;
 
     const distance = score ? (
         <>
-            Speed:&nbsp;
-            {hasHandicappedResults && score.handicapped?.taskDistance ? <>{score.handicapped.taskDistance.toFixed(1)} km hcap</> : null}
+            &nbsp;
+            {hasHandicappedResults && score.handicapped?.taskDistance ? <>{score.handicapped.taskDistance.toFixed(1)} km hcap/</> : null}
             {score.actual?.taskDistance?.toFixed(1) || '-'} km
         </>
     ) : null;
@@ -273,7 +282,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                             </tr>
                             <tr>
                                 <td>Leg Start</td>
-                                {_map(actualLegs, (x) => (x.time ? <td>{formatTime(x.time as Epoch, tz)[0]}</td> : null))}
+                                {_map(actualLegs, (x) => (x.time ? <td>{OptionalTimeHHMM('', x.time as Epoch, tz)}</td> : null))}
                             </tr>
                             <tr style={{fontSize: 'small'}}>
                                 <td>Leg Duration</td>
@@ -398,9 +407,11 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     {climb}
                     {times}
                     {speed}
-                    {legs}
-                    <Optional b="Glide Ratio to Finish" v={score.actual?.grRemaining} e=":1" />
+                    {speed ? ',' : ''}
+                    {distance}
+                    <Optional b=", Glide ratio to Finish" v={score.actual?.grRemaining} e=":1" />
                     <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining} e=":1" />
+                    {legs}
                 </div>
             );
         }
