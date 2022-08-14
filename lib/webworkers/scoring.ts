@@ -13,6 +13,8 @@
 
 // Import the APRS server
 
+import {initialiseInsights} from '../insights';
+
 import {PositionMessage} from './positionmessage';
 import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno, InOrderGeneratorFunction, AirfieldLocation} from '../types';
 
@@ -176,6 +178,9 @@ function spawnScoringContestListener(config: ScoringConfig): Worker {
 
 if (!isMainThread) {
     console.log(`Started Scoring Thread for class ${workerData.className} :)`);
+
+    // Perhaps we need to do this in the thread?
+    initialiseInsights();
 
     // The parent can post a few different messages to us
     //

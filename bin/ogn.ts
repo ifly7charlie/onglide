@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-// Copyright 2020 (c) Melissa Jenkins
+// Copyright 2020-2022 (c) Melissa Jenkins
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
+
+import {initialiseInsights, trackMetric} from '../lib/insights';
 
 // Import the APRS server
 import {ISSocket} from 'js-aprs-is';
@@ -178,9 +180,14 @@ async function main() {
         maxConnsFreq: 15 * 60 * 1000,
         usedConnsFreq: 10 * 60 * 1000,
         maxRetries: 2,
-        zombieMaxTimeout: 60,
-        connUtilization: 0.1
+        zombieMaxTimeout: 120,
+        connUtilization: 0.2
     });
+
+    // Allow insights if it's configured.
+    // DON'T TRACK DEPENDENCIES as it will pick up SQL statements
+    // and we do a LOT of them
+    initialiseInsights();
 
     // Location comes from the competition table in the database
     location = (await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1'))[0];
@@ -281,14 +288,18 @@ async function main() {
         for (const channelName in channels) {
             const channel = channels[channelName];
 
-            //            console.log(`interval ${channelName}: ${channel.clients.length} (${channel.toSend.length} updates to send)`);
+            trackMetric(channel.className + '.activeListeners', channel.clients.length);
+
             if (channel.clients.length) {
-                // && (channel.toSend.length > 0 || channel.lastSentPositions < now - 60)) {
                 // Encode all the changes, we only keep latest per glider if multiple received
                 // there shouldn't be multiple!
-
-                //                console.log(channel.className, JSON.stringify(channel.toSend));
                 const msg = OnglideWebSocketMessage.encode({positions: {positions: channel.toSend}, t: Math.trunc(now - location.officialDelay)}).finish();
+                //
+                // Metrics are helpful
+                trackMetric(channel.className + '.positions.sent', channel.toSend.length);
+                trackMetric(channel.className + '.positions.bytesSent', channel.toSend.length * msg.byteLength);
+
+                // We don't want to send it twice so it can go
                 channel.toSend = [];
                 channel.lastSentPositions = now;
 
@@ -312,8 +323,8 @@ async function main() {
             } else {
                 console.log('db pong');
             }
+            db.end();
         });
-        db.end();
     }, 60 * 1000);
 
     setInterval(async function () {
@@ -670,6 +681,9 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
         }
     }).finish();
 
+    // We don't know how many scores we have without decoding the protobuf message :(
+    trackMetric(channel.className + '.scoring.bytesSent', scores.byteLength * channel.clients.length);
+
     // Protobuf encode the scores message
     channel.lastScores = scores;
 
@@ -809,12 +823,10 @@ function processAprsMessage(className: string, channel: Channel, message: Positi
     if (!message.l) {
         // Buffer the message they get batched every second
         channel.toSend.push(message);
-        //        console.log(`${message.c}: ${message.t}: sending`);
 
         // Merge into the display data structure
         mergePoint(message, glider);
     } else {
-        //        console.log(`${message.c}: ${message.t} !!!`);
     }
 
     // Pop into the database
@@ -824,7 +836,7 @@ function processAprsMessage(className: string, channel: Channel, message: Positi
                 escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
                                                            ${message.lat}, ${message.lng}, ${message.a}, ${message.g}, ${message.t}, ${message.b}, ${message.s}, ${message.f} )`,
-                {timeout: 200}
+                {timeout: 1000}
             )
         );
     }

@@ -36,6 +36,8 @@ const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'gl
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
+import {trackMetric, initialiseInsights} from '../insights';
+
 export enum AprsCommandEnum {
     none,
     shutdown,
@@ -130,6 +132,8 @@ export function spawnAprsContestListener(config: AprsListenerConfig): Worker {
 
 if (!isMainThread) {
     console.log('Started APRS worker thread');
+
+    initialiseInsights();
 
     // The parent can post a few different messages to us
     //
@@ -262,11 +266,21 @@ function startAprsListener(config: AprsListenerConfig) {
     const kaInterval = setInterval(function () {
         // Log and reset statistics
         const period = (Date.now() - statistics.periodStart) / 1000;
-        console.log(period);
-        console.log(`APRS: ${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s`);
+
+        // Into insights
+        if (statistics.periodStart) {
+            console.log(period);
+            console.log(`APRS: ${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s, unstableCount: ${unstableCount}`);
+            trackMetric('aprs.msgsReceived', statistics.msgsReceived);
+            trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
+            trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
+            trackMetric('aprs.server', parseInt(APRSSERVER.match(/([0-9])/)?.[0] || '99'));
+        }
+
         statistics.msgsReceived = statistics.aprsDelay = 0;
         statistics.periodStart = Date.now();
         unstableCount--;
+        trackMetric('aprs.unstableCount', unstableCount);
 
         // send a keepalive
         console.log('sending keepalive', `# ${config.competition} ${process.env.NEXT_PUBLIC_WEBSOCKET_HOST}`);
@@ -287,6 +301,7 @@ function startAprsListener(config: AprsListenerConfig) {
                     console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
                     clearInterval(kaInterval);
                     startAprsListener(config);
+                    trackMetric('aprs.restart', 1);
                 }
                 connection.connect();
             });

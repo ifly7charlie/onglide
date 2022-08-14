@@ -1,4 +1,4 @@
-import Graph from '../flightprocessing/dijkstras';
+import {trackMetric} from '../insights';
 
 import {Epoch, ClassName, Compno, Task, TaskScoresGenerator} from '../types';
 
@@ -45,7 +45,7 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     // Start async functions to read scores and update our most recent
     const promises = [];
     for (const compno in scoreStreams) {
-        promises.push(iterateAndUpdate(compno as Compno, scoreStreams[compno], updateScore));
+        promises.push(iterateAndUpdate(task.details.class, compno as Compno, scoreStreams[compno], updateScore));
     }
 
     // And a timer callback that posts the message to front end
@@ -70,23 +70,31 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     clearInterval(timer);
 }
 
-async function iterateAndUpdate(compno: Compno, input: TaskScoresGenerator, updateScore: Function): Promise<void> {
+async function iterateAndUpdate(className: ClassName, compno: Compno, input: TaskScoresGenerator, updateScore: Function): Promise<void> {
     // Loop till we are told to stop
     try {
         for await (const value of input) {
-            // let current = await input.next(); !current.done && current.value; current = await input.next()) {
-            updateScore(compno, value); // .value);
+            updateScore(compno, value);
         }
     } catch (e) {
         console.log(compno, e);
     }
+    trackMetric('sc.done.' + className, 1);
+    trackMetric('sc.done', 1);
     console.log(`SC: Completed scoring iteration for ${compno}`);
 }
 
 function composeAndSendProtobuf(className: ClassName, taskId: string, port: MessagePort, recent: Record<Compno, PilotScore>, startsToSend: Record<Compno, Epoch>) {
+    const countScoredPilots = Object.keys(recent).length;
+    const countStartsToSend = Object.keys(startsToSend).length;
+    trackMetric('sc.scoredPilots.' + className, countScoredPilots);
+    trackMetric('sc.newStarts.' + className, countStartsToSend);
+    trackMetric('sc.scoredPilots', countScoredPilots);
+    trackMetric('sc.newStarts', countStartsToSend);
+
     //
     // Encoe this as a protobuf
-    const msg = OnglideWebSocketMessage.encode({scores: {pilots: recent}, t: Math.trunc(Date.now() / 1000)}).finish();
+    const msg = OnglideWebSocketMessage.encode({scores: {pilots: recent}}).finish();
     console.log(`Score update: ${className} [${taskId}]: ${Object.keys(recent).join(',')} => ${msg.byteLength} bytes`);
 
     // Now we need to send it back to the main thread - allow transfer, we don't
