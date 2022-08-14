@@ -318,7 +318,11 @@ function processPacket(packet: aprsPacket) {
     const ognTracker = packet.sourceCallsign.slice(0, 3) == 'OGN';
 
     // Lookup the altitude adjustment for the
-    const sender = packet.digipeaters?.pop()?.callsign || 'unknown';
+    let sender = packet.digipeaters?.pop()?.callsign || 'unknown';
+    if (sender == 'DLY2APRS') {
+        sender = packet.digipeaters?.pop()?.callsign || 'unknown';
+    }
+
     let aoa = ognTracker ? 0 : altitudeOffsetAdjust[sender] || 0;
     if (aoa == null) {
         //        console.log(`ignoring packet from ${sender} as blocked`);
