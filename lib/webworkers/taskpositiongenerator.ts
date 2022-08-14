@@ -224,8 +224,9 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
             if (status.recentLegAdvance) {
                 const [inPreviousSector /*inPreviousPenalty*/, , distFromPrevious] = checkIsInTP(task.legs[status.recentLegAdvance], point);
                 if (inPreviousSector) {
-                    log(`re-entry of AAT sector at ${point.t}`);
-                    status.currentLeg--;
+                    log(`re-entry of AAT sector ${status.recentLegAdvance} at ${point.t}, ${distFromPrevious}`);
+                    status.currentLeg = status.recentLegAdvance;
+                    legStatus = status.legs[status.currentLeg];
                     status.closestToNext = Infinity as DistanceKM;
                     possibleAdvances = [];
                     delete status.closestToNextSectorPoint;
@@ -324,7 +325,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
             // into them and if they did that with an instant exit advance we wouldn't
             // score them again
             else if (legStatus.entryTimeStamp && !task.rules.aat) {
-                if (!status.inSector) {
+                if (!inSector) {
                     status.currentLeg++;
                     status.closestToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
@@ -337,9 +338,13 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 // Make sure we have actually left the sector and passed a small distance from the TP before
                 // assuming advance. AAT is longer otherwise a brief pop out will ignore points after
                 // however need to cope with short legs (control points for example)
-                if (task.rules.aat && !status.inPenalty && !status.inSector) {
+                if (task.rules.aat && !inPenalty && !inSector) {
+                    log(`setting a advance`, JSON.stringify(legStatus));
+                    log(point);
+                    //                    log(status);
                     status.recentLegAdvance = status.currentLeg;
                     status.currentLeg++;
+                    legStatus = status.legs[status.currentLeg];
                     status.closestToNext = Infinity as DistanceKM;
                     possibleAdvances = [];
                     delete status.closestToNextSectorPoint;
@@ -468,6 +473,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
             console.log('Exception in taskPositionGenerator');
             console.log(e);
             console.log(JSON.stringify(current));
+            console.log(JSON.stringify(status));
         }
     }
 
