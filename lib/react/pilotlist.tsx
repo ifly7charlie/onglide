@@ -124,7 +124,7 @@ function OptionalDurationHHMM(before: string, t: Epoch, after: string | null = n
     }
     return '';
 }
-function OptionalDurationMM(before: string, t: Epoch, after: string | null = null) {
+export function OptionalDurationMM(before: string, t: Epoch, after: string | null = null) {
     if (!t) {
         return '';
     }

@@ -24,7 +24,7 @@ import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
 
-import {PilotList, Details} from './pilotlist';
+import {PilotList, Details, OptionalDurationMM} from './pilotlist';
 import {TaskDetails} from './taskdetails';
 
 import {lineString} from '@turf/helpers';
@@ -84,18 +84,19 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
 
     const connectionStatus = useMemo(() => {
         const connectionStatusO = {
-            [ReadyState.CONNECTING]: ['Connecting', faSpinner],
-            [ReadyState.CLOSING]: ['Closing', faSpinner],
-            [ReadyState.CLOSED]: ['Closed', faLinkSlash],
+            [ReadyState.CONNECTING]: ['Connecting to tracking..', faSpinner],
+            [ReadyState.CLOSING]: ['Closing tracking connection', faSpinner],
+            [ReadyState.CLOSED]: [`Connection to tracking is closed, ${attempt < 0 ? 'please reload to reconnect' : 'retrying shortly'}`, faLinkSlash],
             [ReadyState.UNINSTANTIATED]: ['Messed Up', faSpinner]
         }[readyState];
 
         if (connectionStatusO) {
+            setWsStatus({listeners: 1, airborne: 0, timeStamp: 0, at: 0}); // clear status will update eventually
             return (
                 <div>
                     <TooltipIcon icon={connectionStatusO[1]} tooltip={connectionStatusO[0]} />
                     <Nbsp />
-                    Connection to tracking is <b>{connectionStatusO[0]}</b> {attempt < 0 ? 'Please reload page to reconnect' : 'will retry automatically'}
+                    {connectionStatusO[0]}
                     <br style={{clear: 'both'}} />
                     <hr />
                 </div>
@@ -137,7 +138,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
             (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
             ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
         );
-    }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne]);
+    }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
 
     return (
         <>
@@ -190,9 +191,21 @@ function formatTimes(t, tz) {
     // Figure out what the local language is for international date strings
     const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
 
+    let competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
+        ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
+                <span style={{color: 'grey'}}>
+                 &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
+            </span>
+          </a>`
+        : '';
+
     // And then produce a string to display it locally
     const dt = new Date(t * 1000);
-    return `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ✈️ </a>` + `<a href='#' title='your time'>${dt.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`;
+    const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((t + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
+    return (
+        `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a>` + //
+        `<a href='#' title='your time'>${dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`
+    );
 }
 
 function mergePointToPilot(point: PilotPosition, trackData: TrackData) {

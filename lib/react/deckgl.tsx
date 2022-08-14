@@ -296,7 +296,11 @@ export default function MApp(props: {
             if (object.time) {
                 // Figure out what the local language is for international date strings
                 const dt = new Date(object.time * 1000);
-                response += `${object.compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})} - ${object.time}<br/>`;
+                response += `${object.compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
+            }
+
+            if (process.env.NODE_ENV == 'development') {
+                response += `[${object.time}]<br/>`;
             }
 
             if (object.alt && !isNaN(object.alt)) {
@@ -333,7 +337,7 @@ export default function MApp(props: {
         }
     }
 
-    const attribution = <AttributionControl key={radarOverlay.key + (props.status?.substring(12, 6) || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
+    const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
 
     // Update the view and synchronise with mapbox
     const onViewStateChange = ({viewState}) => {
