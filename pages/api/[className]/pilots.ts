@@ -34,7 +34,9 @@ export default async function taskHandler(req, res) {
 			WHERE pilots.compno = pr.compno and pr.class = pilots.class
                           and cs.datecode = pr.datecode
                           and cs.class = pilots.class
-			  and pilots.class = ${className}`);
+           and pilots.class = ${className}`);
+
+    mysqlEnd();
 
     if (!pilots || !pilots.length) {
         console.log('api/pilots: invalid class or day not started');
@@ -43,8 +45,6 @@ export default async function taskHandler(req, res) {
         res.status(204).end();
         return;
     }
-
-    console.log(pilots);
 
     // How long should it be cached - 60 seconds is good
     res.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=60');
