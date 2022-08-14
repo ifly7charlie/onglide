@@ -279,7 +279,9 @@ function startAprsListener(config: AprsListenerConfig) {
 
         statistics.msgsReceived = statistics.aprsDelay = 0;
         statistics.periodStart = Date.now();
-        unstableCount--;
+        if (unstableCount > 0) {
+            unstableCount--;
+        }
         trackMetric('aprs.unstableCount', unstableCount);
 
         // send a keepalive
