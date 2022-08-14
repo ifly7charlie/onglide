@@ -23,11 +23,10 @@ export default async function image(req, res) {
         await query(escape`
       SELECT image
       FROM images
-      WHERE class = ${className} and compno=${compno}
+      WHERE class = ${className} and compno=${compno} ORDER by updated desc limit 1
     `)
     )[0]?.image;
 
-    mysqlEnd();
     if (!imageBlob) {
         console.log('no image');
         res.status(404).json({error: 'no image found'});
