@@ -20,6 +20,8 @@ import {cloneDeep as _clonedeep} from 'lodash';
 
 import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper';
 
+const sleepInterval = 10 * 1000;
+
 //export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
 function simplifyPoint(point: PositionMessage): BasePositionMessage {
@@ -31,10 +33,11 @@ function simplifyPoint(point: PositionMessage): BasePositionMessage {
 export const taskPositionGenerator = async function* (task: Task, iterator: EnrichedPositionGenerator, log?: Function): AsyncGenerator<TaskStatus, void, void> {
     //
     // Make sure we have some logging
-    if (!log)
-        log = (...a) => {
-            console.log(...a);
+    if (!log) {
+        log = () => {
+            /**/
         };
+    }
 
     let status: TaskStatus = {
         compno: 'init' as Compno,
@@ -190,7 +193,10 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                     status.currentLeg = 1;
                     status.legs[0].points = [{t: (previousPoint || point).t, a: (previousPoint || point).a, lat: startLine.nlat, lng: startLine.nlng}];
                     status.utcStart = status.legs[0].exitTimeStamp = (previousPoint || point).t;
-                    if (point._) yield status;
+                    if (point._) {
+                        yield status;
+                        await setTimeout(sleepInterval);
+                    }
                     continue;
                 }
 
@@ -199,7 +205,10 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 // We don't need to do anything else until we have a start candidate
                 // IE: you can't score without a start time
                 if (!status.startFound) {
-                    if (point._) yield status;
+                    if (point._) {
+                        yield status;
+                        await setTimeout(sleepInterval);
+                    }
                     continue;
                 }
 
@@ -264,7 +273,10 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                     return;
                 } else {
                     // we must see a point to complete this so nothing to do
-                    if (point._) yield status;
+                    if (point._) {
+                        yield status;
+                        await setTimeout(sleepInterval);
+                    }
                     continue;
                 }
             }
@@ -446,13 +458,11 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 }
             }
 
-            // If we are live then we should return the scoring
-            log(status);
-            if (point._) yield status;
-
             // If we are live we only score so often
             if (point._) {
-                await setTimeout(15);
+                log(status);
+                yield status;
+                await setTimeout(sleepInterval);
             }
         } catch (e) {
             console.log('Exception in taskPositionGenerator');
