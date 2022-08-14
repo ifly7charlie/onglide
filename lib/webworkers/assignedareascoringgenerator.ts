@@ -204,17 +204,17 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                 const lsDistance = length(ls);
                                 const scoredTo = along(ls, Math.max(lsDistance - taskStatus.closestToNext, 0));
 
-                                const intermediatePoint: BasePositionMessage = {
+                                const intermediatePointL: BasePositionMessage = {
                                     a: 0,
                                     t: -taskStatus.currentLeg as Epoch,
                                     lat: scoredTo.geometry.coordinates[1],
                                     lng: scoredTo.geometry.coordinates[0]
                                 };
 
-                                log('add link', ppoint.t, intermediatePoint, 'along:', lsDistance, 'ctn', taskStatus.closestToNext);
-                                log('add link', intermediatePoint, fakePoint);
-                                tempGraph.addLink(ppoint, intermediatePoint, (1000 - lsDistance) as DistanceKM);
-                                tempGraph.addLink(intermediatePoint, fakePoint, 0 as DistanceKM);
+                                log('add link', ppoint.t, intermediatePointL, 'along:', lsDistance, 'ctn', taskStatus.closestToNext);
+                                log('add link', intermediatePointL, fakePoint);
+                                tempGraph.addLink(ppoint, intermediatePointL, (1000 - lsDistance) as DistanceKM);
+                                tempGraph.addLink(intermediatePointL, fakePoint, 0 as DistanceKM);
                             }
                         } else {
                             console.log('missing closest sector point', JSON.stringify(taskStatus));
@@ -265,10 +265,12 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     for (let legno = taskStatus.currentLeg; legno < task.legs.length; legno++) {
                         const aatLeg = aatLegStatus[legno];
 
+                        const fixedLeg = legno < (taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg);
+
                         for (const ppoint of previousLeg.convexHull.length ? previousLeg.convexHull : previousLeg.taskPoints) {
                             for (const point of aatLeg.taskPoints) {
                                 maxGraph.addLinkIfMissing(point, ppoint, () => (1000 - distHaversine(point, ppoint)) as DistanceKM);
-                                minGraph.addLinkIfMissing(point, ppoint, () => distHaversine(point, ppoint) as DistanceKM);
+                                minGraph.addLinkIfMissing(point, ppoint, () => (fixedLeg ? 1000 - distHaversine(point, ppoint) : distHaversine(point, ppoint)) as DistanceKM);
                             }
                         }
                         previousLeg = aatLeg;
@@ -279,18 +281,16 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     const shortestRemainingPath = minGraph.findPath(startPoint, fakeFinishPoint).reverse();
                     log('shortestRemainingPath', shortestRemainingPath);
 
-                    if (!taskStatus.inSector && !taskStatus.inPenalty) {
-                        // We also need a slight tweak on shortest to get the shortest distance around and home - we don't
-                        // need points just distances
-                        for (const point of aatLegStatus[taskStatus.currentLeg].taskPoints) {
-                            minGraph.addLink(intermediatePoint, point, distHaversine(intermediatePoint, point) as DistanceKM);
-                        }
-                    } else {
-                        // I'm guessing the problem is the intermediate
+                    // We also need a slight tweak on shortest to get the shortest distance around and home - we don't
+                    // need points just distances
+                    const updatedIntermediate = _clonedeep(intermediatePoint);
+                    for (const point of aatLegStatus[taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg].taskPoints) {
+                        minGraph.addLink(updatedIntermediate, point, distHaversine(updatedIntermediate, point) as DistanceKM);
                     }
-                    const drPath = minGraph.findPath(intermediatePoint, fakeFinishPoint).reverse(); //.shift(), //
+
+                    const drPath = minGraph.findPath(updatedIntermediate, fakeFinishPoint).reverse(); //.shift(), //
                     log(drPath);
-                    scoredStatus.distanceRemaining = sumPath(drPath, taskStatus.inSector ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
+                    scoredStatus.distanceRemaining = sumPath(drPath, taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
                         log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
                         scoredStatus.legs[leg].distanceRemaining = distance;
                     });
@@ -327,7 +327,15 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 // We don't need necessary precision
             }
             log('AAT Scoring:');
-            log(scoredStatus);
+            log(
+                JSON.stringify(
+                    scoredStatus,
+                    (k, v) => {
+                        return k == 'points' || k == 'penaltyPoints' ? undefined : v;
+                    },
+                    4
+                )
+            );
             log('-------------');
             yield scoredStatus;
         } catch (e) {
