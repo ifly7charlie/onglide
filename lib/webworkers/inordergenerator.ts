@@ -80,7 +80,8 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
         running = true;
 
         if (!getNow) {
-            getNow = () => Math.trunc(Date.now() / 1000) as Epoch;
+            const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
+            getNow = () => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
         }
 
         //
