@@ -22,10 +22,11 @@ import {lineString} from '@turf/helpers';
 // Get a generator to calculate task status
 export const assignedAreaScoringGenerator = async function* (task: Task, taskStatusGenerator: TaskStatusGenerator, log?: Function): CalculatedTaskGenerator {
     // Generate log function as it's quite slow to read environment all the time
-    if (!log)
-        log = (...a) => {
-            console.log(...a);
+    if (!log) {
+        log = () => {
+            /**/
         };
+    }
 
     // We do a dijkstra on this
     let aatGraph = new Graph<BasePositionMessage, DistanceKM>();
@@ -194,7 +195,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             for (const point of aatLegStatus[taskStatus.currentLeg].convexHull) {
                                 tempGraph.addLink(point, fakePoint, (1000 - distHaversine(point, fakePoint)) as DistanceKM);
                             }
-                        } else {
+                        } else if (taskStatus.closestSectorPoint) {
                             for (const ppoint of aatPreviousLeg.convexHull) {
                                 const ls = lineString([
                                     [ppoint.lng, ppoint.lat],
@@ -215,6 +216,8 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                 tempGraph.addLink(ppoint, intermediatePoint, (1000 - lsDistance) as DistanceKM);
                                 tempGraph.addLink(intermediatePoint, fakePoint, 0 as DistanceKM);
                             }
+                        } else {
+                            console.log('missing closest sector point', JSON.stringify(taskStatus));
                         }
                     }
 
