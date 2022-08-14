@@ -162,6 +162,7 @@ export interface TaskStatus extends TimeStampType {
     startFound: boolean; // time for start has passed in the track
     startConfirmed: boolean; // been close to a turnpoint as well
     currentLeg: number; // what leg are we on
+    recentLegAdvance?: number; // aat if we just advance from TP then we may still need to check for it
 
     //
     inSector: boolean;

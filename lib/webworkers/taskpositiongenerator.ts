@@ -210,6 +210,21 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 }
             }
 
+            //
+            // We need to give them a window to re-enter an AAT sector, 10% of leg length or 10km
+            if (status.recentLegAdvance) {
+                const [inPreviousSector /*inPreviousPenalty*/, , distFromPrevious] = checkIsInTP(task.legs[status.recentLegAdvance], point);
+                if (inPreviousSector) {
+                    log(`re-entry of AAT sector at ${point.t}`);
+                    status.currentLeg--;
+                    status.closestToNext = Infinity as DistanceKM;
+                    possibleAdvances = [];
+                    delete status.closestToNextSectorPoint;
+                } else if (distFromPrevious > Math.min(task.legs[status.currentLeg]?.length * 0.1, 10)) {
+                    status.recentLegAdvance = 0;
+                }
+            }
+
             // Otherwise we are evaluating against the rest of the task, this
             // includes checking what turnpoint we are in etc
             const tp = task.legs[status.currentLeg];
@@ -310,7 +325,8 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 // Make sure we have actually left the sector and passed a small distance from the TP before
                 // assuming advance. AAT is longer otherwise a brief pop out will ignore points after
                 // however need to cope with short legs (control points for example)
-                if (!status.inPenalty && distanceRemaining > Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, task.rules.aat ? 10 : 2)) {
+                if (task.rules.aat && !status.inPenalty && !status.inSector) {
+                    status.recentLegAdvance = status.currentLeg;
                     status.currentLeg++;
                     status.closestToNext = Infinity as DistanceKM;
                     possibleAdvances = [];
