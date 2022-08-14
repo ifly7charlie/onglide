@@ -145,6 +145,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
 //
 // If the pilot has started we can prune before the startline
 export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
+    //    console.log('pruneStartline', deck.compno, startTime);
     // Keep 30 seconds before start
     if (!deck || deck.t[0] >= startTime) {
         return false;
@@ -159,6 +160,10 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
 
     // Find the index into the segments that is the index or above
     let segmentPos = _sortedIndex(deck.indices.subarray(0, deck.segmentIndex), indexRemove);
+
+    //    for (let c = 0; c <= deck.segmentIndex; c++) {
+    //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
+    //    }
 
     // A segment starts on this position - we can remove all before
     if (deck.indices[segmentPos] == indexRemove) {
@@ -195,6 +200,10 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     deck.t = deck.t.slice(indexRemove);
     deck.climbRate = deck.climbRate.slice(indexRemove);
 
+    //    console.log('ir:', indexRemove, 'sp:', segmentPos, 'start:', startTime);
+    //    for (let c = 0; c <= deck.segmentIndex; c++) {
+    //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
+    //    }
 
     return true;
 }

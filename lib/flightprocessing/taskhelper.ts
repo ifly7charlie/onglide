@@ -226,7 +226,6 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
             ),
             (a, b) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000)
         );
-        console.log(turnpoint.legno, JSON.stringify(turnpoint.coordinates));
     }
     turnpoint.lineString = lineString(polypoints);
 
