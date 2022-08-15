@@ -18,7 +18,7 @@ import {setTimeout} from 'timers/promises';
 
 import {cloneDeep as _clonedeep} from 'lodash';
 
-import {checkIsInTP, checkIsInStartSector} from '../flightprocessing/taskhelper';
+import {checkIsInTP, checkIsInStartSector, stripPoints} from '../flightprocessing/taskhelper';
 
 const sleepInterval = 10 * 1000;
 
@@ -472,8 +472,8 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
         } catch (e) {
             console.log('Exception in taskPositionGenerator');
             console.log(e);
-            console.log(JSON.stringify(current));
-            console.log(JSON.stringify(status));
+            console.log(JSON.stringify(current, stripPoints, 4));
+            console.log(JSON.stringify(status, stripPoints, 4));
         }
     }
 

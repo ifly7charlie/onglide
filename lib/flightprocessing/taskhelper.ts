@@ -422,6 +422,14 @@ export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs:
     return (Math.round(distance * 10) / 10) as DistanceKM;
 }
 
+const tostrip = {
+    points: (v) => v.length,
+    penaltyPoints: (v) => v.length,
+    geoJSON: (v) => {
+        'geoJSON';
+    }
+};
+
 export function stripPoints(k, v) {
-    return k == 'points' || k == 'penaltyPoints' ? (v || []).length : v;
+    return tostrip[k] ? tostrip[k](v) : v;
 }

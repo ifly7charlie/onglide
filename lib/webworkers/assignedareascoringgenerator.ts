@@ -4,7 +4,7 @@ import {Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, Estima
 
 import {cloneDeep as _clonedeep, keyBy as _keyby} from 'lodash';
 
-import {distHaversine, sumPath} from '../flightprocessing/taskhelper';
+import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelper';
 
 import {convexHull} from '../flightprocessing/convexHull';
 import length from '@turf/length';
@@ -341,12 +341,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
         } catch (e) {
             console.log('Exception in AAT Generator');
             console.log(e);
-            let a: any = _clonedeep(current);
-            for (const l of a.legs) {
-                l.points = l.points.length;
-                l.penaltyPoints = l.penaltyPoints.length;
-            }
-            console.log(JSON.stringify(a));
+            console.log(JSON.stringify(current, stripPoints, 4));
         }
     }
 };
