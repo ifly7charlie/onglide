@@ -94,6 +94,7 @@ export interface EnrichedPosition extends PositionMessage {
 export interface TaskLeg {
     type: 'line' | 'sector';
     legno: number;
+    finish?: boolean;
 
     // Center
     nlat: number;

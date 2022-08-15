@@ -48,6 +48,7 @@ export function calculateTaskLength(legs: TaskLeg[]): DistanceKM {
         last.legDistanceAdjust = last.r1;
         last.length = (last.length - last.legDistanceAdjust) as DistanceKM;
     }
+    last.finish = true;
 
     // Return the length of the task
     return (Math.round(_sumby(legs, 'length') * 10) / 10) as DistanceKM;
@@ -286,11 +287,11 @@ export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [b
     // If we are inside the radius and the sector is just a circle then we are done
     if (turnpoint.quickSector) {
         distanceRemaining = (distanceRemaining - turnpoint.maxR) as DistanceKM;
-        const insidePenaltyVolume = distanceRemaining < 0.5; //Math.round(distanceRemaining * 10) <= 5;
+        const insidePenaltyVolume = !turnpoint.finish && distanceRemaining < 0.5; // no penalty volume on finish
         const insideSector = distanceRemaining < 0;
 
         // Accept penalty volume of 0.5km on each sector
-        if (insidePenaltyVolume) {
+        if (insidePenaltyVolume || insideSector) {
             return [insideSector, !insideSector && insidePenaltyVolume, (insideSector ? 0 : distanceRemaining) as DistanceKM];
         }
 
@@ -306,9 +307,9 @@ export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [b
     //
     // If it's not a circle then if we are outside possible penaltyVolume we
     // don't need to check if we are in the polygon
-    if (distanceRemaining > turnpoint.maxR + 0.5) {
+    if (distanceRemaining > turnpoint.maxR + (turnpoint.finish ? 0 : 0.5)) {
         distanceRemaining = distanceToTPPolygon(turnpoint, p, nearestPoint);
-        return [false, distanceRemaining < 0.5, distanceRemaining as DistanceKM];
+        return [false, !turnpoint.finish && distanceRemaining < 0.5, distanceRemaining as DistanceKM];
     }
 
     // Otherwise confirm if it is inside the polygon, here we do need
@@ -319,7 +320,7 @@ export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [b
     }
 
     distanceRemaining = distanceToTPPolygon(turnpoint, p, nearestPoint);
-    return [false, distanceRemaining < 0.5, distanceRemaining as DistanceKM];
+    return [false, !turnpoint.finish && distanceRemaining < 0.5, distanceRemaining as DistanceKM];
 }
 
 export function checkIsInStartSector(turnpoint: TaskLeg, p): boolean {
@@ -419,4 +420,8 @@ export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs:
         previousPoint = point;
     }
     return (Math.round(distance * 10) / 10) as DistanceKM;
+}
+
+export function stripPoints(k, v) {
+    return k == 'points' || k == 'penaltyPoints' ? (v || []).length : v;
 }
