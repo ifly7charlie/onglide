@@ -8,7 +8,7 @@ import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelpe
 
 import {convexHull} from '../flightprocessing/convexHull';
 import length from '@turf/length';
-import distance from '@turf/distance';
+//import distance from '@turf/distance';
 import along from '@turf/along';
 import {lineString} from '@turf/helpers';
 
