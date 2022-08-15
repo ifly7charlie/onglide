@@ -218,10 +218,22 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
         const distanceRemaining = (x) => {
             const l = accessor(x);
-            if (l && l.maxPossible) {
+            if (!l) {
+                return null;
+            }
+            if (l.maxPossible && l.minPossible && Math.trunc(l.minPossible) != Math.round(l.maxPossible)) {
                 return (
                     <td style={{fontSize: 'small'}}>
-                        {l.minPossible} to {l.maxPossible}
+                        {Math.trunc(l.minPossible)}-{Math.round(l.maxPossible)}
+                        <br />
+                        {l.distanceRemaining}
+                    </td>
+                );
+            }
+            if (l.maxPossible) {
+                return (
+                    <td style={{fontSize: 'small'}}>
+                        {l.maxPossible}
                         <br />
                         {l.distanceRemaining}
                     </td>
@@ -229,6 +241,22 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             }
             if (l.distanceRemaining > 0) {
                 return <td>{l.distanceRemaining}</td>;
+            }
+            return null;
+        };
+        const distanceRemainingLegend = (x) => {
+            const l = accessor(x);
+            if (l && l.maxPossible) {
+                return (
+                    <td style={{fontSize: 'small'}}>
+                        Possible
+                        <br />
+                        Shortest
+                    </td>
+                );
+            }
+            if (l.distanceRemaining > 0) {
+                return <td>Shortest</td>;
             }
             return null;
         };
@@ -303,7 +331,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                         ))}
                                     </tr>
                                     <tr>
-                                        <td>Leg Remaining</td>
+                                        {distanceRemainingLegend(score)}
                                         {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td></td>))}
                                     </tr>
                                 </>
@@ -324,10 +352,16 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                                     </tr>
                                     {!score.utcFinish && (
                                         <tr>
-                                            <td>Task Remaining</td>
-                                            {_map(score.legs, (x) => (
-                                                <td>{x.legno == score.currentLeg - 1 ? distanceRemaining(score) : <td></td>}</td>
-                                            ))}
+                                            {_map(score.legs, (x) =>
+                                                x.legno == score.currentLeg - 1 ? (
+                                                    <>
+                                                        {distanceRemainingLegend(score)}
+                                                        {distanceRemaining(score)}
+                                                    </>
+                                                ) : (
+                                                    <td />
+                                                )
+                                            )}
                                         </tr>
                                     )}
                                 </>
