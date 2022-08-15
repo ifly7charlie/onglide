@@ -30,8 +30,9 @@ export default async function taskHandler(req, res) {
     let task = await query(escape`
       SELECT tasks.*
       FROM tasks, compstatus cs
-      WHERE cs.class = ${className} AND tasks.class = cs.class
-        AND cs.datecode = tasks.datecode AND tasks.flown = 'Y'
+      WHERE (((${process.env.REPLAY || ''}) = '' AND tasks.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND tasks.datecode=todcode(from_unixtime(${process.env.REPLAY}))))
+        AND cs.class = ${className} AND tasks.class = cs.class
+        AND tasks.flown = 'Y'
     `);
 
     if (!task.length || !task[0].taskid) {

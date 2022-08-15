@@ -17,7 +17,8 @@ export default async function taskHandler(req, res) {
     const contestday = await query(escape`
          SELECT contestday.*, DATE_FORMAT( contestday.calendardate, "%a %D %M" ) displaydate
           FROM contestday, compstatus cs
-          WHERE cs.datecode = contestday.datecode and cs.class = contestday.class and contestday.class= ${className}
+          WHERE (((${process.env.REPLAY || ''}) = '' AND contestday.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND contestday.datecode=todcode(from_unixtime(${process.env.REPLAY}))))
+            AND cs.class = contestday.class and contestday.class= ${className}
           LIMIT 1
     `);
 

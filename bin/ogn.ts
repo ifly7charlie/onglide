@@ -108,6 +108,7 @@ interface Glider {
     greg: string;
     handicap: number;
     dbTrackerId: string;
+    datecode: Datecode;
     duplicate: number;
     scoringConfigured?: boolean;
 
@@ -183,6 +184,11 @@ async function main() {
         zombieMaxTimeout: 120,
         connUtilization: 0.2
     });
+
+    if (process.env.REPLAY) {
+        console.log('readonly for replay');
+        readOnly = true;
+    }
 
     // Allow insights if it's configured.
     // DON'T TRACK DEPENDENCIES as it will pick up SQL statements
@@ -343,7 +349,7 @@ async function updateClasses() {
     console.log('updateClasses()');
 
     // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await db.query('SELECT class, datecode FROM compstatus');
+    const classes = await db.query(process.env.REPLAY ? escape`SELECT class,todcode(from_unixtime(${process.env.REPLAY})) datecode FROM compstatus` : 'SELECT class, datecode FROM compstatus');
 
     // Now convert that into the main structure
     function channelName(className, datecode) {
@@ -414,7 +420,8 @@ async function updateTasks(className: ClassName): Promise<Task | void> {
                     ELSE UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',nostart))-(SELECT tzoffset FROM competition)
                END nostartutc
           FROM tasks, compstatus cs, classes c
-          WHERE tasks.datecode= cs.datecode and tasks.class = cs.class AND c.class = cs.class
+          WHERE (((${process.env.REPLAY || ''}) = '' AND tasks.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND tasks.datecode=todcode(from_unixtime(${process.env.REPLAY}))))
+             AND tasks.class = cs.class AND c.class = cs.class
              AND tasks.class= ${className} and tasks.flown='Y'
     `)) || {})[0];
 
@@ -460,22 +467,29 @@ async function updateTasks(className: ClassName): Promise<Task | void> {
 
 async function updateTrackers() {
     // Now get the trackers
-    const cTrackers = await db.query(`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
-                                             p.class className
+
+    let cTrackers;
+    if (process.env.REPLAY) {
+        cTrackers = await db.query(`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
+                                             p.class className, todcode(from_unixtime(${process.env.REPLAY})) datecode
+                                        FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno`);
+    } else {
+        cTrackers = await db.query(`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
+                                             p.class className, c.datecode
                                         FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join compstatus c on c.class=p.class
                                       WHERE p.class = c.class`);
+    }
 
     // Now go through all the gliders and make sure we have linked them
     cTrackers.forEach((t) => {
         // Spread, this will define/overwrite as needed
         const gliderKey = makeClassname_Compno(t);
 
-        // If we have changed channel then we have changed datecode as channel is class+datecode
-        // and glider is simply keyed on class+compno
-        //        if (gliders[gliderKey] && gliders[gliderKey].channel != t.channel) {
-        //            console.log(`glider channel changed to ${t.channel} so resetting vario`);
-        //            gliders[gliderKey] = {};
-        //        }
+        // glider key not enough to check for datecode changes
+        const glider = gliders[gliderKey];
+        if (glider && glider.datecode != t.datecode) {
+            delete gliders[gliderKey];
+        }
 
         gliders[gliderKey] = Object.assign(gliders[gliderKey] || {}, {...t, greg: t?.greg?.replace(/[^A-Z0-9]/i, '')});
 
