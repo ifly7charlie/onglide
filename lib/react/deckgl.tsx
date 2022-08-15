@@ -43,7 +43,7 @@ import {OgnPathLayer} from './ognpathlayer';
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d, mapStreet) {
+function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d, mapLight: boolean) {
     if (!props.trackData) {
         console.log('missing layers');
         return [];
@@ -81,7 +81,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     _pathType: 'open',
                     positionFormat: map2d ? 'XY' : 'XYZ',
                     getWidth: 5,
-                    getColor: mapStreet ? [80, 80, 80, 128] : [224, 224, 224, 224],
+                    getColor: mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224],
                     jointRounded: true,
                     fp64: false,
                     widthMinPixels: 2,
@@ -205,11 +205,12 @@ export default function MApp(props: {
 
     // Map display style
     const map2d = options.mapType > 1;
-    const mapStreet = options.mapType % 2;
+    const mapStreet = !!(options.mapType % 2);
+    const mapLight = !!mapStreet;
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d, mapStreet), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial, mapStreet]);
+    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d, mapStreet), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial, mapLight]);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
@@ -244,8 +245,8 @@ export default function MApp(props: {
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
-        return map2d ? turnpointStyle2d(selectedPilotData?.score) : turnpointStyle3d(selectedPilotData?.score);
-    }, [selectedCompno, selectedPilotData?.score?.currentLeg]);
+        return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle3d(selectedPilotData?.score, mapLight);
+    }, [selectedCompno, selectedPilotData?.score?.currentLeg, selectedPilotData?.score?.utcFinish, mapLight]);
 
     const onMapLoad = useCallback(
         (evt) => {
@@ -467,17 +468,17 @@ const attributionStyle = {
     fontSize: '13px'
 };
 
-function turnpointStyle3d(selectedPilot: PilotScore | null): LayerProps[] {
+function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): LayerProps[] {
     return [
         {
             // Track line
             id: 'track',
             type: 'line',
             paint: {
-                'line-color': 'white',
+                'line-color': mapLight ? 'darkgrey' : 'white',
                 'line-width': ['case', ['==', !selectedPilot, true], 15, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 15, 6],
                 'line-opacity': 1,
-                'line-pattern': 'oneway-white-large'
+                'line-pattern': mapLight ? 'oneway-large' : 'oneway-white-large'
             }
         },
         {
@@ -492,12 +493,12 @@ function turnpointStyle3d(selectedPilot: PilotScore | null): LayerProps[] {
                 'fill-color': [
                     'case',
                     ['==', !selectedPilot, true],
-                    'white',
+                    mapLight ? 'darkgrey' : 'white',
                     ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
-                    'green',
+                    mapLight ? 'green' : '#7cfc00',
                     ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
                     'orange',
-                    'white'
+                    mapLight ? 'darkgrey' : 'white'
                 ]
             }
         },
@@ -512,12 +513,12 @@ function turnpointStyle3d(selectedPilot: PilotScore | null): LayerProps[] {
                 'fill-extrusion-color': [
                     'case',
                     ['==', !selectedPilot, true],
-                    'white',
+                    mapLight ? 'darkgrey' : 'white',
                     ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
-                    'green',
+                    mapLight ? 'green' : '#7cfc00',
                     ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
                     'orange',
-                    'white'
+                    mapLight ? 'darkgrey' : 'white'
                 ],
                 'fill-extrusion-opacity': 0.5,
                 'fill-extrusion-base': ['case', ['==', !selectedPilot, true], 10, ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], 5, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 10, 0],
@@ -527,17 +528,17 @@ function turnpointStyle3d(selectedPilot: PilotScore | null): LayerProps[] {
     ];
 }
 
-function turnpointStyle2d(selectedPilot: PilotScore | null): LayerProps[] {
+function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): LayerProps[] {
     return [
         {
             // Track line
             id: 'track',
             type: 'line',
             paint: {
-                'line-color': 'white',
-                'line-width': ['case', ['==', !selectedPilot, true], 15, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 15, 6],
+                'line-color': mapLight ? 'darkgrey' : 'white',
+                'line-width': ['case', ['==', !selectedPilot, true], 20, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 20, 10],
                 'line-opacity': 1,
-                'line-pattern': 'oneway-white-large'
+                'line-pattern': mapLight ? 'oneway-large' : 'oneway-white-large'
             }
         },
         {
@@ -549,12 +550,12 @@ function turnpointStyle2d(selectedPilot: PilotScore | null): LayerProps[] {
                 'fill-color': [
                     'case',
                     ['==', !selectedPilot, true],
-                    'white',
+                    mapLight ? 'darkgrey' : 'white',
                     ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
-                    'green',
+                    mapLight ? 'green' : 'lawngreen',
                     ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
                     'orange',
-                    'white'
+                    mapLight ? 'darkgrey' : 'white'
                 ]
             }
         },
@@ -565,7 +566,7 @@ function turnpointStyle2d(selectedPilot: PilotScore | null): LayerProps[] {
                 visibility: 'none'
             },
             paint: {
-                'line-color': 'grey',
+                'line-color': mapLight ? 'darkgrey' : 'grey',
                 'line-width': 0
             },
             type: 'line'
