@@ -28,3 +28,9 @@ export function trackMetric(name: string, value: number): void {
         global.insightsDefClient.trackMetric({name, value});
     }
 }
+
+export function trackAggregatedMetric(scope: string, name: string, value: number, count: number = 1, period: number = 60000): void {
+    if (global.insightsDefClient) {
+        global.insightsDefClient.trackMetric({name, value, count, period, kind: 'Aggregation', properties: {scope}});
+    }
+}
