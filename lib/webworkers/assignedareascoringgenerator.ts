@@ -186,7 +186,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
                     const aatPreviousLeg = aatLegStatus[taskStatus.currentLeg - 1];
                     if (aatPreviousLeg) {
-                        if (taskStatus.inSector) {
+                        if (taskStatus.inSector || taskStatus.inPenalty) {
                             for (const ppoint of aatPreviousLeg.convexHull) {
                                 for (const point of aatLegStatus[taskStatus.currentLeg].convexHull) {
                                     tempGraph.addLink(point, ppoint, (1000 - distHaversine(point, ppoint)) as DistanceKM);
@@ -227,12 +227,10 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
                     scoredPoints = tempGraph.findPath(startPoint, fakePoint);
-                    log('scoredPoints:', scoredPoints);
 
-                    // If we are in sector then we added a control point to the next turnpoint that we don't need
-                    //                    if (taskStatus.inSector) {
                     scoredPoints.shift();
-                    //                    }
+                    log('r scoredPoints:', [].concat(scoredPoints).reverse());
+                    log('scoredPoints:', scoredPoints);
 
                     //
                     // Now the fun part - calculate possible distance remaining from where we are
@@ -257,43 +255,69 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
                     // 1. Build the graphs
                     const maxGraph = new Graph<BasePositionMessage, DistanceKM>();
-                    const minGraph = new Graph<BasePositionMessage, DistanceKM>(); // min remaining graph
                     maxGraph.clone(aatGraph); // max possible graph, intialised for turnpoints flown but not finish
-                    minGraph.clone(aatGraph);
 
                     let previousLeg = aatLegStatus[taskStatus.currentLeg - 1];
                     for (let legno = taskStatus.currentLeg; legno < task.legs.length; legno++) {
-                        const aatLeg = aatLegStatus[legno];
-
-                        const fixedLeg = legno < (taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg);
-
                         for (const ppoint of previousLeg.convexHull.length ? previousLeg.convexHull : previousLeg.taskPoints) {
-                            for (const point of aatLeg.taskPoints) {
+                            for (const point of aatLegStatus[legno].taskPoints) {
                                 maxGraph.addLinkIfMissing(point, ppoint, () => (1000 - distHaversine(point, ppoint)) as DistanceKM);
-                                minGraph.addLinkIfMissing(point, ppoint, () => (fixedLeg ? 1000 - distHaversine(point, ppoint) : distHaversine(point, ppoint)) as DistanceKM);
                             }
                         }
-                        previousLeg = aatLeg;
+                        previousLeg = aatLegStatus[legno];
                     }
 
                     const longestRemainingPath = maxGraph.findPath(startPoint, fakeFinishPoint).reverse();
                     log('longestRemainingPath', longestRemainingPath);
-                    const shortestRemainingPath = minGraph.findPath(startPoint, fakeFinishPoint).reverse();
-                    log('shortestRemainingPath', shortestRemainingPath);
 
-                    // We also need a slight tweak on shortest to get the shortest distance around and home - we don't
-                    // need points just distances
+                    // Next do distance remaining, it's shortest parth from current point to home
                     const updatedIntermediate = _clonedeep(intermediatePoint);
-                    for (const point of aatLegStatus[taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg].taskPoints) {
-                        minGraph.addLink(updatedIntermediate, point, distHaversine(updatedIntermediate, point) as DistanceKM);
+
+                    const drGraph = new Graph<BasePositionMessage, DistanceKM>();
+                    const minRemainingFirstLeg = taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg;
+                    for (const point of aatLegStatus[minRemainingFirstLeg].taskPoints) {
+                        drGraph.addLink(updatedIntermediate, point, distHaversine(updatedIntermediate, point) as DistanceKM);
+                    }
+                    for (let legno = minRemainingFirstLeg + 1; legno < task.legs.length; legno++) {
+                        for (const ppoint of aatLegStatus[legno - 1].taskPoints) {
+                            for (const point of aatLegStatus[legno].taskPoints) {
+                                drGraph.addLink(point, ppoint, distHaversine(point, ppoint) as DistanceKM);
+                            }
+                        }
                     }
 
-                    const drPath = minGraph.findPath(updatedIntermediate, fakeFinishPoint).reverse(); //.shift(), //
-                    log(drPath);
-                    scoredStatus.distanceRemaining = sumPath(drPath, taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
+                    // Figure out remaining shortest distance, we need the results of this to calculate min task remaining as well
+                    const drPath = drGraph.findPath(updatedIntermediate, fakeFinishPoint).reverse(); //.shift(), //
+                    log('drPath:', drPath);
+                    const drPoints: BasePositionMessage[] = [];
+                    scoredStatus.distanceRemaining = sumPath(drPath.slice(1), taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
                         log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
+                        drPoints.push(p);
                         scoredStatus.legs[leg].distanceRemaining = distance;
                     });
+
+                    // Finally we need to find min possible remaining task distance
+                    // this is basically the maximum distance up until now, and then the
+                    // minimum distance from the next tp to the finish. AAT graph has all actuals
+                    // and nothing beyond so we can add the rest of the mindistance track as
+                    // fixed points
+                    const minGraph = new Graph<BasePositionMessage, DistanceKM>();
+                    minGraph.clone(aatGraph); // already linked up to current so can just link from current CvxHull
+                    // to shortest points
+
+                    // Link from the current turn points to the next shortest path point
+                    const startLeg = aatLegStatus[taskStatus.currentLeg].convexHull.length ? taskStatus.currentLeg : taskStatus.currentLeg - 1;
+                    for (const ppoint of aatLegStatus[startLeg].convexHull) {
+                        minGraph.addLink(ppoint, drPoints[0], (1000 - distHaversine(drPoints[0], ppoint)) as DistanceKM);
+                    }
+                    // Then through those to the end
+                    while (drPoints.length > 1) {
+                        log('DRPATH:', drPoints[0], drPoints[1]);
+                        minGraph.addLink(drPoints[0], drPoints[1], (1000 - distHaversine(drPoints[0], drPoints[1])) as DistanceKM);
+                        drPoints.shift();
+                    }
+                    const shortestRemainingPath = minGraph.findPath(startPoint, fakeFinishPoint).reverse();
+                    log('shortestRemainingPath', shortestRemainingPath);
 
                     // First sum up the total maximum distance - could be different solution than current
                     // score and covers whole flight
@@ -308,6 +332,12 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 } else {
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
                     scoredPoints = aatGraph.findPath(startPoint, finishPoint);
+
+                    for (const leg of scoredStatus.legs) {
+                        delete leg.minPossible;
+                        delete leg.maxPossible;
+                        delete leg.distanceRemaining;
+                    }
                 }
 
                 // Reverse and output for logging...
