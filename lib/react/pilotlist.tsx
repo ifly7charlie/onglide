@@ -203,8 +203,10 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     return <TooltipIcon icon={solid('cow')} tooltip="Landout on leg" />;
                 } else if (score.flightStatus == PositionStatus.Home) {
                     return <TooltipIcon icon={solid('house')} tooltip="Returned home" />;
+                } else if (score.inSector || score.inPenalty) {
+                    return <TooltipIcon icon={solid('location-crosshairs')} tooltip="plane in sector" fade style={{animationDuration: '10s'}} />;
                 }
-                return <TooltipIcon icon={solid('paper-plane')} tooltip="plane still in sector" fade style={{animationDuration: '10s'}} />;
+                return <TooltipIcon icon={solid('paper-plane')} tooltip="plane still heading to sector" fade style={{animationDuration: '10s'}} />;
             }
             if (leg.legno > score.currentLeg) {
                 return <TooltipIcon icon={solid('hourglass-start')} tooltip="leg not started yet" size="xs" />;
