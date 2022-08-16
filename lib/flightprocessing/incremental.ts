@@ -38,20 +38,20 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData): void {
     };
 }
 
-export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true, now = Date.now() / 1000): void {
+export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true, now = Date.now() / 1000): boolean {
     // Ignore if before start
     let lastTime: number | null = null;
 
     if (!glider.deck) {
         if (latest) {
-            return;
+            return false;
         }
         initialiseDeck(glider.compno, glider);
     } else {
         // If not first point then make sure we are in order!
         lastTime = glider.deck.t[glider.deck.posIndex - 1];
         if (point.t < lastTime) {
-            return;
+            return false;
         }
     }
 
@@ -140,6 +140,8 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     } catch (_e) {
         console.log(_e);
     }
+
+    return true;
 }
 
 //
