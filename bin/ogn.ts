@@ -4,7 +4,7 @@
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
-import {initialiseInsights, trackMetric} from '../lib/insights';
+import {initialiseInsights, trackMetric, trackAggregatedMetric} from '../lib/insights';
 
 // Import the APRS server
 import {ISSocket} from 'js-aprs-is';
@@ -76,6 +76,19 @@ import {ScoringController} from '../lib/webworkers/scoring';
 // Where is the comp based
 let location: AirfieldLocation;
 
+interface Statistics {
+    periodStart: Epoch;
+
+    outOfOrderPackets: number;
+    insertedPackets: number;
+    totalPackets: number;
+
+    positionsSent: number;
+    positionsSentCycles: number;
+    listenerCycles: number;
+    activeListeners: number;
+}
+
 interface Channel {
     //    name: string
     className: ClassName;
@@ -93,6 +106,8 @@ interface Channel {
 
     lastKeepAliveMsg?: any;
     lastScores?: any;
+
+    statistics: Statistics;
 }
 
 let channels: Record<ClassName, Channel> = {};
@@ -294,7 +309,8 @@ async function main() {
         for (const channelName in channels) {
             const channel = channels[channelName];
 
-            trackMetric(channel.className + '.activeListeners', channel.clients.length);
+            channel.statistics.activeListeners += channel.clients.length;
+            channel.statistics.listenerCycles++;
 
             if (channel.clients.length) {
                 // Encode all the changes, we only keep latest per glider if multiple received
@@ -302,9 +318,9 @@ async function main() {
                 const msg = OnglideWebSocketMessage.encode({positions: {positions: channel.toSend}, t: Math.trunc(now - location.officialDelay)}).finish();
                 //
                 // Metrics are helpful
-                trackMetric(channel.className + '.positions.sent', channel.toSend.length);
-                trackMetric(channel.className + '.positions.bytesSent', channel.toSend.length * msg.byteLength);
-
+                channel.statistics.positionsSent += channel.toSend.length;
+                channel.statistics.bytesSent += channel.toSend.length * msg.byteLength;
+                channel.statistics.positionSentCycles++;
                 // We don't want to send it twice so it can go
                 channel.toSend = [];
                 channel.lastSentPositions = now;
@@ -331,6 +347,20 @@ async function main() {
             }
             db.end();
         });
+        const now = Math.trunc(Date.now() / 1000) - (start - replayBase);
+        for (const channelName in channels) {
+            const channel = channels[channelName];
+
+            trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
+            trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
+            trackAggregatedMetric(channel.className, 'activeListeners', channel.statistics.activeListeners / channel.statistics.listenerCycles, channel.statistics.listenerCycles);
+
+            trackAggregatedMetric(channel.className, 'ogn.outOfOrderPackets', channel.statistics.outOfOrderPackets);
+            trackAggregatedMetric(channel.className, 'ogn.insertedPackets', channel.statistics.insertedPackets);
+            trackAggregatedMetric(channel.className, 'ogn.totalPackets', channel.statistics.totalPackets);
+
+            channel.statistics.positionsSent = channel.statistics.positionsSentCycles = channel.statistics.bytesSent = channel.statistics.activeListeners = channel.statistics.listenerCycles = channel.statistics.outOfOrderPackets = channel.statistics.insertedPackets = channel.statistics.totalPackets = 0;
+        }
     }, 60 * 1000);
 
     setInterval(async function () {
@@ -372,7 +402,17 @@ async function updateClasses() {
                 lastSentPositions: 0 as Epoch,
                 toSend: [],
                 className: c.class,
-                datecode: c.datecode
+                datecode: c.datecode,
+                statistics: {
+                    periodStart: Math.trunc(Date.now() / 1000) as Epoch,
+                    outOfOrderPackets: 0,
+                    insertedPackets: 0,
+                    totalPackets: 0,
+                    positionsSent: 0,
+                    positionsSentCycles: 0,
+                    listenerCycles: 0,
+                    activeListeners: 0
+                }
             };
         }
         newchannels[cname] = channel;
@@ -820,7 +860,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
 //
 // This is a complete message that can be sent to the client,
 // it's complete with the vario elevation etc
-function processAprsMessage(className: string, channel: Channel, message: PositionMessage) {
+async function processAprsMessage(className: string, channel: Channel, message: PositionMessage) {
     // how many gliders are we tracking for this channel
     channel.activeGliders.add(message.c as Compno);
 
@@ -839,8 +879,11 @@ function processAprsMessage(className: string, channel: Channel, message: Positi
         channel.toSend.push(message);
 
         // Merge into the display data structure
-        mergePoint(message, glider);
+        if (!mergePoint(message, glider)) {
+            channel.statistics.outOfOrderPackets++;
+        }
     } else {
+        channel.statistics.outOfOrderPackets++;
     }
 
     // Pop into the database
@@ -852,7 +895,10 @@ function processAprsMessage(className: string, channel: Channel, message: Positi
                                                            ${message.lat}, ${message.lng}, ${message.a}, ${message.g}, ${message.t}, ${message.b}, ${message.s}, ${message.f} )`,
                 {timeout: 1000}
             )
-        );
+        ).then((result) => {
+            channel.statistics.insertedPackets += result.affectedRows || 0;
+            channel.statistics.totalPackets++;
+        });
     }
 }
 
