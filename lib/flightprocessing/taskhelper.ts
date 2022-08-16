@@ -6,10 +6,12 @@ import nearestPointOnLine from '@turf/nearest-point-on-line';
 import along from '@turf/along';
 import distance from '@turf/distance';
 
-import {lineString, point as turfPoint} from '@turf/helpers';
+import {featureCollection, lineString, point as turfPoint, Feature, LineString, Position} from '@turf/helpers';
 import lineChunk from '@turf/line-chunk';
 import {coordReduce} from '@turf/meta';
-import {uniqWith as _uniqWith} from 'lodash';
+import {uniqWith as _uniqWith, chunk as _chunk} from 'lodash';
+
+import {} from '@turf/helpers';
 
 import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage} from '../types';
 
@@ -18,7 +20,7 @@ let miss = 0;
 
 type Radian = number & As<'Radian'>;
 
-const steps = process.env.NEXT_RUNTIME ? 40 : 15;
+const steps = process.env.NEXT_RUNTIME ? 30 : 30;
 const scoring = !(process.env.NEXT_RUNTIME || false);
 
 var _2pi: Radian = (Math.PI * 2) as Radian;
