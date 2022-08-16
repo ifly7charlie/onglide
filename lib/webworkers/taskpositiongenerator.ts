@@ -5,9 +5,7 @@
  *
  */
 
-import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus} from '../types';
-
-import {EnrichedPositionGenerator, EnrichedPosition} from '../types';
+import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, AltitudeAMSL} from '../types';
 
 import {Point, Feature, lineString, point as turfPoint} from '@turf/helpers';
 import length from '@turf/length';
@@ -97,9 +95,9 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
     let closestSectorPoint: NearestSectorPoint;
 
     interface PossibleAdvance {
-        nearestSectorPoint: NearestSectorPoint;
-        estimatedTurnTime: Epoch;
+        possiblePoints: BasePositionMessage[];
         rewindTo: Epoch;
+        estimatedTurnType: EstimatedTurnType;
         ld: number;
     }
 
@@ -377,27 +375,26 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
 
                             const speedKps = interpointDistance / elapsedTime; // kps
                             const altPs = (point.a - previousPoint.a) / elapsedTime; //mps
+                            let sectorPoints: BasePositionMessage[] = [];
 
                             for (const intersection of intersections.features) {
                                 const intersectionDistance = distance(previousPoint.geoJSON, intersection);
                                 const estimatedTime = Math.round(intersectionDistance * speedKps + previousPoint.t);
                                 const estimatedAlt = Math.round(intersectionDistance * altPs + previousPoint.a);
 
-                                legStatus.points.push({t: estimatedTime as Epoch, a: estimatedAlt, lat: intersection.geometry.coordinates[1], lng: intersection.geometry.coordinates[0]});
+                                sectorPoints.push({t: estimatedTime as Epoch, a: estimatedAlt as AltitudeAMSL, lat: intersection.geometry.coordinates[1], lng: intersection.geometry.coordinates[0]});
 
                                 if (!task.rules.aat) {
                                     // If we are not an AAT then we only take the first point
                                     break;
                                 }
                             }
-                            legStatus.exitTimeStamp = legStatus.points[legStatus.points.length - 1].t;
-                            legStatus.entryTimeStamp = legStatus.points[0].t;
-                            legStatus.estimatedTurn = EstimatedTurnType.crossing;
-
-                            status.currentLeg++;
-                            status.closestToNext = Infinity as DistanceKM;
-                            delete status.closestToNextSectorPoint;
-                            possibleAdvances = [];
+                            possibleAdvances.push({
+                                possiblePoints: sectorPoints,
+                                estimatedTurnType: EstimatedTurnType.crossing,
+                                rewindTo: point.t,
+                                ld: 0
+                            });
 
                             // Otherwise check for a dogleg
                         } else {
@@ -422,9 +419,17 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                             // Make sure we meet the constrants
                             if (neededSpeed < possibleSpeed) {
                                 log(`* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` + ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`);
+                                const possibleT = Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch;
                                 possibleAdvances.push({
-                                    nearestSectorPoint: _clonedeep(closestSectorPoint),
-                                    estimatedTurnTime: Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch,
+                                    possiblePoints: [
+                                        {
+                                            a: null,
+                                            t: possibleT,
+                                            lat: closestSectorPoint.geometry.coordinates[1],
+                                            lng: closestSectorPoint.geometry.coordinates[0]
+                                        }
+                                    ],
+                                    estimatedTurnType: EstimatedTurnType.dogleg,
                                     rewindTo: point.t,
                                     ld: ld
                                 });
@@ -441,21 +446,19 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 if (possibleAdvances.length && distanceRemaining > status.closestToNext + Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, 2)) {
                     // We pick the advance based on - lowest ld
                     const advanceChosen = possibleAdvances.sort((paA, paB) => paA.ld - paB.ld)[0];
-                    log(`* using previously identified dogleg advance for sector, estimating turn @ ${advanceChosen.estimatedTurnTime} [1 of ${possibleAdvances.length} candidates] and backtracking`);
+                    log(`* using previously identified ${advanceChosen.estimatedTurnType} advance for sector, estimating turn @ ${advanceChosen.possiblePoints[0].t} [1 of ${possibleAdvances.length} candidates] and backtracking`);
                     //
                     // backtrack to immediately after the dogleg so we don't miss new sectors if the gap finishes inside the sector or
                     // there is only one point between them, we can ignore the point it will be dealt with on next pass of for loop
                     iterator.next(advanceChosen.rewindTo);
 
-                    legStatus.points.push({
-                        a: null,
-                        t: advanceChosen.estimatedTurnTime,
-                        lat: advanceChosen.nearestSectorPoint.geometry.coordinates[1],
-                        lng: advanceChosen.nearestSectorPoint.geometry.coordinates[0]
-                    });
+                    legStatus.points.push(...advanceChosen.possiblePoints);
 
-                    legStatus.exitTimeStamp = legStatus.entryTimeStamp = advanceChosen.estimatedTurnTime;
-                    legStatus.estimatedTurn = EstimatedTurnType.dogleg;
+                    legStatus.exitTimeStamp = advanceChosen.possiblePoints[advanceChosen.possiblePoints.length - 1].t;
+                    legStatus.entryTimeStamp = advanceChosen.possiblePoints[0].t;
+                    legStatus.estimatedTurn = advanceChosen.estimatedTurnType;
+
+                    // reset for next leg
                     status.closestToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
                     status.currentLeg++;
