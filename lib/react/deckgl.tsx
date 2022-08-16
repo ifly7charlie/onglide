@@ -388,19 +388,22 @@ export default function MApp(props: {
                         </Source>
                     </>
                 ) : null}
+                {selectedPilotData && options.constructionLines && selectedPilotData.score?.minGeoJSON ? (
+                    <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_'}>
+                        <Layer {...minLineStyle} />
+                        <Layer {...distanceLineLabelStyle(minLineStyle)} />
+                    </Source>
+                ) : null}
+                {selectedPilotData && options.constructionLines && selectedPilotData.score?.maxGeoJSON ? (
+                    <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_'}>
+                        <Layer {...maxLineStyle} />
+                        <Layer {...distanceLineLabelStyle(maxLineStyle)} />
+                    </Source>
+                ) : null}
                 {selectedPilotData && selectedPilotData?.score?.scoredGeoJSON ? (
                     <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_'}>
                         <Layer {...scoredLineStyle} />
-                    </Source>
-                ) : null}
-                {selectedPilotData && selectedPilotData.score?.minGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_'}>
-                        <Layer {...minLineStyle} />
-                    </Source>
-                ) : null}
-                {selectedPilotData && selectedPilotData.score?.maxGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_'}>
-                        <Layer {...maxLineStyle} />
+                        <Layer {...distanceLineLabelStyle(scoredLineStyle)} />
                     </Source>
                 ) : null}
                 {!map2d && (
@@ -449,8 +452,32 @@ const maxLineStyle: LayerProps = {
         'line-dasharray': [2, 1]
     }
 };
-    }
+
+const distanceLineLabelStyle = (source: LayerProps): LayerProps => {
+    return {
+        id: source.id + '_label',
+        type: 'symbol',
+        //        source: source,
+        paint: {
+            'text-color': '#000',
+            'text-halo-blur': 1,
+            'text-halo-width': 2,
+            'text-halo-color': '#fff'
+        },
+        layout: {
+            'symbol-placement': 'line-center',
+            'text-font': ['Open Sans Regular'],
+            'text-field': ['get', 'distance'],
+            //            'text-field': 'hello!',
+            //            'text-color': '#0ff',
+            //            'text-halo-blur': 2,
+            //            'text-halo-width': 3,
+            //'text-halo-color': '#fff',
+            'text-size': 12
+        } as any
+    };
 };
+
 function getSunPosition(mapRef, date?) {
     const map = mapRef?.current?.getMap();
     if (map) {

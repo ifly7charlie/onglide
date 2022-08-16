@@ -524,6 +524,8 @@ function Sorting(props) {
     const radarFunction = () => {
         const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
         props.setOptions({...props.options, rainRadarAdvance: nextRadar});
+    const constructionLines = () => {
+        props.setOptions({...props.options, constructionLines: !props.options.constructionLines});
     };
 
     return (
@@ -531,6 +533,10 @@ function Sorting(props) {
             <span className="options">
                 <a title="Adjust radar timings" href="#" onClick={radarFunction}>
                     <FontAwesomeIcon icon={solid('umbrella')} />
+                </a>
+                &nbsp;
+                <a title="Construction Lines" href="#" onClick={constructionLines}>
+                    <FontAwesomeIcon icon={solid('ruler-combined')} transform={{rotate: -122}} />
                 </a>
             </span>
             <span className="sorting">

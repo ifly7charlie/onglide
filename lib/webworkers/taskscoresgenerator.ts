@@ -141,19 +141,26 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     time: leg.point?.t || leg.exitTimeStamp
                 };
             }
-            if (leg.point) {
-                score.scoredPoints.push(leg.point.lng, leg.point.lat);
-            }
-            if (leg.minPossible) {
-                if (leg.minPossible.start) {
-                    score.minDistancePoints.push(leg.minPossible.start.lng, leg.minPossible.start.lat);
+
+            // Output points for construction lines
+            {
+                const sl: PilotScoreLeg = score.legs[leg.legno];
+
+                if (leg.point) {
+                    score.scoredPoints.push(leg.point.lng, leg.point.lat, sl.actual?.distance || 0, sl.handicapped?.distance || 0);
                 }
-                score.minDistancePoints.push(leg.minPossible.point.lng, leg.minPossible.point.lat);
-            }
-            if (leg.maxPossible) {
-                score.maxDistancePoints.push(leg.maxPossible.point.lng, leg.maxPossible.point.lat);
+                if (leg.minPossible) {
+                    if (leg.minPossible.start) {
+                        score.minDistancePoints.push(leg.minPossible.start.lng, leg.minPossible.start.lat, 0, 0);
+                    }
+                    score.minDistancePoints.push(leg.minPossible.point.lng, leg.minPossible.point.lat, sl.actual?.minPossible || 0, sl.handicapped?.minPossible || 0);
+                }
+                if (leg.maxPossible) {
+                    score.maxDistancePoints.push(leg.maxPossible.point.lng, leg.maxPossible.point.lat, sl.actual?.maxPossible || 0, sl.handicapped?.maxPossible || 0);
+                }
             }
 
+            // And move on
             previousLeg = leg;
         }
 
