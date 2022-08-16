@@ -526,6 +526,7 @@ function Sorting(props) {
     const radarFunction = () => {
         const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
         props.setOptions({...props.options, rainRadarAdvance: nextRadar});
+    };
     const constructionLines = () => {
         props.setOptions({...props.options, constructionLines: !props.options.constructionLines});
     };
