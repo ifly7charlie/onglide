@@ -77,6 +77,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             utcStart: item.utcStart,
             utcFinish: item.utcFinish,
             flightStatus: item.flightStatus,
+            inSector: item.inSector,
+            inPenalty: item.inPenalty,
 
             currentLeg: item.currentLeg,
 
@@ -126,9 +128,13 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 doGrCalc(sl.actual, sl.alt);
                 doGrCalc(sl.handicapped, sl.alt);
 
-                //
-                sl.duration = (legTime(leg) || leg.point?.t) - sl.time;
-                sl.taskDuration = (legTime(leg) || leg.point?.t) - item.utcStart;
+                // If we don't have a time then it's because we are in progress, don't use leg.point as that's scored
+                // and may have fake time for AATs use the actual time we are scored to which is in item.t
+                const currentLegTime = legTime(leg);
+                if (sl.time) {
+                    sl.duration = (currentLegTime || item.t) - sl.time;
+                    sl.taskDuration = (currentLegTime || item.t) - item.utcStart;
+                }
 
                 // And now do speeds
                 doSpeedCalc(sl.actual, sl.duration, sl.taskDuration);
