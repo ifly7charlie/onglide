@@ -14,7 +14,7 @@ import {Nbsp, TooltipIcon} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, chunk as _chunk} from 'lodash';
+import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map} from 'lodash';
 
 import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
 import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
@@ -26,15 +26,14 @@ import Button from 'react-bootstrap/Button';
 
 import {PilotList, Details, OptionalDurationMM} from './pilotlist';
 import {TaskDetails} from './taskdetails';
-
-import {lineString} from '@turf/helpers';
+import {assembleLabeledLine} from '../flightprocessing/taskhelper';
 
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
 
 import MApp from './deckgl';
 
-let mutateTimer = 0;
+//let mutateTimer = 0;
 const httpsTest = new RegExp(/^https/i, 'i');
 
 function proposedUrl(vc, datecode) {
@@ -276,7 +275,6 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                             segmentIndex: p.segmentIndex
                         });
                         //                        result[compno].colors = new Uint8Array(_map(result[compno].t, (_) => [Math.floor(Math.random() * 255), 128, 128]).flat());
-                        console.log(`track  for ${compno}, ${p.climbRate.length} points, partial: ${p.partial}`);
                         if (!p.partial && pilotScores[compno]?.utcStart) {
                             pruneStartline(deck, pilotScores[compno].utcStart);
                         }
@@ -302,14 +300,14 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                         // what the pilot has been scored for
                         delete p.minGeoJSON;
                         delete p.maxGeoJSON;
-                        if (p.scoredPoints && p.scoredPoints.length > 2) {
-                            p.scoredGeoJSON = lineString(_chunk(p.scoredPoints, 2), {});
+                        if (p.scoredPoints && p.scoredPoints.length > 3) {
+                            p.scoredGeoJSON = assembleLabeledLine(p.scoredPoints);
                         }
                         if (p.minDistancePoints && p.minDistancePoints.length > 2) {
-                            p.minGeoJSON = lineString(_chunk(p.minDistancePoints, 2), {});
+                            p.minGeoJSON = assembleLabeledLine(p.minDistancePoints);
                         }
                         if (p.maxDistancePoints && p.maxDistancePoints.length > 2) {
-                            p.maxGeoJSON = lineString(_chunk(p.maxDistancePoints, 2), {});
+                            p.maxGeoJSON = assembleLabeledLine(p.maxDistancePoints);
                         }
                         if (p.taskGeoJSON) {
                             p.taskGeoJSON = JSON.parse(p.taskGeoJSON);
