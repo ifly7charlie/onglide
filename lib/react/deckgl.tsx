@@ -432,10 +432,10 @@ const minLineStyle: LayerProps = {
     id: 'minpossible',
     type: 'line',
     paint: {
-        'line-color': '#0f0',
+        'line-color': '#f00',
         'line-width': 4,
         'line-opacity': 0.7,
-        'line-dasharray': [3, 5]
+        'line-dasharray': [1, 1]
     }
 };
 
@@ -446,7 +446,9 @@ const maxLineStyle: LayerProps = {
         'line-color': '#0f0',
         'line-width': 4,
         'line-opacity': 0.7,
-        'line-dasharray': [5, 3]
+        'line-dasharray': [2, 1]
+    }
+};
     }
 };
 function getSunPosition(mapRef, date?) {
