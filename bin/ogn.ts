@@ -337,7 +337,11 @@ async function main() {
         }
     }, 1000);
 
+    //
+    // Housekeeping
     setInterval(async function () {
+        //
+        // Make sure our DB connection is good to go!
         db.getClient()?.ping((e) => {
             if (e) {
                 console.log('db ping failed', e);
@@ -347,6 +351,25 @@ async function main() {
             }
             db.end();
         });
+
+        //
+        // We need to purge unused channels
+        for (const channelName in channels) {
+            const channel = channels[channelName];
+
+            // Remove any that are still marked as not alive
+            const toterminate = _remove(channel.clients, (client: any) => {
+                return client.isAlive === false;
+            });
+
+            toterminate.forEach((client) => {
+                console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
+                client.terminate();
+            });
+        }
+
+        //
+        // Aggregate statistics
         const now = Math.trunc(Date.now() / 1000) - (start - replayBase);
         for (const channelName in channels) {
             const channel = channels[channelName];
@@ -363,12 +386,12 @@ async function main() {
         }
     }, 60 * 1000);
 
+    //
+    // Update competition information
     setInterval(async function () {
         await updateTrackers();
         await updateClasses();
     }, 300 * 1000);
-
-    //    await setTimeout(10000000);
 }
 
 main().then(() => console.log('Started'));
@@ -707,16 +730,6 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
     // For each channel (aka class)
 
     console.log('Sending Scores', scores.length);
-
-    // Remove any that are still marked as not alive
-    const toterminate = _remove(channel.clients, (client: any) => {
-        return client.isAlive === false;
-    });
-
-    toterminate.forEach((client) => {
-        console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
-        client.terminate();
-    });
 
     // If we have nothing then do nothing...
     if (!channel.clients.length) {
