@@ -388,12 +388,6 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 } else {
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
                     scoredPoints = aatGraph.findPath(startPoint, finishPoint);
-
-                    for (const leg of scoredStatus.legs) {
-                        delete leg.minPossible;
-                        delete leg.maxPossible;
-                        delete leg.distanceRemaining;
-                    }
                 }
 
                 // Reverse and output for logging...
