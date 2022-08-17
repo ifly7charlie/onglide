@@ -114,14 +114,16 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 if (previousLeg?.point?.a) {
                     sl.alt = previousLeg?.point?.a;
                 }
-                if (leg.minPossible) {
-                    sl.actual.minPossible = Math.round(leg.minPossible.distance * 10) / 10;
-                }
-                if (leg.maxPossible) {
-                    sl.actual.maxPossible = Math.round(leg.maxPossible.distance * 10) / 10;
-                }
-                if (leg.distanceRemaining || leg.minPossible) {
-                    sl.actual.distanceRemaining = Math.round((leg.distanceRemaining || leg.minPossible.distance) * 10) / 10;
+                if (!score.utcFinish) {
+                    if (leg.minPossible) {
+                        sl.actual.minPossible = Math.round(leg.minPossible.distance * 10) / 10;
+                    }
+                    if (leg.maxPossible) {
+                        sl.actual.maxPossible = Math.round(leg.maxPossible.distance * 10) / 10;
+                    }
+                    if (leg.distanceRemaining || leg.minPossible) {
+                        sl.actual.distanceRemaining = Math.round((leg.distanceRemaining || leg.minPossible.distance) * 10) / 10;
+                    }
                 }
 
                 doHandicapping(sl);
@@ -155,14 +157,16 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 if (leg.point) {
                     score.scoredPoints.push(leg.point.lng, leg.point.lat, sl.actual?.distance || 0, sl.handicapped?.distance || 0);
                 }
-                if (leg.minPossible) {
-                    if (leg.minPossible.start) {
-                        score.minDistancePoints.push(leg.minPossible.start.lng, leg.minPossible.start.lat, 0, 0);
+                if (!score.utcFinish) {
+                    if (leg.minPossible) {
+                        //                        if (leg.minPossible.start) {
+                        //                            score.minDistancePoints.push(leg.minPossible.start.lng, leg.minPossible.start.lat, 0, 0);
+                        //                        }
+                        score.minDistancePoints.push(leg.minPossible.point.lng, leg.minPossible.point.lat, sl.actual?.minPossible || 0, sl.handicapped?.minPossible || 0);
                     }
-                    score.minDistancePoints.push(leg.minPossible.point.lng, leg.minPossible.point.lat, sl.actual?.minPossible || 0, sl.handicapped?.minPossible || 0);
-                }
-                if (leg.maxPossible) {
-                    score.maxDistancePoints.push(leg.maxPossible.point.lng, leg.maxPossible.point.lat, sl.actual?.maxPossible || 0, sl.handicapped?.maxPossible || 0);
+                    if (leg.maxPossible) {
+                        score.maxDistancePoints.push(leg.maxPossible.point.lng, leg.maxPossible.point.lat, sl.actual?.maxPossible || 0, sl.handicapped?.maxPossible || 0);
+                    }
                 }
             }
 
