@@ -285,18 +285,21 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 legStatus.penaltyPoints = [];
                 if (task.rules.aat) {
                     legStatus.points.push(simplifyPoint(point));
+                } else {
+                    // We advance on the first point in sector if not AAT
+                    status.currentLeg++;
+                    legStatus.points = [simplifyPoint(point)];
                 }
+
                 if (!legStatus.entryTimeStamp) {
                     legStatus.entryTimeStamp = point.t;
                     delete legStatus.penaltyTimeStamp;
                     //                legStatus.altitude = point.a;
-                    if (!task.rules.aat) {
-                        legStatus.points = [simplifyPoint(point)];
-                    }
                     log('* next tp:' + status.currentLeg + '/' + inSector + ',' + legStatus.legno);
                 }
                 legStatus.exitTimeStamp = point.t;
                 status.closestToNext = Infinity as DistanceKM;
+                possibleAdvances = [];
                 delete status.closestToNextSectorPoint;
             }
 
@@ -318,34 +321,35 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 }
             }
 
-            // If we have an entry timestamp then we have been in the turn so we can simply
-            // advance - this isn't such a good idea for AATs because people sometimes go back
+            // If we have any timestamp, and we aren't in either penalty or sector
+            // then we have been in the turn so we can simply
+            // advance -
+            // for AATs people sometimes go back
             // into them and if they did that with an instant exit advance we wouldn't
             // score them again
-            else if (legStatus.entryTimeStamp && !task.rules.aat) {
-                if (!inSector) {
-                    status.currentLeg++;
-                    status.closestToNext = Infinity as DistanceKM;
-                    delete status.closestToNextSectorPoint;
-                }
-            }
-
-            // If we have a penalty only sector then we give it more time (or aat in regular sector)
             else if (legStatus.entryTimeStamp || legStatus.penaltyTimeStamp) {
-                //
-                // Make sure we have actually left the sector and passed a small distance from the TP before
-                // assuming advance. AAT is longer otherwise a brief pop out will ignore points after
-                // however need to cope with short legs (control points for example)
-                if (task.rules.aat && !inPenalty && !inSector) {
-                    log(`setting a advance`, JSON.stringify(legStatus));
-                    log(point);
-                    //                    log(status);
-                    status.recentLegAdvance = status.currentLeg;
-                    status.currentLeg++;
-                    legStatus = status.legs[status.currentLeg];
-                    status.closestToNext = Infinity as DistanceKM;
-                    possibleAdvances = [];
-                    delete status.closestToNextSectorPoint;
+                if (!inPenalty && !inSector) {
+                    if (!task.rules.aat) {
+                        status.currentLeg++;
+                        status.closestToNext = Infinity as DistanceKM;
+                        possibleAdvances = [];
+                        delete status.closestToNextSectorPoint;
+                    }
+                    //
+                    // Make sure we have actually left the sector and passed a small distance from the TP before
+                    // assuming advance. AAT is longer otherwise a brief pop out will ignore points after
+                    // however need to cope with short legs (control points for example)
+                    else {
+                        log(`setting a advance`, JSON.stringify(legStatus));
+                        log(point);
+                        //                    log(status);
+                        status.recentLegAdvance = status.currentLeg;
+                        status.currentLeg++;
+                        legStatus = status.legs[status.currentLeg];
+                        status.closestToNext = Infinity as DistanceKM;
+                        possibleAdvances = [];
+                        delete status.closestToNextSectorPoint;
+                    }
                 }
             }
 
