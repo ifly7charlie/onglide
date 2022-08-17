@@ -9,7 +9,7 @@ import distance from '@turf/distance';
 import {featureCollection, lineString, point as turfPoint, Feature, LineString, Position} from '@turf/helpers';
 import lineChunk from '@turf/line-chunk';
 import {coordReduce} from '@turf/meta';
-import {uniqWith as _uniqWith, chunk as _chunk} from 'lodash';
+import {uniqWith as _uniqWith} from 'lodash';
 
 import {} from '@turf/helpers';
 
@@ -438,23 +438,6 @@ export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs:
         previousPoint = point;
     }
     return (Math.round(distance * 10) / 10) as DistanceKM;
-}
-
-//
-// Convert a sequence of lng,lat points into a geojson geometry with properties
-// including their line length
-export function assembleLabeledLine(points: number[]) {
-    const chunked: number[][] = _chunk(points, 4);
-    const lines: Feature<LineString>[] = [];
-
-    for (let i = 0; i < chunked.length - 1; i++) {
-        const distance = Math.round(10 * chunked[i + 1][2]) / 10;
-        const handicappedDistance = Math.round(10 * chunked[i + 1][3]) / 10;
-        lines.push(lineString([chunked[i].slice(0, 2), chunked[i + 1].slice(0, 2)], {distance: distance + ' km' + (handicappedDistance >= 0.1 ? '(' + handicappedDistance + ' km h/cap)' : '')}));
-    }
-
-    //    console.log(lines);
-    return featureCollection(lines);
 }
 
 const tostrip = {

@@ -6,6 +6,7 @@ import Head from 'next/head';
 import Navbar from 'react-bootstrap/Navbar';
 import Nav from 'react-bootstrap/Nav';
 
+import {FlyToInterpolator} from '@deck.gl/core';
 import {useState} from 'react';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
@@ -22,6 +23,9 @@ import Router from 'next/router';
 
 //import {pilotsorting} from '../lib/react/pilot-sorting.js';
 import {query} from '../lib/react/db';
+import {Options} from '../lib/react/options';
+
+import {useMeasure} from '../lib/react/measure';
 
 import cookies from 'next-cookies';
 
@@ -84,16 +88,7 @@ function Menu(props) {
                         </Nav.Link>
                     </Nav.Item>
                     <Nav.Item key="settings">
-                        <Nav.Link
-                            href="#"
-                            key="navlinksettings"
-                            eventKey="settings"
-                            onClick={() => {
-                                Router.push('/settings', undefined, {shallow: true});
-                            }}
-                        >
-                            <FontAwesomeIcon icon={faGears} />
-                        </Nav.Link>
+                        <Options {...props} />
                     </Nav.Item>
                 </Nav>
             </Navbar>
@@ -117,11 +112,12 @@ export default function CombinePage(props) {
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
     const {comp, isLoading, isError} = useContest();
-    console.log(props);
-    console.log(comp);
+    //    console.log(props);
+    //    console.log(comp);
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
+    const measureFeatures = useMeasure();
 
     // What the map is looking at
     const [viewport, setViewport] = useState({
@@ -151,6 +147,18 @@ export default function CombinePage(props) {
     // Make sure we have the class object
     const selectedClass = _find(comp.classes, {class: className});
 
+    if (!selectedClass) {
+        return (
+            <>
+                <Head>
+                    <title>{comp.competition.name}</title>
+                </Head>
+                <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
+                <h1>Please choose a class from the menu bar</h1>
+            </>
+        );
+    }
+
     return (
         <>
             <Head>
@@ -160,9 +168,9 @@ export default function CombinePage(props) {
                 <meta name="viewport" content="width=device-width, minimal-ui" />
                 <IncludeJavascript />
             </Head>
-            <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} />
+            <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
             <div className="resizingContainer">
-                <OgnFeed vc={className} tz={props.tz} datecode={selectedClass ? selectedClass.datecode : '07C'} selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno} viewport={viewport} setViewport={setViewport} options={props.options} setOptions={props.setOptions} />
+                <OgnFeed vc={className} tz={props.tz} datecode={selectedClass ? selectedClass.datecode : '07C'} selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno} viewport={viewport} setViewport={setViewport} options={props.options} setOptions={props.setOptions} measureFeatures={measureFeatures} handicapped={selectedClass?.handicapped} />
             </div>
         </>
     );
@@ -171,17 +179,17 @@ export default function CombinePage(props) {
 //
 // Determine the default class
 export async function getServerSideProps(context) {
-    try {
-        const location = (await query('SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1'))?.[0];
-        const classes = await query('SELECT class FROM classes ORDER BY class');
+    //    try {
+    //        const location = (await query('SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1'))?.[0];
+    //      const classes = await query('SELECT class FROM classes ORDER BY class');
 
-        return {
-            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : '', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1}}
-        };
-    } catch (e) {
-        console.log(e);
-        return {
-            props: {lat: 52.4393, lng: -1.04162, tzoffset: 3600, tz: 'Europe/London', defaultClass: '18Metre', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1}}
-        };
-    }
+    //    return {
+    //      props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : '', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 1}}
+    //        };
+    //    } catch (e) {
+    //        console.log(e);
+    return {
+        props: {lat: 52.4393, lng: -1.04162, tzoffset: 3600, tz: 'Europe/London', defaultClass: '18Metre', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 0}}
+    };
+    //    }
 }

@@ -253,10 +253,11 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
 
 // list of descriptions
 const handicappedDescriptions = {
-    auto: 'Handicapped speed, distance or height agl',
+    auto: 'Handicapped or height agl',
     speed: 'Current handicapped speed',
     aspeed: 'Current actual speed',
-    fspeed: 'Fastest possible handicapped speed assuming finishing now',
+    fspeed: 'Handicapped speed if finishing now',
+    faspeed: 'Speed assuming finishing now',
     height: 'Current height above sea level',
     aheight: 'Current height above ground',
     climb: 'Recent average height change',
@@ -273,7 +274,7 @@ const handicappedDescriptions = {
 
 const handicappedSortOrders = {
     auto: ['auto'],
-    speed: ['speed', 'aspeed', 'fspeed'],
+    speed: ['speed', 'aspeed', 'fspeed', 'faspeed'],
     height: ['aheight', 'height'],
     climb: ['climb'],
     ld: ['ld', 'ald'],
@@ -286,7 +287,7 @@ const handicappedSortOrders = {
 const descriptions = {
     auto: 'Speed, distance or height agl',
     aspeed: 'Current actual speed',
-    faspeed: 'Fastest possible speed assuming finishing now',
+    faspeed: 'Actual speed assuming finishing now',
     height: 'Current height above sea level',
     aheight: 'Current height above ground',
     climb: 'Recent average height change',
@@ -308,6 +309,30 @@ const sortOrders = {
     distance: ['adistance'],
     times: ['start', 'duration', 'finish']
 };
+
+const whichSortOrder = {
+    auto: 'auto',
+    speed: 'speed',
+    aspeed: 'speed',
+    fspeed: 'speed',
+    faspeed: 'speed',
+    aheight: 'height',
+    height: 'height',
+    climb: 'climb',
+    ld: 'ld',
+    ald: 'ld',
+    remaining: 'remaining',
+    aremaining: 'remaining',
+    distance: 'distance',
+    adistance: 'distance',
+    start: 'times',
+    duration: 'times',
+    finish: 'times'
+};
+
+export function getSortOrderType(key: string): string {
+    return whichSortOrder[key] || key;
+}
 
 export function getSortDescription(id, handicapped = false) {
     return handicapped ? handicappedDescriptions[id] : descriptions[id];

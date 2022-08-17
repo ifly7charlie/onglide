@@ -18,15 +18,16 @@ import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as
 
 import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
 import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
+import {assembleLabeledLine} from './distanceLine';
 
 import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
 
-import {PilotList, Details, OptionalDurationMM} from './pilotlist';
+import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
-import {assembleLabeledLine} from '../flightprocessing/taskhelper';
+import {OptionalDurationMM} from './optional';
 
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
@@ -44,7 +45,7 @@ function proposedUrl(vc, datecode) {
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) ? 'wss://' : 'ws://') + hn + '/' + (vc + datecode).toUpperCase();
 }
 
-export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions}) {
+export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped}) {
     const [trackData, setTrackData] = useState<TrackData>({});
     const [pilotScores, setPilotScores] = useState<ScoreData>({});
     const {pilots, isPLoading} = usePilots(vc);
@@ -112,6 +113,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
 
     function setCompno(cn) {
         setSelectedCompno(cn);
+        console.log('setCompno', cn, pilots[cn]);
         if (cn && pilots && pilots[cn]) {
             setFollow(true);
             console.log(cn, trackData[cn]?.deck?.partial);
@@ -143,6 +145,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
         <>
             <div className={'resizingMap'}>
                 <MApp
+                    key="map"
                     vc={vc}
                     follow={follow}
                     setFollow={setFollow}
@@ -159,15 +162,17 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
                     setViewport={setViewport}
                     trackData={trackData}
                     selectedCompno={selectedCompno}
+                    measureFeatures={measureFeatures}
                     status={status}
                 />
             </div>
-            <div className="resultsOverlay">
+            <div className="resultsOverlay" key="results">
                 <div className="resultsUnderlay">
                     {connectionStatus}
                     <TaskDetails vc={vc} />
                     {valid && (
                         <PilotList
+                            key="pilotList"
                             pilots={pilots}
                             pilotScores={pilotScores} //
                             trackData={trackData}
@@ -176,7 +181,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
                             now={wsStatus.at as Epoch}
                             tz={tz}
                             options={options}
-                            setOptions={setOptions}
+                            handicapped={handicapped}
                         />
                     )}
                 </div>
@@ -294,8 +299,6 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                 _reduce(
                     decoded.scores.pilots,
                     (result, p: PilotScoreDisplay, compno) => {
-                        console.log(compno, p);
-
                         // Update the geoJSON with the scored trackline so we can easily display
                         // what the pilot has been scored for
                         delete p.minGeoJSON;

@@ -1,16 +1,18 @@
 // What do we need to render the bootstrap part of the page
 import Collapse from 'react-bootstrap/Collapse';
-import ButtonGroup from 'react-bootstrap/ButtonGroup';
-
-import Button from 'react-bootstrap/Button';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus} from '../types';
-import {PilotScoreLeg} from '../protobuf/onglide';
+
 import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
+import {Optional, OptionalTime, OptionalDuration, OptionalDurationMM} from './optional';
 import {useState} from 'react';
+
+import {FlightLegs} from './flightLegs';
+import {Sorting} from './sorting';
+import {UseMeasure} from './measure';
 
 // Helpers for loading contest information etc
 import {Nbsp, TooltipIcon} from './htmlhelper';
@@ -50,104 +52,7 @@ function PilotImage(props) {
     return <div className="ih" style={{backgroundImage: `url(/flags/outline.png)`}} />;
 }
 
-function RoundNumber(v) {
-    if (typeof v === 'number') {
-        v = Math.round(v * 10) / 10;
-        if (isNaN(v)) {
-            v = undefined;
-        }
-    }
-
-    if (v != '' && v != 0.0 && v != undefined && v != '00:00:00' && v != '0') {
-        return v;
-    } else {
-        return null;
-    }
-}
-
-function Optional(props) {
-    const v = RoundNumber(props.v);
-    if (v) {
-        return (
-            <span style={props.style}>
-                {props.b} {v} {props.e}
-            </span>
-        );
-    }
-    return null;
-}
-function OptionalDiv(props) {
-    const v = RoundNumber(props.v);
-    if (v) {
-        return (
-            <div style={props.style}>
-                {props.b} {v} {props.e}
-            </div>
-        );
-    }
-    return null;
-}
-function OptionalText(b, iv, e = null) {
-    const v = RoundNumber(iv);
-    if (v) {
-        return `${b ? b : ''}${v}${e ? e : ''}`;
-    }
-    return '';
-}
-function OptionalTime(before: string, t: Epoch | number, tz: TZ, after: string | null = null) {
-    if (!t) {
-        return '';
-    }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'});
-    if (v) {
-        return `${before || ''}${v}${after || ''}`;
-    }
-    return '';
-}
-function OptionalTimeHHMM(before: string, t: Epoch | number, tz: TZ, after: string | null = null) {
-    if (!t) {
-        return '';
-    }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'});
-    if (v) {
-        return `${before || ''}${v}${after || ''}`;
-    }
-    return '';
-}
-function OptionalDuration(before: string, t: Epoch, after: string | null = null) {
-    if (!t) {
-        return '';
-    }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'});
-    if (v) {
-        return `${before || ''}${v}${after || ''}`;
-    }
-    return '';
-}
-function OptionalDurationHHMM(before: string, t: Epoch, after: string | null = null) {
-    if (!t) {
-        return '';
-    }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit'});
-    if (v) {
-        return `${before || ''}${v}${after || ''}`;
-    }
-    return '';
-}
-export function OptionalDurationMM(before: string, t: Epoch, after: string | null = null) {
-    if (!t) {
-        return '';
-    }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', minute: '2-digit'});
-    if (v) {
-        return `${before || ''}${v}${after || ''}`;
-    }
-    return '';
-}
-
 export function Details({units, pilot, score, vario, tz}: {score: PilotScore | null; vario: VarioData | null; tz: TZ; units: number; pilot: API_ClassName_Pilots_PilotDetail}) {
-    const [viewOptions, setViewOptions] = useState({task: 1, hcapped: 0});
-
     if (!pilot) {
         return null;
     }
@@ -193,198 +98,6 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         </>
     ) : null;
 
-    let legs = <></>;
-    if (score?.legs) {
-        const legIcon = (leg) => {
-            if (leg.legno == score.currentLeg) {
-                if (score.utcFinish) {
-                    return <TooltipIcon icon={solid('trophy')} tooltip="Finished!" />;
-                } else if (score.flightStatus == PositionStatus.Landed) {
-                    return <TooltipIcon icon={solid('cow')} tooltip="Landout on leg" />;
-                } else if (score.flightStatus == PositionStatus.Home) {
-                    return <TooltipIcon icon={solid('house')} tooltip="Returned home" />;
-                } else if (score.inSector || score.inPenalty) {
-                    return <TooltipIcon icon={solid('location-crosshairs')} tooltip="plane in sector" fade style={{animationDuration: '10s'}} />;
-                }
-                return <TooltipIcon icon={solid('paper-plane')} tooltip="plane still heading to sector" fade style={{animationDuration: '10s'}} />;
-            }
-            if (leg.legno > score.currentLeg) {
-                return <TooltipIcon icon={solid('hourglass-start')} tooltip="leg not started yet" size="xs" />;
-            } else if (leg.estimatedStart || leg.estimatedEnd) {
-                return <TooltipIcon icon={solid('signal')} tooltip={`warning: estimated ${leg.estimatedStart ? 'leg start ' : ''}${leg.estimatedEnd ? 'leg end' : ''} due to coverage issue`} />;
-            }
-            return <TooltipIcon icon={regular('square-check')} tooltip="leg completed" />;
-        };
-
-        const accessor = viewOptions.hcapped ? (l: PilotScoreLeg | PilotScore) => l?.handicapped : (l: PilotScoreLeg | PilotScore) => l?.actual;
-
-        const distanceRemaining = (x) => {
-            const l = accessor(x);
-            if (!l) {
-                return null;
-            }
-            if (l.maxPossible && l.minPossible && Math.trunc(l.minPossible) != Math.round(l.maxPossible)) {
-                return (
-                    <td style={{fontSize: 'small'}}>
-                        {Math.trunc(l.minPossible)}-{Math.round(l.maxPossible)}
-                        <br />
-                        {l.distanceRemaining}
-                    </td>
-                );
-            }
-            if (l.maxPossible) {
-                return (
-                    <td style={{fontSize: 'small'}}>
-                        {l.maxPossible}
-                        <br />
-                        {l.distanceRemaining}
-                    </td>
-                );
-            }
-            if (l.distanceRemaining > 0) {
-                return <td>{l.distanceRemaining}</td>;
-            }
-            return null;
-        };
-        const distanceRemainingLegend = (x) => {
-            const l = accessor(x);
-            if (l && l.maxPossible) {
-                return (
-                    <td style={{fontSize: 'small'}}>
-                        Possible
-                        <br />
-                        Shortest
-                    </td>
-                );
-            }
-            if (l.distanceRemaining > 0) {
-                return <td>Shortest</td>;
-            }
-            return null;
-        };
-
-        const actualLegs = _filter(score.legs, (f) => f.legno != 0);
-
-        legs = (
-            <>
-                <br style={{clear: 'both'}} />
-                <ButtonGroup key="taskleg" role="group" aria-label="task or leg" className={'smallbuttons goleft'}>
-                    {['leg', 'task'].map((radio, idx) => (
-                        <Button key={idx} variant={idx == viewOptions.task ? 'primary' : 'secondary'} value={idx} onClick={(e) => setViewOptions({...viewOptions, task: idx})}>
-                            {radio}
-                        </Button>
-                    ))}
-                </ButtonGroup>
-
-                {hasHandicappedResults ? (
-                    <ButtonGroup key="hcapped" role="group" aria-label="actual or handicapped" className={'smallbuttons goright'}>
-                        {['actuals', 'handicapped'].map((radio, idx) => (
-                            <Button
-                                key={radio}
-                                variant={idx == viewOptions.hcapped ? 'primary' : 'secondary'}
-                                value={idx}
-                                onClick={(e) => {
-                                    setViewOptions({...viewOptions, hcapped: idx});
-                                }}
-                            >
-                                {radio}
-                            </Button>
-                        ))}
-                    </ButtonGroup>
-                ) : null}
-
-                {viewOptions.task < 2 ? (
-                    <table className="legs">
-                        <thead>
-                            <tr>
-                                <td></td>
-                                {_map(actualLegs, (x) => (
-                                    <td>
-                                        Leg {x.legno} {legIcon(x)}
-                                    </td>
-                                ))}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr style={{fontSize: 'small'}}>
-                                <td>Leg Start Altitude</td>
-                                {_map(actualLegs, (x) => (x?.alt > 0 ? <td>{displayHeight(x?.alt, units)}</td> : null))}
-                            </tr>
-                            <tr>
-                                <td>Leg Start</td>
-                                {_map(actualLegs, (x) => (x.time ? <td>{OptionalTimeHHMM('', x.time as Epoch, tz)}</td> : null))}
-                            </tr>
-                            <tr style={{fontSize: 'small'}}>
-                                <td>Leg Duration</td>
-                                {_map(actualLegs, (x) => (x.duration ? <td>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
-                            </tr>
-                            {!viewOptions.task ? (
-                                <>
-                                    <tr>
-                                        <td>Leg Distance</td>
-                                        {_map(actualLegs, (x) => (
-                                            <td>{accessor(x)?.distance || ''}</td>
-                                        ))}
-                                    </tr>
-                                    <tr>
-                                        <td>Leg Speed</td>
-                                        {_map(actualLegs, (x) => (
-                                            <td>{accessor(x)?.legSpeed}</td>
-                                        ))}
-                                    </tr>
-                                    <tr>
-                                        {distanceRemainingLegend(score)}
-                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td></td>))}
-                                    </tr>
-                                </>
-                            ) : null}
-                            {viewOptions.task ? (
-                                <>
-                                    <tr>
-                                        <td>Task Speed</td>
-                                        {_map(actualLegs, (x) => (
-                                            <td>{accessor(x)?.taskSpeed || ''}</td>
-                                        ))}
-                                    </tr>
-                                    <tr>
-                                        <td>Task Distance</td>
-                                        {_map(actualLegs, (x) => (
-                                            <td>{accessor(x)?.taskDistance || ''}</td>
-                                        ))}
-                                    </tr>
-                                    {!score.utcFinish && (
-                                        <tr>
-                                            {_map(score.legs, (x) =>
-                                                x.legno == score.currentLeg - 1 ? (
-                                                    <>
-                                                        {distanceRemainingLegend(score)}
-                                                        {distanceRemaining(score)}
-                                                    </>
-                                                ) : (
-                                                    <td />
-                                                )
-                                            )}
-                                        </tr>
-                                    )}
-                                </>
-                            ) : null}
-                        </tbody>
-                    </table>
-                ) : (
-                    <>
-                        <br style={{clear: 'both'}} />
-                        {score.wind?.speed ? (
-                            <>
-                                Recent Wind {score.wind.speed} kph @ {score.wind.direction}
-                            </>
-                        ) : null}
-                        <br />
-                    </>
-                )}
-            </>
-        );
-    }
-
     let times = null;
     if (score?.utcStart) {
         times = (
@@ -417,7 +130,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 {climb}
                 {times}
                 {speed}
-                {legs}
+                <FlightLegs score={score} tz={tz} units={units} />
             </div>
         );
     } else {
@@ -427,6 +140,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     Landed out
                     <br />
                     {distance}
+                    <FlightLegs score={score} tz={tz} units={units} />
                 </div>
             );
         } else if (score?.flightStatus == PositionStatus.Home) {
@@ -435,6 +149,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     Landed back
                     <br />
                     {distance}
+                    <FlightLegs score={score} tz={tz} units={units} />
                 </div>
             );
         } else {
@@ -447,7 +162,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     {distance}
                     <Optional b=", Glide ratio to Finish" v={score.actual?.grRemaining} e=":1" />
                     <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining} e=":1" />
-                    {legs}
+                    <FlightLegs score={score} tz={tz} units={units} />
                 </div>
             );
         }
@@ -462,7 +177,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         <span>
             <Nbsp />
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
-                <TooltipIcon icon={regular('square-check')} /> {Math.round(vario?.delay)}s delay
+                <FontAwesomeIcon icon={regular('square-check')} /> {Math.round(vario?.delay)}s delay
             </a>
         </span>
     ) : (
@@ -521,72 +236,6 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 //<!--                <a title="Show Wind Shading" href="#" onClick={() => props.setOptions('windshade')}>
 //                  <Icon type="magic" /> -->
 //            </a>
-
-function Sorting(props) {
-    const radarFunction = () => {
-        const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
-        props.setOptions({...props.options, rainRadarAdvance: nextRadar});
-    };
-    const constructionLines = () => {
-        props.setOptions({...props.options, constructionLines: !props.options.constructionLines});
-    };
-
-    return (
-        <>
-            <span className="options">
-                <a title="Adjust radar timings" href="#" onClick={radarFunction}>
-                    <FontAwesomeIcon icon={solid('umbrella')} />
-                </a>
-                &nbsp;
-                <a title="Construction Lines" href="#" onClick={constructionLines}>
-                    <FontAwesomeIcon icon={solid('ruler-combined')} transform={{rotate: -122}} />
-                </a>
-            </span>
-            <span className="sorting">
-                <a title="Sort Automatically" href="#" onClick={() => props.setSort('auto')}>
-                    <FontAwesomeIcon icon={solid('star')} />
-                </a>
-                <a title="Show Speed" href="#" onClick={() => props.setSort('speed')}>
-                    <FontAwesomeIcon icon={solid('trophy')} />
-                </a>
-                <a title="Show Height" href="#" onClick={() => props.setSort('height')}>
-                    <FontAwesomeIcon icon={solid('cloud-upload')} />
-                    &nbsp;
-                </a>
-                <a title="Show Current Climb Average" href="#" onClick={() => props.setSort('climb')}>
-                    <FontAwesomeIcon icon={solid('upload')} />
-                    &nbsp;
-                </a>
-                <a title="Show L/D Remaining" href="#" onClick={() => props.setSort('ld')}>
-                    <FontAwesomeIcon icon={solid('fast-forward')} />
-                    &nbsp;
-                </a>
-                <a title="Show Distance Done" href="#" onClick={() => props.setSort('distance')}>
-                    <FontAwesomeIcon icon={solid('right-from-bracket')} />
-                    &nbsp;
-                </a>
-                <a title="Show Distance Remaining" href="#" onClick={() => props.setSort('remaining')}>
-                    <FontAwesomeIcon icon={solid('right-to-bracket')} />
-                    &nbsp;
-                </a>
-                <a title="Cycle through times" href="#" onClick={() => props.setSort('times')}>
-                    <FontAwesomeIcon icon={solid('stopwatch')} />
-                    &nbsp;
-                </a>
-                <Nbsp />
-
-                <a href="#" className="d-lg-inline d-none" onClick={() => props.toggleVisible()} title={props.visible ? 'Hide Results' : 'Show Results'} aria-controls="task-collapse" aria-expanded={props.visible}>
-                    <FontAwesomeIcon icon={solid('tasks')} />
-                    <FontAwesomeIcon icon={props.visible ? solid('caret-up') : solid('caret-down')} />
-                </a>
-            </span>
-            <div className="d-lg-inline d-none" id="sortdescription">
-                <br />
-                {props.sortDescription}
-            </div>
-        </>
-    );
-}
 
 // Display the current height of the pilot as a percentage bar, note this is done altitude not AGL
 // which is probably wrong
@@ -674,7 +323,7 @@ export function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
-    setOptions,
+    handicapped,
     now,
     tz
 }: //
@@ -685,17 +334,13 @@ export function PilotList({
     selectedPilot: Compno;
     setSelectedCompno: Function;
     options: any;
-    setOptions: Function;
+    handicapped: boolean;
     now: Epoch;
     tz: TZ;
 }) {
     // These are the rendering options
     const [order, setOrder] = useState<SortKey>('auto');
     const [visible, setVisible] = useState(true);
-
-    //    if (trackData) {
-    //        console.log(trackData);
-    //    }
 
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
@@ -722,19 +367,15 @@ export function PilotList({
         <>
             <Sorting
                 setSort={(o) => {
-                    setOrder(nextSortOrder(o, order));
+                    setOrder(nextSortOrder(o, order, handicapped || false));
                 }}
-                sortDescription={getSortDescription(order)}
-                setOptions={(o) => {
-                    setOptions({...options, ...o});
-                }}
-                options={options}
+                sortOrder={order}
                 visible={visible}
                 toggleVisible={() => {
                     setVisible(!visible);
                 }}
+                handicapped={handicapped || false}
             />
-
             <Collapse in={visible}>
                 <ul className="pilots">{pilotList}</ul>
             </Collapse>

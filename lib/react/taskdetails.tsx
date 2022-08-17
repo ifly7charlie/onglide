@@ -55,11 +55,11 @@ export function TaskDetails({vc}) {
             <div className={'d-lg-inline d-none'}>
                 <h5>
                     {taskDescription}
-                    <span className="sorting">
-                        <a href="#" onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
+                    <span className="sorting" style={{fontSize: 'medium'}}>
+                        <button className="d-lg-inline d-none" onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
                             <FontAwesomeIcon icon={solid('tasks')} size="sm" />
                             <FontAwesomeIcon icon={open ? solid('caret-up') : solid('caret-down')} size="sm" />
-                        </a>
+                        </button>
                     </span>
                 </h5>
 

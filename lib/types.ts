@@ -273,7 +273,7 @@ export interface PilotTrackData {
     //    colors?: Uint8Array; // deck colour picking
 }
 
-export {PilotScore} from './protobuf/onglide';
+export {PilotScore, PilotScoreLeg} from './protobuf/onglide';
 import {PilotScore} from './protobuf/onglide';
 import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 
