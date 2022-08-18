@@ -165,6 +165,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     if (leg.maxPossible) {
                         score.maxDistancePoints.push(leg.maxPossible.point.lng, leg.maxPossible.point.lat, sl.actual?.maxPossible || 0, sl.handicapped?.maxPossible || 0);
                     }
+                    if (item.closestSectorPoint) {
+                        score.closestSectorPoint = [item.closestSectorPoint.lng, item.closestSectorPoint.lat];
+                    }
                 }
             }
 
