@@ -86,7 +86,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             legs: {},
             scoredPoints: [],
             minDistancePoints: [],
-            maxDistancePoints: []
+            maxDistancePoints: [],
+            closestSectorPoint: []
         };
 
         let previousLeg: CalculatedTaskLegStatus = null;
