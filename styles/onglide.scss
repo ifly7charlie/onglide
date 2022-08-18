@@ -19,6 +19,12 @@ body {
     z-index: 10;
 }
 
+.options {
+    vertical-align: middle;
+    text-height: 10px !important;
+    margin-top: 7px;
+}
+
 // These are tweaks for small screens
 @include media-breakpoint-down(sm) {
     .resizingMap {
@@ -128,7 +134,10 @@ body {
     ul.pilots {
         width: 100%;
         list-style-type: none;
-        padding: 0px;
+        padding-left: 0px;
+        padding-right: 0px;
+        padding-top: 4px;
+        padding-bottom: 0px;
         margin: 0px;
         display: flex;
         flex-wrap: wrap;
@@ -175,9 +184,19 @@ body {
     }
 }
 
+button.active {
+    background-color: grey;
+    color: white;
+    border: 0px;
+}
+
 .smallbuttons .btn {
     padding-top: 0px;
     padding-bottom: 0px;
+}
+
+hr {
+    margin: 0.5rem;
 }
 
 .goright {
@@ -187,10 +206,38 @@ body {
 .legs {
     border: 1px solid grey;
     width: 100%;
+    overflow-x: scroll;
+    display: block;
+    background: white;
 }
 
 .legs thead {
     font-weight: bold;
+    position: sticky;
+}
+
+.legs thead tr td,
+.legs tbody tr td {
+    width: 5rem;
+    max-width: 5rem;
+    min-width: 5rem;
+}
+
+.legs tbody tr td:nth-child(2),
+.legs thead tr td:nth-child(2) {
+    padding-left: 9rem;
+    width: 14rem;
+    max-width: 14rem;
+    min-width: 14rem;
+}
+
+.legs tbody tr td:first-child,
+.legs thead tr td:first-child {
+    position: fixed;
+    font-weight: bold;
+    width: 8rem;
+    min-width: 8rem;
+    background: white;
 }
 
 .doclearboth:after {

@@ -82,7 +82,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
             currentLeg: item.currentLeg,
 
-            // We will fill these in enxt
+            // We will fill these in as we go
             legs: {},
             scoredPoints: [],
             minDistancePoints: [],
@@ -159,9 +159,6 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 }
                 if (!score.utcFinish) {
                     if (leg.minPossible) {
-                        //                        if (leg.minPossible.start) {
-                        //                            score.minDistancePoints.push(leg.minPossible.start.lng, leg.minPossible.start.lat, 0, 0);
-                        //                        }
                         score.minDistancePoints.push(leg.minPossible.point.lng, leg.minPossible.point.lat, sl.actual?.minPossible || 0, sl.handicapped?.minPossible || 0);
                     }
                     if (leg.maxPossible) {
@@ -181,8 +178,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         // AAT (or min duration tasks) with duration configured and a finish we need to make sure
         // it took longer than task time - only do this after finish as it's misleading while they
         // are flying - perhaps it should be done if they are obviously going to be under
-        if (task.details.durationsec && item.utcFinish) {
-            duration = Math.min(duration, task.details.durationsec);
+        if (task.details.durationsecs && item.utcFinish) {
+            duration = Math.min(duration, task.details.durationsecs);
         }
 
         score.actual = {

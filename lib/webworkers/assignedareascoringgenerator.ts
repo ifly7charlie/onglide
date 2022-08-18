@@ -230,14 +230,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                             if (firstSectorPoint.t >= secondSectorPoint.t) {
                                                 break;
                                             }
-                                            log(`link ${previousLegPoint.t} -> ${firstSectorPoint.t} -> ${secondSectorPoint.t} -> ${fakePoint.t}`);
                                             tempGraph.addLink(firstSectorPoint, previousLegPoint, (1000 - distHaversine(firstSectorPoint, previousLegPoint)) as DistanceKM);
 
                                             const distScoredOnLine = Math.max(lsDistance - distHaversine(secondSectorPoint, fakePoint), 0);
                                             const scoredTo = along(ls, distScoredOnLine);
 
                                             const intermediatePointL: BasePositionMessage = {
-                                                a: -taskStatus.currentLeg,
+                                                a: 0,
                                                 t: secondSectorPoint.t,
                                                 lat: scoredTo.geometry.coordinates[1],
                                                 lng: scoredTo.geometry.coordinates[0]
@@ -248,8 +247,6 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                         }
                                     }
                                 }
-
-                                tempGraph.dump(log, (a) => a.t);
                             }
                         } else if (taskStatus.closestSectorPoint) {
                             for (const ppoint of aatPreviousLeg.convexHull) {

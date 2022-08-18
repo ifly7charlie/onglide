@@ -163,10 +163,12 @@ export function FlightLegs({score, units, tz}) {
                                         <td>{accessor(x)?.legSpeed}</td>
                                     ))}
                                 </tr>
-                                <tr>
-                                    {distanceRemainingLegend(score)}
-                                    {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td></td>))}
-                                </tr>
+                                {!score.utcFinish && (
+                                    <tr>
+                                        {distanceRemainingLegend(score)}
+                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td></td>))}
+                                    </tr>
+                                )}
                             </>
                         ) : null}
                         {viewOptions.task ? (
