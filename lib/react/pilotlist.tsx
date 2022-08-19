@@ -160,7 +160,8 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     {speed}
                     {speed ? ',' : ''}
                     {distance}
-                    <Optional b=", Glide ratio to Finish" v={score.actual?.grRemaining} e=":1" />
+                    {score.handicapped?.grRemaining ? <br /> : ', '}
+                    <Optional b="Glide ratio to Finish" v={score.actual?.grRemaining} e=":1" />
                     <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining} e=":1" />
                     <FlightLegs score={score} tz={tz} units={units} />
                 </div>
