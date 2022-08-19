@@ -10,6 +10,8 @@ import {useTask, Spinner, Error} from './loaders';
 
 import Collapse from 'react-bootstrap/Collapse';
 
+const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
+
 //
 export function TaskDetails({vc}) {
     const {data, isLoading, isError} = useTask(vc);
@@ -21,6 +23,8 @@ export function TaskDetails({vc}) {
     if (!data || !data.contestday) {
         return (
             <>
+                <br style={{clear: 'both'}} />
+                <br style={{clear: 'both'}} />
                 <h4>No task</h4>
             </>
         );
@@ -50,11 +54,14 @@ export function TaskDetails({vc}) {
         taskDescription = 'Scrubbed';
     }
 
+    const classNameSentenceCased = data.classes.classname.replace(matchWords, (r) => r.toUpperCase());
+
     return (
         <>
             <div className={'d-lg-inline d-none'}>
                 <h5>
                     {taskDescription}
+                    {classNameSentenceCased} {taskDescription}
                     <span className="sorting" style={{fontSize: 'medium'}}>
                         <button className="d-lg-inline d-none" onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
                             <FontAwesomeIcon icon={solid('tasks')} size="sm" />
