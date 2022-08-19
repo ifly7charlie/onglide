@@ -5,7 +5,7 @@ import {getSortOrderType, getSortDescription} from './pilot-sorting';
 
 export function Sorting(props: {setSort: Function; sortOrder: string; toggleVisible: Function; visible: boolean; handicapped: boolean}) {
     return (
-        <div style={{paddingBotton: '3px'}}>
+        <div style={{paddingBottom: '3px'}}>
             <span className="d-lg-inline d-none" id="sortdescription" style={{fontSize: 'small', maxWidth: '30%', width: '30%', display: 'inline-block'}}>
                 {getSortDescription(props.sortOrder, props.handicapped)}
             </span>
