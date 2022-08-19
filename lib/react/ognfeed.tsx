@@ -64,9 +64,9 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
     const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
         reconnectAttempts: 40,
         reconnectInterval: 16000,
-        onReconnectStop: () => {
-            setAttempt(-100);
-        },
+        //        onReconnectStop: () => {
+        //            setAttempt(-100);
+        //        },
         retryOnError: true
     });
 
@@ -86,7 +86,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
         const connectionStatusO = {
             [ReadyState.CONNECTING]: ['Connecting to tracking..', faSpinner],
             [ReadyState.CLOSING]: ['Closing tracking connection', faSpinner],
-            [ReadyState.CLOSED]: [`Connection to tracking is closed, ${attempt < 0 ? 'please reload to reconnect' : 'retrying shortly'}`, faLinkSlash],
+            [ReadyState.CLOSED]: [`Connection to tracking is closed, ${attempt < Infinity ? 'please reload to reconnect' : 'retrying shortly'}`, faLinkSlash],
             [ReadyState.UNINSTANTIATED]: ['Messed Up', faSpinner]
         }[readyState];
 

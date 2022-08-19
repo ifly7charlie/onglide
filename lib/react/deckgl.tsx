@@ -316,7 +316,7 @@ export default function MApp(props: {
     // Do we have a loaded set of details?
     const valid = !(isTLoading || isTError) && taskGeoJSON?.tp && taskGeoJSON?.track;
 
-    const skyLayer: LayerProps = {
+    const skyLayer: any = {
         id: 'sky',
         type: 'sky',
         paint: {
@@ -439,15 +439,15 @@ export default function MApp(props: {
         >
             <StaticMap mapboxApiAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN} mapStyle={mapStreet ? 'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' /*"mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk"*/ : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'} onLoad={onMapLoad} ref={mapRef} attributionControl={false}>
                 {valid ? (
-                    <>
-                        <Source type="geojson" data={taskGeoJSON.track}>
-                            <Layer {...trackLineStyle} key="tls" />
-                        </Source>
-                        <Source type="geojson" data={taskGeoJSONtp}>
-                            <Layer {...turnpointStyleFlat} key="tps" />
-                            <Layer {...turnpointStyle} key="tgjp" />
-                        </Source>
-                    </>
+                    <Source type="geojson" data={taskGeoJSON.track}>
+                        <Layer {...trackLineStyle} key="tls" />
+                    </Source>
+                ) : null}
+                {valid ? (
+                    <Source type="geojson" data={taskGeoJSONtp}>
+                        <Layer {...turnpointStyleFlat} key="tps" />
+                        <Layer {...turnpointStyle} key="tgjp" />
+                    </Source>
                 ) : null}
                 {selectedPilotData && options.constructionLines && selectedPilotData.score?.minGeoJSON ? (
                     <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_'}>
@@ -651,6 +651,7 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): 
             layout: {
                 visibility: 'none'
             },
+            paint: {},
             type: 'fill-extrusion'
         }
     ];

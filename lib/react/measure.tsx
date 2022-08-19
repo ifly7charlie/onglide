@@ -1,4 +1,4 @@
-import {point, lineString, featureCollection, Feature} from '@turf/helpers';
+import {point, lineString, featureCollection, Feature, Geometry, FeatureCollection} from '@turf/helpers';
 import length from '@turf/length';
 
 import {cloneDeep as _cloneDeep} from 'lodash';
@@ -31,7 +31,7 @@ export function measureClick(useMeasure: UseMeasure): Function {
         }
         measureFeatures.features.push(point(info.coordinate));
         if (measureFeatures.features.length > 1) {
-            const line = lineString(measureFeatures.features.map((point) => point.geometry.coordinates));
+            const line = lineString(measureFeatures.features.map((point: any) => point?.geometry?.coordinates));
 
             line.properties['distance'] = Math.round(length(line) * 10) / 10 + ' km';
             measureFeatures.features.push(line);
@@ -56,7 +56,7 @@ export function toggleMeasure(useMeasure: UseMeasure): MouseEventHandler<HTMLBut
 export function MeasureLayers(props: {useMeasure: UseMeasure}) {
     const [measureFeatures] = props.useMeasure;
     return isMeasuring(props.useMeasure) && measureFeatures?.features?.length ? (
-        <Source type="geojson" data={featureCollection(measureFeatures.features)} key={'measure' + measureFeatures.features.length} id={'measure'}>
+        <Source type="geojson" data={featureCollection(measureFeatures.features) as any} key={'measure' + measureFeatures.features.length} id={'measure'}>
             <Layer {...measurePointsStyle} />
             <Layer {...measureLineStyle} />
             <Layer {...measureLineLabelStyle(measureLineStyle)} />
