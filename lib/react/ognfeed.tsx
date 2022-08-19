@@ -224,13 +224,13 @@ function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
     const compno = point.c;
     let cp = trackData?.[compno];
 
+    // If we don't no the pilot we'll discard - this could mean we miss a point or
+    // two when connecting but eliminates ghosts when changing channel
     if (!cp) {
-        cp = trackData[compno] = {};
+        return;
     }
 
-    // Merge into the geoJSON objects as needed - allow it to create
-    // a new deck it will be incompleted so clicking on pilot will
-    // cause a reload
+    // Merge into the geoJSON objects as needed
     mergePoint(point, cp, false);
 }
 
