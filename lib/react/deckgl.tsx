@@ -1,7 +1,7 @@
 import {useCallback, useMemo, useState} from 'react';
 import DeckGL from '@deck.gl/react';
 import {TextLayer} from '@deck.gl/layers';
-import {FlyToInterpolator, TRANSITION_EVENTS} from '@deck.gl/core';
+import {FlyToInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
 import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
 import {MercatorCoordinate} from 'mapbox-gl';
 
@@ -27,7 +27,7 @@ import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
 
 import {point} from '@turf/helpers';
 import bearing from '@turf/bearing';
-
+import bbox from '@turf/bbox';
 import nearestPointOnLine from '@turf/nearest-point-on-line';
 import {polygonToLine} from '@turf/polygon-to-line';
 
@@ -222,6 +222,9 @@ export default function MApp(props: {
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
     const radarOverlay = RadarOverlay({options, setOptions, tz});
 
+    // What task are we using on display
+    const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
+
     // We will calculate the nearest point every 60 seconds or when the TP changes or selected pilot changes
     useMemo(() => {
         if (props.options.follow && selectedPilotData && selectedPilotData.track?.vario?.lat && selectedPilotData.score?.currentLeg && follow && taskGeoJSON?.tp?.features) {
@@ -267,6 +270,31 @@ export default function MApp(props: {
             );
         }
     }, [map2d]);
+
+    useMemo(() => {
+        if (options.zoomTask) {
+            const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
+
+            const viewportWebMercator = new WebMercatorViewport(viewport);
+            const {
+                longitude,
+                latitude,
+                zoom
+            } = //
+                viewportWebMercator.fitBounds(
+                    [
+                        [minLng, minLat],
+                        [maxLng, maxLat]
+                    ],
+                    {
+                        padding: 20
+                    }
+                );
+            setViewport({...props.viewport, longitude, latitude, zoom, transitionInterpolator: new FlyToInterpolator(), transitionDuration: 500});
+        }
+
+        setTimeout(() => setOptions({...options, zoomTask: false}), 100);
+    }, [vc, selectedCompno, options.zoomTask]);
 
     //
     // Colour and style the task based on the selected pilot and their destination
@@ -398,8 +426,6 @@ export default function MApp(props: {
             setViewport(viewState);
         }
     };
-
-    const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
 
     return (
         <DeckGL

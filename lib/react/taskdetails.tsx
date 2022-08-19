@@ -13,7 +13,7 @@ import Collapse from 'react-bootstrap/Collapse';
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
 //
-export function TaskDetails({vc}) {
+export function TaskDetails({vc, fitBounds}) {
     const {data, isLoading, isError} = useTask(vc);
     const [open, setOpen] = useState(false);
 
@@ -60,9 +60,12 @@ export function TaskDetails({vc}) {
         <>
             <div className={'d-lg-inline d-none'}>
                 <h5>
-                    {taskDescription}
                     {classNameSentenceCased} {taskDescription}
                     <span className="sorting" style={{fontSize: 'medium'}}>
+                        <button title="Zoom to task" onClick={fitBounds}>
+                            <FontAwesomeIcon icon={solid('magnifying-glass-location')} />
+                        </button>
+                        &nbsp;
                         <button className="d-lg-inline d-none" onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
                             <FontAwesomeIcon icon={solid('tasks')} size="sm" />
                             <FontAwesomeIcon icon={open ? solid('caret-up') : solid('caret-down')} size="sm" />
