@@ -110,7 +110,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     // Figure out what to show based on the db status
     let flightDetails = null;
 
-    if (!score && !vario) {
+    if (!score && !vario?.lat) {
         flightDetails = <div>No tracking yet</div>;
     } else if (!score?.utcStart) {
         if (score?.flightStatus == PositionStatus.Grid) {
@@ -194,7 +194,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     <>
                         <FontAwesomeIcon icon={solid('triangle-exclamation')} />
                         &nbsp;
-                        {(vario?.lat || 0) > 0 ? <>&gt;2 hours ago</> : <>No tracking yet</>}
+                        {(vario?.lat || 0) > 0 ? <>&gt;1 hour ago</> : <>No tracking yet</>}
                     </>
                 )}
             </a>
@@ -204,7 +204,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     const flag = (pilot.country || '') !== '' ? <div className="details-flag">{isoCountryCodeToFlagEmoji(pilot.country)}</div> : null;
 
     let competitionDelay: any = '';
-    if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
+    if (process.env.NEXT_PUBLIC_COMPETITION_DELAY && (uptodate || vario?.lat)) {
         competitionDelay = (
             <a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                 <span style={{color: 'grey'}}>
