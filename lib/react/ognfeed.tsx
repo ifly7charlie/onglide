@@ -6,7 +6,7 @@
 // It will also expose the helper functions required to update the screen
 //
 
-import {useState, useMemo, useRef} from 'react';
+import {useState, useMemo, useRef, useCallback} from 'react';
 
 import {usePilots, Spinner} from './loaders';
 
@@ -133,13 +133,17 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
         : null;
 
     // Cache the calculated times and only refresh every 60 seconds
-
     const status = useMemo(() => {
         return (
             (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
             ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
         );
     }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
+
+    // Scale map to fit the bounds
+    const fitBounds = useCallback(() => {
+        setOptions({...options, zoomTask: true});
+    }, [vc]);
 
     return (
         <>
@@ -169,7 +173,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
             <div className="resultsOverlay" key="results">
                 <div className="resultsUnderlay">
                     {connectionStatus}
-                    <TaskDetails vc={vc} />
+                    <TaskDetails vc={vc} fitBounds={fitBounds} />
                     {valid && (
                         <PilotList
                             key="pilotList"
