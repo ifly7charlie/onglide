@@ -1,4 +1,4 @@
-import {Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, EstimatedTurnType, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
+import {Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, EstimatedTurnType, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, PositionStatus} from '../types';
 
 import {cloneDeep as _clonedeep, keyBy as _keyby} from 'lodash';
 
@@ -26,6 +26,8 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
 
     let compno = '';
 
+    let flightStatus: PositionStatus = PositionStatus.Unknown;
+
     for await (const current of taskStatusGenerator) {
         try {
             // Get current position in the task, we will update this
@@ -34,6 +36,10 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
 
             // Wait for the start
             if (!taskStatus.utcStart) {
+                if (flightStatus != taskStatus.flightStatus) {
+                    flightStatus = taskStatus.flightStatus;
+                    yield taskStatus;
+                }
                 continue;
             }
 
