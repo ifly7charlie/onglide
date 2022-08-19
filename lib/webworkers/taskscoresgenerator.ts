@@ -86,8 +86,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             legs: {},
             scoredPoints: [],
             minDistancePoints: [],
-            maxDistancePoints: [],
-            closestSectorPoint: []
+            maxDistancePoints: []
         };
 
         let previousLeg: CalculatedTaskLegStatus = null;
@@ -96,7 +95,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // 1. AAT specific turnpoint time
             // 2. The entry to the TP
             // 3. the exit from the TP (ie startLine)
-            const legTime = (leg) => leg.entryTimeStamp || leg.exitTimeStamp || 0;
+            const legTime = (leg) => (leg.entryTimeStamp && (leg?.point?.t || 0) > 10000 ? leg?.point?.t : null) || leg.entryTimeStamp || leg.exitTimeStamp || 0;
 
             // Proper turnpoint - startPoint doesn't count
             if (previousLeg) {
@@ -165,9 +164,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     if (leg.maxPossible) {
                         score.maxDistancePoints.push(leg.maxPossible.point.lng, leg.maxPossible.point.lat, sl.actual?.maxPossible || 0, sl.handicapped?.maxPossible || 0);
                     }
-                    if (item.closestSectorPoint) {
-                        score.closestSectorPoint = [item.closestSectorPoint.lng, item.closestSectorPoint.lat];
-                    }
+                    //                    if (item.closestSectorPoint) {
+                    //                        score.closestSectorPoint = [item.closestSectorPoint.lng, item.closestSectorPoint.lat];
+                    //                    }
                 }
             }
 
