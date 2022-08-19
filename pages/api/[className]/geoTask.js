@@ -11,8 +11,11 @@ import escape from 'sql-template-strings';
 import {preprocessSector, sectorGeoJSON} from '../../../lib/flightprocessing/taskhelper';
 
 import bbox from '@turf/bbox';
+import along from '@turf/along';
+import {lineString} from '@turf/helpers';
 
 import _reduce from 'lodash/reduce';
+import _map from 'lodash/map';
 
 import {useRouter} from 'next/router';
 
@@ -27,13 +30,23 @@ export default async function taskHandler(req, res) {
         return;
     }
 
-    let task = await query(escape`
-      SELECT tasks.*
-      FROM tasks, compstatus cs
+    let task = await query(
+        process.env.REPLAY
+            ? escape`
+      SELECT tasks.*, c.Dm
+      FROM tasks, compstatus cs, classes c
       WHERE (((${process.env.REPLAY || ''}) = '' AND tasks.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND tasks.datecode=todcode(from_unixtime(${process.env.REPLAY}))))
+        AND cs.class = ${className} AND tasks.class = cs.class AND c.class=${className}
+        AND tasks.flown = 'Y'
+                           `
+            : escape`
+      SELECT tasks.*, c.Dm
+      FROM tasks, compstatus cs, classes c
+      WHERE tasks.datecode= cs.datecode AND c.class=${className}
         AND cs.class = ${className} AND tasks.class = cs.class
         AND tasks.flown = 'Y'
-    `);
+                           `
+    );
 
     if (!task.length || !task[0].taskid) {
         console.log(`geoTask: no task for ${className}`, task);
@@ -119,11 +132,16 @@ export default async function taskHandler(req, res) {
         []
     );
 
+    const taskPath = lineString(_map(tasklegs, (leg) => [leg.nlng, leg.nlat]));
+
     // How long should it be cached
     res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=300');
 
+    const Dm = task[0].Dm ? {Dm: along(taskPath, task[0].Dm)} : {};
+
     // And we succeeded - here is the json
-    res.status(200).json({tp: geoJSON, track: trackLineGeoJSON});
+    res.status(200).json({tp: geoJSON, track: trackLineGeoJSON, ...Dm});
+
     // Done
     mysqlEnd();
 }
