@@ -343,10 +343,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     const drPath = drGraph.findPath(updatedIntermediate, fakeFinishPoint).reverse(); //.shift(), //
                     log('drPath:', drPath);
                     const drPoints: BasePositionMessage[] = [];
-                    scoredStatus.distanceRemaining = sumPath(drPath.slice(1), taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
+                    scoredStatus.distanceRemaining = sumPath(drPath.slice(0), taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
                         log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
-                        drPoints.push(p);
                         scoredStatus.legs[leg].distanceRemaining = distance;
+                    });
+
+                    sumPath(drPath.slice(1), taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
+                        drPoints.push(p);
                     });
 
                     // Finally we need to find min possible remaining task distance
