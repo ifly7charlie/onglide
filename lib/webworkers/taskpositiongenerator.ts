@@ -56,10 +56,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
 
     // If there is supposed to be a grandprix start then we assume it is, we don't
     // actually check they started
-    if (task.rules.grandprixstart && task.rules.nostartutc) {
-        log('grandprixstart');
-        status.utcStart = task.rules.nostartutc;
-    }
+    let grandPrixStart = task.rules.grandprixstart && task.rules.nostartutc;
 
     // If there has been a time put into soaringspot then use that
     /*    if (status.manualstart) {
@@ -157,17 +154,28 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
             // is a more recent one
             if (!status.startConfirmed) {
                 // If there is a specific start time and we are before it then
-                // do nothing, if we are after it then it's a confirmed start
-                // so we can just accept the time and not do anything else
-                if (status.utcStart && !status.startFound) {
-                    if (point.t < status.utcStart) {
-                        if (point._) yield status;
-                        continue;
-                    } else {
+                // do nothing,
+                if (point.t < task.rules.nostartutc - 10) {
+                    if (point._) yield status;
+                    continue;
+                }
+
+                // If the pilot has a specific utcStart time already then
+                // ignore before - this can happen if scored into soaringspot
+                if (point.t < status.utcStart - 10) {
+                    if (point._) yield status;
+                    continue;
+                }
+
+                // We will start scoring at this point - utcStart
+                // updated and the exitTimestamp
+                if (grandPrixStart) {
+                    if (!status.startFound) {
+                        status.utcStart = task.rules.nostartutc;
                         status.startFound = true;
                         status.startConfirmed = true;
                         status.legs[0].points = [{t: (previousPoint || point).t, lat: startLine.nlat, lng: startLine.nlng, a: (previousPoint || point).a}];
-                        status.legs[0].exitTimeStamp = (previousPoint || point).t;
+                        status.legs[0].exitTimeStamp = status.utcStart;
                     }
                 }
                 // normal tasks require some form of sector entry/exit
