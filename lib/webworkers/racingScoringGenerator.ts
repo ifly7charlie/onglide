@@ -87,7 +87,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 // figure out where the scored point is
                 const scoredTo = along(
                     lineString([task.legs[taskStatus.currentLeg].point.geometry.coordinates, task.legs[taskStatus.currentLeg - 1].point.geometry.coordinates]), //
-                    Math.min(Math.max(taskStatus.closestToNext, 0), task.legs[taskStatus.currentLeg].length)
+                    Math.min(Math.max(taskStatus.closestToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length)
                 );
                 [currentLeg.point.lng, currentLeg.point.lat] = scoredTo.geometry.coordinates;
             }
