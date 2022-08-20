@@ -438,6 +438,11 @@ export default function MApp(props: {
             onClick={measureClick(props.measureFeatures)}
         >
             <StaticMap mapboxApiAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN} mapStyle={mapStreet ? 'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' /*"mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk"*/ : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'} onLoad={onMapLoad} ref={mapRef} attributionControl={false}>
+                {options.constructionLines && taskGeoJSON?.Dm ? (
+                    <Source type="geojson" data={taskGeoJSON.Dm} key="y">
+                        <Layer {...DmPointStyle} />
+                    </Source>
+                ) : null}
                 {valid ? (
                     <Source type="geojson" data={taskGeoJSON.track}>
                         <Layer {...trackLineStyle} key="tls" />
@@ -514,25 +519,48 @@ const maxLineStyle: LayerProps = {
     }
 };
 
-const measureLineStyle: LayerProps = {
-    id: 'measure',
-    type: 'line',
+const DmPointStyle: LayerProps = {
+    id: 'y-points',
+    type: 'symbol',
+    minzoom: 8,
     paint: {
-        'line-color': '#000',
-        'line-width': 2,
-        'line-opacity': 0.7
+        'text-color': '#000',
+        'text-halo-blur': 0.5,
+        'text-halo-width': 3,
+        'text-halo-color': '#fff'
     },
-    filter: ['in', '$type', 'LineString']
-};
-
-const measurePointsStyle: LayerProps = {
-    id: 'measure-points',
-    type: 'circle',
-    paint: {
-        'circle-radius': 5,
-        'circle-color': '#000'
-    },
-    filter: ['in', '$type', 'Point']
+    layout: {
+        'symbol-placement': 'point',
+        'icon-image': 'za-provincial-2',
+        'icon-allow-overlap': true,
+        'icon-size': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            // zoom is 5 (or less) -> circle radius will be 1px
+            8,
+            0.4,
+            // zoom is 10 (or greater) -> circle radius will be 5px
+            11,
+            1.5
+        ],
+        'text-allow-overlap': true,
+        'symbol-sort-key': 999999999,
+        'text-font': ['Open Sans Regular'],
+        'text-field': 'Dm',
+        'text-size': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            // zoom is 5 (or less) -> circle radius will be 1px
+            8,
+            3,
+            // zoom is 10 (or greater) -> circle radius will be 5px
+            11,
+            10
+        ],
+        'text-max-width': 1
+    }
 };
 
 function getSunPosition(mapRef, date?) {

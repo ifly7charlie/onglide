@@ -137,7 +137,7 @@ export default async function taskHandler(req, res) {
     // How long should it be cached
     res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=300');
 
-    const Dm = task[0].Dm ? {Dm: along(taskPath, task[0].Dm)} : {};
+    const Dm = task[0].Dm && task[0].type == 'S' ? {Dm: along(taskPath, task[0].Dm)} : {};
 
     // And we succeeded - here is the json
     res.status(200).json({tp: geoJSON, track: trackLineGeoJSON, ...Dm});
