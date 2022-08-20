@@ -334,13 +334,13 @@ export function getSortOrderType(key: string): string {
     return whichSortOrder[key] || key;
 }
 
-export function getSortDescription(id, handicapped = false) {
+export function getSortDescription(id, handicapped) {
     return handicapped ? handicappedDescriptions[id] : descriptions[id];
 }
 
 //
 // This will figure out what the next sort order should be based on the current one
-export function nextSortOrder(key, current, handicapped = false) {
+export function nextSortOrder(key, current, handicapped) {
     // Toggle through the options
     const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
     const index = orders.indexOf(current);
