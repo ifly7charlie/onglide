@@ -431,9 +431,24 @@ export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs:
     let distance = 0;
     let leg = startLeg;
     for (const point of path) {
-        const legDistance = Math.max((previousPoint !== null ? Math.round(distHaversine(previousPoint, point) * 20) / 20 : 0) - (legs[leg]?.legDistanceAdjust || 0), 0);
-        saveLeg(leg, legDistance, point);
-        distance += legDistance;
+        if (previousPoint) {
+            const legDistance = Math.max(Math.round(distHaversine(previousPoint, point) * 20) / 20 - (legs[leg]?.legDistanceAdjust || 0), 0);
+            if (legs[leg]?.legDistanceAdjust && legDistance > 0) {
+                const newPoint = along(
+                    lineString([
+                        [previousPoint.lng, previousPoint.lat],
+                        [point.lng, point.lat]
+                    ]),
+                    legDistance
+                );
+                saveLeg(leg, legDistance, {t: point.t, lat: newPoint.geometry.coordinates[1], lng: newPoint.geometry.coordinates[0], lda: true});
+            } else {
+                saveLeg(leg, legDistance, point);
+            }
+            distance += legDistance;
+        } else {
+            saveLeg(leg, 0 /*legDistance*/, point);
+        }
         leg++;
         previousPoint = point;
     }
