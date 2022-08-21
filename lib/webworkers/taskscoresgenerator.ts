@@ -202,7 +202,12 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
         // Speeds only appropriate at some points in the flight
         // If we haven't landed out or come home without a finish
-        if (item.flightStatus != PositionStatus.Landed && (item.utcFinish || item.flightStatus != PositionStatus.Home)) {
+        // and don't start reporting them too quickly
+        if (
+            item.flightStatus != PositionStatus.Landed &&
+            (item.utcFinish || item.flightStatus != PositionStatus.Home) && //
+            (task.rules.grandprixstart || (duration > 60 * 7.5 && score.actual.taskDistance > 10))
+        ) {
             doSpeedCalc(score.actual, 0, duration);
             doSpeedCalc(score.handicapped, 0, duration);
             //
