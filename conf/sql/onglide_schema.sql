@@ -11,6 +11,7 @@ CREATE TABLE `classes` (
   `type` char(20) DEFAULT NULL,
   `handicapped` char(1) DEFAULT 'N',
   `grandprixstart` char(1) DEFAULT 'N',
+  `Dm` float DEFAULT NULL,
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
@@ -61,7 +62,7 @@ CREATE TABLE `compstatus` (
   
   `starttime` time DEFAULT NULL COMMENT 'Startline open time',
   `startheight` int(11) DEFAULT '0',
-  
+  `notes` text default '' COMMENT 'Headline message to display', 
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Current competition status, one row per class';
 
@@ -119,7 +120,7 @@ CREATE TABLE `images` (
   `compno` char(4) NOT NULL,
   `image` mediumblob,
   `updated` int(11) NOT NULL,
-  PRIMARY KEY (`class`,`compno`,`updated`)
+  PRIMARY KEY (`class`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 --
@@ -246,7 +247,7 @@ CREATE TABLE `pilots` (
 
 DROP TABLE IF EXISTS `scoringsource`;
 CREATE TABLE `scoringsource` (
-  `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','grandprix') DEFAULT 'soaringspotkey',
+  `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','grandprix','pictureurl') DEFAULT 'soaringspotkey',
   `url` text,
   `client_id` char(120) DEFAULT NULL,
   `secret` char(120) DEFAULT NULL,
@@ -343,7 +344,7 @@ CREATE TABLE `trackerhistory` (
   `flarmid` char(10) DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix') DEFAULT 'none'
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot') DEFAULT 'none'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
