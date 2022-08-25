@@ -12,20 +12,18 @@ import {useState} from 'react';
 
 import {FlightLegs} from './flightLegs';
 import {Sorting} from './sorting';
-import {UseMeasure} from './measure';
 
 // Helpers for loading contest information etc
-import {Nbsp, TooltipIcon} from './htmlhelper';
 import {delayToText, formatTime} from './timehelper.js';
 
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
 // Helpers for sorting pilot list
-import {updateSortKeys, nextSortOrder, getSortDescription, ShortDisplayKeys, SortKey} from './pilot-sorting';
+import {updateSortKeys, nextSortOrder, getValidSortOrder, isValidSortOrder, ShortDisplayKeys, SortKey} from './pilot-sorting';
 import {displayHeight, displayClimb} from './displayunits';
 
-function isoCountryCodeToFlagEmoji(country) {
-    return String.fromCodePoint(...[...country].map((c) => c.charCodeAt() + 0x1f1a5));
+function isoCountryCodeToFlagEmoji(country: string) {
+    return String.fromCodePoint(...[...country].map((c) => c.charCodeAt(0) + 0x1f1a5));
 }
 
 // Figure out what image to display for the pilot. If they have an image then display the thumbnail for it,
@@ -49,7 +47,7 @@ function PilotImage(props) {
         return <div className="ihi">{isoCountryCodeToFlagEmoji(props.country)}</div>;
     }
 
-    return <div className="ih" style={{backgroundImage: `url(/flags/outline.png)`}} />;
+    return <div className="ih" style={{backgroundImage: `url(/outline.gif)`}} />;
 }
 
 export function Details({units, pilot, score, vario, tz}: {score: PilotScore | null; vario: VarioData | null; tz: TZ; units: number; pilot: API_ClassName_Pilots_PilotDetail}) {
@@ -69,13 +67,15 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         vario && (vario.gainXsecond > 0 || vario.lossXsecond > 0) ? (
             <>
                 <span>
-                    {vario.Xperiod}s average
-                    <Nbsp />
-                    <FontAwesomeIcon icon={solid('arrow-up')} /> {displayHeight(vario.gainXsecond, units)}
-                    <Nbsp />
-                    <FontAwesomeIcon icon={solid('arrow-down')} /> {displayHeight(vario.lossXsecond, units)}
-                    <Nbsp />
-                    <FontAwesomeIcon icon={howMuchClimb} /> {displayClimb(vario.average, units)}
+                    {vario.Xperiod}s&nbsp;average&nbsp;
+                    <FontAwesomeIcon icon={solid('arrow-up')} />
+                    &nbsp;{displayHeight(vario.gainXsecond, units)}
+                    &nbsp;
+                    <FontAwesomeIcon icon={solid('arrow-down')} />
+                    &nbsp;{displayHeight(vario.lossXsecond, units)}
+                    &nbsp;
+                    <FontAwesomeIcon icon={howMuchClimb} />
+                    &nbsp;{displayClimb(vario.average, units)}
                 </span>
                 <br />
             </>
@@ -172,18 +172,19 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     // Check at render if we are up to date or not, delay calculated in sorting which
     // gets updated regularily
     const uptodate = (vario?.delay || Infinity) < 45;
+    console.log(vario?.delay);
 
     // Are we in coverage or not, keyed off uptodate
     const ognCoverage = uptodate ? (
         <span>
-            <Nbsp />
+            &nbsp;
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
                 <FontAwesomeIcon icon={regular('square-check')} /> {Math.round(vario?.delay)}s delay
             </a>
         </span>
     ) : (
         <span>
-            <Nbsp />
+            &nbsp;
             <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage" className="tooltipicon">
                 {(vario?.delay || Infinity) < 3600 ? (
                     <>
@@ -201,7 +202,14 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         </span>
     );
 
-    const flag = (pilot.country || '') !== '' ? <div className="details-flag">{isoCountryCodeToFlagEmoji(pilot.country)}</div> : null;
+    const flag =
+        (pilot.country || '') !== '' ? (
+            <div className="details-flag">
+                <a href="#" title={new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) || 'Country Code: ' + pilot.country} className="tooltipicon">
+                    {isoCountryCodeToFlagEmoji(pilot.country)}
+                </a>
+            </div>
+        ) : null;
 
     let competitionDelay: any = '';
     if (process.env.NEXT_PUBLIC_COMPETITION_DELAY && (uptodate || vario?.lat)) {
@@ -219,8 +227,11 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     return (
         <div className="details" style={{paddingTop: '5px'}}>
             {flag}
-            <h6>
-                {pilot.compno}:<b>{pilot.name}</b> {pilot.gliderType.substring(0, 15)} <div className={'pull-right'}>{false /*track.follow*/ ? <FontAwesomeIcon icon={solid('crosshairs')} /> : ''}</div>
+            <h6 style={{width: '100%'}}>
+                {pilot.compno}:<b>{pilot.name}</b>
+                <span style={{float: 'right', paddingRight: '0.5em'}}>{pilot.gliderType.substring(0, 20)}</span>
+                <br />
+                {new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country)}
                 <br />
                 <span style={{fontSize: '80%'}}>
                     {ognCoverage}
@@ -342,6 +353,10 @@ export function PilotList({
     // These are the rendering options
     const [order, setOrder] = useState<SortKey>('auto');
     const [visible, setVisible] = useState(true);
+
+    if (!isValidSortOrder(order, handicapped)) {
+        setImmediate(() => setOrder(getValidSortOrder(order, handicapped)));
+    }
 
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
