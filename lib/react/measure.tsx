@@ -101,6 +101,7 @@ export const measureLineLabelStyle = (source: LayerProps): LayerProps => {
             'text-field': ['get', 'distance'],
             'text-allow-overlap': false,
             'text-size': 15
-        } as any
+        } as any,
+        filter: ['in', '$type', 'LineString']
     };
 };
