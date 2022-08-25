@@ -45,7 +45,7 @@ function proposedUrl(vc, datecode) {
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) ? 'wss://' : 'ws://') + hn + '/' + (vc + datecode).toUpperCase();
 }
 
-export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped}) {
+export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
     const [trackData, setTrackData] = useState<TrackData>({});
     const [pilotScores, setPilotScores] = useState<ScoreData>({});
     const {pilots, isPLoading} = usePilots(vc);
@@ -173,6 +173,13 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
             <div className="resultsOverlay" key="results">
                 <div className="resultsUnderlay">
                     {connectionStatus}
+                    {notes && notes != '' && (
+                        <>
+                            <br />
+                            <span style={{clear: 'both', color: 'red'}}>{notes}</span>
+                            <br />
+                        </>
+                    )}
                     <TaskDetails vc={vc} fitBounds={fitBounds} />
                     {valid && (
                         <PilotList
