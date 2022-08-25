@@ -1,9 +1,9 @@
-import {useCallback, useMemo, useState} from 'react';
+import {useCallback, useMemo, useEffect} from 'react';
 import DeckGL from '@deck.gl/react';
 import {TextLayer} from '@deck.gl/layers';
-import {FlyToInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
+import {FlyToInterpolator, LinearInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
 import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
-import {MercatorCoordinate} from 'mapbox-gl';
+import {LngLat, MercatorCoordinate} from 'mapbox-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
@@ -28,8 +28,7 @@ import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
 import {point} from '@turf/helpers';
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
-import nearestPointOnLine from '@turf/nearest-point-on-line';
-import {polygonToLine} from '@turf/polygon-to-line';
+import distance from '@turf/distance';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
@@ -44,7 +43,7 @@ import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} 
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
 import {OgnPathLayer} from './ognpathlayer';
-
+import {StopFollowController} from './deckglcontroller';
 //
 // Responsible for generating the deckGL layers
 //
@@ -226,39 +225,80 @@ export default function MApp(props: {
     const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
 
     // We will calculate the nearest point every 60 seconds or when the TP changes or selected pilot changes
-    useMemo(() => {
-        if (props.options.follow && selectedPilotData && selectedPilotData.track?.vario?.lat && selectedPilotData.score?.currentLeg && follow && taskGeoJSON?.tp?.features) {
-            // If we are in track up mode then we will point it towards the next turnpoint
-            let fbearing = props.options.taskUp == 2 ? props.viewport.bearing : 0;
-            if (props.options.taskUp == 1) {
-                const npol = selectedPilotData.score.minDistancePoints.slice(4, 6);
-                fbearing = bearing([selectedPilotData.track.vario.lng, selectedPilotData.track.vario.lat], npol);
-            }
+    useEffect(
+        () => {
+            console.log('checkfollow', props.options.follow, follow);
+            if (
+                props.options.follow &&
+                follow &&
+                selectedPilotData &&
+                selectedPilotData.track?.vario?.lat && //
+                selectedPilotData.score?.currentLeg &&
+                taskGeoJSON?.tp?.features
+            ) {
+                // If we are in track up mode then we will point it towards the next turnpoint
+                const lat = selectedPilotData.track.vario.lat;
+                const lng = selectedPilotData.track.vario.lng;
 
-            props.setViewport(
-                Object.assign(
+                let fbearing = props.options.taskUp == 2 ? props.viewport.bearing : 0;
+                const npol = selectedPilotData.score.minDistancePoints.slice(4, 6);
+                let position = props.viewport?.position;
+                if (props.options.taskUp == 1) {
+                    fbearing = bearing([lng, lat], npol);
+                }
+
+                if (!map2d) {
+                    if (
+                        (Math.abs(fbearing - props.viewport.bearing) < 10 && //
+                            distance([lng, lat], [props.viewport.lng, props.viewport.lat]) < 0.4) ||
+                        distance([lng, lat], npol) < 0.75
+                    ) {
+                        console.log('not far enough');
+                        return undefined;
+                    }
+                    const map = mapRef?.current?.getMap();
+                    if (map && map.transform && map.transform.elevation) {
+                        // && map.queryTerrainElevation) {
+                        const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
+                        // const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(new LngLat(lng, lat)));
+                        position = [0, 0, mapbox_elevation];
+                        console.log(mapbox_elevation);
+                    }
+                }
+
+                console.log('move viewport');
+                props.setViewport(
+                    //                    Object.assign(
                     {
                         ...props.viewport,
-                        latitude: selectedPilotData.track.vario.lat,
-                        longitude: selectedPilotData.track.vario.lng,
-                        bearing: fbearing
-                    },
-                    map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 700, transitionInterpolator: new FlyToInterpolator()}
-                )
-            );
-            return fbearing;
-        }
-        return undefined;
-    }, [selectedCompno, selectedPilotData?.score?.currentLeg, follow, Math.trunc(props.t / 60), props.options.taskUp, props.options.follow]);
+                        latitude: lat,
+                        longitude: lng,
+                        bearing: fbearing,
+                        position
+                    } //,
+                    //                        map2d ? {} : {}
+                    /*                            : {
+                                  transitionInterruption: TRANSITION_EVENTS.BREAK, //
+                                  transitionDuration: 600,
+                                  transitionInterpolator: new LinearInterpolator({transitionProps: ['longitude', 'latitude', 'bearing']})
+                              } */
+                    //                  )
+                );
+                return fbearing;
+            }
+            return undefined;
+        },
+        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, Math.trunc(props.t / 60), props.options.taskp] : [null]
+    );
 
-    useMemo(() => {
+    useEffect(() => {
         if (props.viewport.pitch == 0 && !map2d) {
             props.setViewport(
                 {
                     ...props.viewport,
                     pitch: 70
                 },
-                map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 700, transitionInterpolator: new FlyToInterpolator()}
+                map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 300, transitionInterpolator: new FlyToInterpolator()}
             );
         } else if (props.viewport.pitch != 0 && map2d) {
             props.setViewport(
@@ -266,7 +306,7 @@ export default function MApp(props: {
                     ...props.viewport,
                     pitch: 0
                 },
-                map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 700, transitionInterpolator: new FlyToInterpolator()}
+                map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 500, transitionInterpolator: new FlyToInterpolator()}
             );
         }
     }, [map2d]);
@@ -302,9 +342,13 @@ export default function MApp(props: {
         return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle3d(selectedPilotData?.score, mapLight);
     }, [selectedCompno, selectedPilotData?.score?.currentLeg, selectedPilotData?.score?.utcFinish, mapLight, map2d]);
 
+    //
+    // Two different ways to make sure we have terrain loaded
+    // on map load (in case it's default for user and on change of map type)
     const onMapLoad = useCallback(
         (evt) => {
             if (!map2d) {
+                console.log('terrain callback');
                 const map = evt.target;
                 map.setTerrain({source: 'mapbox-dem'});
                 map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
@@ -312,6 +356,34 @@ export default function MApp(props: {
         },
         [map2d]
     );
+    const onMapTerrain = useMemo(() => {
+        const map = mapRef?.current?.getMap();
+        if (map) {
+            const hasTerrain = !!map.getTerrain();
+            if (hasTerrain && map2d) {
+                console.log('disabling terrain');
+                map.setTerrain(null);
+                map.setFog(null);
+            }
+            if (!hasTerrain && !map2d) {
+                console.log('enabling terrain');
+                if (!map.getSource('mapbox-dem')) {
+                    map.addSource('mapbox-dem', {
+                        type: 'raster-dem',
+                        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+                        tileSize: 512,
+                        maxzoom: 14
+                    });
+                }
+                setTimeout(() => {
+                    map.setTerrain({source: 'mapbox-dem'});
+                    map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
+                }, 1000);
+            }
+        } else {
+            console.log('no mapref');
+        }
+    }, [map2d, mapRef]);
 
     // Do we have a loaded set of details?
     const valid = !(isTLoading || isTError) && taskGeoJSON?.tp && taskGeoJSON?.track;
@@ -331,8 +403,11 @@ export default function MApp(props: {
         }
     };
 
-    function toolTip({object, picked, layer}) {
+    function toolTip({object, picked, layer, coordinate}) {
         if (!picked) {
+            if (process.env.NODE_ENV == 'development' && coordinate) {
+                return `[${coordinate.map((x) => x.toFixed(4))}]`;
+            }
             return null;
         }
         if (object) {
@@ -391,12 +466,7 @@ export default function MApp(props: {
     const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
 
     // Update the view and synchronise with mapbox
-    const onViewStateChange = ({viewState}) => {
-        // If we were following but somebody dragged the map then stop following
-        if (follow) {
-            setFollow(false);
-        }
-
+    const onViewStateChange = useCallback(({viewState}) => {
         //
         if (props.options.taskUp == 0) {
             viewState.bearing = 0;
@@ -412,12 +482,12 @@ export default function MApp(props: {
         }
 
         const map = mapRef?.current?.getMap();
-        if (map && map.transform && map.transform.elevation) {
-            // && map.queryTerrainElevation) {
-            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
-            //L			const mapbox_elevation = map.queryTerrainElevation(map.getCenter(),{ exaggerated: true });
+        if (map && map.transform && map.transform.elevation && !viewState.position) {
+            //&& map.queryTerrainElevation) {
+            //            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
+            const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
             //			console.log( "3d transform, elevation", mapbox_elevation );
-            //			const mapbox_elevation = -40000;
+            //const mapbox_elevation = -40000;
             setViewport({
                 ...viewState,
                 ...{position: [0, 0, mapbox_elevation]}
@@ -425,13 +495,13 @@ export default function MApp(props: {
         } else {
             setViewport(viewState);
         }
-    };
+    }, []);
 
     return (
         <DeckGL
             viewState={viewport}
             onViewStateChange={(e) => onViewStateChange(e)}
-            controller={{inertia: true}} // helps with touch scroll on laptops (undocumented)
+            controller={{type: StopFollowController, setFollow, inertia: true, transitionDuration: 0}} // helps with touch scroll on laptops (undocumented)
             getTooltip={toolTip}
             {...(isMeasuring(props.measureFeatures) ? {getCursor: () => 'crosshair'} : {})}
             layers={layers} //
@@ -473,12 +543,7 @@ export default function MApp(props: {
                     </Source>
                 ) : null}
                 <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
-                {!map2d && (
-                    <>
-                        <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} maxzoom={14} />
-                        <Layer {...skyLayer} />
-                    </>
-                )}
+                {!map2d && <Layer {...skyLayer} />}
                 {attribution}
                 {radarOverlay.layer}
             </StaticMap>
