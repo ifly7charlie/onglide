@@ -1,15 +1,15 @@
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {getSortOrderType, getSortDescription} from './pilot-sorting';
+import {getSortOrderType, getSortDescription, SortKey} from './pilot-sorting';
 
-export function Sorting(props: {setSort: Function; sortOrder: string; toggleVisible: Function; visible: boolean; handicapped: boolean}) {
+export function Sorting(props: {setSort: Function; sortOrder: SortKey; toggleVisible: Function; visible: boolean; handicapped: boolean}) {
     return (
         <div style={{paddingBottom: '3px'}}>
             <span className="d-lg-inline d-none" id="sortdescription" style={{fontSize: 'small', maxWidth: '30%', width: '30%', display: 'inline-block'}}>
                 {getSortDescription(props.sortOrder, props.handicapped)}
             </span>
-            <span className="sorting" style={{fontSize: 'medium'}}>
+            <span className="sorting">
                 <button title="Sort Automatically" onClick={() => props.setSort('auto')} className={props.sortOrder == 'auto' ? 'active' : ''}>
                     <FontAwesomeIcon icon={solid('star')} />
                 </button>
