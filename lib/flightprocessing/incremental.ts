@@ -216,12 +216,9 @@ export function updateVarioFromDeck(deck: DeckData, vario: VarioData): [Epoch, V
         const lastPos = deck.t.length - 1;
         cp.agl = deck.agl[lastPos];
         [cp.lng, cp.lat, cp.altitude] = [].concat(...deck.positions.subarray(lastPos * 3));
-        console.log(cp);
-
         cp.lossXsecond = cp.gainXsecond = cp.total = cp.average = cp.Xperiod = 0;
-
-        //        cp.min = Math.min(min || point.a, cp.min);
-        //      cp.max = Math.max(max || point.a, cp.max);
+        cp.min = Math.min(cp.altitude || cp.min, cp.min);
+        cp.max = Math.max(cp.altitude || cp.max, cp.max);
     } catch (_e) {
         console.log(_e);
     }
