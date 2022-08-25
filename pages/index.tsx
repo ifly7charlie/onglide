@@ -67,19 +67,23 @@ function Menu(props) {
     ));
 
     // Try and extract a short form of the name, only letters and spaces stop at first number
-    const shortName = comp.competition.name.match(new RegExp(/^([\p{L}\s]*)/, 'u'))?.[1]?.trim() || comp.competition.name;
+    const shortName =
+        comp.competition.name
+            .replace(/World Gliding Championship[s]*/gi, 'WGC')
+            .match(new RegExp(/^([0-9]*[\p{L}\s]*)/, 'u'))?.[1]
+            ?.trim() || comp.competition.name.substring(0, 25) + '...';
     return (
         <>
             <Navbar bg="light" fixed="top">
                 <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
                     {classes}
                     <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-md-none">
+                        <Nav.Link href={comp.competition.mainwebsite} className="d-lg-none">
                             {shortName}
                             <Nbsp />
                             <FontAwesomeIcon icon={faLink} />
                         </Nav.Link>
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-md-block" style={{paddingTop: 0, paddingBottom: 0}}>
+                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
                             {comp.competition.name}
                             <div style={{fontSize: '70%'}}>
                                 {comp.competition.start} to {comp.competition.end}
@@ -170,7 +174,7 @@ export default function CombinePage(props) {
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
             <div className="resizingContainer">
-                <OgnFeed vc={className} tz={props.tz} datecode={selectedClass ? selectedClass.datecode : '07C'} selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno} viewport={viewport} setViewport={setViewport} options={props.options} setOptions={props.setOptions} measureFeatures={measureFeatures} handicapped={selectedClass?.handicapped == 'Y'} />
+                <OgnFeed vc={className} tz={props.tz} datecode={selectedClass ? selectedClass.datecode : '07C'} selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno} viewport={viewport} setViewport={setViewport} options={props.options} setOptions={props.setOptions} measureFeatures={measureFeatures} handicapped={selectedClass?.handicapped == 'Y'} notes={selectedClass?.notes} />
             </div>
         </>
     );
