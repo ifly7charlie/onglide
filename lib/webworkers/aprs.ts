@@ -72,6 +72,7 @@ export interface AprsListenerConfig {
 // Keep track of some basic statistics
 const statistics = {
     msgsReceived: 0,
+    knownReceived: 0,
     aprsDelay: 0,
     periodStart: 0
 };
@@ -170,7 +171,7 @@ if (!isMainThread) {
             aircraft[task.className + '/' + task.compno] = trackerObject;
 
             // Link the tracker(s) in
-            (typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId).map((t) => (trackers[t] = trackerObject));
+            (typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId)?.map((t) => (trackers[t] = trackerObject));
 
             // And make sure we have a channel for it
             if (!channels[task.className]) {
@@ -179,6 +180,7 @@ if (!isMainThread) {
 
             // And link the broadcast channel to it
             aircraft[task.className + '/' + task.compno].channel = channels[task.className];
+            console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId}`);
         }
 
         if (task.action == AprsCommandEnum.untrack) {
@@ -189,10 +191,11 @@ if (!isMainThread) {
             }
 
             // remove the trackers
-            (typeof toRemove.trackers == 'string' ? [toRemove.trackers] : toRemove.trackers).map((t) => delete trackers[t]);
+            (typeof toRemove.trackers == 'string' ? [toRemove.trackers] : toRemove.trackers).forEach((t) => delete trackers[t]);
 
             // Remove the glider details
             delete aircraft[makeClassname_Compno(task)];
+            console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers}`);
         }
     });
 
@@ -270,14 +273,14 @@ function startAprsListener(config: AprsListenerConfig) {
         // Into insights
         if (statistics.periodStart) {
             console.log(period);
-            console.log(`APRS: ${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s, unstableCount: ${unstableCount}`);
+            console.log(`APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s, unstableCount: ${unstableCount}`);
             trackMetric('aprs.msgsReceived', statistics.msgsReceived);
             trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
             trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
             trackMetric('aprs.server', parseInt(APRSSERVER.match(/([0-9])/)?.[0] || '99'));
         }
 
-        statistics.msgsReceived = statistics.aprsDelay = 0;
+        statistics.msgsReceived = statistics.aprsDelay = statistics.knownReceived = 0;
         statistics.periodStart = Date.now();
         if (unstableCount > 0) {
             unstableCount--;
@@ -322,7 +325,7 @@ function processPacket(packet: aprsPacket) {
     // Lookup the altitude adjustment for the
     let sender = packet.digipeaters?.pop()?.callsign || 'unknown';
     if (sender == 'DLY2APRS') {
-        sender = packet.digipeaters?.pop()?.callsign || 'unknown';
+        sender = packet.digipeaters?.[0]?.callsign || 'unknown';
     }
 
     let aoa = ognTracker ? 0 : altitudeOffsetAdjust[sender] || 0;
@@ -388,6 +391,8 @@ function processPacket(packet: aprsPacket) {
     if (!aircraft.log) {
     }
 
+    statistics.knownReceived++;
+
     // Kalman smoothing
     if (!aircraft.kf) {
         aircraft.kf = new KalmanFilter();
@@ -416,7 +421,7 @@ function processPacket(packet: aprsPacket) {
     }
 
     // Check for very late and log it
-    islate = aircraft.lastTime > packet.timestamp;
+    islate = aircraft.lastTime >= packet.timestamp;
     if (!islate) {
         aircraft.lastPoint = jPoint;
         aircraft.lastTime = packet.timestamp;
