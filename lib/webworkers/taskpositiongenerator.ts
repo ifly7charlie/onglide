@@ -37,50 +37,39 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
         };
     }
 
-    let status: TaskStatus = {
-        compno: 'init' as Compno,
-        t: 0 as Epoch,
-        utcStart: null,
-        utcFinish: null,
-        startFound: false,
-        startConfirmed: false,
-        currentLeg: 0,
-        closestToNext: Infinity as DistanceKM,
-        inSector: false,
-        inPenalty: false,
-        pointsProcessed: 0,
-        legs: task.legs.map((l) => {
-            return {legno: l.legno, points: [], penaltyPoints: []};
-        })
-    };
+    let status: TaskStatus = null;
+    // Reset everything related to the current task
+    function resetStart() {
+        status = {
+            compno: status?.compno || ('init' as Compno),
+            t: status?.t || (0 as Epoch),
+            flightStatus: status?.flightStatus || PositionStatus.Unknown,
+            utcStart: null,
+            utcFinish: null,
+            startFound: false,
+            startConfirmed: false,
+            currentLeg: 0,
+            closestToNext: Infinity as DistanceKM,
+            inSector: false,
+            inPenalty: false,
+            pointsProcessed: status?.pointsProcessed || 0,
+            legs: task.legs.map((l) => {
+                return {legno: l.legno, points: [], penaltyPoints: []};
+            })
+        };
+    }
+    resetStart();
 
     // If there is supposed to be a grandprix start then we assume it is, we don't
     // actually check they started
     let grandPrixStart = task.rules.grandprixstart && task.rules.nostartutc;
 
-    // If there has been a time put into soaringspot then use that
-    /*    if (status.manualstart) {
-        log('manual start from db');
-        status.utcstart = status.manualstart;
-        status.start = timeToText(status.utcstart);
-        status.dbstatus = 'S';
-        status.startFound = true;
-        return;
-    } 
-    // Otherwise if there are scores
-    if (status.datafromscoring == 'Y') {
-        if (status.utcstart) {
-            log('start from results');
-            status.startFound = true;
-            status.dbstatus = 'S';
-        }
-        return;
-    }
-    */
+    console.log(`${task.details.class}: Startline open: ${task.rules.nostartutc}, gp start valid: ${grandPrixStart}/${task.rules.grandprixstart}`);
 
     // state for the search
     let inStartSector = false;
     let wasInStartSector = false;
+    let landedBack = false;
 
     // How close did we get to current turnpoint
     interface NearestSectorPoint {
@@ -141,9 +130,22 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 yield status;
             }
 
+            // If we had started but are now home then we will need to reset the
+            // start if they fly again
+            if (status.flightStatus == PositionStatus.Home && status.startFound) {
+                landedBack = true;
+            }
+
             // Skip if we are not flying
             if (status.flightStatus != PositionStatus.Low && status.flightStatus != PositionStatus.Airborne) {
                 continue;
+            }
+
+            // If we had previous landed back but are now airborne then we can reset the task
+            if (landedBack) {
+                landedBack = false;
+                resetStart();
+                console.log(`New flight found for ${status.compno} after landback - t:${status.t}`);
             }
 
             // Helper
@@ -182,17 +184,11 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
                 // or better still line cross
                 // check if we are in the sector
                 else if ((inStartSector = checkIsInStartSector(startLine, point))) {
-                    // If we are in the start sector this is now wrong
-                    status.utcStart = undefined;
-                    status.startFound = false;
-                    status.legs[0].points = [];
-                    status.closestToNext = Infinity as DistanceKM;
-                    status.currentLeg = 0;
-                    delete status.closestToNextSectorPoint;
-                    delete status.legs[0].exitTimeStamp;
+                    resetStart();
                 }
                 // We have left the start sector, remember we are going forward in time
-                // we will advance but the start is not confirmed until we get
+                // we will advance but the start is not confirmed until we get to the
+                // first sector
                 else if (wasInStartSector) {
                     status.startFound = true;
                     wasInStartSector = false;
