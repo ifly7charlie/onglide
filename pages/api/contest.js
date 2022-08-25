@@ -23,10 +23,10 @@ export default async function competitionHandler(req, res) {
     const classes = await query(
         process.env.REPLAY
             ? escape`
-         SELECT c.class, c.classname, c.description, todcode(from_unixtime(${process.env.REPLAY})) datecode, cs.status, handicapped
+         SELECT c.class, c.classname, c.description, todcode(from_unixtime(${process.env.REPLAY})) datecode, cs.status, handicapped, notes
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
             : escape`
-         SELECT c.class, c.classname, c.description, cs.datecode, cs.status, handicapped
+         SELECT c.class, c.classname, c.description, cs.datecode, cs.status, handicapped, notes
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
     );
 
