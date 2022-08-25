@@ -7,16 +7,18 @@ body {
 }
 
 .resizingMap {
-    height: 95vh;
+    height: 100vh;
     width: 100vw;
     position: absolute;
-    //    min-height: 400px;
+    top: 0px;
 }
 .resizingContainer {
-    height: 95vh;
+    height: 100vh;
     width: 100vw;
-    position: relative;
+    //    position: relative;
     z-index: 10;
+    bottom: 0px;
+    left: 0px;
 }
 
 .options {
@@ -26,13 +28,14 @@ body {
 }
 
 // These are tweaks for small screens
-@include media-breakpoint-down(sm) {
+@include media-breakpoint-down(md) {
     .resizingMap {
         height: 97vh;
     }
 
     .navbar {
         --bs-navbar-padding-y: 0.15rem;
+        padding: 0px;
     }
 
     .sponsor {
@@ -42,16 +45,22 @@ body {
     .resultsOverlay {
         //		width: 10000px;
         left: 0px;
-        height: 120px;
-        top: 0px;
+        height: 130px;
+        //        top: 1rem;
         width: 100vw;
         overflow-x: auto;
-        overflow-y: clip;
-        position: absolute;
-        display: block;
+        overflow-y: hidden;
+        position: relative;
+        margin-top: -4px;
+        z-index: 20;
         clear: both;
         margin-top: 0.3rem;
         background-color: rgba(255, 255, 255, 0.7);
+        //        background-color: red;
+    }
+
+    .sorting {
+        display: none;
     }
 
     .results {
@@ -59,12 +68,10 @@ body {
         top: 70px;
     }
 
-    .sorting {
-        display: none;
-        //        right: 0px;
-        //        position: fixed;
-        //        height: 2em;
+    .options {
+        margin-top: 1vw;
     }
+
     button {
         border: 0px;
         padding-left: 4px;
@@ -100,16 +107,22 @@ body {
     }
 
     .navbar {
-        font-size: 50%;
+        font-size: 1.5vw;
     }
     html {
         height: -webkit-fill-available;
     }
 }
 
-@include media-breakpoint-up(sm) {
+@media (min-width: 1600px) {
+    .sorting {
+        font-size: small !important;
+    }
+}
+
+@include media-breakpoint-up(lg) {
     .resultsOverlay {
-        top: 55px;
+        top: 75px;
         right: 15px;
         display: block;
         position: absolute;
@@ -156,13 +169,16 @@ body {
 
     .sorting {
         float: right;
+        font-size: 1vw;
     }
 
     .details {
         clear: both;
         right: 15px;
-        bottom: 27px;
+        bottom: 75px;
         padding: 20px;
+        padding-bottom: 5px;
+        padding-top: 5px;
         position: absolute;
         color: black !important;
         background-color: rgba(255, 255, 255, 0.7);
