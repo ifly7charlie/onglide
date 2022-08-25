@@ -12,16 +12,16 @@
 function PriorityQueue() {
     this._nodes = [];
 
-    this.enqueue = function (priority, key) {
-        this._nodes.push({key: key, priority: priority});
-        this.sort();
-    };
+    //    this.enqueue = function (priority, key) {
+    //        this._nodes.push({key: key, priority: priority});
+    //        this.sort();
+    //    };
     this.enqueuequick = function (priority, key) {
         this._nodes.push({key: key, priority: priority});
     };
-    this.sort = function () {
-        this.sort();
-    };
+    //    this.sort = function () {
+    //        this.sort();
+    //    };
 
     this.dequeue = function () {
         return this._nodes.shift().key;
@@ -93,6 +93,10 @@ export default class Graph<VertexType, WeightType extends number> {
         this.vertices.get(dest)?.delete(src);
     }
 
+    size() {
+        return this.vertices.size;
+    }
+
     dump(logger, decorator) {
         logger('---->');
         for (const [src, dest] of this.vertices) {
@@ -113,8 +117,6 @@ export default class Graph<VertexType, WeightType extends number> {
         let neighbor;
         let alt;
         const INFINITY: WeightType = (1 / 0) as WeightType;
-
-        //        console.log('shortest path from ', start, ' to ', finish);
 
         for (const [vertex] of this.vertices) {
             //            console.log(vertex);
