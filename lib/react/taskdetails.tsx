@@ -59,7 +59,7 @@ export function TaskDetails({vc, fitBounds}) {
     return (
         <>
             <div className={'d-lg-inline d-none'}>
-                <h5>
+                <h5 style={{fontSize: '1.2vw'}}>
                     {classNameSentenceCased} {taskDescription}
                     <span className="sorting" style={{fontSize: 'medium'}}>
                         <button title="Zoom to task" onClick={fitBounds}>
