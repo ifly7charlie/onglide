@@ -29,22 +29,9 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
 
     return (
         <div className="options">
-            <button title="Adjust radar timings" onClick={radarFunction}>
+            <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
                 <FontAwesomeIcon icon={solid('umbrella')} />
             </button>
-            &nbsp;
-            {props.options.constructionLines ? (
-                <button title="Click to hide Construction Lines" onClick={constructionLines}>
-                    <FontAwesomeIcon icon={solid('compass-drafting')} />
-                </button>
-            ) : (
-                <button title="Click to show Construction Lines" onClick={constructionLines}>
-                    <span className="fa-layers">
-                        <FontAwesomeIcon icon={solid('slash')} />
-                        <FontAwesomeIcon icon={solid('compass-drafting')} />
-                    </span>
-                </button>
-            )}
             &nbsp;
             {!isMeasuring(props.measureFeatures) ? (
                 <button title="Click to measure" onClick={toggleMeasure(props.measureFeatures)}>
@@ -55,6 +42,19 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={solid('slash')} />
                         <FontAwesomeIcon icon={solid('ruler')} />
+                    </span>
+                </button>
+            )}
+            &nbsp;
+            {props.options.constructionLines ? (
+                <button title="Click to hide Construction Lines" onClick={constructionLines}>
+                    <FontAwesomeIcon icon={solid('compass-drafting')} />
+                </button>
+            ) : (
+                <button title="Click to show Construction Lines" onClick={constructionLines}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={solid('slash')} />
+                        <FontAwesomeIcon icon={solid('compass-drafting')} />
                     </span>
                 </button>
             )}
