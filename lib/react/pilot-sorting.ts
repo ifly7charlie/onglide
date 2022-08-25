@@ -26,7 +26,7 @@ export enum Units {
     british = 1
 }
 
-export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'ald' | 'ld' | 'done' | 'auto';
+export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'delay' | 'ald' | 'ld' | 'done' | 'auto' | 'times';
 
 export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreData, trackData: TrackData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ) {
     //
@@ -97,15 +97,27 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 }
                 break;
             case 'climb':
-                newKey = vario?.average;
-                [displayAs, suffix] = convertClimb(newKey, units);
+                if (
+                    pilotScore?.utcFinish ||
+                    pilotScore?.stationary || //
+                    (pilotScore?.flightStatus != PositionStatus.Airborne && pilotScore?.flightStatus != PositionStatus.Low)
+                ) {
+                    displayAs = '';
+                    newKey = -99999;
+                    suffix = '';
+                } else {
+                    newKey = vario?.average;
+                    [displayAs, suffix] = convertClimb(newKey, units);
+                }
                 break;
             case 'remaining':
-                newKey = remaining(pilotScore.handicapped);
+                displayAs = pilotScore?.utcFinish ? 'finished' : '-';
+                newKey = pilotScore?.utcFinish ? 0 : -(displayAs = remaining(pilotScore.handicapped)) || -9999;
                 suffix = 'km';
                 break;
             case 'aremaining':
-                newKey = remaining(pilotScore.actual);
+                displayAs = pilotScore?.utcFinish ? 'finished' : '-';
+                newKey = pilotScore?.utcFinish ? 0 : -(displayAs = remaining(pilotScore.actual)) || -9999;
                 suffix = 'km';
                 break;
             case 'distance':
@@ -150,19 +162,38 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                     suffix = iso.substr(17, 2);
                 }
                 break;
+            case 'delay':
+                // Delay not relevant if home or finished
+                if (pilotScore.flightStatus == PositionStatus.Home || pilotScore?.utcFinish) {
+                    displayAs = '-';
+                    suffix = '';
+                    newKey = '';
+                } else {
+                    newKey = -delay;
+                    [displayAs] = delayToText(delay).split(' ');
+                }
+                break;
             case 'ld':
-                if (pilotScore.handicapped?.grRemaining > 0) {
+                if (pilotScore?.utcFinish) {
+                    displayAs = 'finished';
+                    newKey = 99999;
+                    suffix = '';
+                } else if (pilotScore.handicapped?.grRemaining > 0) {
                     displayAs = Math.round(pilotScore.handicapped?.grRemaining);
                     suffix = ':1';
                     newKey = -displayAs;
                 } else {
                     displayAs = '-';
-                    newKey = -99999;
+                    newKey = -99998;
                     suffix = '';
                 }
                 break;
             case 'ald':
-                if (pilotScore.actual?.grRemaining > 0) {
+                if (pilotScore?.utcFinish) {
+                    displayAs = 'finished';
+                    newKey = 99999;
+                    suffix = '';
+                } else if (pilotScore.actual?.grRemaining > 0) {
                     displayAs = Math.round(pilotScore.actual?.grRemaining);
                     suffix = ':1';
                     newKey = -displayAs;
@@ -178,34 +209,21 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 break;
             case 'auto':
                 // If it is scored then distance or speed
-                /*                if (pilotScore.utcStart) {
-                        newKey = -1;
-                        displayAs = '-';
-                    } else if (pilotScore.scoredstatus == 'F') {
-                        newKey = 10000 + Math.round(pilotScore.handicapped.speed * 10);
-                        displayAs = pilotScore.handicapped.speed.toFixed(1);
-                        suffix = 'kph';
-                    } else {
-                        newKey = Math.round(pilotScore.handicapped.distancedone * 10);
-                        displayAs = pilotScore.handicapped.distancedone.toFixed(1);
-                        suffix = 'km';
-                    }
-                }
                 // Before they start show altitude, sort to the end of the list
-                else */
-                if (!pilotScore?.utcStart || pilotScore?.flightStatus == PositionStatus.Low) {
+                if (!pilotScore?.utcStart) {
                     newKey = vario?.agl / 10000;
                     [displayAs, suffix] = convertHeight(vario?.agl || 0, units);
                 } else if (!vario) {
                     newKey = -1;
                     displayAs = '-';
                 }
-                // After start but be
+                // After start, it's speed if we have recent points and are airborne or finished
+                // or distance if they have distance, otherwise just height
                 else {
                     var speed = pilotScore?.handicapped?.taskSpeed || pilotScore?.actual?.taskSpeed;
                     var distance = pilotScore?.handicapped?.taskDistance || pilotScore?.actual?.taskDistance;
 
-                    if ((speed > 5 && delay < 3600 && pilotScore.flightStatus == PositionStatus.Airborne) || pilotScore?.utcFinish) {
+                    if ((speed > 5 && delay < 900 && pilotScore.flightStatus == PositionStatus.Airborne) || pilotScore?.utcFinish) {
                         newKey = 10000 + Math.round(speed * 10);
                         displayAs = Math.round(speed);
                         suffix = 'kph';
@@ -269,7 +287,8 @@ const handicappedDescriptions = {
     adistance: 'Actual distance completed',
     start: 'Start time',
     finish: 'Finish time',
-    duration: 'Task duration'
+    duration: 'Task duration',
+    delay: 'Tracking delay'
 };
 
 const handicappedSortOrders = {
@@ -280,7 +299,7 @@ const handicappedSortOrders = {
     ld: ['ld', 'ald'],
     remaining: ['remaining', 'aremaining'],
     distance: ['distance', 'adistance'],
-    times: ['start', 'duration', 'finish']
+    times: ['start', 'duration', 'finish', 'delay']
 };
 
 // list of descriptions
@@ -296,7 +315,8 @@ const descriptions = {
     adistance: 'Actual distance completed',
     start: 'Start time',
     finish: 'Finish time',
-    duration: 'Task duration'
+    duration: 'Task duration',
+    delay: 'Tracking delay'
 };
 
 const sortOrders = {
@@ -307,7 +327,7 @@ const sortOrders = {
     ld: ['ald'],
     remaining: ['aremaining'],
     distance: ['adistance'],
-    times: ['start', 'duration', 'finish']
+    times: ['start', 'duration', 'finish', 'delay']
 };
 
 const whichSortOrder = {
@@ -327,23 +347,34 @@ const whichSortOrder = {
     adistance: 'distance',
     start: 'times',
     duration: 'times',
-    finish: 'times'
+    finish: 'times',
+    delay: 'times'
 };
 
-export function getSortOrderType(key: string): string {
+export function getSortOrderType(key: SortKey): SortKey {
     return whichSortOrder[key] || key;
 }
 
-export function getSortDescription(id, handicapped) {
+export function getSortDescription(id: SortKey, handicapped: boolean) {
     return handicapped ? handicappedDescriptions[id] : descriptions[id];
+}
+
+export function isValidSortOrder(type: SortKey, handicapped: boolean): boolean {
+    return !!getSortDescription(type, handicapped);
+}
+
+export function getValidSortOrder(type: SortKey, handicapped: boolean): SortKey {
+    const key = getSortOrderType(type);
+    const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
+    return orders[0];
 }
 
 //
 // This will figure out what the next sort order should be based on the current one
-export function nextSortOrder(key, current, handicapped) {
+export function nextSortOrder(key: SortKey, current: SortKey, handicapped: boolean) {
     // Toggle through the options
     const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
-    const index = orders.indexOf(current);
+    const index = orders.indexOf(current) || 0;
     const order = orders[(index + 1) % orders.length];
 
     // And return
