@@ -14,7 +14,7 @@ const defaultEpochNow = (): Epoch => Math.trunc(Date.now() / 1000) as Epoch;
 // order
 // NOTE: ONLY ONE EXECUTION OF GENERATOR ALLOWED!
 
-export function bindChannelForInOrderPackets(className: ClassName, compno: Compno, initialPoints: PositionMessage[], tick: boolean = false): InOrderGeneratorFunction {
+export function bindChannelForInOrderPackets(className: ClassName, compno: Compno, initialPoints: PositionMessage[], tick: boolean = false, once: boolean = false): InOrderGeneratorFunction {
     //
     // And we need a way to notify and wake up our generator
     // that is not asynchronous. Once we have achieved this
@@ -71,18 +71,13 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
 
     // Generate the next item in the sequence this will block until
     // values are ready and have been waiting for 30 seconds
-    const inOrderGenerator = async function* (getNow: () => Epoch | null = null): InOrderGenerator {
+    const inOrderGenerator = async function* (getNow: () => Epoch): InOrderGenerator {
         // Singleton enforcement - because of the way we wait on a changing promise
         if (running) {
             throw new Error('Only one iterator allowed');
             return;
         }
         running = true;
-
-        if (!getNow) {
-            const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
-            getNow = () => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
-        }
 
         //
         // How far through are we
@@ -123,6 +118,10 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
             // If we didn't have anything then sleep a second until we do
             // min interval for points is 1 second so this seems sensible
             else {
+                if (once) {
+                    break;
+                }
+
                 // As we do out of order if it's inserted before us then
                 // we just skip forward
                 const insertIndex = await new Promise((resolve) => (resolveNotification = resolve));
