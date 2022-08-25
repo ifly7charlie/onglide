@@ -20,7 +20,7 @@ let miss = 0;
 
 type Radian = number & As<'Radian'>;
 
-const steps = process.env.NEXT_RUNTIME ? 30 : 30;
+const steps = process.env.NEXT_RUNTIME ? 25 : 25;
 const scoring = !(process.env.NEXT_RUNTIME || false);
 
 var _2pi: Radian = (Math.PI * 2) as Radian;
@@ -220,7 +220,7 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
     if (scoring) {
         turnpoint.coordinates = _uniqWith(
             coordReduce(
-                lineChunk(lineString(polypoints), 2),
+                lineChunk(lineString(polypoints), 5),
                 (prev, current) => {
                     prev.push(current);
                     return prev;
