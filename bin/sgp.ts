@@ -95,11 +95,20 @@ async function SGP(deep = false) {
     // links in this code are HTTP because that is how they are returned in the JSON
     // HOWEVER! All fetches will be https because the enumeration links are all https
     fetch(keys.url)
-        .then((res) => res.json())
+        .then((res) => {
+            if (res.status == 200) {
+                return res.json();
+            }
+            console.log(`Unable to fetch task ${res.statusText}`);
+            throw new Error(res.statusText);
+        })
         .then((res) => {
             update_class();
             update_task(res.task);
             update_pilots(res.tracks);
+        })
+        .catch((err) => {
+            console.log(err);
         });
 }
 /*
