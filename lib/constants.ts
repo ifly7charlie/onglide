@@ -1,5 +1,5 @@
 // How much time between packets is considered to be a gap in the track (seconds)
-export const gapLength = 150;
+export const gapLength = 60;
 
 // How many points to start/increase array allocation by
 export const deckPointIncrement = 2500;

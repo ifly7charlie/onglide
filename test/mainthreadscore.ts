@@ -104,7 +104,7 @@ async function runScore(datecode, className, compno: Compno, handicap) {
         const epg = enrichedPositionGenerator(location, inorder(getNow), log);
 
         // 1. Figure out where in the task we are
-        const tpg = taskPositionGenerator(task, epg, log);
+        const tpg = taskPositionGenerator(task, 0 as Epoch, epg, log);
 
         // 2. Figure out what that means for leg distances
         const distances = task.rules.aat // what kind of scoring do we do

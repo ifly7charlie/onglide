@@ -74,7 +74,8 @@ const statistics = {
     msgsReceived: 0,
     knownReceived: 0,
     aprsDelay: 0,
-    periodStart: 0
+    periodStart: 0,
+    jumps: 0
 };
 
 // Keep track of the aircraft requested
@@ -273,14 +274,15 @@ function startAprsListener(config: AprsListenerConfig) {
         // Into insights
         if (statistics.periodStart) {
             console.log(period);
-            console.log(`APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s, unstableCount: ${unstableCount}`);
+            console.log(`APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s, ignored ${statistics.jumps} jumps, unstableCount: ${unstableCount}`);
             trackMetric('aprs.msgsReceived', statistics.msgsReceived);
             trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
             trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
             trackMetric('aprs.server', parseInt(APRSSERVER.match(/([0-9])/)?.[0] || '99'));
+            trackMetric('aprs.jumps', statistics.jumps);
         }
 
-        statistics.msgsReceived = statistics.aprsDelay = statistics.knownReceived = 0;
+        statistics.msgsReceived = statistics.aprsDelay = statistics.knownReceived = statistics.jumps = 0;
         statistics.periodStart = Date.now();
         if (unstableCount > 0) {
             unstableCount--;
@@ -393,46 +395,56 @@ function processPacket(packet: aprsPacket) {
 
     statistics.knownReceived++;
 
+    // Ignore duplicates
+    if (aircraft.lastTime == packet.timestamp) {
+        return;
+    }
+
+    // Check to make sure they have moved or that it's been about 10 seconds since the last update
+    // this reduces load from stationary aircrafts on the ground and allows us to track stationary aircrafts
+    // better. the 1 ensures that first packet gets picked up after restart
+    // Also make sure the speed between points is < 330kph - ignoring ordering
+    const distanceFromLast = aircraft.lastPoint ? distance(jPoint, aircraft.lastPoint) : 1;
+    const speedBetweenKph = distanceFromLast / (Math.abs(packet.timestamp - aircraft.lastMoved) / 3600);
+    if (distanceFromLast < 0.01) {
+        if (packet.timestamp - aircraft.lastTime < 10) {
+            aircraft.stationary++;
+            return;
+        }
+    }
+    if (speedBetweenKph > 330 /*kph*/) {
+        console.log(`IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph}kph ${packet.timestamp - aircraft.lastMoved}s`);
+        statistics.jumps++;
+        return;
+    }
+
+    aircraft.stationary = 0;
+    aircraft.lastMoved = packet.timestamp;
+
+    if (altitude > 10000) {
+        console.log(`IGNORING ALTITUDE JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph}kph`);
+        statistics.jumps++;
+        return;
+    }
+
     // Kalman smoothing
     if (!aircraft.kf) {
         aircraft.kf = new KalmanFilter();
     }
     const kfalt = Math.floor(aircraft.kf.filter(altitude));
 
-    // Check to make sure they have moved or that it's been about 10 seconds since the last update
-    // this reduces load from stationary aircrafts on the ground and allows us to track stationary aircrafts
-    // better. the 1 ensures that first packet gets picked up after restart
-    const distanceFromLast = aircraft.lastPoint ? distance(jPoint, aircraft.lastPoint) : 1;
-    if (distanceFromLast < 0.01) {
-        if (packet.timestamp - aircraft.lastTime < 10) {
-            aircraft.stationary++;
-            return;
-        }
-    } else {
-        aircraft.stationary = 0;
-        aircraft.lastMoved = packet.timestamp;
-    }
-
-    // Ignore duplicates
-    if (aircraft.lastTime == packet.timestamp) {
-        aircraft.log(packet);
-        aircraft.log(`${packet.timestamp} ${kfalt}/${altitude}\t${aircraft.compno} ** ${ognTracker} ${td}/***** from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
-        return;
-    }
-
     // Check for very late and log it
     islate = aircraft.lastTime >= packet.timestamp;
     if (!islate) {
         aircraft.lastPoint = jPoint;
         aircraft.lastTime = packet.timestamp;
-
-        if (aircraft.lastTime - packet.timestamp > 1800) {
-            console.log(`${aircraft.compno} : VERY late flarm packet received, ${(aircraft.lastTime - packet.timestamp) / 60}  minutes earlier than latest packet received for the aircraft, ignoring`);
-            return;
-        }
+    } else if (aircraft.lastTime - packet.timestamp > 1800) {
+        console.log(`${aircraft.compno} : VERY late flarm packet received, ${(aircraft.lastTime - packet.timestamp) / 60}  minutes earlier than latest packet received for the aircraft, ignoring`);
+        return;
     }
 
     // Logging if requested
+    aircraft.log(packet.origpacket);
     aircraft.log(`${kfalt}/${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
 
     // And now use the kalman filtered altitude for everything else

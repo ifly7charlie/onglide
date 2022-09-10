@@ -247,8 +247,7 @@ async function update_pilots(class_url, classid, classname, keys) {
             if (pilot.email) {
                 return createHash('md5').update(pilot.email.trim().toLowerCase()).digest('hex');
             } else {
-                return;
-                createHash('md5')
+                return createHash('md5')
                     .update((pilot.first_name + pilot.last_name + '@comps.onglide.com').replace(/\s/g, '').toLowerCase())
                     .digest('hex');
             }

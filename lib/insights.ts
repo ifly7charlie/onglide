@@ -20,6 +20,8 @@ export function initialiseInsights() {
             //        .setAutoPopulateAzureProperties(true)
             .start();
         global.insightsDefClient = defaultClient;
+    } else {
+        global.insightsDefClient = null;
     }
 }
 

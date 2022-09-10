@@ -81,8 +81,8 @@ export class ScoringController {
     }
 
     // Load these points into scoring
-    setInitialTrack(compno: Compno, handicap: number, points: PositionMessage[]) {
-        this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, compno, points, handicap});
+    setInitialTrack(compno: Compno, handicap: number, utcStart: Epoch, points: PositionMessage[]) {
+        this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, compno, points, handicap, utcStart});
     }
 
     // This actually starts scoring for the task
@@ -106,6 +106,7 @@ interface GliderState {
     className: ClassName;
     compno: Compno;
     handicap: number;
+    utcStart: Epoch;
 
     // Sequence of steps used to do the scoring
     // inorder returns a generator that gives all of the glider points
@@ -155,6 +156,7 @@ interface ScoringCommandTrack {
 
     compno: Compno;
     handicap: number;
+    utcStart: Epoch;
 
     // Historical points, must be in sorted order
     points: PositionMessage[];
@@ -200,11 +202,12 @@ if (!isMainThread) {
 
         if (task.action == ScoringCommandEnum.initialTrack) {
             const itTask: ScoringCommandTrack = task;
-            console.log(`${task.className}/${task.compno}: initial track received ${itTask.points.length} positions ${itTask.handicap} hcap`);
+            console.log(`${task.className}/${task.compno}: initial track received ${itTask.points.length} positions ${itTask.handicap} hcap, ${itTask.utcStart} utcStart`);
             gliders[makeClassname_Compno(task)] = {
                 className: task.className,
                 compno: task.compno,
                 handicap: task.handicap,
+                utcStart: task.utcStart,
                 inorder: bindChannelForInOrderPackets(task.className, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
                 scoring: null
             };
@@ -250,7 +253,7 @@ function startScoring(config: ScoringConfig, task: any) {
             const glider: GliderState = gliders[cncn];
 
             const log =
-                glider.compno == '7C'
+                glider.compno == 'YO'
                     ? console.log
                     : () => {
                           /*noop*/
@@ -261,7 +264,7 @@ function startScoring(config: ScoringConfig, task: any) {
                 const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
 
                 // 1. Figure out where in the task we are
-                const tpg = taskPositionGenerator(task, epg, log);
+                const tpg = taskPositionGenerator(task, glider.utcStart, epg, log);
 
                 // 2. Figure out what that means for leg distances
                 const distances = task.rules.aat // what kind of scoring do we do

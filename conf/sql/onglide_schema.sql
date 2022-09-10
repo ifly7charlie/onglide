@@ -247,7 +247,7 @@ CREATE TABLE `pilots` (
 
 DROP TABLE IF EXISTS `scoringsource`;
 CREATE TABLE `scoringsource` (
-  `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','grandprix','pictureurl') DEFAULT 'soaringspotkey',
+  `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','sgp','pictureurl') DEFAULT 'soaringspotkey',
   `url` text,
   `client_id` char(120) DEFAULT NULL,
   `secret` char(120) DEFAULT NULL,

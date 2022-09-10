@@ -6,14 +6,12 @@ export class StopFollowController extends MapController {
     constructor(options: any = {}) {
         super(options);
         this.setFollow = options.setFollow;
-        //        this.events = ['pointermove'];
     }
 
     handleEvent(event) {
         if (event.type == 'panstart') {
             this.setFollow(false);
         }
-        console.log(event.type);
         super.handleEvent(event);
     }
 }

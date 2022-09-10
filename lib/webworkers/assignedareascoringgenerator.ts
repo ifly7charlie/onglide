@@ -153,7 +153,12 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 }
             }
 
-            //        aatGraph.dump(long, (a) => a.t);
+            log(
+                `baseAAT Size: ${aatGraph.size()} chull sizes: ${aatLegStatus.map((s) => s.convexHull.length).join(',')}` + //
+                    `pointsinsector: ${aatLegStatus.map((s) => s.lengthConvexHullGeneratedAt).join(',')}`
+            );
+
+            log(`tp status: ${aatLegStatus.map((l) => l.taskPoints.length).join(',')}`);
 
             // What we optimize in next stage
             let scoredPoints: BasePositionMessage[];

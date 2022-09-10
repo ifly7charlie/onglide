@@ -227,7 +227,6 @@ export default function MApp(props: {
     // We will calculate the nearest point every 60 seconds or when the TP changes or selected pilot changes
     useEffect(
         () => {
-            console.log('checkfollow', props.options.follow, follow);
             if (
                 props.options.follow &&
                 follow &&
@@ -253,7 +252,7 @@ export default function MApp(props: {
                             distance([lng, lat], [props.viewport.lng, props.viewport.lat]) < 0.4) ||
                         distance([lng, lat], npol) < 0.75
                     ) {
-                        console.log('not far enough');
+                        //                        console.log('not far enough');
                         return undefined;
                     }
                     const map = mapRef?.current?.getMap();
@@ -266,7 +265,7 @@ export default function MApp(props: {
                     }
                 }
 
-                console.log('move viewport');
+                //              console.log('move viewport');
                 props.setViewport(
                     //                    Object.assign(
                     {
@@ -291,7 +290,7 @@ export default function MApp(props: {
         follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, Math.trunc(props.t / 60), props.options.taskp] : [null]
     );
 
-    useEffect(() => {
+    useMemo(() => {
         if (props.viewport.pitch == 0 && !map2d) {
             props.setViewport(
                 {
@@ -466,36 +465,41 @@ export default function MApp(props: {
     const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
 
     // Update the view and synchronise with mapbox
-    const onViewStateChange = useCallback(({viewState}) => {
-        //
-        if (props.options.taskUp == 0) {
-            viewState.bearing = 0;
-        }
-        if (map2d) {
-            viewState.minPitch = 0;
-            viewState.maxPitch = 0;
-            setViewport(viewState);
-            return;
-        } else {
-            viewState.minPitch = 0;
-            viewState.maxPitch = 85;
-        }
+    const onViewStateChange = useCallback(
+        ({viewState}) => {
+            //
+            //            console.log(map2d, props.options.mapType);
+            if (props.options.taskUp == 0) {
+                viewState.bearing = 0;
+            }
+            if (map2d) {
+                viewState.minPitch = 0;
+                viewState.maxPitch = 0;
+                setViewport(viewState);
+                return;
+            } else {
+                viewState.minPitch = 0;
+                viewState.maxPitch = 85;
+                viewState.pitch = Math.max(Math.min(viewState.pitch, 85), 0);
+            }
 
-        const map = mapRef?.current?.getMap();
-        if (map && map.transform && map.transform.elevation && !viewState.position) {
-            //&& map.queryTerrainElevation) {
-            //            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
-            const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
-            //			console.log( "3d transform, elevation", mapbox_elevation );
-            //const mapbox_elevation = -40000;
-            setViewport({
-                ...viewState,
-                ...{position: [0, 0, mapbox_elevation]}
-            });
-        } else {
-            setViewport(viewState);
-        }
-    }, []);
+            const map = mapRef?.current?.getMap();
+            if (map && map.transform && map.transform.elevation && !viewState.position) {
+                //&& map.queryTerrainElevation) {
+                //            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
+                const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
+                //			console.log( "3d transform, elevation", mapbox_elevation );
+                //const mapbox_elevation = -40000;
+                setViewport({
+                    ...viewState,
+                    ...{position: [0, 0, mapbox_elevation]}
+                });
+            } else {
+                setViewport(viewState);
+            }
+        },
+        [map2d, props.options.taskUp, mapRef]
+    );
 
     return (
         <DeckGL

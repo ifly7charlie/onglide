@@ -172,7 +172,6 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     // Check at render if we are up to date or not, delay calculated in sorting which
     // gets updated regularily
     const uptodate = (vario?.delay || Infinity) < 45;
-    console.log(vario?.delay);
 
     // Are we in coverage or not, keyed off uptodate
     const ognCoverage = uptodate ? (

@@ -43,6 +43,10 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     function updateScore(compno: Compno, score: PilotScore) {
         mostRecentScore[compno] = score;
 
+        if (process.env.NODE_ENV == 'development') {
+            console.log(`[${id}/${taskId}] score for ${compno}`);
+        }
+
         if (score.utcStart && mostRecentStart[compno] != score.utcStart) {
             console.log(`[${id}/${taskId}] Start found for: ${className}:${compno} @ ${score.utcStart} - ${new Date(score.utcStart * 1000).toUTCString()}`);
             startsToSend[compno] = mostRecentStart[compno] = score.utcStart as Epoch;
@@ -64,6 +68,7 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
             console.log(`[${id}/${taskId}] No score update: ${className}`);
             return;
         }
+        console.log(`[${id}/${taskId}] composeAndSendProtobuf`);
 
         const now = getNow();
         trackMetric('sc.scoredPilots', countScoredPilots);

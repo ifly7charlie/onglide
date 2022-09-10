@@ -25,7 +25,7 @@ export default async function image(req, res) {
       FROM images
       WHERE class = ${className} and compno=${compno} ORDER by updated desc limit 1
     `)
-    )[0]?.image;
+    )?.[0]?.image;
 
     if (!imageBlob) {
         console.log('no image');

@@ -70,7 +70,6 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
             icon = faPaperPlane;
         }
 
-        //        console.log(pilotScore);
         if (!pilotScore && sortKey != 'height' && sortKey != 'aheight' && sortKey != 'auto') {
             return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon};
         }

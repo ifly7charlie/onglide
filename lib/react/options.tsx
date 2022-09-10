@@ -31,6 +31,8 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
         <div className="options">
             <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
                 <FontAwesomeIcon icon={solid('umbrella')} />
+                &nbsp;
+                <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
             </button>
             &nbsp;
             {!isMeasuring(props.measureFeatures) ? (

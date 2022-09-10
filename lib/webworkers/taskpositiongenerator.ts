@@ -28,7 +28,7 @@ function simplifyPoint(point: PositionMessage): BasePositionMessage {
 
 //
 // Get a generator to calculate task status
-export const taskPositionGenerator = async function* (task: Task, iterator: EnrichedPositionGenerator, log?: Function): AsyncGenerator<TaskStatus, void, void> {
+export const taskPositionGenerator = async function* (task: Task, officialStart: Epoch, iterator: EnrichedPositionGenerator, log?: Function): AsyncGenerator<TaskStatus, void, void> {
     //
     // Make sure we have some logging
     if (!log) {
@@ -44,7 +44,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
             compno: status?.compno || ('init' as Compno),
             t: status?.t || (0 as Epoch),
             flightStatus: status?.flightStatus || PositionStatus.Unknown,
-            utcStart: null,
+            utcStart: officialStart || null,
             utcFinish: null,
             startFound: false,
             startConfirmed: false,
@@ -117,7 +117,7 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
         try {
             // Keep track of where we are
             previousPoint = point;
-            point = status.lastProcessedPoint = current.value;
+            point = current.value;
 
             // What time have we scored to
             status.t = point.t;
@@ -164,16 +164,16 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
 
                 // If the pilot has a specific utcStart time already then
                 // ignore before - this can happen if scored into soaringspot
-                if (point.t < status.utcStart - 10) {
+                if (status.utcStart && point.t < status.utcStart - 10) {
                     if (point._) yield status;
                     continue;
                 }
 
                 // We will start scoring at this point - utcStart
                 // updated and the exitTimestamp
-                if (grandPrixStart) {
+                if (grandPrixStart || officialStart) {
                     if (!status.startFound) {
-                        status.utcStart = task.rules.nostartutc;
+                        status.utcStart = officialStart ? officialStart : task.rules.nostartutc;
                         status.startFound = true;
                         status.startConfirmed = true;
                         status.legs[0].points = [{t: (previousPoint || point).t, lat: startLine.nlat, lng: startLine.nlng, a: (previousPoint || point).a}];
@@ -372,8 +372,9 @@ export const taskPositionGenerator = async function* (task: Task, iterator: Enri
 
                     // Make sure that they have actually moved between the two points, 250m should be enough
                     // as it's a bit more than a thermal circle. This should stop us picking up a jump when
-                    // they are stationary with a gap
-                    if (interpointDistance > 0.25) {
+                    // they are stationary with a gap, we also check for other reasons such as altitude
+                    // change or longer gaps
+                    if (interpointDistance > 0.25 || Math.abs(point.a - previousPoint.a) > 100 || elapsedTime > 70) {
                         //
                         // Check for intersection of the line and the turnpoint
                         const line = lineString([point.geoJSON.geometry.coordinates, previousPoint.geoJSON.geometry.coordinates]);

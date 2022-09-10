@@ -1,7 +1,6 @@
-FROM node:16-alpine
+FROM ognbase:latest
 WORKDIR /onglide
-COPY package.json ./
-RUN yarn install
-COPY ./lib ./lib
-COPY ./bin ./bin
-
+COPY ./dist ./dist
+COPY ./.env.local ./.env.local
+EXPOSE 8080
+CMD node dist/bin/ogn.js
