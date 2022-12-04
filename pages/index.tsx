@@ -45,27 +45,30 @@ function IncludeJavascript() {
 
 function Menu(props) {
     const comp = props.comp;
-    const classes = comp.classes.map((c) => (
-        <Nav.Item key={'navitem' + c.class}>
-            <Nav.Link
-                href="#"
-                key={'navlink' + c.class}
-                eventKey={c.class}
-                onClick={() => {
-                    Router.push('/?className=' + c.class, undefined, {shallow: true});
-                    props.setSelectedPilot(null);
-                }}
-            >
-                {c.classname}
-                {c.status == 'L' ? (
-                    <>
-                        <Nbsp />
-                        <FontAwesomeIcon icon={faPaperPlane} />
-                    </>
-                ) : null}
-            </Nav.Link>
-        </Nav.Item>
-    ));
+    const classes =
+        comp.classes.length > 1
+            ? comp.classes.map((c) => (
+                  <Nav.Item key={'navitem' + c.class}>
+                      <Nav.Link
+                          href="#"
+                          key={'navlink' + c.class}
+                          eventKey={c.class}
+                          onClick={() => {
+                              Router.push('/?className=' + c.class, undefined, {shallow: true});
+                              props.setSelectedPilot(null);
+                          }}
+                      >
+                          {c.classname}
+                          {c.status == 'L' ? (
+                              <>
+                                  <Nbsp />
+                                  <FontAwesomeIcon icon={faPaperPlane} />
+                              </>
+                          ) : null}
+                      </Nav.Link>
+                  </Nav.Item>
+              ))
+            : null;
 
     // Try and extract a short form of the name, only letters and spaces stop at first number
     const shortName =
@@ -73,6 +76,7 @@ function Menu(props) {
             .replace(/World Gliding Championship[s]*/gi, 'WGC')
             .match(new RegExp(/^([0-9]*[\p{L}\s]*)/, 'u'))?.[1]
             ?.trim() || comp.competition.name.substring(0, 25) + '...';
+
     return (
         <>
             <Navbar bg="light" fixed="top">
