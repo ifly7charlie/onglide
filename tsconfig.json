@@ -1,20 +1,36 @@
 {
-    "compilerOptions": {
-        "target": "es2015",
-        "lib": ["dom", "dom.iterable", "esnext"],
-        "allowJs": true,
-        "skipLibCheck": true,
-        "strict": false,
-        "forceConsistentCasingInFileNames": true,
-        "outDir": "nextdest",
-        "noEmit": true,
-        "incremental": true,
-        "esModuleInterop": true,
-        "module": "esnext",
-        "resolveJsonModule": true,
-        "isolatedModules": true,
-        "jsx": "preserve"
-    },
-    "include": ["next-env.d.ts", "lib/react/*.ts", "pages/*.tsx", "pages/**/*.tsx", "lib/flightprocessing/taskhelper.ts"],
-    "exclude": ["node_modules", "lib/webworkers/*ts", "lib/flightprocessing/dijkstras.ts", "test"]
+  "compilerOptions": {
+    "target": "es2015",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "nextdest",
+    "noEmit": true,
+    "incremental": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "moduleResolution": "node"
+  },
+  "include": [
+    "next-env.d.ts",
+    "lib/react/*.ts",
+    "pages/*.tsx",
+    "pages/**/*.tsx",
+    "lib/flightprocessing/taskhelper.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "lib/webworkers/*ts",
+    "lib/flightprocessing/dijkstras.ts",
+    "test"
+  ]
 }
