@@ -276,9 +276,15 @@ async function main() {
     }
 
     const server = http.createServer((req, res) => {
-        const body = http.STATUS_CODES[404];
+        // health check
+        if (req?.url == '/status') {
+            res.writeHead(200);
+            res.end(http.STATUS_CODES[200]);
+            return;
+        }
 
-        const [valid, command, channelName] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\/$/i) || [false, '', ''];
+        // explict score request
+        const [valid, command, channelName] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+).json$/i) || [false, '', ''];
         console.log(valid, command, channelName);
         if (valid) {
             console.log(Object.keys(channels));
@@ -296,7 +302,7 @@ async function main() {
         }
         console.log('url not found', req?.url);
         res.writeHead(404);
-        res.end(body);
+        res.end(http.STATUS_CODES[404]);
     });
     server.listen(process.env.WEBSOCKET_PORT || 8080);
 
