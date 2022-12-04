@@ -100,12 +100,14 @@ async function SGP(deep = false) {
                 return res.json();
             }
             console.log(`Unable to fetch task ${res.statusText}`);
-            throw new Error(res.statusText);
+            return null;
         })
         .then((res) => {
-            update_class();
-            update_task(res.task);
-            update_pilots(res.tracks);
+            if (res) {
+                update_class();
+                update_task(res.task);
+                update_pilots(res.tracks);
+            }
         })
         .catch((err) => {
             console.log(err);
@@ -238,7 +240,7 @@ async function download_picture(url, compno, classid, mysql) {
         .then((res) => {
             if (res.status != 200) {
                 console.log(` ${classid}:${compno}: FAI website returns ${res.status}: ${res.statusText}`);
-                if (res.status == 404) {
+                if (res.status == 404 || res.status == 403) {
                     return undefined;
                 }
                 throw `FAI website returns ${res.status}: ${res.statusText}`;
@@ -247,7 +249,7 @@ async function download_picture(url, compno, classid, mysql) {
             }
         })
         .then((ab) => {
-            const data = Buffer.from(ab);
+            const data = ab ? Buffer.from(ab) : null;
             if (data) {
                 mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
                                   ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)`);
