@@ -186,7 +186,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         }
 
         score.actual = {
-            taskDistance: item.distance
+            taskDistance: Math.max(item.distance, 0)
         };
         score.taskDuration = duration;
 
