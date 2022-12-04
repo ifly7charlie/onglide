@@ -1,13 +1,9 @@
-FROM node:16-alpine
-ARG NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
-ENV NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN $NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
+FROM ognbase:latest
 WORKDIR /onglide
-COPY package.json ./
-RUN yarn install
-COPY ./pages ./pages
-COPY ./public ./public
-COPY ./lib ./lib
+COPY ./.build ./.build
 COPY ./next.config.js ./next.config.js
-COPY ./styles ./styles
-COPY ./bin ./bin
-RUN yarn next build
+COPY ./.env.local ./.env
+COPY ./LICENSE ./LICENSE
+EXPOSE 3000
+CMD yarn next start
+

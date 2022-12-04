@@ -1,0 +1,188 @@
+syntax = "proto3";
+//import "google/protobuf/any.proto";
+
+message OnglideWebSocketMessage {
+    optional PilotTracks tracks = 1;
+    optional Scores scores = 2;
+    optional Positions positions = 3;
+    optional KeepAlive ka = 4;
+    optional uint32 t = 5;
+}
+
+message PilotTracks {
+    map<string, PilotTrack> pilots = 1;
+};
+
+
+message PilotTrack {
+    // what pilot
+    string compno = 1;
+
+    // number of points
+    uint32 posIndex = 2;
+
+    // epoch time for each point (actually uint32)
+    bytes t = 3;
+
+    // Three tuple of [lat,lng,alt] repeated length times (actually float) (and the height above ground)
+    bytes positions = 4;
+
+    // Segments in the track line, for broken track drawing (actually uint32)
+    uint32 segmentIndex = 5;
+    bytes indices = 6;
+    bytes agl = 12; // int16
+
+    // Two Uint32 array containing the track segment that is most recent
+    bytes recentIndices = 7;
+
+    // For colouring, all Uint8 arrays one for each point all optional
+	bytes climbRate = 8;
+	//    bytes airSpeed = 9;
+	//    bytes altitudeBand = 10;
+	//    bytes leg = 11;
+
+    // Does this contain a full trace or just the most recent trace
+    optional bool partial = 13;
+};
+
+message Scores {
+    map<string,PilotScore> pilots = 1;
+}
+
+message SpeedDist {
+    optional double distance = 1; // done distance on this leg
+	double taskDistance = 2; // done distance on whole task
+
+    optional double distanceRemaining = 11; // Speed
+    optional double maxPossible = 12; // AAT
+    optional double minPossible = 13;
+
+    optional uint32 grRemaining = 20;
+
+    optional double legSpeed = 30; // speed on this leg
+    optional double taskSpeed = 31; // speed on task to end of leg
+}
+
+message PilotScoreLeg {
+    uint32 legno = 1;
+    uint32 time = 2;
+	optional uint32 duration = 3; // time from previous point to this one 
+	optional uint32 taskDuration = 4; // time from start to this
+
+	optional BasePositionMessage point = 5;
+
+    optional uint32 alt = 6;
+    optional uint32 agl = 7;
+
+    optional bool   estimatedEnd = 8;
+    optional bool   estimatedStart = 9;
+    optional bool   inPenalty = 10;
+
+	// Scores
+    optional SpeedDist handicapped = 11;
+    optional SpeedDist actual = 12;
+
+	
+}
+
+message Wind {
+    uint32 speed = 1;
+    uint32 direction = 2;
+}
+
+//
+// A segment of the flight
+message StatSegment {
+    uint32 start = 1; // Epoch
+    uint32 end = 2; // Epoch
+    string state = 3; // Type of segment
+    Wind wind = 4; // Wind for segment
+    uint32 turncount = 5; // Number of turns
+    double distance = 6; // Distance (ground not task)
+    double achievedDistance = 7; // From first point to last point - straight
+    int32 delta = 8; // height delta?
+    double avgDelta = 9;
+    uint32 direction = 10; // left or right
+    uint32 heightgain = 11; // gain m
+    uint32 heightloss = 12; // loss m
+}
+
+message Stats {
+	repeated StatSegment segments = 1;
+}
+
+message BasePositionMessage {
+	uint32 t = 1;
+	float lat = 2;
+	float lng = 3;
+}
+
+//
+// Scores for each pilot
+message PilotScore {
+    // timestamp
+    uint32 t = 1;
+
+    // Pilot details
+    string compno = 2;
+
+    // Start/Finish details
+    uint32 utcStart = 3;
+    uint32 utcFinish = 4;
+	optional uint32 taskDuration = 5; // scored to when
+	
+	//    bool startFound = 6;
+	optional bool inSector = 7;
+	optional bool inPenalty = 8;
+	optional bool stationary = 9;
+
+	// What phase of flight (see PositionStatus in types.ts)
+	optional uint32 flightStatus = 12;
+
+    // Scores
+    optional SpeedDist actual = 10;
+    optional SpeedDist handicapped = 11;
+
+    // Leg details
+    uint32 currentLeg = 37;
+    map<uint32,PilotScoreLeg> legs = 36;
+
+    // If we are generating statistics then include that
+    optional Stats stats = 43;
+    optional Wind wind = 56;
+
+    // List of points [x,y,x,y,x,y]
+    repeated float scoredPoints = 52;
+    repeated float minDistancePoints = 60;
+    repeated float maxDistancePoints = 61;
+
+    // For DH we have a specific task for the pilot
+    optional string taskGeoJSON = 53;
+}
+
+//
+// This message is generate position updates for the pilots
+message PilotPosition {
+    string c = 1;
+    double lat = 2;
+    double lng = 3;
+    uint32 a = 4;
+    uint32 g = 5;
+    uint32 t = 6;
+    uint32 b = 7;
+    uint32 s = 8;
+    string v = 9;
+}
+
+message Positions {
+    repeated PilotPosition positions = 1;
+}
+
+//
+// Are we connected?
+message KeepAlive {
+    bool keepalive = 1;
+    uint32 at = 3;
+    uint32 listeners = 4;
+    uint32 airborne = 5;
+}

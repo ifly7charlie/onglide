@@ -22,13 +22,16 @@ can pass then in through your service provider environment variables.
 SOARINGSPOT_CLIENT_ID=
 SOARINGSPOT_SECRET=
 ```
+
 Once you have configure the environment variables use docker compose to create all the 'services' required
+
 ```
 > docker compose build
 > docker compose up
 ```
 
 This will launch the following:
+
 ```
 * onglide-mysql (db)
 * onglide-soaringspot (data syncrhonisation)
@@ -48,11 +51,11 @@ ot the en_gb root of the competition URL on soaringspot, eg
 https://www.soaringspot.com/en_gb/my-comp-name-2022/
 
 Then use
+
 ```
 > docker compose -f docker-compose-ssscrape.yml build
 > docker compose -f docker-compose-ssscrape.yml up
 ```
-
 
 ## Installing manually (non-docker)
 
@@ -61,84 +64,86 @@ your soaring spot keys to melissa-ogn@onglide.com and I can set it up for you.
 
 #### Requirements
 
-- Mysql server with a database
-- Node and Yarn
-- Apache with caching modules (you can deploy the front end somewhere like vercel as well), it also works well behind cloudfront
+-   Mysql server with a database
+-   Node and Yarn
+-   Apache with caching modules (you can deploy the front end somewhere like vercel as well), it also works well behind cloudfront
 
 #### Steps
 
-- create a database and a user with the following rights
-> grant insert,update,delete,execute,select on dsample19.* to reactuser@'xx.xx.xx.xx' identified by 'some-good-password';
+-   create a database and a user with the following rights
 
-- load the database sql & stored procedures
-> source conf/sql/onglide_schema.sql;
-> source conf/sql/sp_nextjs.sql
+    > grant insert,update,delete,execute,select on dsample19.\* to reactuser@'xx.xx.xx.xx' identified by 'some-good-password';
 
-- install yarn packages
-> yarn install
+-   load the database sql & stored procedures
 
-- install pm2
-> yarn global add pm2
+    > source conf/sql/onglide_schema.sql;
+    > source conf/sql/sp_nextjs.sql
 
-- run the onglide installation script, this will require a mapbox API key, and the database to be loaded
-> yarn setup
+-   install yarn packages
 
-- configure your webserver (there is a sample file but you'll want certificates etc)
+    > yarn install
 
-- build the application using yarn
-> yarn next build
+-   install pm2
+
+    > yarn global add pm2
+
+-   run the onglide installation script, this will require a mapbox API key, and the database to be loaded
+
+    > yarn setup
+
+-   configure your webserver (there is a sample file but you'll want certificates etc)
+
+-   build the application using yarn
+    > yarn next build
 
 ## Running (pm2)
 
 > pm2 start ecosystem.config.js
 > pm2 start all
-- start webserver
+
+-   start webserver
 
 You can use this to see logs
+
 > pm2 log
 > pm2 log ogn
 
 See status
+
 > pm2 status
 
-Or to monitor processes 
+Or to monitor processes
+
 > pm2 monit
 
 pm2 will automatically restart the processes if they fail
 
 ## Running (yarn)
 
-- start the OGN processor (bin/onglide_ogn.pl) this will fetch data into the database and send on websocket
-> yarn ogn
+-   start the OGN processor (bin/ogn.ts) this will fetch data into the database and send on websocket
 
-- start the soaringspot processor
-> yarn soaringspot
+    > yarn ogn
 
-- start the application
-> yarn next start
+-   start the soaringspot processor
 
-- start webserver
+    > yarn soaringspot
+
+-   start the application
+
+    > yarn next start
+
+-   start webserver
 
 ## RST tracking
 
-Instead of using SoaringSpot as the backend it's possible to use RST Online as well. 
+Instead of using SoaringSpot as the backend it's possible to use RST Online as well.
 
-- run the normal installation program
-- select RST for scoring system (see steps above) and then ensure the URL provided takes you to the page on RST that lists the competition. Default is "Övriga tävlingar" but it should also work with the HDI Safe Skies pages as well by changing the URL
-- ensure that the contest name matches the prefix of the name, text after the name is assumed to be the contest class
+-   run the normal installation program
+-   select RST for scoring system (see steps above) and then ensure the URL provided takes you to the page on RST that lists the competition. Default is "Övriga tävlingar" but it should also work with the HDI Safe Skies pages as well by changing the URL
+-   ensure that the contest name matches the prefix of the name, text after the name is assumed to be the contest class
 
 eg: "DM Herrljunga 2021 18-Meter" select "DM Herrljunga 2021" as the contest name, 18-Meter will become the contest class
 
-- run
-
+-   run
 
 ## Troubleshooting
-
-Uncomment startStatusServer() line in bin/ogn.js to configure url /wsstatus that allows you to see what is happening with the OGN feed on the server end
-PM2 also exposes some of these values and you can easily watch them using pm2 monit
-
-
-## rebuilding protobuf
-
-cd lib; pbjs --target json --wrap es6 onglide.proto -o onglide-protobuf.mjs; cd -
-cd lib; pbjs --target json onglide.proto -o onglide-protobuf.js; cd -
