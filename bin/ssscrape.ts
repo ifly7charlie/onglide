@@ -228,7 +228,7 @@ async function ssscrape(deep = false) {
 
                 // Make sure we have rows for each day and that compstatus is correct
                 //    await mysql_db.query( escape`call contestdays()`);
-                await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode(new Date())}`);
+                await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode()}`);
 
                 const dates = findAll((x) => x.name == 'tr' && x.parent?.nodeType == 1 && x.parent?.name == 'tbody', result.children);
 
@@ -297,7 +297,7 @@ async function update_class(className, data, dataHtml) {
 
     // Make sure we have rows for each day and that compstatus is correct
     //    await mysql_db.query( escape`call contestdays()`);
-    await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode(new Date())}`);
+    await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode()}`);
 
     // Now add details of pilots
     await update_pilots(data['Piloter']);
