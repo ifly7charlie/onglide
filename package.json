@@ -17,6 +17,7 @@
         "ogn": "node dist/bin/ogn.js",
         "ogn:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/ogn.js\"",
         "soaringspot:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/soaringspot.js\"",
+        "ssscrape:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/ssscrape.js\"",
         "sgp:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect --experimental-fetch dist/bin/sgp.js\"",
         "ogn:devbrk": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect-brk --experimental-fetch dist/bin/ogn.js\"",
         "x:devbrk": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --inspect-brk --experimental-fetch dist/test/x.js\"",

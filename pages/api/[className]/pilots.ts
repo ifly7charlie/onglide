@@ -25,26 +25,6 @@ export default async function taskHandler(req, res) {
 			WHERE 
             pilots.class = ${className}`);
 
-    /*	select pilots.class, pilots.compno, 
-	            concat(firstname,' ',lastname) name, gliderType, handicap, country,
-          CASE 
-            WHEN image != 'Y' THEN email ELSE 'Y' END image,
-          distance,
-          speed,
-		       dataFromScoring, scoredStatus,
-		       CASE WHEN start ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',start))-(SELECT tzoffset FROM competition)
-               END utcStart,
-		       CASE WHEN finish ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(cs.datecode),' ',finish))-(SELECT tzoffset FROM competition)
-               END utcFinish, forceTP
-          
-			FROM pilots, pilotresult pr, compstatus cs
-			WHERE pilots.compno = pr.compno and pr.class = pilots.class
-                          and cs.datecode = pr.datecode
-                          and cs.class = pilots.class
-           and pilots.class = ${className}`); */
-
     if (!pilots || !pilots.length) {
         console.log('api/pilots: invalid class or day not started');
         console.log(pilots);

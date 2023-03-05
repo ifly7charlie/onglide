@@ -19,6 +19,8 @@ import _map from 'lodash/map';
 
 import {useRouter} from 'next/router';
 
+import {toDateCode, fromDateCode} from '../../../lib/datecode';
+
 export default async function taskHandler(req, res) {
     const {
         query: {className}
@@ -35,7 +37,7 @@ export default async function taskHandler(req, res) {
             ? escape`
       SELECT tasks.*, c.Dm
       FROM tasks, compstatus cs, classes c
-      WHERE (((${process.env.REPLAY || ''}) = '' AND tasks.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND tasks.datecode=todcode(from_unixtime(${process.env.REPLAY}))))
+      WHERE (((${process.env.REPLAY || ''}) = '' AND tasks.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND tasks.datecode=${toDateCode(new Date(parseInt(process.env.REPLAY) * 1000))}))
         AND cs.class = ${className} AND tasks.class = cs.class AND c.class=${className}
         AND tasks.flown = 'Y'
                            `

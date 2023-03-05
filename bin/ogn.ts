@@ -37,6 +37,9 @@ import {mergePoint, initialiseDeck, pruneStartline} from '../lib/flightprocessin
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 
+// Datecode helpers
+import {fromDateCode, toDateCode} from '../lib/datecode';
+
 // Message passed from the AprsContest Listener
 import {PositionMessage} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
@@ -175,11 +178,11 @@ const start = Math.trunc(Date.now() / 1000);
 // Correct timing for the competition
 const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
 let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
+const replayBase = parseInt(process.env.REPLAY);
 
 // And the replay
 if (process.env.REPLAY) {
     let multiplier = parseInt(process.env.REPLAY_MULTIPLIER || '1');
-    const replayBase = parseInt(process.env.REPLAY);
 
     getNow = (): Epoch => {
         const now = Math.trunc(Date.now() / 1000);
@@ -261,7 +264,7 @@ async function main() {
     const internalName = location.name.replace(/[^a-z]/g, '').substring(0, 10);
 
     // Start a listener for the location and competition
-    if (!process.env.REPLAY) {
+    if (!replayBase) {
         aprsListener = spawnAprsContestListener({competition: internalName, location: {lt: location.lat, lg: location.lng}});
     }
 
@@ -278,7 +281,6 @@ async function main() {
     }
 
     const server = http.createServer((req, res) => {
-
         // health check
         if (req?.url == '/status') {
             res.writeHead(200);
@@ -451,8 +453,7 @@ main().then(() => console.log('Started'));
 //
 // Get current date code
 async function getDCode() {
-    const dcode = await db.query(process.env.REPLAY ? escape`SELECT todcode(from_unixtime(${process.env.REPLAY})) datecode FROM compstatus LIMIT 1` : 'SELECT datecode FROM compstatus LIMIT 1');
-    return dcode[0].datecode;
+    return replayBase ? toDateCode(new Date(replayBase * 1000)) : (await db.query('SELECT datecode FROM compstatus LIMIT 1'))[0].datecode;
 }
 
 //
@@ -464,7 +465,7 @@ async function updateClasses() {
     let runAgain = false;
 
     // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await db.query(process.env.REPLAY ? escape`SELECT class,todcode(from_unixtime(${process.env.REPLAY})) datecode FROM compstatus` : 'SELECT class, datecode FROM compstatus');
+    const classes = await db.query(replayBase ? escape`SELECT class,${toDateCode(new Date(replayBase * 1000))} datecode FROM compstatus` : 'SELECT class, datecode FROM compstatus');
 
     // Now convert that into the main structure
     function channelName(className, datecode) {
@@ -1139,12 +1140,4 @@ function timeToText(t: Epoch): string {
     if (!t) return '';
     var cT = new Date(t * 1000);
     return cT.toLocaleTimeString('en-GB', {timeZone: location.tz, hour: '2-digit', minute: '2-digit'});
-}
-
-function fromDateCode(dcode: string): string {
-    const now = new Date();
-    const year = parseInt(dcode.charAt(0)) + now.getFullYear() - (now.getFullYear() % 10);
-    const month = parseInt(dcode.charAt(1), 36);
-    const day = parseInt(dcode.charAt(2), 36);
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
