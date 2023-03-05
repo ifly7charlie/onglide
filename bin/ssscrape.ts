@@ -15,6 +15,9 @@ import {findOne, findAll, existsOne, removeElement, getChildren, getInnerHTML, g
 
 import {Element} from 'domhandler';
 
+// Datecode helpers
+import {fromDateCode, toDateCode} from '../lib/datecode';
+
 // Helper
 const fetcher = (url) => fetch(url).then((res) => res.json());
 const https = require('node:https');
@@ -165,9 +168,12 @@ async function ssscrape(deep = false) {
         .then((res) => res.text())
         .then((body) => {
             let dom = htmlparser.parseDocument(body);
-            const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class != 'contest-title', dom.children);
+            console.log(dom);
+            const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class != 'contest-title', dom?.children);
 
-            const name = textContent(findOne((x) => x.name == 'h1', contestInfo.children)).trim();
+            console.log(contestInfo);
+
+            const name = textContent(findOne((x) => x.name == 'h1', contestInfo?.children)).trim();
             const site = textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', contestInfo.children)).trim();
             const dates = textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', contestInfo.children)).trim();
 
@@ -222,7 +228,7 @@ async function ssscrape(deep = false) {
 
                 // Make sure we have rows for each day and that compstatus is correct
                 //    await mysql_db.query( escape`call contestdays()`);
-                await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
+                await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode(new Date())}`);
 
                 const dates = findAll((x) => x.name == 'tr' && x.parent?.nodeType == 1 && x.parent?.name == 'tbody', result.children);
 
@@ -291,7 +297,7 @@ async function update_class(className, data, dataHtml) {
 
     // Make sure we have rows for each day and that compstatus is correct
     //    await mysql_db.query( escape`call contestdays()`);
-    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
+    await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode(new Date())}`);
 
     // Now add details of pilots
     await update_pilots(data['Piloter']);
@@ -379,6 +385,7 @@ async function update_pilots(data) {
 async function process_day_task(day, classid, classname) {
     let rows = 0;
     let date = day.task_date;
+    let dateCode = toDateCode(date);
 
     let script = '';
     let status = day.result_status; //.replace(/^([a-z])/\U1/; I think this uppercases first letter? but perl
@@ -396,7 +403,7 @@ async function process_day_task(day, classid, classname) {
 
     // So we don't rebuild tasks if they haven't changed
     const hash = createHash('sha256').update(JSON.stringify(day)).digest('base64');
-    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=todcode(${date}) AND class=${classid}`);
+    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=${dateCode} AND class=${classid}`);
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
         console.log(`${classid} - ${date}: task unchanged`);
@@ -414,17 +421,17 @@ async function process_day_task(day, classid, classname) {
         .query(
             escape`
             UPDATE compstatus SET starttime = COALESCE(${convert_to_mysql(day.no_start)},starttime)
-              WHERE datecode = todcode(${date})`
+              WHERE datecode = ${dateCode}`
         )
 
         // remove any old crud
-        .query(escape`DELETE FROM tasks WHERE datecode=todcode(${date}) AND class=${classid} AND task='B'`)
+        .query(escape`DELETE FROM tasks WHERE datecode=${dateCode} AND class=${classid} AND task='B'`)
 
         // and add a new one
         .query(
             escape`
           INSERT INTO tasks (datecode, class, flown, description, distance, hdistance, duration, type, task, hash )
-             VALUES ( todcode(${date}), ${classid},
+             VALUES ( ${dateCode}, ${classid},
                       'N', ${day.task_type},
                       ${day.task_distance / 1000},
                       ${day.task_distance / 1000},
@@ -470,9 +477,9 @@ async function process_day_task(day, classid, classname) {
                 const bearingDeg = previousPoint ? (bearing(previousPoint, currentPoint) + 360) % 360 : 0;
                 let hi = 0; // only used when windicapping
 
-                query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
+                query = query + "( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
 
-                values = values.concat([classid, date, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0]);
+                values = values.concat([classid, dateCode, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0]);
             }
 
             query = query.substring(0, query.length - 1);
@@ -483,7 +490,7 @@ async function process_day_task(day, classid, classname) {
         // Remove the old task and legs for this class and date
         .query((r, ro) => {
             const taskid = ro[ro.length - 2].insertId;
-            return ['DELETE FROM tasks WHERE class=? AND taskid != ? AND datecode = todcode(?)', [classid, taskid, date]];
+            return ['DELETE FROM tasks WHERE class=? AND taskid != ? AND datecode = ?', [classid, taskid, dateCode]];
         })
         .query((r, ro) => {
             const taskid = ro[ro.length - 3].insertId;
@@ -500,7 +507,7 @@ async function process_day_task(day, classid, classname) {
         .query(
             escape`INSERT IGNORE INTO pilotresult
                ( class, datecode, compno, status, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable )
-             SELECT ${classid}, todcode(${date}),
+             SELECT ${classid}, ${dateCode},
                compno, '-', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N'
              FROM pilots WHERE pilots.class = ${classid}`
         )
@@ -511,7 +518,7 @@ async function process_day_task(day, classid, classname) {
                                                    notes, calendardate, datecode )
                                          VALUES ( ${classid}, LEFT(${script},60), ${Math.round(day.task_distance / 100) / 10},
                                                   ${status}, ${''}, winddir, windspeed, ${day.task_number}, 'Y',
-                                                  ${day?.notes || ''}, ${date}, todcode(${date}))
+                                                  ${day?.notes || ''}, ${date}, ${dateCode})
                                        ON DUPLICATE KEY
                                        UPDATE turnpoints = values(turnpoints), script = LEFT(values(script),60), length=values(length),
                                           result_type=values(result_type), info=values(info),
@@ -523,17 +530,17 @@ async function process_day_task(day, classid, classname) {
         // if they are marked as flying etc. If the day is cancelled we want that updated here as well
         // Status not used at present but a way of keeping track of if they are flying etc.
         .query(() => {
-            if (day.result_status != 'cancelled') return ["UPDATE compstatus SET status='B' WHERE class=? AND datecode=todcode(?) AND status NOT IN ( 'L', 'S', 'R', 'H', 'Z' )", [classid, date]];
-            else return ["UPDATE compstatus SET status='Z' WHERE class=? AND datecode=todcode(?)", [classid, date]];
+            if (day.result_status != 'cancelled') return ["UPDATE compstatus SET status='B' WHERE class=? AND datecode=? AND status NOT IN ( 'L', 'S', 'R', 'H', 'Z' )", [classid, dateCode]];
+            else return ["UPDATE compstatus SET status='Z' WHERE class=? AND datecode=?", [classid, dateCode]];
         })
 
         // If it was cancelled then mark it as not flown, this will stop the UI from displaying it
         .query(() => {
-            if (day.result_status == 'cancelled') return ['UPDATE tasks SET flown="N" WHERE class=? AND datecode=todcode(?)', [classid, date]];
+            if (day.result_status == 'cancelled') return ['UPDATE tasks SET flown="N" WHERE class=? AND datecode=?', [classid, dateCode]];
             else return null;
         })
         .query(() => {
-            if (day.result_status == 'cancelled') return ['UPDATE contestday SET status="N" WHERE class=? AND datecode=todcode(?)', [classid, date]];
+            if (day.result_status == 'cancelled') return ['UPDATE contestday SET status="N" WHERE class=? AND datecode=?', [classid, dateCode]];
             else return null;
         })
         // Combine results
@@ -543,7 +550,7 @@ async function process_day_task(day, classid, classname) {
 
         // Update the last date for results
         .query(
-            escape`UPDATE compstatus SET resultsdatecode = GREATEST(todcode(${date}),COALESCE(resultsdatecode,todcode(${date})))
+            escape`UPDATE compstatus SET resultsdatecode = GREATEST(${dateCode},COALESCE(resultsdatecode,${dateCode}))
                        WHERE class=${classid}`
         )
         .query(
@@ -562,6 +569,7 @@ async function process_day_task(day, classid, classname) {
 async function process_day_results(classid, className, date, day_number, results) {
     let rows = 0;
     let doCheckForOGNMatches = false;
+    let dateCode = toDateCode(date);
 
     if (!results || results[0].length < 0) {
         console.log(`${className}: ${date} - no results`);
@@ -658,7 +666,7 @@ async function process_day_results(classid, className, date, day_number, results
                              speed=${scoredvals.as}, distance=${scoredvals.ad},
                              hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd},
                              daypoints=${parseInt(row.Points.replace(',', ''))}, dayrank=${parseInt(row['#'].replace('.', ''))}, totalpoints=${0}, totalrank=${0}, penalty=${0}
-                          WHERE datecode=todcode(${date}) AND compno=${pilot} and class=${classid}`);
+                          WHERE datecode=${dateCode} AND compno=${pilot} and class=${classid}`);
 
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );
             rows += r.affectedRows;
@@ -666,7 +674,7 @@ async function process_day_results(classid, className, date, day_number, results
             // check the file to check tracking details
             let {igcavailable} = (
                 await mysql_db.query(escape`SELECT igcavailable FROM pilotresult
-                                                              WHERE datecode=todcode(${date}) and compno=${pilot} and class=${classid}`)
+                                                              WHERE datecode=${dateCode} and compno=${pilot} and class=${classid}`)
             )[0] || {igcavailable: false};
             if ((igcavailable || 'Y') == 'N' && url) {
                 await processIGC(classid, pilot, location, date, url, https, mysql, () => {});
@@ -683,7 +691,7 @@ async function process_day_results(classid, className, date, day_number, results
     // Did anything get updated?
     if (rows) {
         await mysql_db.query(escape`UPDATE contestday SET results_uploaded=NOW()
-                                 WHERE class=${classid} AND datecode=todcode(${date}) and STATUS != "Z"`);
+                                 WHERE class=${classid} AND datecode=${dateCode} and STATUS != "Z"`);
     }
 
     // rescore the day, but only for preliminary results
