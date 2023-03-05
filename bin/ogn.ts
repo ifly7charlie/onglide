@@ -1,4 +1,6 @@
-// Copyright 2020-2022 (c) Melissa Jenkins
+#!/usr/bin/env node
+
+// Copyright 2020-2023 (c) Melissa Jenkins
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
@@ -276,6 +278,7 @@ async function main() {
     }
 
     const server = http.createServer((req, res) => {
+
         // health check
         if (req?.url == '/status') {
             res.writeHead(200);
