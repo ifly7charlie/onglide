@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Copyright 2020-2022 (c) Melissa Jenkins
+// Copyright 2020-2023 (c) Melissa Jenkins
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
@@ -278,13 +278,34 @@ async function main() {
     }
 
     const server = http.createServer((req, res) => {
-        const body = http.STATUS_CODES[200];
 
-        res.writeHead(200, {
-            'Content-Length': body.length,
-            'Content-Type': 'text/plain'
-        });
-        res.end(body);
+        // health check
+        if (req?.url == '/status') {
+            res.writeHead(200);
+            res.end(http.STATUS_CODES[200]);
+            return;
+        }
+
+        // explict score request
+        const [valid, command, channelName] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+).json$/i) || [false, '', ''];
+        console.log(valid, command, channelName);
+        if (valid) {
+            console.log(Object.keys(channels));
+            if (channelName in channels) {
+                const channel = channels[channelName];
+                // Only support returning the scores
+                if (command == 'scores') {
+                    const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
+                    res.setHeader('Content-Type', 'application/json');
+                    res.writeHead(200);
+                    res.end(JSON.stringify(msg));
+                    return;
+                }
+            }
+        }
+        console.log('url not found', req?.url);
+        res.writeHead(404);
+        res.end(http.STATUS_CODES[404]);
     });
     server.listen(process.env.WEBSOCKET_PORT || 8080);
 
@@ -551,7 +572,7 @@ async function updateTasks(className: ClassName, datecode: Datecode): Promise<Ta
     const taskdetails = ((await db.query(escape`
          SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped,
                CASE WHEN nostart ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${datecode}),' ',nostart))-(SELECT tzoffset FROM competition)
+                    ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
                END nostartutc
           FROM tasks, classes c
           WHERE tasks.datecode= ${datecode}
@@ -604,7 +625,7 @@ async function updateTrackers(datecode: string) {
 
     let cTrackers = await db.query(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
-                                           ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${datecode}),' ',ppr.start))-(SELECT tzoffset FROM competition)
+                                           ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
                                         END utcStart
                                         FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join
                                              (select compno,class,start from pilotresult pr where pr.datecode=${datecode}) as ppr
@@ -860,10 +881,10 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
 //
 async function getInitialTrackPoints(channel: Channel): Promise<void> {
     /*    const pilotStarts = db.query(escape`SELECT CASE WHEN start ='00:00:00' THEN 0
-                                           ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${channel.datecode}),' ',nostart))-(SELECT tzoffset FROM competition)
+          ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(channel.datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
                                         END utcStart,
                                          CASE WHEN finish ='00:00:00' THEN 0
-                                           ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${channel.datecode}),' ',nostart))-(SELECT tzoffset FROM competition)
+                                         ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(channel.datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
                                         END utcFinish
                                      FROM pilotresult WHERE class=${channel.className} and datecode=${channel.datecode}`);
     */
@@ -1114,8 +1135,16 @@ function identifyUnknownGlider(data: PositionMessage): void {
 }
 
 // Display a time as competition time, use 24hr clock (en-GB)
-function timeToText(t) {
+function timeToText(t: Epoch): string {
     if (!t) return '';
     var cT = new Date(t * 1000);
     return cT.toLocaleTimeString('en-GB', {timeZone: location.tz, hour: '2-digit', minute: '2-digit'});
+}
+
+function fromDateCode(dcode: string): string {
+    const now = new Date();
+    const year = parseInt(dcode.charAt(0)) + now.getFullYear() - (now.getFullYear() % 10);
+    const month = parseInt(dcode.charAt(1), 36);
+    const day = parseInt(dcode.charAt(2), 36);
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }

@@ -151,7 +151,8 @@ message PilotScore {
     optional Stats stats = 43;
     optional Wind wind = 56;
 
-    // List of points [x,y,x,y,x,y]
+
+    // List of points [x,y,actualDistance,hcapDistance,x,y,actualDistance,hcapDistance,x,y,actualDistance,hcapDistance]
     repeated float scoredPoints = 52;
     repeated float minDistancePoints = 60;
     repeated float maxDistancePoints = 61;

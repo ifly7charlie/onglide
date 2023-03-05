@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Copyright 2020 (c) Melissa Jenkins
+// Copyright 2020- (c) Melissa Jenkins
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
