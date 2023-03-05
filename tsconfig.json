@@ -1,5 +1,4 @@
 {
-
   "compilerOptions": {
     "target": "es2015",
     "lib": [
@@ -34,5 +33,4 @@
     "lib/flightprocessing/dijkstras.ts",
     "test"
   ]
-
 }
