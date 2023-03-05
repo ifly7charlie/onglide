@@ -287,7 +287,7 @@ export default function MApp(props: {
             }
             return undefined;
         },
-        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, Math.trunc(props.t / 60), props.options.taskp] : [null]
+        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, Math.trunc(props.t / 60), props.options.taskp] : [null, null, null, null, null]
     );
 
     useMemo(() => {

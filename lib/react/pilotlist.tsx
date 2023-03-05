@@ -230,7 +230,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 {pilot.compno}:<b>{pilot.name}</b>
                 <span style={{float: 'right', paddingRight: '0.5em'}}>{pilot.gliderType.substring(0, 20)}</span>
                 <br />
-                {new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country)}
+                {pilot.country ? new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) : ''}
                 <br />
                 <span style={{fontSize: '80%'}}>
                     {ognCoverage}
