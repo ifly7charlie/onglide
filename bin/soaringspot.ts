@@ -100,8 +100,12 @@ async function roboControl() {
                 return res.json();
             }
         })
-        .then((data: any[]) => {
-            for (const p of data || []) {
+        .then((data: any[] | any) => {
+            let location = data;
+            if (data?.message) {
+                location = data.message;
+            }
+            for (const p of location || []) {
                 if (p.flarm?.length) {
                     console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
                     mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);

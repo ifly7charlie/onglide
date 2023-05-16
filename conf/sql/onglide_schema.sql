@@ -57,6 +57,7 @@ CREATE TABLE `compstatus` (
   `class` char(15) NOT NULL,
   `datecode` char(3) DEFAULT NULL COMMENT 'current contest date code for this class',
   
+  `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,W=waitlist,X=confirm reg,P=prebrief,B=afterbrief,L=launched,S=startopen/flying,R=all reported,H=all home,Z=scrubbed,O=comp over',
   `resultsdatecode` char(3) DEFAULT NULL COMMENT 'what date is scoring up to with uploading, results after this date wont be displayed',
   `task` char(1) DEFAULT 'A' COMMENT 'selected task',
   
@@ -84,8 +85,8 @@ CREATE TABLE `contestday` (
   `results_uploaded` datetime DEFAULT NULL,
   `info` char(255) DEFAULT NULL COMMENT 'Messages output about the task',
   `status` char(1) DEFAULT 'N' COMMENT 'What happened with the day - Y = contest, Z = scrubbed, N = not yet flown',
-  `comments` text DEFAULT NULL,
-  `notes` text DEFAULT NULL,
+  `comments` text ,
+  `notes` text ,
   `igcavailable` char(1) DEFAULT 'N' COMMENT 'Are there any IGC files for this day Y/N',
   `windspeed` int(11) DEFAULT NULL COMMENT 'Used for UK Scoring script windicapping',
   `winddir` int(11) DEFAULT NULL COMMENT 'Used for UK Scoring script windicapping',
@@ -311,7 +312,7 @@ CREATE TABLE `tasks` (
   `duration` time DEFAULT NULL COMMENT 'AAT time',
   `nostart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
 
-  `hash` TEXT DEFAULT NULL COMMENT 'hash of value from soaring spot to prevent redownloading',
+  `hash` TEXT  COMMENT 'hash of value from soaring spot to prevent redownloading',
   
   PRIMARY KEY (`taskid`),
   UNIQUE KEY `integrity` (`class`,`datecode`,`task`),

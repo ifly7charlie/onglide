@@ -3,6 +3,8 @@ import escape from 'sql-template-strings';
 
 import {calculateTaskLength} from '../../../lib/flightprocessing/taskhelper';
 
+import {toDateCode, fromDateCode} from '../../../lib/datecode';
+
 export default async function taskHandler(req, res) {
     const {
         query: {className}
@@ -17,7 +19,7 @@ export default async function taskHandler(req, res) {
     const contestday = await query(escape`
          SELECT contestday.*, DATE_FORMAT( contestday.calendardate, "%a %D %M" ) displaydate
           FROM contestday, compstatus cs
-          WHERE (((${process.env.REPLAY || ''}) = '' AND contestday.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND contestday.datecode=todcode(from_unixtime(${process.env.REPLAY}))))
+          WHERE (((${process.env.REPLAY || ''}) = '' AND contestday.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND contestday.datecode=${toDateCode(new Date(parseInt(process.env.REPLAY) * 1000))}))
             AND cs.class = contestday.class and contestday.class= ${className}
           LIMIT 1
     `);
@@ -31,11 +33,12 @@ export default async function taskHandler(req, res) {
     }
 
     const datecode = contestday[0].datecode;
+    const date = fromDateCode(datecode);
 
     const taskdetails = await query(escape`
          SELECT *, time_to_sec(tasks.duration) durationsecs, 
                CASE WHEN nostart ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${datecode}),' ',nostart))-(SELECT tzoffset FROM competition)
+                    ELSE UNIX_TIMESTAMP(CONCAT(${date},' ',nostart))-(SELECT tzoffset FROM competition)
                END utcstartutc
           FROM tasks
           WHERE tasks.datecode= ${datecode} and tasks.class= ${className} and tasks.flown='Y'
