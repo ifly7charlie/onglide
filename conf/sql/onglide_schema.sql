@@ -62,7 +62,7 @@ CREATE TABLE `compstatus` (
   
   `starttime` time DEFAULT NULL COMMENT 'Startline open time',
   `startheight` int(11) DEFAULT '0',
-  `notes` text default '' COMMENT 'Headline message to display', 
+  `notes` text  COMMENT 'Headline message to display', 
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Current competition status, one row per class';
 
