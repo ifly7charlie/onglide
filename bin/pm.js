@@ -122,7 +122,7 @@ async function doIt() {
 			'MYSQL_DATABASE': db,
 			SHORT_NAME: domain,
 			NEXT_PUBLIC_SITEURL: keys.domain,
-			NEXT_PUBLIC_WEBSOCKET_HOST: keys.domain,
+			NEXT_PUBLIC_WEBSOCKET_HOST: process.env.NEXT_PUBLIC_WEBSOCKET_HOST ?? keys.domain,
 			API_HOSTNAME: (process.env.API_HOSTNAME.slice(0,process.env.API_HOSTNAME.indexOf(":"))||process.env.API_HOSTNAME) + ':' + (3000+keys.portoffset),
 			WEBSOCKET_PORT: 8000+keys.portoffset,
 			STATUS_SERVER_PORT: 8100+keys.portoffset
@@ -146,10 +146,10 @@ async function doIt() {
 			else {
 				console.log( "starting" );
 				if( ! fe ) {
-					const scoringScript = {'soaringspotkey': 'bin/soaringspot.js',
-										   'rst': 'bin/rst.js',
-										   'sgp': 'bin/sgp.js',
-										   'soaringspotscrape': 'bin/ssscrape.js' }[keys.type];
+					const scoringScript = {'soaringspotkey': 'dist/bin/soaringspot.js',
+										   'rst': 'dist/bin/rst.js',
+										   'sgp': 'dist/bin/sgp.js',
+										   'soaringspotscrape': 'dist/bin/ssscrape.js' }[keys.type];
 
 					if( scoringScript ) {
 						console.log( `  using scoring script ${scoringScript}` );
@@ -169,7 +169,7 @@ async function doIt() {
 				
 				if( ! next ) {
 				    await pm2.start( {
-					    script: 'bin/ogn.js',
+					    script: 'dist/bin/ogn.js',
 					    name: domain+"_ogn",
 					    env: environment,
 					    restart_delay: 30000,
@@ -196,6 +196,7 @@ async function doIt() {
 					    pm2.restart( domain+"_next", args, () => { console.log( "next restarted" ); process.exit() } );
 				    }
                     else {
+console.log('next env', environment);
 					    pm2.start( args, () => { console.log( "next started" ); process.exit() } );
                     }
 				}
