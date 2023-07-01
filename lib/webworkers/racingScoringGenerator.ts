@@ -146,19 +146,22 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                         taskStatus.legs[leg].minPossible = {distance, point};
                         taskStatus.distanceRemaining = (taskStatus.distanceRemaining + distance) as DistanceKM;
                     });
-                } catch (e) {}
+                    taskStatus.legs[taskStatus.currentLeg].minPossible.start = taskStatus.lastProcessedPoint;
+                } catch (e) {
+                    // Lazy, should really confirm everything is valid ;)
+                }
 
-                taskStatus.legs[taskStatus.currentLeg].minPossible.start = taskStatus.lastProcessedPoint;
             }
 
             log(JSON.stringify(taskStatus, null, 4));
             yield taskStatus;
         } catch (e) {
             // it's best if we just carry on because otherwise we may never score them again
-            console.log('Exception in racingScoringGenerator');
-            console.log(e);
-            console.log(JSON.stringify(current));
-            console.log(JSON.stringify(task));
+    console.log(`unable to score ${compno} due to exception ${e?.emssage}`);
+//            console.log('Exception in racingScoringGenerator');
+//          console.log(e);
+//            console.log(JSON.stringify(current));
+//            console.log(JSON.stringify(task));
         }
     }
     console.log(`RSG: ${compno} done`);
