@@ -43,18 +43,15 @@ body {
     }
 
     .resultsOverlay {
-        //		width: 10000px;
         left: 0px;
-        height: 130px;
-        //        top: 1rem;
+        height: 95px;
         width: 100vw;
         overflow-x: auto;
         overflow-y: hidden;
         position: relative;
-        margin-top: -4px;
+        margin-top: -1px;
         z-index: 20;
         clear: both;
-        margin-top: 0.3rem;
         background-color: rgba(255, 255, 255, 0.7);
         //        background-color: red;
     }
@@ -101,7 +98,7 @@ body {
         padding: 0px;
         margin: 0px;
         clear: both;
-        margin-top: 2em;
+        margin-top: 0.2em;
         display: flex;
         flex-wrap: none;
     }
