@@ -6,7 +6,6 @@ import Head from 'next/head';
 import Navbar from 'react-bootstrap/Navbar';
 import Nav from 'react-bootstrap/Nav';
 
-import {FlyToInterpolator} from '@deck.gl/core';
 import {useState} from 'react';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
@@ -73,7 +72,8 @@ function Menu(props) {
     // Try and extract a short form of the name, only letters and spaces stop at first number
     const shortName =
         comp.competition.name
-            .replace(/World Gliding Championship[s]*/gi, 'WGC')
+            .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
+            .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
             .match(new RegExp(/^([0-9]*[\p{L}\s]*)/, 'u'))?.[1]
             ?.trim() || comp.competition.name.substring(0, 25) + '...';
 
@@ -175,6 +175,7 @@ export default function CombinePage(props) {
                     {comp.competition.name} - {className}
                 </title>
                 <meta name="viewport" content="width=device-width, minimal-ui" />
+                <link rel="manifest" href="/manifest.json" />
                 <IncludeJavascript />
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />

@@ -1,0 +1,5 @@
+{
+    "name": "WWGC",
+    "display": "standalone",
+    "start_url": "/?standalone=true"
+}
