@@ -232,7 +232,7 @@ export default function MApp(props: {
                 follow &&
                 selectedPilotData &&
                 selectedPilotData.track?.vario?.lat && //
-                selectedPilotData.score?.currentLeg &&
+                selectedPilotData.score?.currentLeg !== undefined &&
                 taskGeoJSON?.tp?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
@@ -265,7 +265,6 @@ export default function MApp(props: {
                     }
                 }
 
-                //              console.log('move viewport');
                 props.setViewport(
                     //                    Object.assign(
                     {
