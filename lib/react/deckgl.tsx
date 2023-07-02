@@ -240,7 +240,10 @@ export default function MApp(props: {
                 const lng = selectedPilotData.track.vario.lng;
 
                 let fbearing = props.options.taskUp == 2 ? props.viewport.bearing : 0;
-                const npol = selectedPilotData.score.minDistancePoints.slice(4, 6);
+                const npol =
+                    selectedPilotData.score.minDistancePoints.length > 6 // make sure we have next point or use first tp
+                        ? selectedPilotData.score.minDistancePoints.slice(4, 6)
+                        : taskGeoJSON?.track?.features?.[0]?.geometry?.coordinates?.[1];
                 let position = props.viewport?.position;
                 if (props.options.taskUp == 1) {
                     fbearing = bearing([lng, lat], npol);
@@ -258,7 +261,6 @@ export default function MApp(props: {
                     if (map && map.transform && map.transform.elevation) {
                         const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
                         position = [0, 0, mapbox_elevation];
-                        console.log(mapbox_elevation);
                     }
                 }
 
