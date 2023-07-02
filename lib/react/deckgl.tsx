@@ -252,36 +252,23 @@ export default function MApp(props: {
                             distance([lng, lat], [props.viewport.lng, props.viewport.lat]) < 0.4) ||
                         distance([lng, lat], npol) < 0.75
                     ) {
-                        //                        console.log('not far enough');
                         return undefined;
                     }
                     const map = mapRef?.current?.getMap();
                     if (map && map.transform && map.transform.elevation) {
-                        // && map.queryTerrainElevation) {
                         const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
-                        // const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(new LngLat(lng, lat)));
                         position = [0, 0, mapbox_elevation];
                         console.log(mapbox_elevation);
                     }
                 }
 
-                props.setViewport(
-                    //                    Object.assign(
-                    {
-                        ...props.viewport,
-                        latitude: lat,
-                        longitude: lng,
-                        bearing: fbearing,
-                        position
-                    } //,
-                    //                        map2d ? {} : {}
-                    /*                            : {
-                                  transitionInterruption: TRANSITION_EVENTS.BREAK, //
-                                  transitionDuration: 600,
-                                  transitionInterpolator: new LinearInterpolator({transitionProps: ['longitude', 'latitude', 'bearing']})
-                              } */
-                    //                  )
-                );
+                props.setViewport({
+                    ...props.viewport,
+                    latitude: lat,
+                    longitude: lng,
+                    bearing: fbearing,
+                    position
+                });
                 return fbearing;
             }
             return undefined;
