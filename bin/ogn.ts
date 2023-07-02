@@ -261,7 +261,7 @@ async function main() {
     await updateDDB();
 
     // Generate a short internal name
-    const internalName = location.name.replace(/[^a-z]/g, '').substring(0, 10);
+    const internalName = location.name.replace(/[^a-z]/ig, '').substring(0, 10);
 
     // Start a listener for the location and competition
     if (!replayBase) {
@@ -290,13 +290,12 @@ async function main() {
 
         // explict score request
         const [valid, command, channelName] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+).json$/i) || [false, '', ''];
-        console.log(valid, command, channelName);
         if (valid) {
-            console.log(Object.keys(channels));
             if (channelName in channels) {
                 const channel = channels[channelName];
                 // Only support returning the scores
                 if (command == 'scores') {
+                    console.log('sending scores for ', channelName)
                     const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
                     res.setHeader('Content-Type', 'application/json');
                     res.writeHead(200);
@@ -305,7 +304,6 @@ async function main() {
                 }
             }
         }
-        console.log('url not found', req?.url);
         res.writeHead(404);
         res.end(http.STATUS_CODES[404]);
     });
@@ -338,6 +336,7 @@ async function main() {
             ws.isAlive = false;
             console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
+        ws.on('error', console.error);
         ws.on('message', (m) => {
             if (ws.isAlive) {
                 console.log('requested pilot track', '' + m);
