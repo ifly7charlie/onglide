@@ -19,6 +19,8 @@ import {getElevationOffset} from '../lib/getelevationoffset';
 // handle unkownn gliders
 import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
+import {toDateCode} from '../lib/datecode'
+
 import _groupby from 'lodash.groupby';
 import _forEach from 'lodash.foreach';
 
@@ -91,7 +93,7 @@ async function roboControl() {
         return;
     }
 
-    fetch(robocontrol_url)
+    await fetch(robocontrol_url)
         .then((res) => {
             if (res.status != 200) {
                 console.log(` ${robocontrol_url}: ${res}`);
@@ -100,7 +102,7 @@ async function roboControl() {
                 return res.json();
             }
         })
-        .then((data: any[] | any) => {
+        .then(async (data: any[] | any) => {
             let location = data;
             if (data?.message) {
                 location = data.message;
@@ -108,8 +110,8 @@ async function roboControl() {
             for (const p of location || []) {
                 if (p.flarm?.length) {
                     console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
-                    mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
+                    await mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
+                    await mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
                 }
             }
         });
@@ -166,7 +168,7 @@ async function soaringSpot(deep = false) {
 
             // Update each class in the competition
             for (const cclass of contest._embedded['http://api.soaringspot.com/rel/classes']) {
-                update_class(cclass, keys);
+                await update_class(cclass, keys);
             }
         }
     });
@@ -347,7 +349,7 @@ async function download_picture(compno, classid, mysql, context) {
 
     if (false && !success) {
         console.log(` ${classid}:${compno}: image update failed`);
-        mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, NULL, unix_timestamp() )
+        await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, NULL, unix_timestamp() )
                                   ON DUPLICATE KEY UPDATE image=NULL, updated=values(updated)`);
     }
 }
@@ -457,20 +459,29 @@ async function process_day_task(day, classid, classname, keys) {
         return;
     }
 
+    // Less likely to change for no reason
+    const safeTask = { ...task_details };
+    delete safeTask['_links'];
+    delete safeTask['_embedded'];
+
     // So we don't rebuild tasks if they haven't changed
-    const hash = createHash('sha256').update(JSON.stringify(turnpoints)).update(JSON.stringify(task_details)).digest('base64');
-    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=todcode(${date}) AND class=${classid}`);
+    const hash = createHash('sha256').update(JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points'])).update(JSON.stringify(safeTask)).digest('base64');
+    const dbhashrow = await mysql_db.query(
+        escape`SELECT hash FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid}`);
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
-        console.log(`${classid} - ${date}: task unchanged`);
-        console.log(hash, dbhashrow[0]);
+        console.log(`${classid} - ${date}: task unchanged`,hash, dbhashrow[0]);
         return;
     } else {
-        console.log(`${classid} - ${date}: task changed`);
+        console.log('--------------------');
+        console.log('safeTask',JSON.stringify(safeTask));
+        console.log('turnpoints',JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points']));
+        console.log('date', date, 'class', classid );
+        console.log(`${classid} - ${date}: task changed`,hash, dbhashrow);
     }
 
     // Do this as one block so we don't end up with broken tasks
-    mysql_db
+    await mysql_db
         .transaction()
 
         // If it is the current day and we have a start time we save it

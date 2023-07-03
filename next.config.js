@@ -5,7 +5,7 @@ module.exports = (phase, {defaultConfig}) => {
     console.log('Next config' + process.env.SHORT_NAME);
     const nextConfig = {
         /* config options here */
-        distDir: '.build',
+        distDir: ".build"+process.env.SHORT_NAME,
         i18n: {
             // These are all the locales you want to support in
             // your application
