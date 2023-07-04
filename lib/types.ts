@@ -115,6 +115,7 @@ export interface TaskLeg {
     geoJSON?: any; // geoJSON for the sector
     lineString?: any;
     point?: any; // coordiantes of center geoJSON style
+    altitude?: number; // altitude of the point
     coordinates?: any; // array of geoJSON ordered points eg [ [lng,lat], [lng,lat] ]
     quickSector?: boolean; // are we simple or not?
     legDistanceAdjust?: DistanceKM; // start/finish rings need length adjustment

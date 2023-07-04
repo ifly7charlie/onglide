@@ -127,8 +127,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 }
 
                 doHandicapping(sl);
-                doGrCalc(sl.actual, sl.alt);
-                doGrCalc(sl.handicapped, sl.alt);
+                doGrCalc(sl.actual, sl.alt - leg.altitude ?? 0);
+                doGrCalc(sl.handicapped, sl.alt - leg.altitude ?? 0);
 
                 // If we don't have a time then it's because we are in progress, don't use leg.point as that's scored
                 // and may have fake time for AATs use the actual time we are scored to which is in item.t
@@ -214,8 +214,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // Calculate overall speed and remaining GR if there is a need for one
             score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
             if (!item.utcFinish && item.lastProcessedPoint?.a) {
-                doGrCalc(score.actual, item.lastProcessedPoint.a);
-                doGrCalc(score.handicapped, item.lastProcessedPoint.a);
+                const finishAlt = task.legs[task.legs.length - 1].altitude ?? 0;
+                doGrCalc(score.actual, item.lastProcessedPoint.a - finishAlt);
+                doGrCalc(score.handicapped, item.lastProcessedPoint.a - finishAlt);
             }
         }
 
