@@ -192,7 +192,7 @@ if (process.env.REPLAY) {
     };
 }
 
-console.log('now:', getNow());
+console.log(`Competition delay: ${compDelay} seconds, competition time: ${getNow()} = ${new Date(getNow() * 1000).toISOString()}, replay: ${replayBase > 0}`);
 
 async function main() {
     if (error) {
