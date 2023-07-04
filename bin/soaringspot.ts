@@ -19,7 +19,7 @@ import {getElevationOffset} from '../lib/getelevationoffset';
 // handle unkownn gliders
 import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
-import {toDateCode} from '../lib/datecode'
+import {toDateCode} from '../lib/datecode';
 
 import _groupby from 'lodash.groupby';
 import _forEach from 'lodash.foreach';
@@ -460,7 +460,7 @@ async function process_day_task(day, classid, classname, keys) {
     }
 
     // Less likely to change for no reason
-    const safeTask = { ...task_details };
+    const safeTask = {...task_details};
     delete safeTask['_links'];
     delete safeTask['_embedded'];
 
