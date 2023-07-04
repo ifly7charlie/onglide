@@ -17,7 +17,7 @@ import {aprsParser, aprsPacket} from 'js-aprs-fap';
 
 // Correction factors
 import {altitudeOffsetAdjust} from '../offsets.js';
-import {getElevationOffset} from '../getelevationoffset.js';
+import {getElevationOffset} from '../getelevationoffset';
 //import { getOffset } from '../egm96.mjs';
 
 // Helper function for geometry

@@ -16,17 +16,19 @@ let pending = [];
 let referrer = undefined;
 let accessToken = undefined;
 
-let LRU = require('lru-cache'),
-    options = {
-        max: 3600,
-        dispose: function (key, n) {
-            console.log('flushed ' + key + ' from cache');
-        },
-        updateAgeOnGet: true,
-        allowStale: true,
-        ttl: 72 * 3600 * 1000
+import {LRUCache} from 'lru-cache';
+
+const options = {
+    max: 3600,
+    dispose: function (key, n) {
+        console.log('flushed ' + key + ' from cache');
     },
-    cache = new LRU(options);
+    updateAgeOnGet: true,
+    allowStale: true,
+    ttl: 72 * 3600 * 1000
+};
+
+const cache = new LRUCache(options);
 
 //    module.exports = function(tk) {
 //      return function(p, cb) {
