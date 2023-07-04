@@ -275,6 +275,7 @@ CREATE TABLE `taskleg` (
   `bearing` int(11) DEFAULT NULL,
   `nlat` float DEFAULT NULL COMMENT 'location of tp',
   `nlng` float DEFAULT NULL COMMENT 'location of tp',
+  `altitude` float default 0 comment 'altitude of the tp',
   `Hi` float DEFAULT NULL COMMENT 'handicap/windicap adjustment for the leg',
 
   `type` enum('sector','line','thistle') DEFAULT NULL COMMENT 'sector type',

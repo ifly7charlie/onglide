@@ -466,18 +466,18 @@ async function process_day_task(day, classid, classname, keys) {
 
     // So we don't rebuild tasks if they haven't changed
     const hash = createHash('sha256').update(JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points'])).update(JSON.stringify(safeTask)).digest('base64');
-    const dbhashrow = await mysql_db.query(
-        escape`SELECT hash FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid}`);
+    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid}`);
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
-        console.log(`${classid} - ${date}: task unchanged`,hash, dbhashrow[0]);
+        console.log(`${classid} - ${date}: task unchanged`, hash, dbhashrow[0]?.hash);
         return;
     } else {
-        console.log('--------------------');
-        console.log('safeTask',JSON.stringify(safeTask));
-        console.log('turnpoints',JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points']));
-        console.log('date', date, 'class', classid );
-        console.log(`${classid} - ${date}: task changed`,hash, dbhashrow);
+        console.log(`${classid} - ${date}: task changed`, hash, dbhashrow[0]?.hash);
+    }
+
+    // Get the height of the tp
+    for (const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'].sort((a, b) => a.point_index - b.point_index)) {
+        tp.altitude = await new Promise((resolve) => getElevationOffset(toDeg(tp.latitude), toDeg(tp.longitude), resolve));
     }
 
     // Do this as one block so we don't end up with broken tasks
@@ -522,7 +522,7 @@ WHERE datecode = todcode(${date})`
             }
 
             let values = [];
-            let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) ' + 'VALUES ';
+            let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12, altitude ) ' + 'VALUES ';
 
             let previousPoint = null;
             let currentPoint = null;
@@ -564,9 +564,8 @@ WHERE datecode = todcode(${date})`
                 //            let query = "INSERT INTO taskleg ( class, datecode, taskid, legno, "+
                 //              "length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) "+
                 //            "VALUES ";
-                query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
-
-                values = values.concat([classid, date, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0]);
+                query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
+                values = values.concat([classid, date, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0, tp.altitude]);
             }
 
             query = query.substring(0, query.length - 1);
