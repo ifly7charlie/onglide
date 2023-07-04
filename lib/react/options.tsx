@@ -70,7 +70,7 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
                     <FontAwesomeIcon icon={solid('globe')} />
                 </button>
             )}
-            &nbsp;
+            <br className="smallScreen" />
             {props.options.mapType & 1 ? (
                 <button title="Displaying road map, Click to switch to satellite map" onClick={toggleSatellite}>
                     <FontAwesomeIcon icon={solid('road')} />

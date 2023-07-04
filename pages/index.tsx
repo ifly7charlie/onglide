@@ -57,13 +57,7 @@ function Menu(props) {
                               props.setSelectedPilot(null);
                           }}
                       >
-                          {c.classname}
-                          {c.status == 'L' ? (
-                              <>
-                                  <Nbsp />
-                                  <FontAwesomeIcon icon={faPaperPlane} />
-                              </>
-                          ) : null}
+                          {c.classname.replace(/\s+(meter|metre)/, 'm')}
                       </Nav.Link>
                   </Nav.Item>
               ))
@@ -83,7 +77,7 @@ function Menu(props) {
                 <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
                     {classes}
                     <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-lg-none">
+                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-sm-block d-lg-none">
                             {shortName}
                             <Nbsp />
                             <FontAwesomeIcon icon={faLink} />

@@ -4,6 +4,7 @@ body {
     padding-top: 1.6rem; //40px;
     position: relative;
     overflow: hidden;
+    width: 100vw;
 }
 
 .resizingMap {
@@ -39,6 +40,11 @@ body {
         padding: 0px;
     }
 
+    div.options {
+        padding: 0px !important;
+        margin: 0px !important;
+    }
+
     .sponsor {
         display: none;
     }
@@ -64,10 +70,6 @@ body {
     .results {
         font-size: 90%;
         top: 90px;
-    }
-
-    .options {
-        margin-top: 1vw;
     }
 
     button {
@@ -116,6 +118,12 @@ body {
 @media (min-width: 1600px) {
     .sorting {
         font-size: small !important;
+    }
+}
+
+@include media-breakpoint-up(sm) {
+    br.smallScreen {
+        display: none;
     }
 }
 

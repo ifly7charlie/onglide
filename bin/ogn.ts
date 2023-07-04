@@ -261,7 +261,7 @@ async function main() {
     await updateDDB();
 
     // Generate a short internal name
-    const internalName = location.name.replace(/[^a-z]/ig, '').substring(0, 10);
+    const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
 
     // Start a listener for the location and competition
     if (!replayBase) {
@@ -295,7 +295,7 @@ async function main() {
                 const channel = channels[channelName];
                 // Only support returning the scores
                 if (command == 'scores') {
-                    console.log('sending scores for ', channelName)
+                    console.log('sending scores for ', channelName);
                     const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
                     res.setHeader('Content-Type', 'application/json');
                     res.writeHead(200);
