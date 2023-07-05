@@ -431,6 +431,11 @@ function processPacket(packet: aprsPacket) {
         console.log(`${aircraft.compno}/${sender} : VERY delayed flarm packet received, ${(td / 60).toFixed(1)}  minutes old, ignoring`);
         return;
     }
+
+    const betweenPacketGap = packet.timestamp - aircraft.lastTime;
+
+    // Kalman smoothing - reset if more than 30 seconds since last packet
+    if (!aircraft.kf || betweenPacketGap > 30) {
         aircraft.kf = new KalmanFilter();
         // add it to the filter but don't use the result
         aircraft.kf.filter(altitude);
