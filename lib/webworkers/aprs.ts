@@ -172,7 +172,7 @@ if (!isMainThread) {
             aircraft[task.className + '/' + task.compno] = trackerObject;
 
             // Link the tracker(s) in
-            (typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId)?.map((t) => (trackers[t] = trackerObject));
+            (typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId)?.forEach((t) => (trackers[t] = trackerObject));
 
             // And make sure we have a channel for it
             if (!channels[task.className]) {
@@ -396,7 +396,7 @@ function processPacket(packet: aprsPacket) {
     statistics.knownReceived++;
 
     // Ignore duplicates
-    if (aircraft.lastTime == packet.timestamp) {
+    if (aircraft.lastTime >= packet.timestamp) {
         return;
     }
 
@@ -427,28 +427,25 @@ function processPacket(packet: aprsPacket) {
         return;
     }
 
-    // Kalman smoothing
-    if (!aircraft.kf) {
-        aircraft.kf = new KalmanFilter();
-    }
-    const kfalt = Math.floor(aircraft.kf.filter(altitude));
-
-    // Check for very late and log it
-    islate = aircraft.lastTime >= packet.timestamp;
-    if (!islate) {
-        aircraft.lastPoint = jPoint;
-        aircraft.lastTime = packet.timestamp;
-    } else if (aircraft.lastTime - packet.timestamp > 1800) {
-        console.log(`${aircraft.compno} : VERY late flarm packet received, ${(aircraft.lastTime - packet.timestamp) / 60}  minutes earlier than latest packet received for the aircraft, ignoring`);
+    if (td > 600) {
+        console.log(`${aircraft.compno}/${sender} : VERY delayed flarm packet received, ${(td / 60).toFixed(1)}  minutes old, ignoring`);
         return;
     }
+        aircraft.kf = new KalmanFilter();
+        // add it to the filter but don't use the result
+        aircraft.kf.filter(altitude);
+    } else {
+        // And now use the kalman filtered altitude for everything else
+        altitude = Math.floor(aircraft.kf.filter(altitude));
+    }
+
+    // Check for very late and log it
+    aircraft.lastPoint = jPoint;
+    aircraft.lastTime = packet.timestamp;
 
     // Logging if requested
     aircraft.log(packet.origpacket);
-    aircraft.log(`${kfalt}/${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
-
-    // And now use the kalman filtered altitude for everything else
-    altitude = kfalt;
+    aircraft.log(`${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
 
     // Calculate the vario for the aircraft
     vario = (!islate ? calculateVario(aircraft, altitude, packet.timestamp) : aircraft.lastVario || []).join(',');
