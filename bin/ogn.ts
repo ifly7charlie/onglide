@@ -633,16 +633,38 @@ async function updateTrackers(datecode: string) {
 
     console.log('tracker update');
 
-    // Now go through all the gliders and make sure we have linked them
+    // Filter out anything that doesn't match the input set, doesn't matter if it matches
+    // unknowns as they won't be in the trackers pick
+    const keyedDb = keyBy(cTrackers, makeClassname_Compno);
+    const removedGliders = _filter(gliders, (g) => g.datecode != datecode || !keyedDb[makeClassname_Compno(g)]);
+
+    // Now unsubsribe from each of them
+    removedGliders.forEach((g) => {
+        if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
+            const flarmIDs = _filter(g.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i)) as string[];
+            if (flarmIDs && flarmIDs.length) {
+                // Tell APRS to start listening for the flarmid
+                console.log(`Stopping APRS Listener for glider ${g.className}:${g.compno} => ${flarmIDs.join(',')}`);
+                const command: AprsCommandTrack = {
+                    action: AprsCommandEnum.untrack,
+                    compno: g.compno, //
+                    className: g.className,
+                    trackerId: flarmIDs
+                };
+                aprsListener.postMessage(command);
+            }
+        }
+        delete gliders[makeClassname_Compno(g)];
+    });
+
+    // Now go through all the desired gliders and make sure we have linked them
     cTrackers.forEach((t) => {
-        // Spread, this will define/overwrite as needed
         const gliderKey = makeClassname_Compno(t);
 
         // glider key not enough to check for datecode changes
         const glider = gliders[gliderKey];
         if (glider && glider.datecode != datecode) {
             console.log('datecode changed', gliderKey, glider.datecode, datecode);
-            delete gliders[gliderKey];
         }
 
         const trackersChanged = glider?.dbTrackerId !== t.dbTrackerId;
@@ -660,39 +682,6 @@ async function updateTrackers(datecode: string) {
                     const command: AprsCommandTrack = {action: AprsCommandEnum.track, compno: t.compno, className: t.className, trackerId: flarmIDs};
                     aprsListener.postMessage(command);
                 }
-            }
-        }
-    });
-
-    // Filter out anything that doesn't match the input set, doesn't matter if it matches
-    // unknowns as they won't be in the trackers pick
-    const keyedDb = keyBy(cTrackers, makeClassname_Compno);
-
-    // All the ones that are gone
-    const removedGliders = _filter(gliders, (g) => !keyedDb[makeClassname_Compno(g)]);
-
-    // And all the ones that remain
-    forEach(gliders, (_g, k) => {
-        if (!keyedDb[k]) {
-            console.log('removing glider', k);
-            delete gliders[k];
-        }
-    });
-
-    // Now unsubsribe from each of them
-    removedGliders.forEach((g) => {
-        if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
-            const flarmIDs = _filter(g.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i)) as string[];
-            if (flarmIDs && flarmIDs.length) {
-                // Tell APRS to start listening for the flarmid
-                console.log(`Stopping APRS Listener for glider ${g.className}:${g.compno} => ${flarmIDs.join(',')}`);
-                const command: AprsCommandTrack = {
-                    action: AprsCommandEnum.untrack,
-                    compno: g.compno, //
-                    className: g.className,
-                    trackerId: flarmIDs
-                };
-                aprsListener.postMessage(command);
             }
         }
     });
