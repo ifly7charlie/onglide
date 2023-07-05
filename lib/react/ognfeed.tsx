@@ -32,7 +32,17 @@ import {OptionalDurationMM} from './optional';
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
 
-import MApp from './deckgl';
+import dynamic from 'next/dynamic';
+const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
+    ssr: false,
+    loading: () => (
+        <div style={{width: '100vw', marginTop: '20vh', position: 'absolute'}}>
+            <div style={{display: 'block', margin: 'auto', width: '100px'}}>
+                <img width="100" height="100" src="http://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />
+            </div>
+        </div>
+    )
+});
 
 //let mutateTimer = 0;
 const httpsTest = new RegExp(/^https/i, 'i');
