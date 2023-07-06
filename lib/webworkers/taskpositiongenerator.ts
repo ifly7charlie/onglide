@@ -164,21 +164,26 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                 // If the pilot has a specific utcStart time already then
                 // ignore before - this can happen if scored into soaringspot
-                if (status.utcStart && point.t < status.utcStart - 10) {
+                if (status.utcStart && point.t < status.utcStart) {
                     if (point._) yield status;
                     continue;
                 }
 
                 // We will start scoring at this point - utcStart
-                // updated and the exitTimestamp
+                // updated and the exitTimestamp - relies on the previous if statement to
+                // skip up to the correct point
                 if (grandPrixStart || officialStart) {
-                    if (!status.startFound) {
-                        status.utcStart = officialStart ? officialStart : task.rules.nostartutc;
-                        status.startFound = true;
-                        status.startConfirmed = true;
-                        status.legs[0].points = [{t: (previousPoint || point).t, lat: startLine.nlat, lng: startLine.nlng, a: (previousPoint || point).a}];
-                        status.legs[0].exitTimeStamp = status.utcStart;
+                    status.utcStart = officialStart ? officialStart : task.rules.nostartutc;
+                    status.startConfirmed = true;
+                    status.startFound = true;
+                    status.legs[0].points = [{t: status.utcStart, lat: startLine.nlat, lng: startLine.nlng, a: (previousPoint || point).a}];
+                    status.legs[0].exitTimeStamp = status.utcStart;
+
+                    if (point._) {
+                        yield status;
+                        await setTimeout(sleepInterval);
                     }
+                    continue;
                 }
                 // normal tasks require some form of sector entry/exit
                 // or better still line cross
