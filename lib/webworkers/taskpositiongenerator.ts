@@ -176,6 +176,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status.utcStart = officialStart ? officialStart : task.rules.nostartutc;
                     status.startConfirmed = true;
                     status.startFound = true;
+                    status.currentLeg = 1;
                     status.legs[0].points = [{t: status.utcStart, lat: startLine.nlat, lng: startLine.nlng, a: (previousPoint || point).a}];
                     status.legs[0].exitTimeStamp = status.utcStart;
 
