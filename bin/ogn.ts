@@ -898,6 +898,11 @@ async function getInitialTrackPoints(channel: Channel): Promise<void> {
         // Find the glider
         const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
 
+        if( ! glider ) {
+            console.log( 'missing glider', compno, gliders );
+            continue;
+        }
+
         if (!glider.deck) {
             initialiseDeck(compno as Compno, glider);
 
