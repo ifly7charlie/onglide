@@ -108,8 +108,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
                 // Figure out actuals for the leg/copy them over
                 sl.actual = {
-                    distance: Math.round(leg.distance * 10) / 10,
-                    taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + leg.distance) * 10) / 10
+                    distance: Math.max(Math.round(leg.distance * 10) / 10, 0),
+                    taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + Math.max(leg.distance, 0)) * 10) / 10
                 };
                 if (previousLeg?.point?.a) {
                     sl.alt = previousLeg?.point?.a;
