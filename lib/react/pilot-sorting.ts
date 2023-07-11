@@ -177,6 +177,10 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                     displayAs = 'finished';
                     newKey = 99999;
                     suffix = '';
+                } else if (pilotScore.handicapped?.grRemaining > 200) {
+                    displayAs = '∞';
+                    newKey = -9999;
+                    suffix = '';
                 } else if (pilotScore.handicapped?.grRemaining > 0) {
                     displayAs = Math.round(pilotScore.handicapped?.grRemaining);
                     suffix = ':1';
@@ -191,6 +195,10 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 if (pilotScore?.utcFinish) {
                     displayAs = 'finished';
                     newKey = 99999;
+                    suffix = '';
+                } else if (pilotScore.actual?.grRemaining > 200) {
+                    displayAs = '∞';
+                    newKey = -9999;
                     suffix = '';
                 } else if (pilotScore.actual?.grRemaining > 0) {
                     displayAs = Math.round(pilotScore.actual?.grRemaining);
