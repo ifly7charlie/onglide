@@ -653,8 +653,7 @@ async function update_contest(contest_name, info) {
                 await mysql_db.query(escape`
          UPDATE competition SET start = ${matches[1]},
                                   end = ${matches[2]},
-                                  countrycode = 'SE',
-                                  name = ${contest_name}`);
+                                  countrycode = 'SE'`);
             }
         }
     }
