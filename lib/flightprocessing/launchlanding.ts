@@ -102,9 +102,7 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch, point: Posit
         if (speed > 70 && gain > 25 && agl > 40 && trackDistance > 0.1) {
             if (!track.airborne) {
                 if (db) {
-                    db.query(
-                        escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'launch', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`
-                    );
+                    db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'launch', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`);
                 }
                 console.log(id, at, 'launch', speed, gain, agl);
                 track.airborne = true;
@@ -116,9 +114,7 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch, point: Posit
                 // If we haven't changed height much (ridge soaring at the mind will break this if people are within 50m of takeoff altitude!)
                 if (Math.abs(gain) < 10 && speed < 35 && agl < 50) {
                     if (db) {
-                        db.query(
-                            escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'landing', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`
-                        );
+                        db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'landing', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`);
                     }
                     console.log(id, at, 'landing', speed, gain, agl);
                     track.airborne = false;
@@ -159,8 +155,7 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
 
     // Find the potential associations
     const key = [date.substring(8, 11), classid, '%'].join('/');
-    const matchesRaw =
-        await mysql.query(escape`SELECT mo.id flarmid, mi.id glider, group_concat(mi.action ORDER BY mi.action) actions FROM movements mo 
+    const matchesRaw = await mysql.query(escape`SELECT mo.id flarmid, mi.id glider, group_concat(mi.action ORDER BY mi.action) actions FROM movements mo 
                                                             JOIN movements mi ON mo.action = mi.action and abs(truncate(mo.time/30,0)-truncate(mi.time/30,0)) < 4 and mo.id != mi.id 
                                                             WHERE mi.type='igc' and mo.type='flarm' and mi.id like ${key} and mo.datecode=mi.datecode and mo.datecode = todcode(${date})
                                                             GROUP BY 1,2 
@@ -212,9 +207,7 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
                         escape`UPDATE tracker SET trackerid = ${m.flarmid} 
                                                 WHERE compno = ${mCompno} AND class = ${classid} AND trackerid="unknown" limit 1`
                     )
-                    .query(
-                        escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${mCompno}, now(), ${m.flarmid}, now(), "tltimes" )`
-                    )
+                    .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${mCompno}, now(), ${m.flarmid}, now(), "tltimes" )`)
                     .commit();
             } else {
                 if (flarmid != m.flarmid) {
@@ -229,14 +222,12 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
 
 //
 // Get an IGC file from a website spot so we can process it
-export async function processIGC(classid, compno, location, date, url, https, mysql, getHeaders) {
+export async function processIGC(classid, compno, location, date, url, https, mysql, getHeaders?: Function) {
     // IGC files may be from a Flarm, if they are then we can extract the flarm ID from them
     // and associate it with the device
     let flarm_lfla = new RegExp(/LFLA[0-9]+ID [0-9] ([0-9A-F]{6})/i);
     let flarm_lxvfla = new RegExp(/LLXVFLARM:LXV,[0-9.]+,([0-9A-F]{6})/i);
-    let brecord = new RegExp(
-        /^B([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3})([NS])([0-9]{3})([0-9]{2})([0-9]{3})([EW])A([0-9]{5})([0-9]{5})/i
-    );
+    let brecord = new RegExp(/^B([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3})([NS])([0-9]{3})([0-9]{2})([0-9]{3})([EW])A([0-9]{5})([0-9]{5})/i);
     let hfdte = new RegExp(/^HFDTE([0-9]{2})([0-9]{2})([0-9]{2})/i);
     let hfdtedate = new RegExp(/^HFDTEDATE:([0-9]{2})([0-9]{2})([0-9]{2})/i);
 
@@ -258,11 +249,7 @@ export async function processIGC(classid, compno, location, date, url, https, my
         });
 
         myInterface.on('close', () => {
-            mysql.query(
-                escape`UPDATE pilotresult SET igcavailable=${
-                    validFile ? 'P' : 'F'
-                } WHERE datecode=todcode(${date}) and compno=${compno} and class=${classid}`
-            );
+            mysql.query(escape`UPDATE pilotresult SET igcavailable=${validFile ? 'P' : 'F'} WHERE datecode=todcode(${date}) and compno=${compno} and class=${classid}`);
             if (validFile) {
                 capturePossibleLaunchLanding(key, undefined, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
                 console.log(`processed ${date} ${classid} - ${compno} successfully`);
@@ -321,9 +308,7 @@ export async function processIGC(classid, compno, location, date, url, https, my
                         escape`UPDATE tracker SET trackerid = ${flarmId} WHERE
                                       compno = ${compno} AND class = ${classid} AND trackerid="unknown" limit 1`
                     )
-                    .query(
-                        escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${compno}, now(), ${flarmId}, now(), "igcfile" )`
-                    )
+                    .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${compno}, now(), ${flarmId}, now(), "igcfile" )`)
                     .commit();
 
                 // We may not have processed it but we did get useful information from it so that's
