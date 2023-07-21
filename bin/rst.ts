@@ -4,7 +4,7 @@
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
-import crypto from 'crypto';
+import {createHash, randomBytes, createHmac} from 'crypto';
 
 import {Tabletojson} from 'tabletojson'; // tabletojson = require('tabletojson').Tabletojson;
 
@@ -246,6 +246,12 @@ async function update_pilots(classid, data, hcaps) {
         const handicap = correct_handicap(hcaps[greg]);
         cnhandicaps[classid + '_' + compno] = handicap;
 
+        const gravatar = (pilot) => {
+            return createHash('md5')
+                .update((pilot.Pilot + '@comps.onglide.com').replace(/\s/g, '').toLowerCase())
+                .digest('hex');
+        };
+
         pilotnumber = pilotnumber + 1;
         await t.query(escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
@@ -253,7 +259,7 @@ async function update_pilots(classid, data, hcaps) {
                   VALUES ( ${classid},
                            ${pilot.Pilot}, ${pilot.Copilot}, ${pilot.Klubb}, null,
                            ${pilotnumber}, 'SE',
-                           null,
+                           ${gravatar(pilot)},
                            ${compno},
                            'Y',
                            ${pilot.Segelflygplan},
@@ -341,7 +347,7 @@ async function process_class_task(classid, className, date, day_number, day_info
             },
             ''
         );
-        const hash = crypto.createHash('sha256').update(info).update(tps).digest('base64');
+        const hash = createHash('sha256').update(info).update(tps).digest('base64');
         const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=todcode(${date}) AND class=${classid}`);
         if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
             return;
