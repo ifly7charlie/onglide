@@ -237,7 +237,7 @@ export async function processIGC(classid, compno, location, date, url, https, my
 
     // Used to track state and updated into the database we use the day of the month
     // because in node these could be executed in parallel
-    let key = [date.substring(8, 11), classid, compno].join('/');
+    let key = [String(date).substring(8, 11), classid, compno].join('/');
 
     // De-escape it
     url = url.replaceAll('&amp;', '&');

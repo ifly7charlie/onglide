@@ -355,6 +355,9 @@ async function process_class_task(classid, className, date, day_number, day_info
             console.log(`${classid} - ${date}: task changed`);
             console.log(tps);
         }
+        for (const tp of task_info) {
+            tp.altitude = await new Promise((resolve) => getElevationOffset(toDeg(tp.latitude), toDeg(tp.longitude), resolve));
+        }
 
         // Do this as one block so we don't end up with broken tasks
         await mysql_db
@@ -387,14 +390,14 @@ async function process_class_task(classid, className, date, day_number, day_info
                     console.log(`${classid} - ${date}: unable to insert task!`);
                     return null;
                 }
-                if (!task_info || !task_info.length) {
+                if (!task_info.length) {
                     console.log(`${classid} - ${date}: no turnpoints for task`);
                     throw 'oops';
                     return null;
                 }
 
                 let values = [];
-                let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) ' + 'VALUES ';
+                let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12, altitude ) ' + 'VALUES ';
 
                 let previousPoint = null;
                 let currentPoint = null;
@@ -417,9 +420,9 @@ async function process_class_task(classid, className, date, day_number, day_info
                     const bearingDeg = previousPoint ? (bearing(previousPoint, currentPoint) + 360) % 360 : 0;
                     let hi = 0;
 
-                    query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
+                    query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
 
-                    values = values.concat([classid, date, taskid, point_index, leglength, bearingDeg, toDeg(tp.Latitud), toDeg(tp.Longitud), hi, trigraph, tpname, point_index > 0 ? 'symmetrical' : 'np', parseFloat(tp.Radie), tp.Typ == 'Line' ? 90 : 0, 0, 0, 0]);
+                    values = values.concat([classid, date, taskid, point_index, leglength, bearingDeg, toDeg(tp.Latitud), toDeg(tp.Longitud), hi, trigraph, tpname, point_index > 0 ? 'symmetrical' : 'np', parseFloat(tp.Radie), tp.Typ == 'Line' ? 90 : 0, 0, 0, 0, tp.altitude]);
 
                     point_index++;
                 }

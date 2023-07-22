@@ -235,13 +235,25 @@ async function ssscrape(deep = false) {
                 for (const day of dates) {
                     const keys = findAll((x) => x.name == 'td', day.children);
 
-                    const dateGB = textContent(keys[0]).match(/([0-9]{2})\/([0-9]{2})\/([0-9]{4})/);
-                    const date = dateGB[3] + '-' + dateGB[2] + '-' + dateGB[1];
-
-                    const daynumber = textContent(keys[1]).trim();
-                    if (daynumber == 'No task') {
+                    if (!keys?.length || keys?.length < 2) {
+                        console.log('no dates yet');
                         continue;
                     }
+
+                    const daynumber = textContent(keys[1])?.trim();
+                    if (daynumber == 'No task') {
+                        console.log('no task yet');
+                        continue;
+                    }
+
+                    const dateGB = textContent(keys[0])?.match(/([0-9]{2})\/([0-9]{2})\/([0-9]{4})/);
+                    if (!dateGB) {
+                        console.log('no task yet');
+                        continue;
+                    }
+
+                    const date = dateGB[3] + '-' + dateGB[2] + '-' + dateGB[1];
+
                     const url = getAttributeValue(toElement(keys[1].children[1]), 'href');
 
                     console.log(date, daynumber, url);
