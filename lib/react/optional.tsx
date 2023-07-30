@@ -4,7 +4,7 @@ export function RoundNumber(v) {
     if (typeof v === 'number') {
         v = Math.round(v * 10) / 10;
         if (isNaN(v)) {
-            v = undefined;
+            return null;
         }
     }
 
