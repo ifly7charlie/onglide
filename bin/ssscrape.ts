@@ -92,28 +92,31 @@ main().then(() => {
 async function roboControl() {
     // Allow the use of environment variables to configure the soaring spot endpoint
     // rather than it being in the database
-    let robocontrol_url = null;
+    let url = null;
+    let overwrite = false;
     if (process.env.ROBOCONTROL_URL) {
-        robocontrol_url = process.env.ROBOCONTROL_URL;
+        url = process.env.ROBOCONTROL_URL;
     }
 
-    if (!robocontrol_url) {
+    if (!url) {
         // Get the soaring spot keys from database
-        robocontrol_url = (
+        const row = (
             await mysql_db.query(escape`
-              SELECT url
+              SELECT url, overwrite
                 FROM scoringsource where type='robocontrol'`)
-        )[0]?.url;
+        )[0] ?? {url:null, overwrite:true};
+        url = row.url;
+        overwrite = row.overwrite ?? true;
     }
 
-    if (!robocontrol_url) {
+    if (!url) {
         return;
     }
 
-    fetch(robocontrol_url)
+    fetch(url)
         .then((res) => {
             if (res.status != 200) {
-                console.log(` ${robocontrol_url}: ${res}`);
+                console.log(` ${url}: ${res}`);
                 return {};
             } else {
                 return res.json();
@@ -127,7 +130,12 @@ async function roboControl() {
             for (const p of location || []) {
                 if (p.flarm?.length) {
                     console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
+                    if( overwrite ) {
+                        mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
+                    }
+                    else {
+                        mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn} and trackerid='unknown'`);
+                    }
                     mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
                 }
             }
