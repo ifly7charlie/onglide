@@ -157,7 +157,7 @@ export interface PilotScore {
   taskDuration?:
     | number
     | undefined;
-  /** how many seconds remaining on an aat, will be negative if over time */
+  /** how many seconds remaining on an aat, will be negative if under time */
   taskTimeRemaining?:
     | number
     | undefined;

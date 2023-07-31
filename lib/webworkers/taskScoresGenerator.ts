@@ -182,10 +182,10 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         // it took longer than task time - only do this after finish as it's misleading while they
         // are flying - perhaps it should be done if they are obviously going to be under
         if (task.details.durationsecs) {
+            score.taskTimeRemaining = duration - task.details.durationsecs;
             if (item.utcFinish) {
                 duration = Math.max(duration, task.details.durationsecs);
             }
-            score.taskTimeRemaining = task.details.durationsecs - duration;
         }
 
         score.actual = {
