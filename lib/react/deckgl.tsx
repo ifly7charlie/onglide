@@ -89,7 +89,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     jointRounded: true,
                     fp64: false,
                     widthMinPixels: 2,
-                    billboard: true,
+                    billboard: map2d ? false : true,
                     onClick: (i) => {
                         props.setSelectedCompno(compno);
                     },
@@ -167,7 +167,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     _pathType: 'open',
                     positionFormat: map2d ? 'XY' : 'XYZ',
                     getWidth: 5,
-                    billboard: true,
+                    billboard: map2d ? false : true,
                     getColor: [255, 0, 255, 192],
                     jointRounded: true,
                     widthMinPixels: 3,
