@@ -253,7 +253,7 @@ function startScoring(config: ScoringConfig, task: any) {
             const glider: GliderState = gliders[cncn];
 
             const log =
-                glider.compno == 'YO'
+                glider.compno == '--'
                     ? console.log
                     : () => {
                           /*noop*/

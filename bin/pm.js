@@ -48,6 +48,7 @@ async function doIt() {
 	let fe = false;
     let next = false;
     let restart = false;
+    let delay = false;
 
 	for ( const db of databases ) {
 
@@ -68,6 +69,12 @@ async function doIt() {
 			console.log( "front end only, no score fetching process" );
 			continue;
 		}
+
+        if( db == '--delay' ) {
+            delay = true;
+            console.log( "configuring delay" );
+            continue;
+        }
 		
 		if( db == '--next' ) {
 			next = true;
@@ -106,7 +113,7 @@ async function doIt() {
 			continue;
 		}
 
-        	let domain = process.env.NEXT_PUBLIC_SITEURL||keys.domain;
+        let domain = process.env.NEXT_PUBLIC_SITEURL||keys.domain;
 		domain = domain.slice(0, domain.indexOf("."));
 
 		// If the config is forcing localhost then we will use that but fix the ports
@@ -122,11 +129,15 @@ async function doIt() {
 			'MYSQL_DATABASE': db,
 			SHORT_NAME: domain,
 			NEXT_PUBLIC_SITEURL: keys.domain,
-			NEXT_PUBLIC_WEBSOCKET_HOST: process.env.NEXT_PUBLIC_WEBSOCKET_HOST ?? keys.domain,
+			NEXT_PUBLIC_WEBSOCKET_HOST: domain + '-ws.onglide.com',
 			API_HOSTNAME: (process.env.API_HOSTNAME.slice(0,process.env.API_HOSTNAME.indexOf(":"))||process.env.API_HOSTNAME) + ':' + (3000+keys.portoffset),
 			WEBSOCKET_PORT: 8000+keys.portoffset,
 			STATUS_SERVER_PORT: 8100+keys.portoffset
 		};
+
+        if( delay ) {
+            environment.NEXT_PUBLIC_COMPETITION_DELAY = 15 * 60
+        }
 
 		if( localhost ) {
 			console.log( '  configuring for localhost usage based on NEXT_PUBLIC_SITEURL in .env.local' );
