@@ -31,6 +31,23 @@ body {
 
 // These are tweaks for small screens
 @include media-breakpoint-down(md) {
+    body {
+        padding-top: 0px !important;
+    }
+    .navbar-nav.pull-right {
+        float: none !important;
+    }
+    button {
+        border: 0px;
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+    button.active {
+        border: 0px;
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+
     .resizingMap {
         height: 100dvh;
     }
@@ -203,31 +220,6 @@ body {
     }
 }
 
-@media (max-width: 979px) {
-    body {
-        padding-top: 0px !important;
-    }
-    .navbar-nav.pull-right {
-        float: none !important;
-    }
-    button {
-        border: 0px;
-        padding-left: 4px;
-        padding-right: 4px;
-    }
-    button.active {
-        border: 0px;
-        padding-left: 4px;
-        padding-right: 4px;
-    }
-}
-
-@media (max-width: 1039px) {
-    .dayarrows {
-        display: none;
-    }
-}
-
 button.active {
     background-color: grey;
     color: white;
@@ -254,30 +246,15 @@ hr {
     display: block;
     background: white;
 }
-/*
-.legs thead {
-    font-weight: bold;
-    position: sticky;
-}
-*/
 .legs thead tr td,
 .legs tbody tr td {
     width: 5rem;
     max-width: 5rem;
     min-width: 5rem;
 }
-/*
-.legs tbody tr td:nth-child(2),
-.legs thead tr td:nth-child(2) {
-    padding-left: 9rem;
-    width: 14rem;
-    max-width: 14rem;
-    min-width: 14rem;
-}*/
 
 .legs tbody tr td:first-child,
 .legs thead tr td:first-child {
-    //    position: fixed;
     font-weight: bold;
     width: 8rem;
     min-width: 8rem;
