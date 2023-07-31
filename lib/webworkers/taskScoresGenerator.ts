@@ -195,8 +195,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
         // Looks weird but take it if it is there, if it isn't then take the alternative
         // AAT uses all three, racing uses dR
-        score.actual.distanceRemaining = Math.round((item.distanceRemaining || item.minPossible) * 10) / 10;
-        score.actual.minPossible = Math.round((item.minPossible || item.distanceRemaining) * 10) / 10;
+        score.actual.distanceRemaining = Math.round((item.distanceRemaining ?? item.minPossible ?? 0) * 10) / 10;
+        score.actual.minPossible = Math.round((item.minPossible ?? item.distanceRemaining ?? 0) * 10) / 10;
         if (item.maxPossible) {
             score.actual.maxPossible = Math.round(item.maxPossible * 10) / 10;
         }
