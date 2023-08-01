@@ -131,17 +131,24 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             new TextLayer({
                 id: 'labels',
                 data: data,
-                getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 100 : 80] : (d) => d.coordinates,
+                getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
                 getText: (d) => d.name,
-                getTextColor: (d) => (props.t - d.time > gapLength ? [192, 192, 192] : [0, 0, 0]),
+                getColor: (d) => (props.t - d.time > gapLength ? [100, 80, 80, 255] : [0, 100, 0, 255]),
                 getTextAnchor: 'middle',
                 getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
                 pickage: true,
                 background: true,
-                backgroundPadding: [3, 3, 3, 0],
+                fontSettings: {sdf: true},
+                backgroundPadding: [2, 0, 2, 0],
                 onClick: (i) => {
                     props.setSelectedCompno(i.object?.name || '');
                 },
+                outlineWidth: 2,
+                outlineColor: [255, 255, 255, 255],
+                getBackgroundColor: [255, 255, 255, 255],
+                getBorderColor: [40, 40, 40, 255],
+                getBorderWidth: 1,
+
                 pickable: true
             })
         );
