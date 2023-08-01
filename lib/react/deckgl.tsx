@@ -125,24 +125,27 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             coordinates: p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)
         };
     });
-    layers.push(
-        new TextLayer({
-            id: 'labels',
-            data: data,
-            getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 100 : 80] : (d) => d.coordinates,
-            getText: (d) => d.name,
-            getTextColor: (d) => (props.t - d.time > gapLength ? [192, 192, 192] : [0, 0, 0]),
-            getTextAnchor: 'middle',
-            getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
-            pickage: true,
-            background: true,
-            backgroundPadding: [3, 3, 3, 0],
-            onClick: (i) => {
-                props.setSelectedCompno(i.object?.name || '');
-            },
-            pickable: true
-        })
-    );
+
+    if (data.length) {
+        layers.push(
+            new TextLayer({
+                id: 'labels',
+                data: data,
+                getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 100 : 80] : (d) => d.coordinates,
+                getText: (d) => d.name,
+                getTextColor: (d) => (props.t - d.time > gapLength ? [192, 192, 192] : [0, 0, 0]),
+                getTextAnchor: 'middle',
+                getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
+                pickage: true,
+                background: true,
+                backgroundPadding: [3, 3, 3, 0],
+                onClick: (i) => {
+                    props.setSelectedCompno(i.object?.name || '');
+                },
+                pickable: true
+            })
+        );
+    }
 
     //
     // If there is a selected pilot then we need to add the full track for that pilot
