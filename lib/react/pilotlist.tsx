@@ -14,13 +14,13 @@ import {FlightLegs} from './flightLegs';
 import {Sorting} from './sorting';
 
 // Helpers for loading contest information etc
-import {delayToText, formatTime} from './timehelper.js';
+import {delayToText} from './timehelper.js';
 
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
 // Helpers for sorting pilot list
 import {updateSortKeys, nextSortOrder, getValidSortOrder, isValidSortOrder, ShortDisplayKeys, SortKey} from './pilot-sorting';
-import {displayHeight, displayClimb} from './displayunits';
+import {displayHeight, convertHeight, convertClimb} from './displayunits';
 
 function isoCountryCodeToFlagEmoji(country: string) {
     return String.fromCodePoint(...[...country].map((c) => c.charCodeAt(0) + 0x1f1a5));
@@ -50,6 +50,159 @@ function PilotImage(props) {
     return <div className="ih" style={{backgroundImage: `url(/outline.gif)`}} />;
 }
 
+function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any) {
+    return (
+        <li id={id} style={{width}}>
+            <a href="#" title={title} onClick={() => {}}>
+                <div className="caption">
+                    {title}
+                    {titleIcon || null}
+                </div>
+                <hr />
+                <div>
+                    <div className="main-icon">
+                        <a href="#" title={main.description} className="tooltipicon">
+                            <FontAwesomeIcon icon={main.icon} />
+                        </a>
+                    </div>
+                    <div className="main-text">
+                        {main.value}
+                        {main.units ? <div className="units">{main.units}</div> : null}
+                    </div>
+                </div>
+                <hr />
+                {data1?.value != undefined ? (
+                    <div>
+                        <div className="data-icon">
+                            <a href="#" title={data1.description} className="tooltipicon">
+                                <FontAwesomeIcon icon={data1.icon} />
+                            </a>
+                        </div>
+                        <div className="data-text">
+                            {data1.value}
+                            {data1.units ? <div className="units">{data1.units}</div> : null}
+                        </div>
+                    </div>
+                ) : null}
+                {data2?.value !== undefined && data2.value !== null ? (
+                    <div>
+                        <div className="data-icon">
+                            <a href="#" title={data2.description} className="tooltipicon">
+                                <FontAwesomeIcon icon={data2.icon} />
+                            </a>
+                        </div>
+                        <div className="data-text">
+                            {data2.value}
+                            {data2.units ? <div className="units">{data2.units}</div> : null}
+                        </div>
+                    </div>
+                ) : null}
+            </a>
+        </li>
+    );
+}
+
+function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
+    const howMuchClimb = vario //
+        ? vario.average > 0.2
+            ? solid('circle-arrow-up')
+            : vario.average < -0.2
+            ? solid('circle-arrow-down')
+            : solid('circle-arrow-right')
+        : solid('question');
+
+    const convertedClimb = convertClimb(vario.average, units);
+
+    return (
+        <SummaryComponent
+            id="climb"
+            title="vario" //
+            main={{value: !isNaN(convertedClimb[0]) ? convertedClimb[0] : null, icon: howMuchClimb, units: convertedClimb[1]}}
+            data1={{value: convertHeight(vario.gainXsecond + vario.lossXsecond, units)[0], units: units ? 'ft' : 'm', icon: solid('cloud-upload')}}
+            data2={{value: vario.Xperiod, units: 'sec', icon: solid('hourglass-half')}}
+        />
+    );
+}
+
+function StartComponent({score, tz}: {score: PilotScore; tz: TZ}) {
+    const [endTime, description, icon] = score.utcFinish
+        ? [OptionalTime(' ', score.utcFinish as Epoch, tz), 'finish time', solid('hourglass-end')] //
+        : score.taskTimeRemaining
+        ? [OptionalDuration('', score.taskTimeRemaining as Epoch), 'remaining time', solid('history')]
+        : ['', 'finish time', null];
+
+    const duration = OptionalDuration('+', score.taskDuration as Epoch).split(':');
+
+    return (
+        <SummaryComponent
+            id="times"
+            title="times" //
+            width="110px"
+            main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: solid('stopwatch'), description: 'elapsed time'}}
+            data1={{value: OptionalTime('', score.utcStart as Epoch, tz), icon: solid('hourglass-start'), description: 'start time'}}
+            data2={{value: endTime, icon, description: description}}
+        />
+    );
+}
+
+function HandicappedSpeedComponent({score}: {score: PilotScore}) {
+    return (
+        <SummaryComponent
+            id="speed"
+            title="speed" //
+            main={{value: score.handicapped.taskSpeed, units: 'kph', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped speed'}}
+            data1={{value: score.actual.taskSpeed, units: 'kph', icon: solid('tachometer-alt'), description: 'actual speed'}}
+        />
+    );
+}
+function ActualSpeedComponent({score}: {score: PilotScore}) {
+    return (
+        <SummaryComponent
+            width="100px"
+            id="speed"
+            title="speed" //
+            main={{value: score.actual.taskSpeed, units: 'kph', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual speed'}}
+        />
+    );
+}
+
+function HandicappedDistanceComponent({score}: {score: PilotScore}) {
+    return (
+        <SummaryComponent
+            width="100px"
+            id="distance"
+            title="distance" //
+            main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped distance done'}}
+            data1={{value: score.actual.taskDistance, units: 'km', icon: solid('right-from-bracket'), description: 'actual distance done'}}
+            data2={{value: score.actual.distanceRemaining ?? score.actual.minPossible, units: 'km', icon: solid('right-to-bracket'), description: 'actual minimum distance remaining'}}
+        />
+    );
+}
+
+function ActualDistanceComponent({score}: {score: PilotScore}) {
+    return (
+        <SummaryComponent
+            width="100px"
+            id="distance"
+            title="distance" //
+            main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual distance done'}}
+            data1={{value: score.actual.distanceRemaining ?? score.actual.minPossible, units: 'km', icon: solid('right-to-bracket'), description: 'actual minimum distance remaining'}}
+        />
+    );
+}
+
+function HandicappedGRComponent({score}: {score: PilotScore}) {
+    return (
+        <SummaryComponent
+            width="100px"
+            id="gr"
+            title="L/D" //
+            main={{value: score.handicapped?.grRemaining < 999 ? score.handicapped.grRemaining : null, units: ':1', icon: solid('fast-forward'), description: 'handicapped L/D remaining'}}
+            data1={{value: score.actual?.grRemaining < 999 ? score.actual.grRemaining : null, units: ':1', icon: solid('fast-forward'), description: 'actual L/D remaining'}}
+        />
+    );
+}
+
 export function Details({units, pilot, score, vario, tz}: {score: PilotScore | null; vario: VarioData | null; tz: TZ; units: number; pilot: API_ClassName_Pilots_PilotDetail}) {
     if (!pilot) {
         return null;
@@ -62,49 +215,15 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         </span>
     ) : null;
 
-    const howMuchClimb = vario ? (vario.average > 0.2 ? solid('circle-arrow-up') : vario.average < -0.2 ? solid('circle-arrow-down') : solid('circle-arrow-right')) : solid('question');
-    const climb =
-        vario && (vario.gainXsecond > 0 || vario.lossXsecond > 0) ? (
-            <>
-                <span>
-                    {vario.Xperiod}s&nbsp;average&nbsp;
-                    <FontAwesomeIcon icon={solid('arrow-up')} />
-                    &nbsp;{displayHeight(vario.gainXsecond, units)}
-                    &nbsp;
-                    <FontAwesomeIcon icon={solid('arrow-down')} />
-                    &nbsp;{displayHeight(vario.lossXsecond, units)}
-                    &nbsp;
-                    <FontAwesomeIcon icon={howMuchClimb} />
-                    &nbsp;{displayClimb(vario.average, units)}
-                </span>
-                <br />
-            </>
-        ) : null;
-
     const hasHandicappedResults = score?.handicapped;
 
-    const speed = score ? (
-        <>
-            {hasHandicappedResults && score.handicapped?.taskSpeed ? <>{score.handicapped.taskSpeed.toFixed(1)} kph hcap/</> : null}
-            {score.actual?.taskSpeed?.toFixed(1) || '-'} kph
-        </>
-    ) : null;
+    const speed = score ? hasHandicappedResults ? <HandicappedSpeedComponent score={score} /> : <ActualSpeedComponent score={score} /> : null;
 
-    const distance = score ? (
-        <>
-            &nbsp;
-            {hasHandicappedResults && score.handicapped?.taskDistance ? <>{score.handicapped.taskDistance.toFixed(1)} km hcap/</> : null}
-            {score.actual?.taskDistance?.toFixed(1) || '-'} km
-        </>
-    ) : null;
+    const distance = score ? hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} /> : null;
 
     let times = null;
     if (score?.utcStart) {
-        times = (
-            <div>
-                {OptionalTime('Start ', score.utcStart as Epoch, tz)} {OptionalDuration(' +', score.taskDuration as Epoch)} {OptionalTime(' Finish ', score.utcFinish as Epoch, tz)}
-            </div>
-        );
+        times = <StartComponent score={score} tz={tz} />;
     }
 
     // Figure out what to show based on the db status
@@ -119,27 +238,29 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             flightDetails = (
                 <div>
                     No start reported yet
-                    <br />
-                    {climb}
+                    <ul className="status">
+                        <ClimbComponent vario={vario} units={!!units} />
+                    </ul>
                 </div>
             );
         }
     } else if (score?.utcFinish) {
         flightDetails = (
-            <div>
-                {climb}
-                {times}
-                {speed}
+            <>
+                <ul className="status">
+                    {speed}
+                    {score?.taskTimeRemaining ? distance : null}
+                    {times}
+                </ul>
                 <FlightLegs score={score} tz={tz} units={units} />
-            </div>
+            </>
         );
     } else {
         if (score?.flightStatus == PositionStatus.Landed) {
             flightDetails = (
                 <div>
                     Landed out
-                    <br />
-                    {distance}
+                    <ul className="status">{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={units} />
                 </div>
             );
@@ -147,24 +268,24 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
             flightDetails = (
                 <div>
                     Landed back
-                    <br />
-                    {distance}
+                    <ul className="status">{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={units} />
                 </div>
             );
         } else {
             flightDetails = (
-                <div>
-                    {climb}
-                    {times}
-                    {speed}
-                    {speed ? ',' : ''}
-                    {distance}
+                <>
+                    <ul className="status">
+                        <ClimbComponent vario={vario} units={!!units} />
+                        {speed}
+                        {distance}
+                        {times}
+                    </ul>
                     {score.actual?.grRemaining ? <br /> : ', '}
                     <Optional b="Glide ratio to Finish" v={score.actual?.grRemaining < 200 ? score.actual.grRemaining : null} e=":1" />
                     <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining < 200 ? score.handicapped.grRemaining : null} e=":1" />
                     <FlightLegs score={score} tz={tz} units={units} />
-                </div>
+                </>
             );
         }
     }
@@ -174,7 +295,9 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     const uptodate = (vario?.delay || Infinity) < 45;
 
     // Are we in coverage or not, keyed off uptodate
-    const ognCoverage = uptodate ? (
+    const ognCoverage = score?.utcFinish ? (
+        'Finished' //
+    ) : uptodate ? (
         <span>
             &nbsp;
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
@@ -230,8 +353,8 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 {pilot.compno}:<b>{pilot.name}</b>
                 <span style={{float: 'right', paddingRight: '0.5em'}}>{pilot.gliderType.substring(0, 20)}</span>
                 <br />
-                {pilot.country ? new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) : ''}
-                <br />
+                <span className="largeScreen">{pilot.country ? new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) : ''}</span>
+                <br className="largeScreen" />
                 <span style={{fontSize: '80%'}}>
                     {ognCoverage}
                     {competitionDelay}

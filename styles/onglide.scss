@@ -123,12 +123,26 @@ body {
         flex-wrap: none;
     }
 
+    ul.status {
+        list-style-type: none;
+        padding: 0px;
+        margin: 0px;
+        clear: both;
+        margin-top: 0.2em;
+        display: flex;
+        flex-wrap: none;
+    }
+
     .navbar {
         font-size: 0.75em;
         //        font-size: 3vw;
     }
     html {
         height: -webkit-fill-available;
+    }
+
+    .largeScreen {
+        display: none;
     }
 }
 
@@ -187,6 +201,20 @@ body {
         padding-top: 4px;
         padding-bottom: 0px;
         margin: 0px;
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    ul.status {
+        width: 115%;
+        list-style-type: none;
+        padding-left: 0px;
+        padding-right: 0px;
+        padding-top: 6px;
+        padding-bottom: 0px;
+        margin: 0px;
+        margin-left: -15px;
+        margin-right: 15px;
         display: flex;
         flex-wrap: wrap;
     }
@@ -314,16 +342,19 @@ td.small img {
     flex-grow: initial;
     padding-right: 3px;
     padding-left: 3px;
-    /*\
-z-Index: 10;
+}
 
-	margin-left: 1px !important;
-    margin-right: 1px !important;
+.status li {
+    margin-left: 1px !important;
+    margin-right: 3px !important;
     margin-bottom: 5px !important;
     border: 1px solid #eee;
     background: white !important;
-    width:50px;
-    height:85px; */
+    width: 90px;
+    height: 100px;
+    flex-grow: initial;
+    padding-right: 3px;
+    padding-left: 3px;
 }
 
 .small-pic > a {
@@ -409,8 +440,8 @@ z-Index: 10;
     color: red;
 }
 
-.small-pic.selected > a,
-.small-pic.selected > a:hover {
+.small-pic.selected a,
+.small-pic.selected a:hover {
     color: white !important;
     background-color: grey !important;
 }
@@ -422,11 +453,6 @@ z-Index: 10;
 }
 .selected {
     background: grey;
-    color: white;
-}
-
-.selected .ih {
-    /*    background: black !important; */
     color: white;
 }
 
@@ -466,8 +492,76 @@ z-Index: 10;
 
     /* Internet Explorer */
     filter: progid:DXImageTransform.Microsoft.BasicImage(rotation=3);
+}
 
+.status li .units {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    font-size: 10px;
+    //    margin-left: 5px;
+    //    transform-origin: 64% 95% 0;
+
+    /* Safari 
+    -webkit-transform: rotate(-90deg);
+    -webkit-transform-origin: 64% 95% 0;
+
+
+    -moz-transform: rotate(-90deg);
+
+
+    -ms-transform: rotate(-90deg);
+
+
+    -o-transform: rotate(-90deg);
+
+ 
+    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation=3);
+   */
+    transform: rotate(-90deg) translate(-1ex, -2px);
+}
+
+.status .main-text {
+    text-align: right;
+    font-size: 18px;
+    height: 22px;
+    font-weight: bold;
+    line-height: 130%;
+}
+
+.status .data-text {
+    text-align: right;
+}
+
+.status .data-icon,
+.status .main-icon {
+    width: 20px;
+    font-size: 15px;
+    padding-left: 2px;
+    text-align: center;
     float: right;
+}
+
+.status .data-icon a {
+    color: grey;
+}
+
+.status .main-text .units {
+    font-size: 9px;
+    height: 22px;
+    text-align: center;
+    margin: 0px;
+    padding: 0px;
+    transform: rotate(-90deg) translate(0px, 0px);
+}
+
+.status .data-text .units {
+    font-size: 8px;
+    height: 17px;
+    text-align: center;
+    margin: 0px;
+    padding: 0px;
+    transform: rotate(-90deg) translate(3.5px, 2px);
 }
 
 .pilot .details {
@@ -486,6 +580,13 @@ z-Index: 10;
     line-height: 15px;
 }
 
+.status > li > .caption {
+    font-weight: bold;
+    font-size: x-large;
+    padding: 0px;
+    line-height: 1rem;
+}
+
 .small-pic .info {
     padding: 0px;
     line-height: 15px;
@@ -497,7 +598,8 @@ z-Index: 10;
     padding: 0px;
 }
 
-.small-pic > a {
+.small-pic > a,
+.status > li > a {
     text-align: center;
     vertical-align: bottom;
     color: #49604c;
@@ -512,7 +614,9 @@ z-Index: 10;
 }
 
 .small-pic > a:hover,
-.small-pic > a:focus {
+.small-pic > a:focus,
+.status > li > a:hover,
+.status > li > a:focus {
     text-decoration: none;
     color: #49604c;
 }
@@ -529,14 +633,32 @@ z-Index: 10;
     padding: 10px 6px !important;
 }
 
-ul.pilots li {
+ul.pilots li,
+ul.status li {
     display: block;
     //    float: left;
     //flex: 1.1;
 }
-
 .pilots {
     font-size: 13px;
+}
+
+.status {
+    font-size: 15px;
+}
+
+.status hr {
+    margin: 0px;
+    margin-top: 1px;
+    margin-bottom: 1px;
+    left: 0px;
+    right: 0px;
+    border-top: 1px solid grey;
+}
+
+.status .caption {
+    color: white;
+    background: #444;
 }
 
 .signalpoor {
