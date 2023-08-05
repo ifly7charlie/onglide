@@ -686,7 +686,7 @@ async function updateTrackers(datecode: string) {
                         compno: t.compno,
                         className: t.className,
                         trackerId: flarmIDs,
-                        channelName: channelName(g.className, g.datecode)
+                        channelName: channelName(t.className, datecode)
                     };
                     aprsListener.postMessage(command);
                 }
@@ -1120,7 +1120,13 @@ function identifyUnknownGlider(data: PositionMessage): void {
         match.dbTrackerId = flarmId;
 
         // And we should ask the flarm handler to listen for them properly
-        const command: AprsCommandTrack = {action: AprsCommandEnum.track, compno: match.compno, className: match.className, trackerId: flarmId};
+        const command: AprsCommandTrack = {
+            action: AprsCommandEnum.track, //
+            compno: match.compno,
+            className: match.className,
+            trackerId: flarmId,
+            channelName: channelName(match.className, getDCode())
+        };
         aprsListener.postMessage(command);
 
         // Save in the database so we will reuse them later ;)

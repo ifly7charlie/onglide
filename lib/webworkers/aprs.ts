@@ -155,7 +155,6 @@ if (!isMainThread) {
             const trackerObject: Aircraft = {
                 compno: task.compno,
                 className: task.className,
-                channelName: task.channelName,
                 trackers: task.trackerId,
 
                 // Not had a message
