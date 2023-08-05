@@ -230,7 +230,7 @@ function startAprsListener(config: AprsListenerConfig) {
     // Handle a connect
     connection.on('connect', () => {
         connection.sendLine(connection.userLogin);
-        connection.sendLine(`# onglide ${config.competition} ${process.env.NEXT_PUBLIC_WEBSOCKET_HOST}`);
+        connection.sendLine(`# onglide ${config.competition}`);
     });
 
     // Handle a data packet
@@ -291,10 +291,10 @@ function startAprsListener(config: AprsListenerConfig) {
         trackMetric('aprs.unstableCount', unstableCount);
 
         // send a keepalive
-        console.log('sending keepalive', `# ${config.competition} ${process.env.NEXT_PUBLIC_WEBSOCKET_HOST}`);
+        console.log('sending keepalive', `# ${config.competition}`);
         try {
             // Send APRS keep alive or we will get dumped
-            connection.sendLine(`# ${config.competition} ${process.env.NEXT_PUBLIC_WEBSOCKET_HOST}`);
+            connection.sendLine(`# ${config.competition}`);
         } catch (x) {
             console.log('unable to send keepalive', x);
             connection.valid = false;
