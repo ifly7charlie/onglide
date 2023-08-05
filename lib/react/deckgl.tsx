@@ -133,7 +133,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 data: data,
                 getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
                 getText: (d) => d.name,
-                getColor: (d) => (props.t - d.time > gapLength ? [100, 80, 80, 255] : [0, 100, 0, 255]),
+                getColor: (d) => (props.t - d.time > gapLength ? [100, 80, 80, 96] : [0, 100, 0, 255]),
                 getTextAnchor: 'middle',
                 getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
                 pickage: true,
@@ -148,7 +148,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 getBackgroundColor: [255, 255, 255, 255],
                 getBorderColor: [40, 40, 40, 255],
                 getBorderWidth: 1,
-
                 pickable: true
             })
         );
