@@ -126,7 +126,7 @@ export default function CombinePage(props) {
     const [viewport, setViewport] = useState({
         latitude: props.lat,
         longitude: props.lng,
-        zoom: 11.5,
+        zoom: 8.5,
         minZoom: 6.5,
         maxZoom: 14,
         bearing: 0,
