@@ -8,7 +8,7 @@ import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, Position
 import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
 import {Optional, OptionalTime, OptionalDuration, OptionalDurationMM} from './optional';
-import {useState} from 'react';
+import {useState, useEffect} from 'react';
 
 import {FlightLegs} from './flightLegs';
 import {Sorting} from './sorting';
@@ -477,7 +477,7 @@ export function PilotList({
     const [visible, setVisible] = useState(true);
 
     if (!isValidSortOrder(order, handicapped)) {
-        setImmediate(() => setOrder(getValidSortOrder(order, handicapped)));
+        useEffect(() => setOrder(getValidSortOrder(order, handicapped)));
     }
 
     // ensure they sort keys are correct for each pilot, we don't actually
