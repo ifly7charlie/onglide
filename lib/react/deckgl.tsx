@@ -352,7 +352,7 @@ export default function MApp(props: {
         },
         [map2d]
     );
-    const onMapTerrain = useMemo(() => {
+    useEffect(() => {
         const map = mapRef?.current?.getMap();
         if (map) {
             const hasTerrain = !!map.getTerrain();
@@ -636,7 +636,7 @@ function getSunPosition(mapRef, date?) {
         const sunPos = SunCalc.getPosition(date || Date.now(), center.lat, center.lng);
         const sunAzimuth = 180 + (sunPos.azimuth * 180) / Math.PI;
         const sunAltitude = 90 - (sunPos.altitude * 180) / Math.PI;
-        return [sunAzimuth, sunAltitude];
+        return [Math.round(sunAzimuth * 10) / 10, Math.round(sunAltitude * 10) / 10];
     } else {
         return [0, 0];
     }
