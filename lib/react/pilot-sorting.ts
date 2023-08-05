@@ -2,7 +2,7 @@
 // Private
 
 import {map as _map} from 'lodash';
-import {convertHeight, convertClimb} from './displayunits';
+import {Units, convertHeight, convertClimb} from './displayunits';
 import {delayToText, formatTime} from './timehelper.js';
 
 import {Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData, PositionStatus} from '../types';
@@ -19,11 +19,6 @@ export interface ShortDisplayKeys {
     displayAs: string | number | null;
     units: string;
     icon: any;
-}
-
-export enum Units {
-    metric = 0,
-    british = 1
 }
 
 export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'delay' | 'ald' | 'ld' | 'done' | 'auto' | 'times';
