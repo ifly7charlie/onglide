@@ -473,12 +473,9 @@ export function PilotList({
     tz: TZ;
 }) {
     // These are the rendering options
-    const [order, setOrder] = useState<SortKey>('auto');
+    const [rawOrder, setOrder] = useState<SortKey>('auto');
     const [visible, setVisible] = useState(true);
-
-    if (!isValidSortOrder(order, handicapped)) {
-        useEffect(() => setOrder(getValidSortOrder(order, handicapped)));
-    }
+    const order = getValidSortOrder(rawOrder, handicapped);
 
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
