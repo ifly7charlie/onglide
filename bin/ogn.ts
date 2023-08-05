@@ -450,6 +450,11 @@ async function main() {
 
 main().then(() => console.log('Started'));
 
+// So we have a different channel for each date
+function channelName(className, datecode) {
+    return (className + datecode).toUpperCase();
+}
+
 //
 // Get current date code
 async function getDCode() {
@@ -467,18 +472,13 @@ async function updateClasses() {
     // Fetch the trackers from the database and the channel they are supposed to be in
     const classes = await db.query(replayBase ? escape`SELECT class,${toDateCode(new Date(replayBase * 1000))} datecode FROM compstatus` : 'SELECT class, datecode FROM compstatus');
 
-    // Now convert that into the main structure
-    function channelName(className, datecode) {
-        return (className + datecode).toUpperCase();
-    }
-
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
     for (const c of classes) {
         const cname = channelName(c.class, c.datecode);
         let channel = channels[cname];
 
-        // Existing channel do nothing to it
+        // New channel needs setup
         if (!channel) {
             // Update the saved data with the new values
             channel = {
@@ -510,7 +510,7 @@ async function updateClasses() {
 
         // Make sure we have a broadcast channel for the class
         if (!channel.broadcastChannel) {
-            channel.broadcastChannel = new BroadcastChannel(c.class);
+            channel.broadcastChannel = new BroadcastChannel(cname);
 
             // Hook it up to the position messages so we can update our
             // displayed track we wrap the function with the class and
@@ -650,6 +650,7 @@ async function updateTrackers(datecode: string) {
                     action: AprsCommandEnum.untrack,
                     compno: g.compno, //
                     className: g.className,
+                    channelName: channelName(g.className, g.datecode),
                     trackerId: flarmIDs
                 };
                 aprsListener.postMessage(command);
@@ -680,7 +681,13 @@ async function updateTrackers(datecode: string) {
                 const flarmIDs = _filter(t.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i));
                 if (flarmIDs && flarmIDs.length) {
                     // Tell APRS to start listening for the flarmid
-                    const command: AprsCommandTrack = {action: AprsCommandEnum.track, compno: t.compno, className: t.className, trackerId: flarmIDs};
+                    const command: AprsCommandTrack = {
+                        action: AprsCommandEnum.track, //
+                        compno: t.compno,
+                        className: t.className,
+                        trackerId: flarmIDs,
+                        channelName: channelName(g.className, g.datecode)
+                    };
                     aprsListener.postMessage(command);
                 }
             }

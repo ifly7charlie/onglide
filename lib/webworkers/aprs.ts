@@ -52,6 +52,7 @@ export interface AprsCommandTrack {
     action: AprsCommandEnum; //= AprsCommandEnum.track
 
     className: string;
+    channelName: string;
     compno: string;
     trackerId: string | string[];
 }
@@ -154,6 +155,7 @@ if (!isMainThread) {
             const trackerObject: Aircraft = {
                 compno: task.compno,
                 className: task.className,
+                channelName: task.channelName,
                 trackers: task.trackerId,
 
                 // Not had a message
@@ -175,13 +177,13 @@ if (!isMainThread) {
             (typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId)?.forEach((t) => (trackers[t] = trackerObject));
 
             // And make sure we have a channel for it
-            if (!channels[task.className]) {
-                channels[task.className] = new BroadcastChannel(task.className);
+            if (!channels[task.channelName]) {
+                channels[task.channelName] = new BroadcastChannel(task.channelName);
             }
 
             // And link the broadcast channel to it
-            aircraft[task.className + '/' + task.compno].channel = channels[task.className];
-            console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId}`);
+            aircraft[task.className + '/' + task.compno].channel = channels[task.channelName];
+            console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
         }
 
         if (task.action == AprsCommandEnum.untrack) {
