@@ -269,16 +269,10 @@ async function main() {
         aprsListener = spawnAprsContestListener({competition: internalName, location: {lt: location.lat, lg: location.lng}});
     }
 
-    //
-    // Subscribe to the feed of unknown gliders
-    // Any unknown gliders get sent to this for identification
-    unknownChannel = new BroadcastChannel('Unknown_' + internalName);
-    unknownChannel.onmessage = (ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(ev.data);
-
     {
         const datecode = await getDCode();
         await updateTrackers(datecode);
-        await updateClasses();
+        await updateClasses(internalName, datecode);
     }
 
     const server = http.createServer((req, res) => {
@@ -444,38 +438,38 @@ async function main() {
     setInterval(async function () {
         const datecode = await getDCode();
         await updateTrackers(datecode);
-        await updateClasses();
+        await updateClasses(internalName, datecode);
     }, 300 * 1000);
 }
 
 main().then(() => console.log('Started'));
 
 // So we have a different channel for each date
-function channelName(className, datecode) {
+function channelName(className, datecode: Datecode) {
     return (className + datecode).toUpperCase();
 }
 
 //
 // Get current date code
-async function getDCode() {
+async function getDCode(): Promise<Datecode> {
     return replayBase ? toDateCode(new Date(replayBase * 1000)) : (await db.query('SELECT datecode FROM compstatus LIMIT 1'))[0].datecode;
 }
 
 //
 // Fetch the trackers from the database
-async function updateClasses() {
-    console.log('updateClasses()');
+async function updateClasses(internalName: string, datecode: Datecode) {
+    console.log('updateClasses(datecode)');
 
     // Do we need to do this again straight away to restart the scoring?
     let runAgain = false;
 
     // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await db.query(replayBase ? escape`SELECT class,${toDateCode(new Date(replayBase * 1000))} datecode FROM compstatus` : 'SELECT class, datecode FROM compstatus');
+    const classes = await db.query('SELECT class FROM compstatus');
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
     for (const c of classes) {
-        const cname = channelName(c.class, c.datecode);
+        const cname = channelName(c.class, datecode);
         let channel = channels[cname];
 
         // New channel needs setup
@@ -488,7 +482,7 @@ async function updateClasses() {
                 lastSentPositions: 0 as Epoch,
                 toSend: [],
                 className: c.class,
-                datecode: c.datecode,
+                datecode: datecode,
                 gliderHash: '',
                 statistics: {
                     periodStart: Math.trunc(Date.now() / 1000) as Epoch,
@@ -501,6 +495,9 @@ async function updateClasses() {
                     activeListeners: 0
                 }
             };
+        } else {
+            // We move it to the new list
+            delete channels[cname];
         }
         newchannels[cname] = channel;
 
@@ -518,7 +515,7 @@ async function updateClasses() {
             channel.broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => processAprsMessage(c.class, channel, ev.data);
         }
 
-        const updatedTask = await updateTasks(c.class, c.datecode);
+        const updatedTask = await updateTasks(c.class, datecode);
         // We have a task but we aren't yet scoring
         if (!channel.scoring && updatedTask) {
             // Setup the thread
@@ -540,7 +537,7 @@ async function updateClasses() {
         // We have a task and we previous had one, in this case we need to check for a change
         if (channel.gliderHash != gliderHash || !_isEqual(channel.task || {}, updatedTask || {})) {
             console.log(`new task for ${c.class}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] gliders: ${channel.gliderHash} == ${gliderHash} (#${classGliders.length}}`);
-            // At present the only one to do this is to close everything down
+            // At present the only way to do this is to close everything down
             // we won't miss any track points because we don't stop the APRS listener
             if (channel.scoring) {
                 channel.scoring.shutdown();
@@ -559,12 +556,31 @@ async function updateClasses() {
             }
         }
     }
+
+    // Any channels left here are old and can be removed - the current ones are moved from channels
+    // and added to newchannels
+    if (Object.keys(channels).length) {
+        console.log('closing channels: ', Object.keys(channels).join(','));
+        Object.values(channels).forEach((channel) => {
+            channel.broadcastChannel.close();
+        });
+        unknownChannel.close();
+        unknownChannel = undefined;
+    }
+
+    // Subscribe to the feed of unknown gliders
+    // Any unknown gliders get sent to this for identification
+    if (!unknownChannel) {
+        unknownChannel = new BroadcastChannel('Unknown_' + internalName);
+        unknownChannel.onmessage = (ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(ev.data, datecode);
+    }
+
     // replace (do we need to close the old ones?)
     channels = newchannels;
     console.log(`Updated Channels: ${_map(channels, (c) => c.className + '_' + c.datecode).join(',')}`);
 
     if (runAgain) {
-        setImmediate(updateClasses);
+        setImmediate(() => updateClasses(internalName, datecode));
     }
 }
 
@@ -621,7 +637,7 @@ async function updateTasks(className: ClassName, datecode: Datecode): Promise<Ta
     return task;
 }
 
-async function updateTrackers(datecode: string) {
+async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
 
     let cTrackers = await db.query(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
@@ -1059,7 +1075,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
 
 // If we don't know the glider then we need to figure out who it is and make sure we
 // process it properly
-function identifyUnknownGlider(data: PositionMessage): void {
+function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void {
     //
     // We will get the flarm id in 'c' as there is no known compno
     const flarmId = data.c;
@@ -1125,7 +1141,7 @@ function identifyUnknownGlider(data: PositionMessage): void {
             compno: match.compno,
             className: match.className,
             trackerId: flarmId,
-            channelName: channelName(match.className, await getDCode())
+            channelName: channelName(match.className, datecode)
         };
         aprsListener.postMessage(command);
 
