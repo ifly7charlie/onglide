@@ -906,8 +906,8 @@ async function getInitialTrackPoints(channel: Channel): Promise<void> {
         // Find the glider
         const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
 
-        if( ! glider ) {
-            console.log( 'missing glider', compno, gliders );
+        if (!glider) {
+            console.log('missing glider', compno, gliders);
             continue;
         }
 
@@ -1125,7 +1125,7 @@ function identifyUnknownGlider(data: PositionMessage): void {
             compno: match.compno,
             className: match.className,
             trackerId: flarmId,
-            channelName: channelName(match.className, getDCode())
+            channelName: channelName(match.className, await getDCode())
         };
         aprsListener.postMessage(command);
 
