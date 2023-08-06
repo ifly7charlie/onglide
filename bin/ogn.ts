@@ -519,7 +519,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // We have a task but we aren't yet scoring
         if (!channel.scoring && updatedTask) {
             // Setup the thread
-            channel.scoring = new ScoringController({className: c.class, airfield: location});
+            channel.scoring = new ScoringController({className: c.class, datecode, airfield: location});
             channel.scoring.hookScores(({scores, recentStarts}) => sendScores(channel, scores, recentStarts));
 
             // Get tracks and configure pilots to score

@@ -16,7 +16,7 @@
 import {initialiseInsights} from '../insights';
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno, InOrderGeneratorFunction, AirfieldLocation} from '../types';
+import {Epoch, Datecode, ClassName_Compno, makeClassname_Compno, ClassName, Compno, InOrderGeneratorFunction, AirfieldLocation} from '../types';
 
 import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:worker_threads';
 
@@ -68,26 +68,29 @@ export type scoresCallback = (message: {scores: Buffer; recentStarts: Record<Com
 
 export interface ScoringConfig {
     className: ClassName;
+    datecode: Datecode;
     airfield: AirfieldLocation;
 }
 
 export class ScoringController {
     className: ClassName;
+    datecode: Datecode;
     worker: Worker;
 
     constructor(config: ScoringConfig) {
         this.className = config.className;
+        this.datecode = config.datecode;
         this.worker = spawnScoringContestListener(config);
     }
 
     // Load these points into scoring
     setInitialTrack(compno: Compno, handicap: number, utcStart: Epoch, points: PositionMessage[]) {
-        this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, compno, points, handicap, utcStart});
+        this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, datecode: this.datecode, compno, points, handicap, utcStart});
     }
 
     // This actually starts scoring for the task
     setTask(task: any) {
-        this.worker.postMessage({action: ScoringCommandEnum.newtask, className: this.className, task});
+        this.worker.postMessage({action: ScoringCommandEnum.newtask, className: this.className, datecode: this.datecode, task});
     }
 
     shutdown() {
@@ -140,6 +143,7 @@ export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | Sc
 
 interface ScoringCommandBase {
     className: ClassName;
+    datecode: Datecode;
 }
 
 // Task has changed
@@ -179,7 +183,7 @@ function spawnScoringContestListener(config: ScoringConfig): Worker {
 }
 
 if (!isMainThread) {
-    console.log(`Started Scoring Thread for class ${workerData.className} :)`);
+    console.log(`Started Scoring Thread for class ${workerData.className}/${workerData.datecode} :)`);
 
     // Perhaps we need to do this in the thread?
     initialiseInsights();
@@ -208,7 +212,7 @@ if (!isMainThread) {
                 compno: task.compno,
                 handicap: task.handicap,
                 utcStart: task.utcStart,
-                inorder: bindChannelForInOrderPackets(task.className, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
+                inorder: bindChannelForInOrderPackets(task.className, task.datecode, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
                 scoring: null
             };
         }
@@ -216,7 +220,7 @@ if (!isMainThread) {
         // Actually start scoring the task, will score all the gliders we have tracks for
         if (task.action == ScoringCommandEnum.newtask) {
             console.log(`${task.className}/${task.compno}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})}`);
-            startScoring({className: task.className, airfield: workerData.airfield}, task.task);
+            startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task);
         }
     });
 }

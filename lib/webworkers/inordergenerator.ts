@@ -1,4 +1,4 @@
-import {Epoch, ClassName, Compno, PositionMessage, InOrderGeneratorFunction, InOrderGenerator} from '../types';
+import {Epoch, Datecode, ClassName, Compno, PositionMessage, InOrderGeneratorFunction, InOrderGenerator} from '../types';
 import {inOrderDelay} from '../constants';
 
 import {sortedLastIndexBy as _sortedLastIndexBy} from 'lodash';
@@ -14,7 +14,7 @@ const defaultEpochNow = (): Epoch => Math.trunc(Date.now() / 1000) as Epoch;
 // order
 // NOTE: ONLY ONE EXECUTION OF GENERATOR ALLOWED!
 
-export function bindChannelForInOrderPackets(className: ClassName, compno: Compno, initialPoints: PositionMessage[], tick: boolean = false, once: boolean = false): InOrderGeneratorFunction {
+export function bindChannelForInOrderPackets(className: ClassName, datecode: Datecode, compno: Compno, initialPoints: PositionMessage[], tick: boolean = false, once: boolean = false): InOrderGeneratorFunction {
     //
     // And we need a way to notify and wake up our generator
     // that is not asynchronous. Once we have achieved this
@@ -32,7 +32,8 @@ export function bindChannelForInOrderPackets(className: ClassName, compno: Compn
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
     // channel to simplify things
-    const broadcastChannel = new BroadcastChannel(className);
+    const channelName = (className + datecode).toUpperCase();
+    const broadcastChannel = new BroadcastChannel(channelName);
     broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => {
         // Get the message, and make sure it's for us
         let message = ev.data as PositionMessage;

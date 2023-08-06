@@ -160,6 +160,7 @@ if (!isMainThread) {
                 inorder: bindChannelForInOrderPackets(
                     'replay' as ClassName,
                     task.compno,
+                    task.datecode,
                     itTask.points,
                     true
                 )((): Epoch => {

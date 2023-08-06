@@ -98,7 +98,7 @@ async function runScore(datecode, className, compno: Compno, handicap) {
     for (const compno in groupedPoints) {
         console.log(compno, groupedPoints[compno].length);
 
-        const inorder = bindChannelForInOrderPackets(className, compno as Compno, groupedPoints[compno], iterative, !iterative);
+        const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, groupedPoints[compno], iterative, !iterative);
 
         // 0. Check if we are flying etc
         const epg = enrichedPositionGenerator(location, inorder(getNow), log);
