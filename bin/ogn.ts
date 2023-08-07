@@ -458,7 +458,7 @@ async function getDCode(): Promise<Datecode> {
 //
 // Fetch the trackers from the database
 async function updateClasses(internalName: string, datecode: Datecode) {
-    console.log('updateClasses(datecode)');
+    console.log(`updateClasses(${internalName}, ${datecode})`);
 
     // Do we need to do this again straight away to restart the scoring?
     let runAgain = false;
@@ -598,7 +598,7 @@ async function updateTasks(className: ClassName, datecode: Datecode): Promise<Ta
     `)) || {})[0];
 
     if (!taskdetails || !taskdetails.type) {
-        console.log(`${className}: no active task`, taskdetails);
+        console.log(`${className}/${datecode}: no active task`, taskdetails);
         return null;
     }
 
