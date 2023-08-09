@@ -1778,7 +1778,7 @@ export const PilotScore = {
       writer.uint32(40).uint32(message.taskDuration);
     }
     if (message.taskTimeRemaining !== undefined) {
-      writer.uint32(432).uint32(message.taskTimeRemaining);
+      writer.uint32(432).int32(message.taskTimeRemaining);
     }
     if (message.inSector !== undefined) {
       writer.uint32(56).bool(message.inSector);
@@ -1878,7 +1878,7 @@ export const PilotScore = {
             break;
           }
 
-          message.taskTimeRemaining = reader.uint32();
+          message.taskTimeRemaining = reader.int32();
           continue;
         case 7:
           if (tag !== 56) {

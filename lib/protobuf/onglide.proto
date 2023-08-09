@@ -130,7 +130,7 @@ message PilotScore {
     uint32 utcStart = 3;
     uint32 utcFinish = 4;
 	optional uint32 taskDuration = 5; // scored to when
-	optional uint32 taskTimeRemaining = 54; // how many seconds remaining on an aat, will be negative if under time
+	optional int32 taskTimeRemaining = 54; // how many seconds remaining on an aat, will be negative if under time
 	
 	//    bool startFound = 6;
 	optional bool inSector = 7;

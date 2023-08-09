@@ -68,7 +68,7 @@ export function OptionalDuration(before: string, t: Epoch, after: string | null 
     if (!t) {
         return '';
     }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    const v = (t < 0 ? '-' : '') + new Date(Math.abs(t) * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
