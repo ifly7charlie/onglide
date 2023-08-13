@@ -246,8 +246,9 @@ async function update_pilots(class_url, classid, classname, keys) {
 
         // Get nested data more easily
         const epilot = pilot._embedded['http://api.soaringspot.com/rel/pilot'][0];
+        const compno = pilot.contestant_number.substring(0, 4);
 
-        //pilot.live_track_id (list of flarm ids)
+        const flarmIds = pilot.live_track_id || 'unknown'; //(list of flarm ids)
 
         const gravatar = (pilot) => {
             if (pilot.email) {
@@ -266,7 +267,7 @@ async function update_pilots(class_url, classid, classname, keys) {
                            ${epilot.first_name?.substring(0, 30) || ''}, ${epilot.last_name?.substring(0, 30) || ''}, ${pilot.club?.substring(0, 80) || ''}, null,
                            ${epilot.civl_id ? epilot.civl_id : epilot.igc_id}, ${epilot.nationality?.substring(0, 2) || ''},
                            ${gravatar(epilot)},
-                           ${pilot.contestant_number.substring(0, 4)},
+                           ${compno},
                            ${pilot.not_competing ? 'N' : 'Y'},
                            ${pilot.aircraft_model.substring(0, 30) || ''},
                            ${pilot.aircraft_registration?.substring(0, 8) || ''},
@@ -276,6 +277,19 @@ async function update_pilots(class_url, classid, classname, keys) {
                            homeclub=values(homeclub), fai=values(fai), country=values(country), email=values(email),
                            participating=values(participating), handicap=values(handicap),
                            glidertype=values(glidertype), greg=values(greg), registereddt=NOW()`);
+
+        // Make a list of the IDs, stripping anything but last 6 characters
+        const flarms = flarmIds
+            .split(',')
+            .map((id) => id.match(/([a-f0-9]{6})$/i)?.[1])
+            .filter((id) => !!id);
+        console.log(`flarms: ${compno}: ${flarmIds} => ${flarms}`);
+        if (flarms.length) {
+            await t.query(escape`INSERT INTO tracker (class,compno,type,trackerid) VALUES (${classid},
+                                     ${compno}, 'flarm', ${flarms.join(',')} )
+                                  ON DUPLICATE KEY update trackerid=values(trackerid)`);
+            await t.query(escape`INSERT INTO trackerhistory VALUES ( ${compno}, now(), ${flarms.join(',')}, '', null, 'soaringspot' )`);
+        }
 
         // Download pictures
         if (epilot.igc_id) {
@@ -290,7 +304,7 @@ async function update_pilots(class_url, classid, classname, keys) {
 
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
     await t
-        //        .query(escape`DELETE FROM pilots WHERE class=${classid} AND registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
+        .query(escape`DELETE FROM pilots WHERE class=${classid} AND registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
 
         // Trackers needs a row for each pilot so fill any missing, perhaps we should
         // also remove unwanted ones
