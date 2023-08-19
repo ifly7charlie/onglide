@@ -36,8 +36,8 @@ export class ReplayController {
     }
 
     // Load these points into scoring
-    setInitialTrack(compno: Compno, points: PositionMessage[]) {
-        this.worker.postMessage({action: ReplayCommandEnum.initialTrack, className: this.className, compno: compno, points: points});
+    setInitialTrack(compno: Compno, points: PositionMessage[], channelName: string) {
+        this.worker.postMessage({action: ReplayCommandEnum.initialTrack, className: this.className, compno: compno, points: points, channelName});
     }
 
     // This actually starts scoring for the task
@@ -88,6 +88,7 @@ export type ReplayCommand = ReplayCommandShutdown | ReplayCommandNewTask | Repla
 
 interface ReplayCommandBase {
     className: ClassName;
+    channelName: string;
 }
 
 // Task has changed
@@ -143,8 +144,8 @@ if (!isMainThread) {
         // of gliders to track
         if (task.action == ReplayCommandEnum.initialTrack) {
             const itTask: ReplayCommandTrack = task;
-            if (!channels[task.className]) {
-                channels[task.className] = new BroadcastChannel(task.className);
+            if (!channels[task.channelName]) {
+                channels[task.channelName] = new BroadcastChannel(task.channelName);
             }
 
             let start = Math.trunc(Date.now() / 1000);
@@ -169,7 +170,7 @@ if (!isMainThread) {
                     const effectiveElapsed = elapsed * multiplier;
                     return (replayBase + effectiveElapsed) as Epoch;
                 }),
-                channel: channels[task.className]
+                channel: channels[task.channelName]
             };
         }
 

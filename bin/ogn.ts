@@ -977,7 +977,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
         channel.replay = new ReplayController({className: channel.className});
         for (const compno in groupedPoints) {
             console.log(compno, groupedPoints[compno].length);
-            channel.replay.setInitialTrack(compno as Compno, groupedPoints[compno]);
+            channel.replay.setInitialTrack(compno as Compno, groupedPoints[compno], channelName(channel.className, channel.datecode));
         }
     }
 
