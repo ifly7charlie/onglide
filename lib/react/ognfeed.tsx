@@ -409,7 +409,7 @@ async function* getData(compno: Compno, deck: DeckData, map2d: boolean) {
             current++;
         }
 
-        console.log(compno, newData);
+        //        console.log(compno, newData);
         yield newData;
     }
 }

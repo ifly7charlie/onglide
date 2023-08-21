@@ -35,7 +35,6 @@ import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} 
 
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
-import {OgnPathLayer} from './ognpathlayer';
 import {StopFollowController} from './deckglcontroller';
 //
 // Responsible for generating the deckGL layers
@@ -73,7 +72,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
 
             result.push(
                 new PathLayer({
-                    id: (selected ? 'selected' : '') + compno,
+                    id: compno,
                     compno: compno,
                     data: p.getData,
                     getWidth: 5,
@@ -367,21 +366,22 @@ export default function MApp(props: {
         }
         if (object) {
             let response = '';
+            const compno = layer.props.compno;
 
-            if (object.compno && object.time && pilotScores[object.compno]?.stats) {
-                const segment = _find(props.pilots[object.compno].stats, (c) => c.start <= object.time && object.time <= c.end);
+            if (compno && object.time && pilotScores[compno]?.stats) {
+                const segment = _find(props.pilots[compno].stats, (c) => c.start <= object.time && object.time <= c.end);
                 if (segment) {
                     object.stats = segment;
                 }
             }
-            if (object.time) {
+            if (object.timing) {
                 // Figure out what the local language is for international date strings
-                const dt = new Date(object.time * 1000);
-                response += `${object.compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
+                const dt = new Date(object.timing * 1000);
+                response += `${compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
             }
 
             if (process.env.NODE_ENV == 'development') {
-                response += `[${object.time}]<br/>`;
+                response += `[${object.timing}]<br/>`;
             }
 
             if (object.alt && !isNaN(object.alt)) {
