@@ -29,6 +29,7 @@ import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
 import {OptionalDurationMM} from './optional';
 
+import {gapLength} from '../constants';
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
 
@@ -249,6 +250,7 @@ function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
 
     // Merge into the geoJSON objects as needed
     mergePoint(point, cp, false);
+    cp.deck?.dataPromiseResolve?.();
 }
 
 export function AlertDisconnected({mutatePilots, attempt}) {
@@ -290,16 +292,20 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                         }
                         const deck: DeckData = (result[compno].deck = {
                             compno: compno as Compno,
-                            indices: new Uint32Array(p.indices.slice().buffer),
+                            //                            indices: new Uint32Array(p.indices.slice().buffer),
                             positions: new Float32Array(p.positions.slice().buffer),
                             t: new Uint32Array(p.t.slice().buffer),
                             climbRate: new Int8Array(p.climbRate.slice().buffer),
-                            recentIndices: new Uint32Array(p.recentIndices.slice().buffer),
+                            //                            recentIndices: new Uint32Array(p.recentIndices.slice().buffer),
                             agl: new Int16Array(p.agl.slice().buffer),
                             posIndex: p.posIndex,
-                            partial: p.partial,
-                            segmentIndex: p.segmentIndex
+                            partial: p.partial
+                            //                            segmentIndex: p.segmentIndex
                         });
+
+                        console.log('create iterator:', compno);
+                        deck.getData = getData(compno as Compno, deck, true);
+
                         //                        result[compno].colors = new Uint8Array(_map(result[compno].t, (_) => [Math.floor(Math.random() * 255), 128, 128]).flat());
                         if (!p.partial && pilotScores[compno]?.utcStart) {
                             pruneStartline(deck, pilotScores[compno].utcStart);
@@ -364,4 +370,46 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
             setWsStatus(wsStatus);
         }
     });
+}
+
+// Create an async iterable
+async function* getData(compno: Compno, deck: DeckData, map2d: boolean) {
+    let current = 0;
+    console.log('starting iterator', compno, deck.posIndex);
+
+    while (true) {
+        // Wait for data
+        await new Promise<void>((resolve) => {
+            deck.dataPromiseResolve = resolve;
+        });
+
+        // And send a segment or some
+        const newData = [];
+        while (current < deck.posIndex) {
+            const previous = current ? current - 1 : 0;
+
+            // No gap, use previous point
+            if (deck.t[current] - deck.t[previous] < gapLength) {
+                newData.push({
+                    path: [[...deck.positions.subarray(previous * 3, previous * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
+                    timing: deck.t[current],
+                    climbRate: deck.climbRate[current],
+                    agl: deck.agl[current]
+                });
+            }
+            // gap, use current point twice
+            else {
+                newData.push({
+                    path: [[...deck.positions.subarray(current * 3, current * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
+                    timing: deck.t[current],
+                    climbRate: deck.climbRate[current],
+                    agl: deck.agl[current]
+                });
+            }
+            current++;
+        }
+
+        console.log(compno, newData);
+        yield newData;
+    }
 }

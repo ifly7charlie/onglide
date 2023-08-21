@@ -776,18 +776,18 @@ async function sendPilotTrack(client: WebSocket, compno: Compno) {
     const p = gliders[makeClassname_Compno(channels[client.ognChannel].className, compno)]?.deck;
     const toStream = {};
     if (p) {
-        console.log('sendPilotTrack', client.ognChannel, compno, ', points=', p.posIndex, ', segments=', p.segmentIndex);
+        console.log('sendPilotTrack', client.ognChannel, compno, ', points=', p.posIndex);
         toStream[compno] = {
             compno: compno,
             positions: new Uint8Array(p.positions.buffer, 0, p.posIndex * 3 * 4),
-            indices: new Uint8Array(p.indices.buffer, 0, (p.segmentIndex + 1) * 4),
+            //            indices: new Uint8Array(p.indices.buffer, 0, (p.segmentIndex + 1) * 4),
             t: new Uint8Array(p.t.buffer, 0, p.posIndex * 4),
             climbRate: new Uint8Array(p.climbRate.buffer, 0, p.posIndex),
-            recentIndices: new Uint8Array(p.recentIndices.buffer),
+            //            recentIndices: new Uint8Array(p.recentIndices.buffer),
             agl: new Uint8Array(p.agl.buffer, 0, p.posIndex * 2),
             posIndex: p.posIndex,
-            partial: false,
-            segmentIndex: p.segmentIndex
+            partial: false
+            //            segmentIndex: p.segmentIndex
         };
     }
 
@@ -806,22 +806,22 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
             if (glider.className == className) {
                 const p = glider.deck;
                 if (p) {
-                    const start = p.recentIndices[0];
-                    const end = p.recentIndices[1];
+                    const start = 0; //p.recentIndices[0];
+                    const end = p.posIndex;
                     const length = end - start;
-                    const segments = new Uint32Array([0, length]);
+                    //                    const segments = new Uint32Array([0, length]);
                     if (length) {
                         result[glider.compno] = {
                             compno: glider.compno,
                             positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
-                            indices: new Uint8Array(segments.buffer),
+                            //                            indices: new Uint8Array(segments.buffer),
                             t: new Uint8Array(p.t.buffer, start * 4, length * 4),
                             climbRate: new Uint8Array(p.climbRate.buffer, start, length),
-                            recentIndices: new Uint8Array(segments.buffer),
+                            //                            recentIndices: new Uint8Array(segments.buffer),
                             agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
                             posIndex: length,
-                            partial: true,
-                            segmentIndex: 1
+                            partial: true
+                            //                            segmentIndex: 1
                         };
                     }
                 }

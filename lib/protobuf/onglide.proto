@@ -28,12 +28,12 @@ message PilotTrack {
     bytes positions = 4;
 
     // Segments in the track line, for broken track drawing (actually uint32)
-    uint32 segmentIndex = 5;
-    bytes indices = 6;
+//    uint32 segmentIndex = 5;
+//    bytes indices = 6;
     bytes agl = 12; // int16
 
     // Two Uint32 array containing the track segment that is most recent
-    bytes recentIndices = 7;
+//    bytes recentIndices = 7;
 
     // For colouring, all Uint8 arrays one for each point all optional
 	bytes climbRate = 8;

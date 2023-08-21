@@ -1,7 +1,8 @@
 import {useCallback, useMemo, useEffect} from 'react';
 import DeckGL from '@deck.gl/react';
-import {TextLayer} from '@deck.gl/layers';
+import {TextLayer, PathLayer} from '@deck.gl/layers';
 import {FlyToInterpolator, LinearInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
+import {DataFilterExtension} from '@deck.gl/extensions';
 import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
 import {LngLat, MercatorCoordinate} from 'mapbox-gl';
 
@@ -12,7 +13,7 @@ import {gapLength} from '../constants';
 // Height/Climb helpers
 import {displayHeight, displayClimb} from './displayunits';
 
-import {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
+import {Epoch, ClassName, Compno, TrackData, PilotTrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
@@ -31,14 +32,6 @@ import bbox from '@turf/bbox';
 import distance from '@turf/distance';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
-
-// Create an async iterable
-/*async function* getData() {
-  for (let i = 0; i < 10; i++) {
-    await const chunk = fetchChunk(...);
-    yield chunk;
-  }
-}*/
 
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
@@ -60,32 +53,33 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         props.trackData,
         (result, track, compno) => {
             // Don't include current pilot in list of all
-            if (compno == props.selectedCompno) {
-                return result;
-            }
+            const selected = compno == props.selectedCompno;
+
             const p = track.deck;
-            if (!p) {
+            if (!p || !p.getData) {
                 console.log(`deck missing from ${compno}`, track);
                 return result;
             }
+
+            // For all but selected gliders just show most recent track
+            const filtering = selected ? {} : {};
+            /*                : {
+                      getFilterValue: (a) => a.timing,
+                      filterRange: [props.t - 30, props.t + 30],
+                      extensions: [new DataFilterExtension({filterSize: 1})]
+                  }; */
+
+            const color = selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224];
+
             result.push(
-                new OgnPathLayer({
-                    id: compno,
+                new PathLayer({
+                    id: (selected ? 'selected' : '') + compno,
                     compno: compno,
-                    data: {
-                        length: 1,
-                        startIndices: new Uint32Array([0, p.recentIndices[1] - p.recentIndices[0]]),
-                        timing: p.t.subarray(p.recentIndices[0], p.recentIndices[1]),
-                        climbRate: p.climbRate.subarray(p.recentIndices[0], p.recentIndices[1]),
-                        agl: p.agl.subarray(p.recentIndices[0], p.recentIndices[1]),
-                        attributes: {
-                            getPath: {value: p.positions.subarray(p.recentIndices[0] * 3, p.recentIndices[1] * 3), size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0}
-                        }
-                    },
-                    _pathType: 'open',
-                    positionFormat: map2d ? 'XY' : 'XYZ',
+                    data: p.getData,
                     getWidth: 5,
-                    getColor: mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224],
+                    getPath: (d) => d.path,
+                    positionFormat: map2d ? 'XY' : 'XYZ',
+                    getColor: color,
                     jointRounded: true,
                     fp64: false,
                     widthMinPixels: 2,
@@ -93,11 +87,11 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     onClick: (i) => {
                         props.setSelectedCompno(compno);
                     },
-                    updateTriggers: {
-                        getPath: p.posIndex
-                    },
                     pickable: true,
-                    tt: true
+                    tt: true,
+
+                    // If we are not selected then we are filtered
+                    ...filtering
                 })
             );
             return result;
@@ -143,6 +137,9 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 onClick: (i) => {
                     props.setSelectedCompno(i.object?.name || '');
                 },
+                transitions: {
+                    //                    getPosition: 2000
+                },
                 outlineWidth: 2,
                 outlineColor: [255, 255, 255, 255],
                 getBackgroundColor: [255, 255, 255, 255],
@@ -151,44 +148,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 pickable: true
             })
         );
-    }
-
-    //
-    // If there is a selected pilot then we need to add the full track for that pilot
-    //
-    if (props.selectedCompno && props.trackData[props.selectedCompno]?.deck) {
-        const p = props.trackData[props.selectedCompno].deck;
-        if (p.posIndex) {
-            layers.push(
-                new OgnPathLayer({
-                    id: 'selected' + props.selectedCompno + p.partial + p.posIndex,
-                    compno: props.selectedCompno,
-                    data: {
-                        length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
-                        startIndices: p.indices,
-                        timing: p.t,
-                        climbRate: p.climbRate,
-                        agl: p.agl,
-                        attributes: {
-                            getPath: {value: p.positions, size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0}
-                        }
-                    },
-                    _pathType: 'open',
-                    positionFormat: map2d ? 'XY' : 'XYZ',
-                    getWidth: 5,
-                    billboard: map2d ? false : true,
-                    getColor: [255, 0, 255, 192],
-                    jointRounded: true,
-                    widthMinPixels: 3,
-                    fp64: false,
-                    pickable: true,
-                    tt: true,
-                    updateTriggers: {
-                        getPath: p.posIndex
-                    }
-                })
-            );
-        }
     }
 
     return layers;
@@ -224,7 +183,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d, mapStreet), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial, mapLight]);
+    const layers = makeLayers(props, taskGeoJSON, map2d, mapStreet); //, [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial, mapLight]);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);

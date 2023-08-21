@@ -27,14 +27,11 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData): void {
     glider.deck = {
         compno: compno,
         positions: new Float32Array(deckPointIncrement * 3),
-        indices: new Uint32Array(deckSegmentIncrement),
         agl: new Int16Array(deckPointIncrement),
         t: new Uint32Array(deckPointIncrement),
-        recentIndices: new Uint32Array(2),
         climbRate: new Int8Array(deckPointIncrement),
         partial: true,
-        posIndex: 0,
-        segmentIndex: 0
+        posIndex: 0
     };
 }
 
@@ -55,7 +52,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         }
     }
 
-    // Last point we go
+    // Last point we got
     glider.t = point.t as Epoch;
 
     // Now we will work with this data
@@ -70,52 +67,18 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         deck.climbRate = resize(Int8Array, deck.climbRate, newLength);
     }
 
-    if (deck.segmentIndex + 2 >= deck.indices.length) {
-        deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
-    }
-
     // Set the new positions
     function pushPoint(positions: Float32Array | number[], g: number, t: number) {
         deck.positions.set(positions, deck.posIndex * 3);
         deck.t[deck.posIndex] = t;
         deck.agl[deck.posIndex] = g;
-        //		deck.colours.set( [ 64, 64, 64 ], deck.posIndex*3 );
         deck.posIndex++;
-        // Also the indicies array needs to be terminated
-        deck.indices[deck.segmentIndex] = deck.posIndex;
     }
-
-    // Start the first segment
-    if (deck.posIndex == 0) {
-        deck.indices[deck.segmentIndex++] = 0;
-    } else {
-        // If the gap is too long then we need to start the next segment as well
-        if (point.t - lastTime > gapLength) {
-            // If we have only one point in the previous segment then we should duplicate it
-            const previousSegmentStart = deck.indices[deck.segmentIndex - 1];
-            if (previousSegmentStart == deck.posIndex) {
-                // add it to the previous segment so there are two points in it, it's not a line
-                // without two points
-                pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
-            }
-
-            // Start a new segment, on the next point (which has not yet been pushed)
-            deck.segmentIndex++;
-        } else {
-            deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
-        }
-    }
-
-    // Push the new point into the data array
     pushPoint([point.lng, point.lat, point.a], point.g, point.t);
 
-    // Generate the recent track for the glider
-    let recentOldest = deck.recentIndices[0];
-    while (point.t - deck.t[recentOldest] > gapLength && recentOldest < deck.posIndex) {
-        recentOldest++;
+    if (point.t - lastTime < gapLength) {
+        deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
     }
-    deck.recentIndices[0] = recentOldest;
-    deck.recentIndices[1] = deck.posIndex;
 
     // Update the altitude and height AGL for the pilot
     // Mutate the vario and altitude back into SWR
@@ -152,7 +115,7 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     if (!deck || deck.t[0] >= startTime) {
         return false;
     }
-
+    /*
     // Find the point in the array of times
     let indexRemove = _sortedIndex(deck.t.subarray(0, deck.posIndex - 1), startTime);
     if (!indexRemove || indexRemove == deck.posIndex - 1) {
@@ -206,7 +169,7 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     //    for (let c = 0; c <= deck.segmentIndex; c++) {
     //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
     //    }
-
+*/
     return true;
 }
 

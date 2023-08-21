@@ -31,13 +31,12 @@ export interface PilotTrack {
   t: Uint8Array;
   /** Three tuple of [lat,lng,alt] repeated length times (actually float) (and the height above ground) */
   positions: Uint8Array;
-  /** Segments in the track line, for broken track drawing (actually uint32) */
-  segmentIndex: number;
-  indices: Uint8Array;
-  /** int16 */
+  /**
+   * Segments in the track line, for broken track drawing (actually uint32)
+   *    uint32 segmentIndex = 5;
+   *    bytes indices = 6;
+   */
   agl: Uint8Array;
-  /** Two Uint32 array containing the track segment that is most recent */
-  recentIndices: Uint8Array;
   /** For colouring, all Uint8 arrays one for each point all optional */
   climbRate: Uint8Array;
   /** Does this contain a full trace or just the most recent trace */
@@ -507,10 +506,7 @@ function createBasePilotTrack(): PilotTrack {
     posIndex: 0,
     t: new Uint8Array(0),
     positions: new Uint8Array(0),
-    segmentIndex: 0,
-    indices: new Uint8Array(0),
     agl: new Uint8Array(0),
-    recentIndices: new Uint8Array(0),
     climbRate: new Uint8Array(0),
     partial: undefined,
   };
@@ -530,17 +526,8 @@ export const PilotTrack = {
     if (message.positions.length !== 0) {
       writer.uint32(34).bytes(message.positions);
     }
-    if (message.segmentIndex !== 0) {
-      writer.uint32(40).uint32(message.segmentIndex);
-    }
-    if (message.indices.length !== 0) {
-      writer.uint32(50).bytes(message.indices);
-    }
     if (message.agl.length !== 0) {
       writer.uint32(98).bytes(message.agl);
-    }
-    if (message.recentIndices.length !== 0) {
-      writer.uint32(58).bytes(message.recentIndices);
     }
     if (message.climbRate.length !== 0) {
       writer.uint32(66).bytes(message.climbRate);
@@ -586,33 +573,12 @@ export const PilotTrack = {
 
           message.positions = reader.bytes();
           continue;
-        case 5:
-          if (tag !== 40) {
-            break;
-          }
-
-          message.segmentIndex = reader.uint32();
-          continue;
-        case 6:
-          if (tag !== 50) {
-            break;
-          }
-
-          message.indices = reader.bytes();
-          continue;
         case 12:
           if (tag !== 98) {
             break;
           }
 
           message.agl = reader.bytes();
-          continue;
-        case 7:
-          if (tag !== 58) {
-            break;
-          }
-
-          message.recentIndices = reader.bytes();
           continue;
         case 8:
           if (tag !== 66) {
@@ -643,10 +609,7 @@ export const PilotTrack = {
       posIndex: isSet(object.posIndex) ? Number(object.posIndex) : 0,
       t: isSet(object.t) ? bytesFromBase64(object.t) : new Uint8Array(0),
       positions: isSet(object.positions) ? bytesFromBase64(object.positions) : new Uint8Array(0),
-      segmentIndex: isSet(object.segmentIndex) ? Number(object.segmentIndex) : 0,
-      indices: isSet(object.indices) ? bytesFromBase64(object.indices) : new Uint8Array(0),
       agl: isSet(object.agl) ? bytesFromBase64(object.agl) : new Uint8Array(0),
-      recentIndices: isSet(object.recentIndices) ? bytesFromBase64(object.recentIndices) : new Uint8Array(0),
       climbRate: isSet(object.climbRate) ? bytesFromBase64(object.climbRate) : new Uint8Array(0),
       partial: isSet(object.partial) ? Boolean(object.partial) : undefined,
     };
@@ -666,17 +629,8 @@ export const PilotTrack = {
     if (message.positions.length !== 0) {
       obj.positions = base64FromBytes(message.positions);
     }
-    if (message.segmentIndex !== 0) {
-      obj.segmentIndex = Math.round(message.segmentIndex);
-    }
-    if (message.indices.length !== 0) {
-      obj.indices = base64FromBytes(message.indices);
-    }
     if (message.agl.length !== 0) {
       obj.agl = base64FromBytes(message.agl);
-    }
-    if (message.recentIndices.length !== 0) {
-      obj.recentIndices = base64FromBytes(message.recentIndices);
     }
     if (message.climbRate.length !== 0) {
       obj.climbRate = base64FromBytes(message.climbRate);
@@ -696,10 +650,7 @@ export const PilotTrack = {
     message.posIndex = object.posIndex ?? 0;
     message.t = object.t ?? new Uint8Array(0);
     message.positions = object.positions ?? new Uint8Array(0);
-    message.segmentIndex = object.segmentIndex ?? 0;
-    message.indices = object.indices ?? new Uint8Array(0);
     message.agl = object.agl ?? new Uint8Array(0);
-    message.recentIndices = object.recentIndices ?? new Uint8Array(0);
     message.climbRate = object.climbRate ?? new Uint8Array(0);
     message.partial = object.partial ?? undefined;
     return message;

@@ -42,7 +42,7 @@
         "babel-plugin-macros": "^3.1.0",
         "bootstrap": "^4.0.0",
         "country-iso-3-to-2": "^1.1.0",
-        "deck.gl": "=8.5.2",
+        "deck.gl": ">8.9.3",
         "dotenv": ">=8.2.0",
         "js-aprs-fap": ">=1.0.0",
         "js-aprs-is": ">=1.0.1",

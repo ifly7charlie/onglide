@@ -86,11 +86,13 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
                 ) : null}
                 {data2?.value !== undefined && data2.value !== null ? (
                     <div>
-                        <div className="data-icon">
-                            <a href="#" title={data2.description} className="tooltipicon">
-                                <FontAwesomeIcon icon={data2.icon} />
-                            </a>
-                        </div>
+                        {data2.icon ? (
+                            <div className="data-icon">
+                                <a href="#" title={data2.description} className="tooltipicon">
+                                    <FontAwesomeIcon icon={data2.icon} />
+                                </a>
+                            </div>
+                        ) : null}
                         <div className="data-text">
                             {data2.value}
                             {data2.units ? <div className="units">{data2.units}</div> : null}

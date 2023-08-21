@@ -2,8 +2,8 @@
 export const gapLength = 60;
 
 // How many points to start/increase array allocation by
-export const deckPointIncrement = 2500;
-export const deckSegmentIncrement = 20;
+export const deckPointIncrement = 5000;
+export const deckSegmentIncrement = 2500;
 
 // How long to delay track to ensure we aren't missing packets
 export const inOrderDelay = 10;
