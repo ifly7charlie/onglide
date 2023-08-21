@@ -61,12 +61,15 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             }
 
             // For all but selected gliders just show most recent track
-            const filtering = selected ? {} : {};
-            /*                : {
-                      getFilterValue: (a) => a.timing,
-                      filterRange: [props.t - 30, props.t + 30],
-                      extensions: [new DataFilterExtension({filterSize: 1})]
-                  }; */
+            const filtering = {
+                getFilterValue: (a) => a.timing,
+                filterRange: [props.t - 30, props.t],
+                extensions: [new DataFilterExtension({filterSize: 1, countItems: 1})],
+                filterEnabled: !(props.t % 3)
+                //                onFilteredItemsChange: (event) => {
+                //                  if (event.id == 'S4L') console.log('OFIC', event);
+                //            }
+            };
 
             const color = selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224];
 
