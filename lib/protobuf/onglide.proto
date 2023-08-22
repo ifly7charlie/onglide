@@ -42,7 +42,7 @@ message PilotTrack {
 	//    bytes leg = 11;
 
     // Does this contain a full trace or just the most recent trace
-    optional bool partial = 13;
+//    optional bool partial = 13;
 };
 
 message Scores {

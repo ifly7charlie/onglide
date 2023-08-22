@@ -39,8 +39,6 @@ export interface PilotTrack {
   agl: Uint8Array;
   /** For colouring, all Uint8 arrays one for each point all optional */
   climbRate: Uint8Array;
-  /** Does this contain a full trace or just the most recent trace */
-  partial?: boolean | undefined;
 }
 
 export interface Scores {
@@ -508,7 +506,6 @@ function createBasePilotTrack(): PilotTrack {
     positions: new Uint8Array(0),
     agl: new Uint8Array(0),
     climbRate: new Uint8Array(0),
-    partial: undefined,
   };
 }
 
@@ -531,9 +528,6 @@ export const PilotTrack = {
     }
     if (message.climbRate.length !== 0) {
       writer.uint32(66).bytes(message.climbRate);
-    }
-    if (message.partial !== undefined) {
-      writer.uint32(104).bool(message.partial);
     }
     return writer;
   },
@@ -587,13 +581,6 @@ export const PilotTrack = {
 
           message.climbRate = reader.bytes();
           continue;
-        case 13:
-          if (tag !== 104) {
-            break;
-          }
-
-          message.partial = reader.bool();
-          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -611,7 +598,6 @@ export const PilotTrack = {
       positions: isSet(object.positions) ? bytesFromBase64(object.positions) : new Uint8Array(0),
       agl: isSet(object.agl) ? bytesFromBase64(object.agl) : new Uint8Array(0),
       climbRate: isSet(object.climbRate) ? bytesFromBase64(object.climbRate) : new Uint8Array(0),
-      partial: isSet(object.partial) ? Boolean(object.partial) : undefined,
     };
   },
 
@@ -635,9 +621,6 @@ export const PilotTrack = {
     if (message.climbRate.length !== 0) {
       obj.climbRate = base64FromBytes(message.climbRate);
     }
-    if (message.partial !== undefined) {
-      obj.partial = message.partial;
-    }
     return obj;
   },
 
@@ -652,7 +635,6 @@ export const PilotTrack = {
     message.positions = object.positions ?? new Uint8Array(0);
     message.agl = object.agl ?? new Uint8Array(0);
     message.climbRate = object.climbRate ?? new Uint8Array(0);
-    message.partial = object.partial ?? undefined;
     return message;
   },
 };
