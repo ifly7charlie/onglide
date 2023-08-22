@@ -273,7 +273,6 @@ export interface PilotTrackData {
     deck?: DeckData;
     vario?: VarioData;
     t?: Epoch;
-    //    colors?: Uint8Array; // deck colour picking
 }
 
 export {PilotScore, PilotScoreLeg} from './protobuf/onglide';
