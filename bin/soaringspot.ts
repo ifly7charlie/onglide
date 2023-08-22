@@ -550,7 +550,8 @@ WHERE datecode = todcode(${date}) AND class=${classid}`
             for (const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'].sort((a, b) => a.point_index - b.point_index)) {
                 // We don't handle multiple starts at all so abort
                 if (tp.multiple_start != 0) {
-                    continue;
+                    console.log('multiple start not supported');
+                    //                    continue;
                 }
 
                 // can we extract a number off the leading part of the turnpoint name, if so treat it as a trigraph
@@ -659,7 +660,7 @@ WHERE datecode = todcode(${date}) AND class=${classid}`
         )
 
         .rollback((e) => {
-            console.log('rollback');
+            console.log('rollback', date, classid);
         })
         .commit();
 
