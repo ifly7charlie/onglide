@@ -128,9 +128,6 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
         if (cn && pilots && pilots[cn]) {
             setFollow(true);
             console.log(cn, trackData[cn]?.deck?.partial);
-            if (!trackData[cn]?.deck || trackData[cn]?.deck?.partial) {
-                sendMessage(cn);
-            }
         }
     }
 
