@@ -213,7 +213,7 @@ async function update_class(compClass, keys) {
 
     // Make sure we have rows for each day and that compstatus is correct
     //    await mysql.query( escape`call contestdays()`);
-    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
+    //    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
 
     // Now add details of pilots
     await update_pilots(compClass._links.self.href, classid, name, keys);
@@ -498,12 +498,18 @@ async function process_day_task(day, classid, classname, keys) {
     await mysql_db
         .transaction()
 
+        // Set the datecode
+        .query(
+            escape`
+                   UPDATE compstatus SET datecode = todcode(${date}) WHERE datecode < todcode(${date}) and class=${classid}`
+        )
+
         // If it is the current day and we have a start time we save it
         .query(
             task_details.no_start && !task_details.no_start.endsWith('00:00:00')
                 ? escape`
                    UPDATE compstatus SET starttime = COALESCE(${convert_to_mysql(task_details.no_start)},starttime)
-WHERE datecode = todcode(${date})`
+WHERE datecode = todcode(${date}) AND class=${classid}`
                 : escape`SELECT 1`
         )
 
