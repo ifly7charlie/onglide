@@ -33,6 +33,10 @@ import distance from '@turf/distance';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
+// Figure out the baseline date
+const oneYearIsh = 1000 * 3600 * 24 * 365;
+const referenceDate = new Date(Date.now() - (Date.now() % oneYearIsh)).getTime() / 1000;
+
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
 import {StopFollowController} from './deckglcontroller';
@@ -44,8 +48,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         console.log('missing layers');
         return [];
     }
-
-    //    console.log('deckgl', props.trackData.length);
 
     // Add a layer for the recent points for each pilot
     let layers = _reduce(
@@ -62,10 +64,10 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
 
             // For all but selected gliders just show most recent track
             const filtering = {
-                getFilterValue: (a) => a.timing - 1690632764,
-                filterRange: selected ? [track. ] : [props.t - 1690632764 - 60.0, props.t - 1690632764],
+                getFilterValue: (a) => a.timing - referenceDate,
+                filterRange: [props.t - referenceDate - 600.0, props.t - referenceDate],
                 extensions: [new DataFilterExtension({filterSize: 1})],
-                filterEnabled: !selected //!(props.t % 4),
+                filterEnabled: !selected
             };
 
             const color = selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224];
