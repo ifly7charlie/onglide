@@ -219,7 +219,7 @@ if (!isMainThread) {
 
         // Actually start scoring the task, will score all the gliders we have tracks for
         if (task.action == ScoringCommandEnum.newtask) {
-            console.log(`${task.className}/${task.compno}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})}`);
+            console.log(`${task.className}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})}`);
             startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task);
         }
     });
