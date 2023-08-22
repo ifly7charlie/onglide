@@ -1,7 +1,7 @@
 //
 // The turnpoint list
 //
-
+import {memo} from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
@@ -13,7 +13,7 @@ import Collapse from 'react-bootstrap/Collapse';
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
 //
-export function TaskDetails({vc, fitBounds}) {
+export const TaskDetails = memo(function TaskDetails({vc, fitBounds}) {
     const {data, isLoading, isError} = useTask(vc);
     const [open, setOpen] = useState(false);
 
@@ -91,7 +91,7 @@ export function TaskDetails({vc, fitBounds}) {
             </div>
         </>
     );
-}
+});
 
 // Internal: details on the leg
 function Tasklegs(props) {

@@ -122,23 +122,28 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
         setSocketUrl(proposedUrl(vc, datecode));
     }
 
-    function setCompno(cn) {
-        setSelectedCompno(cn);
-        console.log('setCompno', cn, pilots[cn]);
-        if (cn && pilots && pilots[cn]) {
-            setFollow(true);
-            console.log(cn, trackData[cn]?.deck?.partial);
-        }
-    }
+    const setCompno = useCallback(
+        (cn) => {
+            setSelectedCompno(cn);
+            if (cn && pilots && pilots[cn]) {
+                setFollow(true);
+            }
+        },
+        [setSelectedCompno, pilots]
+    );
 
     // And the pilot object
-    const selectedPilotData: SelectedPilotDetails | null = pilots
-        ? {
-              pilot: pilots[selectedCompno],
-              score: pilotScores[selectedCompno],
-              track: trackData[selectedCompno]
-          }
-        : null;
+    const selectedPilotData: SelectedPilotDetails | null = useMemo(
+        () =>
+            pilots
+                ? {
+                      pilot: pilots[selectedCompno],
+                      score: pilotScores[selectedCompno],
+                      track: trackData[selectedCompno]
+                  }
+                : null,
+        [pilots, selectedCompno]
+    );
 
     // Cache the calculated times and only refresh every 60 seconds
     const status = useMemo(() => {
@@ -162,7 +167,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
                     follow={follow}
                     setFollow={setFollow}
                     selectedPilotData={selectedPilotData}
-                    setSelectedCompno={(x) => setCompno(x)}
+                    setSelectedCompno={setCompno}
                     mapRef={mapRef} //
                     pilots={pilots}
                     pilotScores={pilotScores}
@@ -196,7 +201,7 @@ export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, vi
                             pilotScores={pilotScores} //
                             trackData={trackData}
                             selectedPilot={selectedCompno}
-                            setSelectedCompno={(x) => setCompno(x)}
+                            setSelectedCompno={setCompno}
                             now={wsStatus.at as Epoch}
                             tz={tz}
                             options={options}
@@ -388,19 +393,19 @@ async function* getData(compno: Compno, deck: DeckData, map2d: boolean) {
             // No gap, use previous point
             if (deck.t[current] - deck.t[previous] < gapLength) {
                 newData.push({
-                    path: [[...deck.positions.subarray(previous * 3, previous * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
-                    timing: deck.t[current],
-                    climbRate: deck.climbRate[current],
-                    agl: deck.agl[current]
+                    p: [[...deck.positions.subarray(previous * 3, previous * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
+                    t: deck.t[current],
+                    v: deck.climbRate[current],
+                    g: deck.agl[current]
                 });
             }
             // gap, use current point twice
             else {
                 newData.push({
-                    path: [[...deck.positions.subarray(current * 3, current * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
-                    timing: deck.t[current],
-                    climbRate: deck.climbRate[current],
-                    agl: deck.agl[current]
+                    p: [[...deck.positions.subarray(current * 3, current * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
+                    t: deck.t[current],
+                    v: deck.climbRate[current],
+                    g: deck.agl[current]
                 });
             }
             current++;

@@ -18,7 +18,7 @@ export interface ShortDisplayKeys {
     sortKey: string | number;
     displayAs: string | number | null;
     units: string;
-    icon: any;
+    icon: string | any;
 }
 
 export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'delay' | 'ald' | 'ld' | 'done' | 'auto' | 'times';

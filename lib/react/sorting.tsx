@@ -1,9 +1,10 @@
+import {memo} from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {getSortOrderType, getSortDescription, SortKey} from './pilot-sorting';
 
-export function Sorting(props: {setSort: Function; sortOrder: SortKey; toggleVisible: Function; visible: boolean; handicapped: boolean}) {
+export const Sorting = memo(function Sorting(props: {setSort: Function; sortOrder: SortKey; toggleVisible: Function; visible: boolean; handicapped: boolean}) {
     return (
         <div style={{paddingBottom: '3px'}}>
             <span className="d-lg-inline d-none" id="sortdescription" style={{fontSize: 'small', maxWidth: '30%', width: '30%', display: 'inline-block'}}>
@@ -48,4 +49,4 @@ export function Sorting(props: {setSort: Function; sortOrder: SortKey; toggleVis
             </span>
         </div>
     );
-}
+});

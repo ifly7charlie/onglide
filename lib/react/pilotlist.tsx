@@ -1,4 +1,5 @@
 // What do we need to render the bootstrap part of the page
+import {memo} from 'react';
 import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
@@ -8,7 +9,7 @@ import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, Position
 import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
 import {Optional, OptionalTime, OptionalDuration, OptionalDurationMM} from './optional';
-import {useState, useEffect} from 'react';
+import {useState, useCallback} from 'react';
 
 import {FlightLegs} from './flightLegs';
 import {Sorting} from './sorting';
@@ -399,10 +400,10 @@ function PilotHeightBar({pilot}) {
 
 //
 // Figure out what status the pilot is in and choose the correct icon
-function PilotStatusIcon({display}: {display: ShortDisplayKeys}) {
+function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
     // If it's very delayed and we have had a point and
     // we are in the right mode then display a spinner
-    if (display.icon == 'nosignal') {
+    if (displayIcon == 'nosignal') {
         return (
             <span className="pilotstatus">
                 <FontAwesomeIcon icon={solid('spinner')} spin={true} />
@@ -412,43 +413,37 @@ function PilotStatusIcon({display}: {display: ShortDisplayKeys}) {
 
     return (
         <span className="pilotstatus">
-            <FontAwesomeIcon icon={display.icon} spin={false} />
+            <FontAwesomeIcon icon={displayIcon} spin={false} />
         </span>
     );
 }
 
 //
 // Render the pilot
-function Pilot({pilot, display, selected, select}: {pilot: API_ClassName_Pilots_PilotDetail; display: ShortDisplayKeys; selected: boolean; select: Function}) {
+const Pilot = memo(function Pilot({pilot, displayAs, displayUnits, displayIcon, selected, onClick}: {pilot: API_ClassName_Pilots_PilotDetail; displayAs: string; displayUnits: string; displayIcon: any; selected: boolean; onClick: any}) {
     const className = selected ? 'small-pic pilot pilothovercapture selected' : 'small-pic pilot pilothovercapture';
 
     // Render the normal pilot icon
     return (
         <li className={className} id={pilot.compno}>
-            <a
-                href="#"
-                title={pilot.compno + ': ' + pilot.name}
-                onClick={() => {
-                    select();
-                }}
-            >
+            <a href="#" title={pilot.compno + ': ' + pilot.name} onClick={onClick}>
                 <PilotImage image={pilot.image} country={pilot.country} compno={pilot.compno} class={pilot.class} />
                 <div>
                     <PilotHeightBar pilot={pilot} />
 
                     <div className="caption">
                         {pilot.compno}
-                        <PilotStatusIcon display={display} />
+                        <PilotStatusIcon displayIcon={displayIcon} />
                     </div>
                     <div>
-                        <div className="data">{display.displayAs}</div>
-                        <div className="units">{display.units}</div>
+                        <div className="data">{displayAs}</div>
+                        <div className="units">{displayUnits}</div>
                     </div>
                 </div>
             </a>
         </li>
     );
-}
+});
 
 //
 // Render the list of pilots
@@ -486,33 +481,38 @@ export function PilotList({
 
     // Generate the pilot list, sorted by the correct key
     const pilotList = mutatedPilotList.reverse().map((pilot) => {
+        const onClick = useCallback(() => {
+            selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
+        }, [pilot.compno, selectedPilot]);
+
         return (
-            <Pilot
-                key={pilot.compno + 'pl'}
+            <Pilot //
+                key={pilot.compno}
                 pilot={pilots[pilot.compno]}
-                display={pilot}
+                displayUnits={pilot.units}
+                displayIcon={pilot.icon}
+                displayAs={pilot.displayAs.toString()}
                 selected={selectedPilot === pilot.compno}
-                select={() => {
-                    selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
-                }}
+                onClick={onClick}
             />
         );
     });
 
+    // Prevent unneeded re-render by using callbacks
+    const setSort = useCallback(
+        (o) => {
+            setOrder(nextSortOrder(o, order, handicapped || false));
+        },
+        [order, handicapped]
+    );
+    const toggleVisible = useCallback(() => {
+        setVisible(!visible);
+    }, [visible]);
+
     // Output the whole of the pilots list component
     return (
         <>
-            <Sorting
-                setSort={(o) => {
-                    setOrder(nextSortOrder(o, order, handicapped || false));
-                }}
-                sortOrder={order}
-                visible={visible}
-                toggleVisible={() => {
-                    setVisible(!visible);
-                }}
-                handicapped={handicapped || false}
-            />
+            <Sorting setSort={setSort} sortOrder={order} visible={visible} toggleVisible={toggleVisible} handicapped={handicapped || false} />
             <Collapse in={visible}>
                 <ul className="pilots">{pilotList}</ul>
             </Collapse>

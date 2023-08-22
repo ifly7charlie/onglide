@@ -40,6 +40,8 @@ const referenceDate = new Date(Date.now() - (Date.now() % oneYearIsh)).getTime()
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
 import {StopFollowController} from './deckglcontroller';
+// helps with touch scroll on laptops (undocumented)
+const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
 //
 // Responsible for generating the deckGL layers
 //
@@ -64,8 +66,8 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
 
             // For all but selected gliders just show most recent track
             const filtering = {
-                getFilterValue: (a) => a.timing - referenceDate,
-                filterRange: [props.t - referenceDate - 60.0, p.t[p.posIndex - 1] - referenceDate - 2],
+                getFilterValue: (a) => a.t - referenceDate,
+                filterRange: [props.t - referenceDate - 60.0, props.t - referenceDate], // p.t[p.posIndex - 1] - referenceDate - 2],
                 extensions: [new DataFilterExtension({filterSize: 1})],
                 filterEnabled: !selected
             };
@@ -74,12 +76,12 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
 
             result.push(
                 new PathLayer({
-                    id: compno,
+                    id: compno, //  + (map2d ? '2d' : '3d'),
                     compno: compno,
                     data: p.getData,
                     getWidth: 5,
-                    getPath: (d) => d.path,
-                    positionFormat: map2d ? 'XY' : 'XYZ',
+                    getPath: (d) => d.p,
+                    positionFormat: 'XYZ', // //map2d ? 'XY' : 'XYZ',
                     getColor: color,
                     jointRounded: true,
                     fp64: false,
@@ -90,10 +92,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     },
                     pickable: true,
                     tt: true,
-                    updateTriggers: {
-                        getPath: map2d
-                    },
-
                     // If we are not selected then we are filtered
                     ...filtering
                 })
@@ -116,10 +114,10 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         return {
             name: track.compno,
             compno: track.compno,
-            climbRate: p.climbRate[p.posIndex - 1], //
-            agl: p?.agl[p.posIndex - 1],
-            alt: p.positions[(p.posIndex - 1) * 3 + 2],
-            time: p.t[p.posIndex - 1],
+            v: p.climbRate[p.posIndex - 1], //
+            g: p?.agl[p.posIndex - 1],
+            a: p.positions[(p.posIndex - 1) * 3 + 2],
+            t: p.t[p.posIndex - 1],
             coordinates: p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)
         };
     });
@@ -127,9 +125,9 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
     if (data.length) {
         layers.push(
             new TextLayer({
-                id: 'labels',
+                id: 'labels' + (map2d ? '2d' : '3d'),
                 data: data,
-                getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
+                getPosition: (d) => d.coordinates, // map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
                 getText: (d) => d.name,
                 getColor: (d) => (props.t - d.time > gapLength ? [100, 80, 80, 96] : [0, 100, 0, 255]),
                 getTextAnchor: 'middle',
@@ -165,7 +163,6 @@ export default function MApp(props: {
     selectedPilotData: SelectedPilotDetails | null;
     follow: boolean;
     setFollow: Function;
-    t: Epoch;
     vc: ClassName;
     selectedCompno: Compno;
     setSelectedCompno: Function;
@@ -176,9 +173,10 @@ export default function MApp(props: {
     trackData: TrackData;
     measureFeatures: UseMeasure;
     status: string; // status line
+    t: Epoch;
 }) {
     // So we get some type info
-    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, t, vc, selectedCompno, mapRef, tz, viewport, setViewport} = props;
+    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, mapRef, tz, viewport, setViewport} = props;
 
     // Map display style
     const map2d = options.mapType > 1;
@@ -247,7 +245,7 @@ export default function MApp(props: {
             }
             return undefined;
         },
-        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, Math.trunc(props.t / 60), props.options.taskp] : [null, null, null, null, null]
+        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, props.options.taskp] : [null, null, null, null]
     );
 
     useMemo(() => {
@@ -362,7 +360,7 @@ export default function MApp(props: {
         }
     };
 
-    function toolTip({object, picked, layer, coordinate}) {
+    const toolTip = useCallback(({object, picked, layer, coordinate}) => {
         if (!picked) {
             if (process.env.NODE_ENV == 'development' && coordinate) {
                 return `[${coordinate.map((x) => x.toFixed(4))}]`;
@@ -371,32 +369,37 @@ export default function MApp(props: {
         }
         if (object) {
             let response = '';
-            const compno = layer.props.compno;
+            const compno = layer.props.compno ?? object.compno;
+            const time = object.t;
 
-            if (compno && object.time && pilotScores[compno]?.stats) {
-                const segment = _find(props.pilots[compno].stats, (c) => c.start <= object.time && object.time <= c.end);
-                if (segment) {
-                    object.stats = segment;
+            console.log(object);
+
+            if (time) {
+                if (compno && pilotScores[compno]?.stats) {
+                    const segment = _find(props.pilots[compno].stats, (c) => c.start <= time && time <= c.end);
+                    if (segment) {
+                        object.stats = segment;
+                    }
                 }
-            }
-            if (object.timing) {
+
                 // Figure out what the local language is for international date strings
-                const dt = new Date(object.timing * 1000);
+                const dt = new Date(time * 1000);
                 response += `${compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
             }
 
             if (process.env.NODE_ENV == 'development') {
-                response += `[${object.timing}]<br/>`;
+                response += `[${time}]<br/>`;
             }
 
-            if (object.alt && !isNaN(object.alt)) {
-                response += `${displayHeight(object.alt, props.options.units)} QNH `;
+            const a = object.a ?? object.p[1][2] ?? NaN;
+            if (!isNaN(a)) {
+                response += `${displayHeight(a, props.options.units)} QNH `;
             }
-            if (object.agl && !isNaN(object.agl)) {
-                response += `(${displayHeight(object.agl, props.options.units)} AGL) `;
+            if (object.g && !isNaN(object.g)) {
+                response += `(${displayHeight(object.g, props.options.units)} AGL) `;
             }
-            if (object.climbRate) {
-                response += ` ↕️  ${displayClimb(object.climbRate, props.options.units)}`;
+            if (object.v) {
+                response += ` ↕️  ${displayClimb(object.v, props.options.units)}`;
             }
             if (object.stats) {
                 const stats = object.stats;
@@ -421,7 +424,7 @@ export default function MApp(props: {
         } else {
             return null;
         }
-    }
+    }, []);
 
     const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
 
@@ -462,15 +465,20 @@ export default function MApp(props: {
         [map2d, props.options.taskUp, mapRef]
     );
 
+    const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
+    const getCursor = useCallback(() => 'crosshair', []);
+
+    controller.setFollow = setFollow;
     return (
         <DeckGL
             viewState={viewport}
-            onViewStateChange={(e) => onViewStateChange(e)}
-            controller={{type: StopFollowController, setFollow, inertia: true, transitionDuration: 0}} // helps with touch scroll on laptops (undocumented)
+            onViewStateChange={onViewStateChange}
+            //            controller={{type: StopFollowController, setFollow, inertia: true, transitionDuration: 0}} // helps with touch scroll on laptops (undocumented)
+            controller={controller} // helps with touch scroll on laptops (undocumented)
             getTooltip={toolTip}
-            {...(isMeasuring(props.measureFeatures) ? {getCursor: () => 'crosshair'} : {})}
+            {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
             layers={layers} //
-            onClick={measureClick(props.measureFeatures)}
+            onClick={onClick}
         >
             <StaticMap mapboxApiAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN} mapStyle={mapStreet ? 'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' /*"mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk"*/ : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'} onLoad={onMapLoad} ref={mapRef} attributionControl={false}>
                 {options.constructionLines && taskGeoJSON?.Dm ? (
