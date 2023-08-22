@@ -65,7 +65,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             // For all but selected gliders just show most recent track
             const filtering = {
                 getFilterValue: (a) => a.timing - referenceDate,
-                filterRange: [props.t - referenceDate - 600.0, props.t - referenceDate],
+                filterRange: [props.t - referenceDate - 60.0, p.t[p.posIndex - 1] - referenceDate - 2],
                 extensions: [new DataFilterExtension({filterSize: 1})],
                 filterEnabled: !selected
             };
@@ -90,6 +90,9 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     },
                     pickable: true,
                     tt: true,
+                    updateTriggers: {
+                        getPath: map2d
+                    },
 
                     // If we are not selected then we are filtered
                     ...filtering
@@ -134,7 +137,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 pickage: true,
                 background: true,
                 fontSettings: {sdf: true},
-                backgroundPadding: [2, 0, 2, 0],
+                backgroundPadding: [2, 1, 2, 0],
                 onClick: (i) => {
                     props.setSelectedCompno(i.object?.name || '');
                 },
@@ -144,7 +147,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 outlineWidth: 2,
                 outlineColor: [255, 255, 255, 255],
                 getBackgroundColor: [255, 255, 255, 255],
-                getBorderColor: [40, 40, 40, 255],
+                getBorderColor: (d) => (d.name === props.selectedCompno ? [255, 0, 255, 192] : [40, 40, 40, 255]),
                 getBorderWidth: 1,
                 pickable: true
             })
@@ -205,8 +208,8 @@ export default function MApp(props: {
                 taskGeoJSON?.tp?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
-                const lat = selectedPilotData.track.vario.lat;
-                const lng = selectedPilotData.track.vario.lng;
+                const lat = Math.round(selectedPilotData.track.vario.lat * 100) / 100;
+                const lng = Math.round(selectedPilotData.track.vario.lng * 100) / 100;
 
                 let fbearing = props.options.taskUp == 2 ? props.viewport.bearing : 0;
                 const npol =
