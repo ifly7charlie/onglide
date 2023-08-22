@@ -113,51 +113,19 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     //    console.log('pruneStartline', deck.compno, startTime);
     // Keep 30 seconds before start
     if (!deck || deck.t[0] >= startTime) {
+        console.log(`can't prune startline for ${deck?.compno} first point later than startTime ${startTime}`);
         return false;
     }
-    /*
+
     // Find the point in the array of times
     let indexRemove = _sortedIndex(deck.t.subarray(0, deck.posIndex - 1), startTime);
     if (!indexRemove || indexRemove == deck.posIndex - 1) {
-        console.log(`can't prune startline for ${deck.compno} no enough points yet ${indexRemove} <> ${deck.posIndex}`);
+        console.log(`can't prune startline for ${deck.compno} no enough points yet ${indexRemove} == ${deck.posIndex}-1 [${deck.t[deck.posIndex - 1]} <= ${startTime}`);
         return false;
     }
 
-    // Find the index into the segments that is the index or above
-    let segmentPos = _sortedIndex(deck.indices.subarray(0, deck.segmentIndex), indexRemove);
-
-    //    for (let c = 0; c <= deck.segmentIndex; c++) {
-    //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
-    //    }
-
-    // A segment starts on this position - we can remove all before
-    if (deck.indices[segmentPos] == indexRemove) {
-    }
-    // A segment starts one afterwards - this is tricky it means
-    // the start point was the last point of previous segment
-    // ie indexRemove points to the last point in the previous segment
-    else if (deck.indices[segmentPos] == indexRemove + 1) {
-        // in this case we will truncate the previous segment and keep one
-        // more point
-        segmentPos--;
-        indexRemove--;
-    }
-    // in segment keep this segment but remove the segment before
-    else {
-        segmentPos--;
-    }
-
-    // first we need to remove old segments - start with the older list as may be points in it
-    deck.recentIndices[0] = Math.max(deck.recentIndices[0] - indexRemove, 0);
-    deck.recentIndices[1] = Math.max(deck.recentIndices[1] - indexRemove, 0);
-
-    // Remove before
-    deck.indices = new Uint32Array(deck.indices.subarray(segmentPos).map((p) => Math.max(0, p - indexRemove)));
-
-    // Adjust the offsets and If we are removing anything then resze it down
-    deck.segmentIndex -= segmentPos;
+    // reduce the index
     deck.posIndex -= indexRemove;
-    deck.indices[deck.segmentIndex] = deck.posIndex;
 
     // And then take the end of the buffer for displaying data
     deck.positions = deck.positions.slice(indexRemove * 3);
@@ -165,11 +133,6 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     deck.t = deck.t.slice(indexRemove);
     deck.climbRate = deck.climbRate.slice(indexRemove);
 
-    //    console.log('ir:', indexRemove, 'sp:', segmentPos, 'start:', startTime);
-    //    for (let c = 0; c <= deck.segmentIndex; c++) {
-    //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
-    //    }
-*/
     return true;
 }
 
