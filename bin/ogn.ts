@@ -942,7 +942,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
         channel.replay = new ReplayController({className: channel.className});
         for (const compno in groupedPoints) {
             console.log(compno, groupedPoints[compno].length);
-            channel.replay.setInitialTrack(compno as Compno, groupedPoints[compno], channelName(channel.className, channel.datecode));
+            channel.replay.setInitialTrack(compno as Compno, groupedPoints[compno], channelName(channel.className, channel.datecode), channel.datecode);
         }
     }
 
@@ -958,7 +958,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
             if (newDeck) {
                 mergePoint(point, glider);
             }
-            channel.scoring.setInitialTrack(compno as Compno, glider.handicap, glider.utcStart, [point]);
+            channel.scoring.setInitialTrack(compno as Compno, glider.handicap, glider.utcStart, []);
             break; // only score the first point as it's a replay
         }
         // And pass the whole set to scoring to be loaded into the glider history
