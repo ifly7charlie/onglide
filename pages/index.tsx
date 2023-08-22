@@ -1,4 +1,5 @@
 ///import next from 'next';
+import {memo} from 'react';
 import {useRouter} from 'next/router';
 import Head from 'next/head';
 
@@ -42,7 +43,7 @@ function IncludeJavascript() {
 
 // Requires: classes, link, contestname, contestdates
 
-function Menu(props) {
+const Menu = memo(function Menu(props) {
     const comp = props.comp;
     const classes =
         comp.classes.length > 1
@@ -98,7 +99,7 @@ function Menu(props) {
             <br style={{clear: 'both'}} />
         </>
     );
-}
+});
 
 //
 // Main page rendering :)

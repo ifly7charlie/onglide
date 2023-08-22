@@ -127,14 +127,27 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
     );
 }
 
-function StartComponent({score, tz}: {score: PilotScore; tz: TZ}) {
-    const [endTime, description, icon] = score.utcFinish
-        ? [OptionalTime(' ', score.utcFinish as Epoch, tz), 'finish time', solid('hourglass-end')] //
-        : score.taskTimeRemaining
-        ? [OptionalDuration('', score.taskTimeRemaining as Epoch), 'remaining time', solid('history')]
+const StartComponent = memo(function StartComponent({
+    utcStart,
+    utcFinish,
+    taskTimeRemaining,
+    taskDuration,
+    tz
+}: //
+{
+    utcStart: Epoch;
+    utcFinish: Epoch;
+    taskTimeRemaining: Epoch;
+    taskDuration: Epoch;
+    tz: TZ;
+}) {
+    const [endTime, description, icon] = utcFinish
+        ? [OptionalTime(' ', utcFinish, tz), 'finish time', solid('hourglass-end')] //
+        : taskTimeRemaining
+        ? [OptionalDuration('', taskTimeRemaining), 'remaining time', solid('history')]
         : ['', 'finish time', null];
 
-    const duration = OptionalDuration('+', score.taskDuration as Epoch).split(':');
+    const duration = OptionalDuration('+', taskDuration as Epoch).split(':');
 
     return (
         <SummaryComponent
@@ -142,32 +155,48 @@ function StartComponent({score, tz}: {score: PilotScore; tz: TZ}) {
             title="times" //
             width="110px"
             main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: solid('stopwatch'), description: 'elapsed time'}}
-            data1={{value: OptionalTime('', score.utcStart as Epoch, tz), icon: solid('hourglass-start'), description: 'start time'}}
+            data1={{value: OptionalTime('', utcStart, tz), icon: solid('hourglass-start'), description: 'start time'}}
             data2={{value: endTime, icon, description: description}}
         />
     );
-}
+});
 
-function HandicappedSpeedComponent({score}: {score: PilotScore}) {
+const HandicappedSpeedComponent = memo(function HandicappedSpeedComponent({
+    utcFinish,
+    handicappedTaskSpeed,
+    actualTaskSpeed
+}: //
+{
+    utcFinish: Epoch;
+    handicappedTaskSpeed: number;
+    actualTaskSpeed: number;
+}) {
     return (
         <SummaryComponent
             id="speed"
             title="speed" //
-            main={{value: score.handicapped.taskSpeed, units: 'kph', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped speed'}}
-            data1={{value: score.actual.taskSpeed, units: 'kph', icon: solid('tachometer-alt'), description: 'actual speed'}}
+            main={{value: handicappedTaskSpeed, units: 'kph', icon: utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped speed'}}
+            data1={{value: actualTaskSpeed, units: 'kph', icon: solid('tachometer-alt'), description: 'actual speed'}}
         />
     );
-}
-function ActualSpeedComponent({score}: {score: PilotScore}) {
+});
+const ActualSpeedComponent = memo(function ActualSpeedComponent({
+    utcFinish,
+    actualTaskSpeed
+}: //
+{
+    utcFinish: Epoch;
+    actualTaskSpeed: number;
+}) {
     return (
         <SummaryComponent
             width="100px"
             id="speed"
             title="speed" //
-            main={{value: score.actual.taskSpeed, units: 'kph', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual speed'}}
+            main={{value: actualTaskSpeed, units: 'kph', icon: utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual speed'}}
         />
     );
-}
+});
 
 function HandicappedDistanceComponent({score}: {score: PilotScore}) {
     return (
@@ -220,13 +249,27 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
     const hasHandicappedResults = score?.handicapped;
 
-    const speed = score ? hasHandicappedResults ? <HandicappedSpeedComponent score={score} /> : <ActualSpeedComponent score={score} /> : null;
+    const speed = score ? ( //
+        hasHandicappedResults ? (
+            <HandicappedSpeedComponent utcFinish={score.utcFinish as Epoch} handicappedTaskSpeed={score.handicapped.taskSpeed} actualTaskSpeed={score.actual.taskSpeed} />
+        ) : (
+            <ActualSpeedComponent utcFinish={score.utcFinish as Epoch} actualTaskSpeed={score.actual.taskSpeed} />
+        )
+    ) : null;
 
     const distance = score ? hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} /> : null;
 
     let times = null;
     if (score?.utcStart) {
-        times = <StartComponent score={score} tz={tz} />;
+        times = (
+            <StartComponent //
+                taskDuration={score.taskDuration as Epoch}
+                taskTimeRemaining={score.taskTimeRemaining as Epoch}
+                utcStart={score.utcStart as Epoch}
+                utcFinish={score.utcFinish as Epoch}
+                tz={tz}
+            />
+        );
     }
 
     // Figure out what to show based on the db status

@@ -1,3 +1,4 @@
+import {memo} from 'react';
 import {TooltipIcon} from './htmlhelper';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
@@ -18,7 +19,7 @@ import Button from 'react-bootstrap/Button';
 
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
-export function FlightLegs({score, units, tz}) {
+export const FlightLegs = memo(function FlightLegs({score, units, tz}) {
     const [viewOptions, setViewOptions] = useState({task: 1, hcapped: 0});
 
     if (!score?.legs) {
@@ -208,4 +209,4 @@ export function FlightLegs({score, units, tz}) {
             )}
         </>
     );
-}
+});
