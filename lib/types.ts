@@ -219,7 +219,7 @@ export interface CalculatedTaskStatus extends TaskStatus {
 export type SoftenGenerator<Type extends TimeStampType> = AsyncGenerator<Type, Type | void, void>;
 
 export type InOrderGenerator = AsyncGenerator<PositionMessage, void, Epoch | void>;
-export type InOrderGeneratorFunction = (log: Function | null) => InOrderGenerator;
+export type InOrderGeneratorFunction = (getNow: Function | null) => InOrderGenerator;
 
 // Figure out what is happening in the flight
 export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition, void, Epoch | void>;
