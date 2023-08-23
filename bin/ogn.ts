@@ -322,8 +322,8 @@ async function main() {
                     case 'tracks': {
                         console.log(`sending historical data ${baseTimestamp} [current: ${channel.webPathBaseTime}]`);
                         if (channel.webPathData[baseTimestamp]) {
-                            res.writeHead(200, headers);
                             res.setHeader('Content-Type', 'application/octet-stream');
+                            res.writeHead(200, headers);
                             res.write(channel.webPathData[baseTimestamp], 'binary');
                             res.end(null, 'binary');
                             return;
