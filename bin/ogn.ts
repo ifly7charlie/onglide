@@ -58,6 +58,8 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 import {spawnAprsContestListener, AprsCommandTrack, AprsCommandEnum} from '../lib/webworkers/aprs';
 import {ReplayController, ReplayConfig} from '../lib/webworkers/replay';
 
+import {webPathBaseTime} from '../lib/constants';
+
 import {createHash, randomBytes, createHmac} from 'crypto';
 
 // Communication with the workers
@@ -118,6 +120,10 @@ interface Channel {
     lastScores?: any;
 
     statistics: Statistics;
+
+    // For the web buffer
+    webPathBaseTime: Epoch;
+    webPathData: Record<string, Buffer>;
 }
 
 let channels: Record<ClassName, Channel> = {};
@@ -139,6 +145,7 @@ interface Glider {
     scoringConfigured?: boolean;
 
     deck: DeckData;
+    webPathEndPosition: number;
 }
 
 // Associative array of all the trackers
@@ -276,29 +283,55 @@ async function main() {
     }
 
     const server = http.createServer((req, res) => {
+        const headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'OPTIONS, GET, UPGRADE',
+            'Access-Control-Max-Age': 5 * 60 // 5 minutes
+        };
+
+        if (req.method === 'OPTIONS') {
+            res.writeHead(204, headers);
+            res.end();
+            return;
+        }
+
         // health check
         if (req?.url == '/status') {
-            res.writeHead(200);
+            res.writeHead(200, headers);
             res.end(http.STATUS_CODES[200]);
             return;
         }
 
         // explict score request
-        const [valid, command, channelName] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+).json$/i) || [false, '', ''];
+        const [valid, command, channelName, baseTimestamp] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)$/i) || [false, '', ''];
         if (valid) {
+            console.log(command, channelName);
             if (channelName in channels) {
                 const channel = channels[channelName];
                 // Only support returning the scores
-                if (command == 'scores') {
-                    console.log('sending scores for ', channelName);
-                    const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
-                    res.setHeader('Content-Type', 'application/json');
-                    res.writeHead(200);
-                    res.end(JSON.stringify(msg));
-                    return;
+                switch (command) {
+                    case 'scores': {
+                        console.log('sending scores for ', channelName);
+                        const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
+                        res.setHeader('Content-Type', 'application/json');
+                        res.writeHead(200, headers);
+                        res.end(JSON.stringify(msg));
+                        return;
+                    }
+                    case 'tracks': {
+                        if (channel.webPathData[baseTimestamp]) {
+                            res.writeHead(200, headers);
+                            res.write(channel.webPathData[baseTimestamp], 'binary');
+                            res.end(null, 'binary');
+                            return;
+                        } else {
+                            console.log('no historical data matching', channelName, baseTimestamp);
+                        }
+                    }
                 }
             }
         }
+
         res.writeHead(404);
         res.end(http.STATUS_CODES[404]);
     });
@@ -489,7 +522,9 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     positionsSentCycles: 0,
                     listenerCycles: 0,
                     activeListeners: 0
-                }
+                },
+                webPathBaseTime: 0,
+                webPathData: {}
             };
         } else {
             // We move it to the new list
@@ -759,7 +794,7 @@ async function sendCurrentState(client: WebSocket) {
     }
 
     // Send them the GeoJSONs, they need to keep this up to date
-    sendRecentPilotTracks(channels[client.ognChannel].className, client);
+    sendRecentPilotTracks(channels[client.ognChannel], client);
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
@@ -768,15 +803,62 @@ async function sendCurrentState(client: WebSocket) {
     }
 }
 
+async function generateHistoricalTracks(channel: Channel): Promise<Buffer> {
+    // Figure out the block that preceeds us
+    const now = getNow();
+    const base = now - webPathBaseTime; // determine the last block block
+
+    if (channel.webPathBaseTime < base) {
+        const toStream = reduce(
+            gliders,
+            (result, glider, compno) => {
+                if (glider.className == channel.className) {
+                    const p = glider.deck;
+                    if (p) {
+                        const start = 0; //p.recentIndices[0];
+                        const end = p.posIndex;
+                        const length = end - start;
+                        if (length) {
+                            result[glider.compno] = {
+                                compno: glider.compno,
+                                positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
+                                t: new Uint8Array(p.t.buffer, start * 4, length * 4),
+                                climbRate: new Uint8Array(p.climbRate.buffer, start, length),
+                                agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                                posIndex: length
+                            };
+                        }
+                        glider.webPathEndPosition = end;
+                    }
+                }
+                return result;
+            },
+            {}
+        );
+        // Send the client the current version of the tracks
+        channel.webPathData[base.toString()] = Buffer.from(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: 0}}).finish());
+        channel.webPathBaseTime = base as Epoch;
+    }
+
+    return channel.webPathData[base.toString()];
+}
+
 // Send the abbreviated track for all gliders, used when a new client connects
-async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
+async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
+    const now = getNow();
+    const base = now - (now % webPathBaseTime); // determine the last block
+    if (channel.webPathBaseTime !== base) {
+        generateHistoricalTracks(channel);
+    }
+
     const toStream = reduce(
         gliders,
         (result, glider, compno) => {
-            if (glider.className == className) {
+            if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    const start = 0; //p.recentIndices[0];
+                    console.log('sendRecentPilotTracks:', glider.webPathEndPosition ?? 'none', p.posIndex);
+                    let start = glider.webPathEndPosition ?? 0;
                     const end = p.posIndex;
                     const length = end - start;
                     if (length) {
@@ -796,7 +878,7 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
         {}
     );
     // Send the client the current version of the tracks
-    client.send(OnglideWebSocketMessage.encode({tracks: {pilots: toStream}}).finish(), {binary: true});
+    client.send(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish(), {binary: true});
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -845,10 +927,18 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
 
     // Prune startline
     for (const compno in recentStarts) {
-        const deck = gliders[makeClassname_Compno(channel.className, compno as Compno)]?.deck;
-        if (deck) {
-            console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}`);
-            pruneStartline(deck, recentStarts[compno]);
+        const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
+        if (glider) {
+            const deck = glider.deck;
+            if (deck) {
+                console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}`);
+                pruneStartline(deck, recentStarts[compno]);
+            }
+
+            // Reset the glider starting point, but also the channel so we don't use invalid
+            // mix of the two
+            glider.webPathEndPosition = 0;
+            channel.webPathBaseTime = 0;
         }
     }
 }
@@ -1012,7 +1102,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
             channel.statistics.outOfOrderPackets++;
         } else {
             if (dev) {
-                console.log('ok', JSON.stringify(message));
+                //                console.log('ok', JSON.stringify(message));
             }
         }
     } else {

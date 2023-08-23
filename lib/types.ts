@@ -243,7 +243,7 @@ export interface DeckData {
     t: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
-    dataPromiseResolve?: () => void;
+    dataPromiseResolve?: (a?: boolean) => void;
     getData?: AsyncGenerator<any, void, void>;
 }
 

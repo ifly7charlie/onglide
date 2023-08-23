@@ -15,6 +15,7 @@ export interface OnglideWebSocketMessage {
 
 export interface PilotTracks {
   pilots: { [key: string]: PilotTrack };
+  baseTime: number;
 }
 
 export interface PilotTracks_PilotsEntry {
@@ -31,11 +32,7 @@ export interface PilotTrack {
   t: Uint8Array;
   /** Three tuple of [lat,lng,alt] repeated length times (actually float) (and the height above ground) */
   positions: Uint8Array;
-  /**
-   * Segments in the track line, for broken track drawing (actually uint32)
-   *    uint32 segmentIndex = 5;
-   *    bytes indices = 6;
-   */
+  /** Segments in the track line, for broken track drawing (actually uint32) */
   agl: Uint8Array;
   /** For colouring, all Uint8 arrays one for each point all optional */
   climbRate: Uint8Array;
@@ -345,7 +342,7 @@ export const OnglideWebSocketMessage = {
 };
 
 function createBasePilotTracks(): PilotTracks {
-  return { pilots: {} };
+  return { pilots: {}, baseTime: 0 };
 }
 
 export const PilotTracks = {
@@ -353,6 +350,9 @@ export const PilotTracks = {
     Object.entries(message.pilots).forEach(([key, value]) => {
       PilotTracks_PilotsEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).ldelim();
     });
+    if (message.baseTime !== 0) {
+      writer.uint32(16).uint32(message.baseTime);
+    }
     return writer;
   },
 
@@ -373,6 +373,13 @@ export const PilotTracks = {
             message.pilots[entry1.key] = entry1.value;
           }
           continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.baseTime = reader.uint32();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -390,6 +397,7 @@ export const PilotTracks = {
           return acc;
         }, {})
         : {},
+      baseTime: isSet(object.baseTime) ? Number(object.baseTime) : 0,
     };
   },
 
@@ -403,6 +411,9 @@ export const PilotTracks = {
           obj.pilots[k] = PilotTrack.toJSON(v);
         });
       }
+    }
+    if (message.baseTime !== 0) {
+      obj.baseTime = Math.round(message.baseTime);
     }
     return obj;
   },
@@ -418,6 +429,7 @@ export const PilotTracks = {
       }
       return acc;
     }, {});
+    message.baseTime = object.baseTime ?? 0;
     return message;
   },
 };

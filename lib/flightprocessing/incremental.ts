@@ -112,7 +112,7 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     //    console.log('pruneStartline', deck.compno, startTime);
     // Keep 30 seconds before start
     if (!deck || deck.t[0] >= startTime) {
-        console.log(`can't prune startline for ${deck?.compno} first point later than startTime ${startTime}`);
+        //        console.log(`can't prune startline for ${deck?.compno} first point later than startTime ${startTime}`);
         return false;
     }
 

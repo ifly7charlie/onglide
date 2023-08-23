@@ -7,3 +7,6 @@ export const deckSegmentIncrement = 2500;
 
 // How long to delay track to ensure we aren't missing packets
 export const inOrderDelay = 10;
+
+// How often to refresh the 'static download' (seconds)
+export const webPathBaseTime = 5 * 60;
