@@ -319,6 +319,7 @@ async function main() {
                         return;
                     }
                     case 'tracks': {
+                        console.log(`sending historical data ${baseTimestamp} [current: ${channel.webPathBaseTime}]`);
                         if (channel.webPathData[baseTimestamp]) {
                             res.writeHead(200, headers);
                             res.write(channel.webPathData[baseTimestamp], 'binary');
@@ -807,8 +808,9 @@ async function generateHistoricalTracks(channel: Channel): Promise<Buffer> {
     // Figure out the block that preceeds us
     const now = getNow();
     const base = now - webPathBaseTime; // determine the last block block
+    console.log(`generateHistoricalTracks now: ${now}, base: ${base}, previous: ${channel.webPathBaseTime}`);
 
-    if (channel.webPathBaseTime < base) {
+    if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
         const toStream = reduce(
             gliders,
             (result, glider, compno) => {
@@ -836,11 +838,11 @@ async function generateHistoricalTracks(channel: Channel): Promise<Buffer> {
             {}
         );
         // Send the client the current version of the tracks
-        channel.webPathData[base.toString()] = Buffer.from(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: 0}}).finish());
-        channel.webPathBaseTime = base as Epoch;
+        channel.webPathData[now.toString()] = Buffer.from(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: 0}}).finish());
+        channel.webPathBaseTime = now;
     }
 
-    return channel.webPathData[base.toString()];
+    return channel.webPathData[now.toString()];
 }
 
 // Send the abbreviated track for all gliders, used when a new client connects
