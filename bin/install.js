@@ -196,7 +196,7 @@ async function main() {
                 type: 'text',
                 name: 'ssurl',
                 message: '(URL)',
-                initial: sskey.url,
+                initial: sskey.url || 'http://glidertracking.fai.org/cuc/SGPF/SGPrace-latest.json',
                 validate: (v) => {
                     return !v || !v.match(/SGP/ || !v.match(/.json$/)) ? `please enter SGP json URL` : true;
                 }
@@ -251,6 +251,16 @@ async function main() {
             name: 'wshost',
             message: 'Websocket Host',
             initial: (undefined, v) => (nE.NEXT_PUBLIC_WEBSOCKET_HOST ? nE.NEXT_PUBLIC_WEBSOCKET_HOST : v.url)
+        },
+        {
+            type: 'select',
+            name: 'fairankingimages',
+            message: 'Use FAI ranking list images',
+            choices: [
+                {title: 'Yes', value: '1'},
+                {title: 'No', value: '0'}
+            ],
+            initial: 1
         }
     ];
 
@@ -312,6 +322,13 @@ NEXT_PUBLIC_SITEURL=${wsresponse.url}
                                    ${ssresponse.ssclient || ''}, ${ssresponse.sssecret || ''}, ${ssresponse.sscontest_name || ''}, 0, ${ssresponse.actuals}, ${wsresponse.portoffset}, ${wsresponse.url} )`
         )
         .commit();
+
+    if (wsresponse.fairankingimages) {
+        await mysql
+            .transaction()
+            .query(escape`INSERT INTO scoringsource (type, url) VALUES ( 'pictureurl', 'http://rankingdata.fai.org/PilotImages/{igc_id}.jpg' )`)
+            .commit();
+    }
 
     // If we have an admin set then configure the main table
     if (nE.MYSQL_ADMIN_PW && nE.MYSQL_ADMIN_USER) {
