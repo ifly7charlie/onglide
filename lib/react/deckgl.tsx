@@ -511,8 +511,8 @@ export default function MApp(props: {
                 ) : null}
                 {selectedPilotData && selectedPilotData?.score?.scoredGeoJSON ? (
                     <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_'}>
-                        <Layer {...scoredLineStyle} />
-                        <Layer {...distanceLineLabelStyle(scoredLineStyle)} />
+                        <Layer key="scoredLine" {...scoredLineStyle} />
+                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                     </Source>
                 ) : null}
                 <MeasureLayers useMeasure={props.measureFeatures} key="measure" />

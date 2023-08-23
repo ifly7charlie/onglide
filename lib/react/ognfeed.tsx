@@ -6,7 +6,7 @@
 // It will also expose the helper functions required to update the screen
 //
 
-import {useState, useMemo, useRef, useCallback} from 'react';
+import {useState, useMemo, useRef, useCallback, memo} from 'react';
 
 import {usePilots, Spinner} from './loaders';
 
@@ -14,9 +14,9 @@ import {Nbsp, TooltipIcon} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map} from 'lodash';
+import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual} from 'lodash';
 
-import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
+import {Epoch, TZ, Compno, ClassName, Datecode, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
 import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
 import {assembleLabeledLine} from './distanceLine';
 
@@ -32,6 +32,7 @@ import {OptionalDurationMM} from './optional';
 import {gapLength} from '../constants';
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
+import {UseMeasure} from './measure';
 
 import dynamic from 'next/dynamic';
 const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
@@ -48,7 +49,7 @@ const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
 //let mutateTimer = 0;
 const httpsTest = new RegExp(/^(https|wss)/i, 'i');
 
-function proposedUrl(vc, datecode) {
+function proposedUrl(vc: ClassName, datecode: Datecode) {
     const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
     if (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) {
         return process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX + hn + '/' + (vc + datecode).toUpperCase();
@@ -56,170 +57,208 @@ function proposedUrl(vc, datecode) {
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) ? 'wss://' : 'ws://') + hn + '/' + (vc + datecode).toUpperCase();
 }
 
-export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
-    const [trackData, setTrackData] = useState<TrackData>({});
-    const [pilotScores, setPilotScores] = useState<ScoreData>({});
-    const {pilots, isPLoading} = usePilots(vc);
-    const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
-    const [wsStatus, setWsStatus] = useState({listeners: 1, airborne: 0, timeStamp: 0, at: 0});
-    const [follow, setFollow] = useState(false);
-    const [attempt, setAttempt] = useState(0);
-
-    // For remote updating of the map
-    const mapRef = useRef(null);
-
-    // Keep track of online/offline status of the page
-    const [online] = useState(navigator.onLine);
-
-    // We are using a webSocket to update our data here
-    const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
-        reconnectAttempts: 40,
-        reconnectInterval: 16000,
-        //        onReconnectStop: () => {
-        //            setAttempt(-100);
-        //        },
-        retryOnError: true
-    });
-
-    // Do we have a loaded set of details?
-    const valid = !isPLoading && pilots && Object.keys(pilots).length > 0 && mapRef && mapRef.current && mapRef.current.getMap();
 function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string) {
     const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) ? 'https://' : 'http://') + hn + '/tracks/' + (vc + datecode + '.' + baseTime).toUpperCase();
 }
 
-    // Have we had a websocket message, if it hasn't changed then ignore it!
-    let updateMessage = null;
-    if (lastMessage) {
-        if (wsStatus.timeStamp != lastMessage.timeStamp) {
-            wsStatus.timeStamp = lastMessage.timeStamp;
-            decodeWebsocketMessage(lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus, selectedCompno, follow);
-        }
-    }
+export const OgnFeed = memo(
+    //
+    function OgnFeed({
+        vc,
+        datecode,
+        tz,
+        selectedCompno,
+        setSelectedCompno,
+        viewport,
+        setViewport,
+        options,
+        setOptions,
+        measureFeatures,
+        handicapped,
+        notes
+    }: //
+    {
+        vc: ClassName;
+        datecode: Datecode;
+        tz: TZ;
+        selectedCompno: Compno;
+        setSelectedCompno: Function;
+        viewport: any;
+        setViewport: Function;
+        measureFeatures: UseMeasure;
+        options: any;
+        setOptions: Function;
+        handicapped: any;
+        notes: string;
+    }) {
+        const [trackData, setTrackData] = useState<TrackData>({});
+        const [pilotScores, setPilotScores] = useState<ScoreData>({});
+        const {pilots, isPLoading} = usePilots(vc);
+        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
+        const [wsStatus, setWsStatus] = useState({listeners: 1, airborne: 0, timeStamp: 0, at: 0});
+        const [follow, setFollow] = useState(false);
 
-    const connectionStatus = useMemo(() => {
-        const connectionStatusO = {
-            [ReadyState.CONNECTING]: ['Connecting to tracking..', faSpinner],
-            [ReadyState.CLOSING]: ['Closing tracking connection', faSpinner],
-            [ReadyState.CLOSED]: [`Connection to tracking is closed, ${attempt < Infinity ? 'please reload to reconnect' : 'retrying shortly'}`, faLinkSlash],
-            [ReadyState.UNINSTANTIATED]: ['Messed Up', faSpinner]
-        }[readyState];
+        // For remote updating of the map
+        const mapRef = useRef(null);
 
-        if (connectionStatusO) {
-            setWsStatus({listeners: 1, airborne: 0, timeStamp: 0, at: 0}); // clear status will update eventually
-            return (
-                <div>
-                    <TooltipIcon icon={connectionStatusO[1]} tooltip={connectionStatusO[0]} />
-                    <Nbsp />
-                    {connectionStatusO[0]}
-                    <br style={{clear: 'both'}} />
-                    <hr />
-                </div>
-            );
-        }
-        return null;
-    }, [readyState, attempt]);
+        // Keep track of online/offline status of the page
+        //        const [online] = useState(navigator.onLine);
 
-    if (socketUrl != proposedUrl(vc, datecode)) {
-        setPilotScores({});
-        setTrackData({});
-        setSocketUrl(proposedUrl(vc, datecode));
-    }
+        // We are using a webSocket to update our data here
+        const {lastMessage, readyState} = useWebSocket(socketUrl, {
+            reconnectAttempts: 40,
+            reconnectInterval: 16000,
+            retryOnError: true
+        });
 
-    const setCompno = useCallback(
-        (cn) => {
-            setSelectedCompno(cn);
-            if (cn && pilots && pilots[cn]) {
-                setFollow(true);
+        // Do we have a loaded set of details?
+        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0 && mapRef && mapRef.current && mapRef.current.getMap();
+
+        // Have we had a websocket message, if it hasn't changed then ignore it!
+        let updateMessage = null;
+        if (lastMessage) {
+            if (wsStatus.timeStamp != lastMessage.timeStamp) {
+                wsStatus.timeStamp = lastMessage.timeStamp;
+                decodeWebsocketMessage(vc, datecode, lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus);
             }
-        },
-        [setSelectedCompno, pilots]
-    );
+        }
 
-    // And the pilot object
-    const selectedPilotData: SelectedPilotDetails | null = useMemo(
-        () =>
-            pilots
-                ? {
-                      pilot: pilots[selectedCompno],
-                      score: pilotScores[selectedCompno],
-                      track: trackData[selectedCompno]
-                  }
-                : null,
-        [pilots, selectedCompno]
-    );
+        const connectionStatus = useMemo(() => {
+            const connectionStatusO = {
+                [ReadyState.CONNECTING]: ['Connecting to tracking..', faSpinner],
+                [ReadyState.CLOSING]: ['Closing tracking connection', faSpinner],
+                [ReadyState.CLOSED]: [`Connection to tracking is closed, please reload to reconnect`, faLinkSlash],
+                [ReadyState.UNINSTANTIATED]: ['Messed Up', faSpinner]
+            }[readyState];
 
-    // Cache the calculated times and only refresh every 60 seconds
-    const status = useMemo(() => {
-        return (
-            (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
-            ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
+            if (connectionStatusO) {
+                setWsStatus({listeners: 1, airborne: 0, timeStamp: 0, at: 0}); // clear status will update eventually
+                return (
+                    <div>
+                        <TooltipIcon icon={connectionStatusO[1]} tooltip={connectionStatusO[0]} />
+                        <Nbsp />
+                        {connectionStatusO[0]}
+                        <br style={{clear: 'both'}} />
+                        <hr />
+                    </div>
+                );
+            }
+            return null;
+        }, [readyState]);
+
+        if (socketUrl != proposedUrl(vc, datecode)) {
+            setPilotScores({});
+            setTrackData({});
+            setSocketUrl(proposedUrl(vc, datecode));
+        }
+
+        const setCompno = useCallback(
+            (cn) => {
+                setSelectedCompno(cn);
+                if (cn && pilots && pilots[cn]) {
+                    setFollow(true);
+                }
+            },
+            [setSelectedCompno, pilots]
         );
-    }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
 
-    // Scale map to fit the bounds
-    const fitBounds = useCallback(() => {
-        setOptions({...options, zoomTask: true});
-    }, [vc]);
+        // And the pilot object
+        const selectedPilotData: SelectedPilotDetails | null = useMemo(
+            () =>
+                pilots
+                    ? {
+                          pilot: pilots[selectedCompno],
+                          score: pilotScores[selectedCompno],
+                          track: trackData[selectedCompno]
+                      }
+                    : null,
+            [pilots, selectedCompno]
+        );
 
-    return (
-        <>
-            <div className={'resizingMap'}>
-                <MApp
-                    key="map"
-                    vc={vc}
-                    follow={follow}
-                    setFollow={setFollow}
-                    selectedPilotData={selectedPilotData}
-                    setSelectedCompno={setCompno}
-                    mapRef={mapRef} //
-                    pilots={pilots}
-                    pilotScores={pilotScores}
-                    options={options}
-                    setOptions={setOptions}
-                    tz={tz}
-                    t={wsStatus.at as Epoch}
-                    viewport={viewport}
-                    setViewport={setViewport}
-                    trackData={trackData}
-                    selectedCompno={selectedCompno}
-                    measureFeatures={measureFeatures}
-                    status={status}
-                />
-            </div>
-            <div className="resultsOverlay" key="results">
-                <div className="resultsUnderlay">
-                    {connectionStatus}
-                    {notes && notes != '' && (
-                        <>
-                            <br />
-                            <span style={{clear: 'both', color: 'red'}}>{notes}</span>
-                            <br />
-                        </>
-                    )}
-                    <TaskDetails vc={vc} fitBounds={fitBounds} />
-                    {valid && (
-                        <PilotList
-                            key="pilotList"
-                            pilots={pilots}
-                            pilotScores={pilotScores} //
-                            trackData={trackData}
-                            selectedPilot={selectedCompno}
-                            setSelectedCompno={setCompno}
-                            now={wsStatus.at as Epoch}
-                            tz={tz}
-                            options={options}
-                            handicapped={handicapped}
-                        />
-                    )}
+        // Cache the calculated times and only refresh every 60 seconds
+        const status = useMemo(() => {
+            return (
+                (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
+                ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
+            );
+        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
+
+        // Scale map to fit the bounds
+        const fitBounds = useCallback(() => {
+            setOptions({...options, zoomTask: true});
+        }, [vc]);
+
+        return (
+            <>
+                <div className={'resizingMap'}>
+                    <MApp
+                        key="map"
+                        vc={vc}
+                        follow={follow}
+                        setFollow={setFollow}
+                        selectedPilotData={selectedPilotData}
+                        setSelectedCompno={setCompno}
+                        mapRef={mapRef} //
+                        pilots={pilots}
+                        pilotScores={pilotScores}
+                        options={options}
+                        setOptions={setOptions}
+                        tz={tz}
+                        t={wsStatus.at as Epoch}
+                        viewport={viewport}
+                        setViewport={setViewport}
+                        trackData={trackData}
+                        selectedCompno={selectedCompno}
+                        measureFeatures={measureFeatures}
+                        status={status}
+                    />
                 </div>
-            </div>
-            {selectedPilotData?.pilot ? <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} /> : <Sponsors at={wsStatus.at} />}
-        </>
-    );
-}
+                <div className="resultsOverlay" key="results">
+                    <div className="resultsUnderlay">
+                        {connectionStatus}
+                        {notes && notes != '' && (
+                            <>
+                                <br />
+                                <span style={{clear: 'both', color: 'red'}}>{notes}</span>
+                                <br />
+                            </>
+                        )}
+                        <TaskDetails vc={vc} fitBounds={fitBounds} />
+                        {valid && (
+                            <PilotList
+                                key="pilotList"
+                                pilots={pilots}
+                                pilotScores={pilotScores} //
+                                trackData={trackData}
+                                selectedPilot={selectedCompno}
+                                setSelectedCompno={setCompno}
+                                now={wsStatus.at as Epoch}
+                                tz={tz}
+                                options={options}
+                                handicapped={handicapped}
+                            />
+                        )}
+                    </div>
+                </div>
+                {selectedPilotData?.pilot ? <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} /> : <Sponsors at={wsStatus.at} />}
+            </>
+        );
+    },
+    // Memo comparison, skip all the functions
+    (o, n) =>
+        o.selectedCompno === n.selectedCompno && //
+        o.vc === n.vc &&
+        o.datecode == n.datecode &&
+        _isEqual(o.viewport, n.viewport) &&
+        _isEqual(o.measureFeatures[0], n.measureFeatures[0]) &&
+        _isEqual(o.options, n.options) &&
+        o.notes === n.notes &&
+        o.handicapped === n.handicapped
+    //    function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
+);
 
-function formatTimes(t, tz) {
+function formatTimes(t, tz: TZ) {
     // Figure out what the local language is for international date strings
     const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
 

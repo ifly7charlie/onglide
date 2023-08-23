@@ -31,6 +31,7 @@ import {UseMeasure, useMeasure} from '../lib/react/measure';
 import cookies from 'next-cookies';
 
 import _find from 'lodash.find';
+import _isEqual from 'lodash.isEqual';
 
 function IncludeJavascript() {
     return (
@@ -43,63 +44,67 @@ function IncludeJavascript() {
 
 // Requires: classes, link, contestname, contestdates
 
-const Menu = memo(function Menu(props: {comp: any; setSelectedPilot: Function; measureFeatures: UseMeasure; options: any; setOptions: Function; vc: string}) {
-    const comp = props.comp;
-    const classes =
-        comp.classes.length > 1
-            ? comp.classes.map((c) => (
-                  <Nav.Item key={'navitem' + c.class}>
-                      <Nav.Link
-                          href="#"
-                          key={'navlink' + c.class}
-                          eventKey={c.class}
-                          onClick={() => {
-                              Router.push('/?className=' + c.class, undefined, {shallow: true});
-                              props.setSelectedPilot(null);
-                          }}
-                      >
-                          {c.classname.replace(/\s+(meter|metre)/, 'm')}
-                      </Nav.Link>
-                  </Nav.Item>
-              ))
-            : null;
+const Menu = memo(
+    function Menu(props: {comp: any; setSelectedPilot: Function; measureFeatures: UseMeasure; options: any; setOptions: Function; vc: string}) {
+        const comp = props.comp;
+        const classes =
+            comp.classes.length > 1
+                ? comp.classes.map((c) => (
+                      <Nav.Item key={'navitem' + c.class}>
+                          <Nav.Link
+                              href="#"
+                              key={'navlink' + c.class}
+                              eventKey={c.class}
+                              onClick={() => {
+                                  Router.push('/?className=' + c.class, undefined, {shallow: true});
+                                  props.setSelectedPilot(null);
+                              }}
+                          >
+                              {c.classname.replace(/\s+(meter|metre)/, 'm')}
+                          </Nav.Link>
+                      </Nav.Item>
+                  ))
+                : null;
 
-    // Try and extract a short form of the name, only letters and spaces stop at first number
-    const shortName =
-        comp.competition.name
-            .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
-            .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
-            .match(new RegExp(/^([0-9]*[\p{L}\s]*)/, 'u'))?.[1]
-            ?.trim() || comp.competition.name.substring(0, 25) + '...';
+        // Try and extract a short form of the name, only letters and spaces stop at first number
+        const shortName =
+            comp.competition.name
+                .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
+                .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
+                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/, 'u'))?.[1]
+                ?.trim() || comp.competition.name.substring(0, 25) + '...';
 
-    return (
-        <>
-            <Navbar bg="light" fixed="top">
-                <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
-                    {classes}
-                    <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-sm-block d-lg-none">
-                            {shortName}
-                            <Nbsp />
-                            <FontAwesomeIcon icon={faLink} />
-                        </Nav.Link>
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
-                            {comp.competition.name}
-                            <div style={{fontSize: '70%'}}>
-                                {comp.competition.start} to {comp.competition.end}
-                                <FontAwesomeIcon icon={faLink} />{' '}
-                            </div>
-                        </Nav.Link>
-                    </Nav.Item>
-                    <Nav.Item key="settings">
-                        <Options {...props} />
-                    </Nav.Item>
-                </Nav>
-            </Navbar>
-            <br style={{clear: 'both'}} />
-        </>
-    );
-});
+        return (
+            <>
+                <Navbar bg="light" fixed="top">
+                    <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
+                        {classes}
+                        <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
+                            <Nav.Link href={comp.competition.mainwebsite} className="d-none d-sm-block d-lg-none">
+                                {shortName}
+                                <Nbsp />
+                                <FontAwesomeIcon icon={faLink} />
+                            </Nav.Link>
+                            <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
+                                {comp.competition.name}
+                                <div style={{fontSize: '70%'}}>
+                                    {comp.competition.start} to {comp.competition.end}
+                                    <FontAwesomeIcon icon={faLink} />{' '}
+                                </div>
+                            </Nav.Link>
+                        </Nav.Item>
+                        <Nav.Item key="settings">
+                            <Options {...props} />
+                        </Nav.Item>
+                    </Nav>
+                </Navbar>
+                <br style={{clear: 'both'}} />
+            </>
+        );
+    },
+    // Memo comparison, skip all the functions
+    (o, n) => o.vc === n.vc && o.comp === n.comp && _isEqual(o.measureFeatures[0], n.measureFeatures[0]) && _isEqual(o.options, n.options)
+);
 
 //
 // Main page rendering :)
