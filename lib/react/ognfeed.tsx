@@ -371,15 +371,18 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
 }
 
 // Create an async iterable
-async function* getData(compno: Compno, deck: DeckData, map2d: boolean) {
+async function* getData(compno: Compno, deck: DeckData) {
     let current = 0;
     console.log('starting iterator', compno, deck.posIndex);
 
-    while (true) {
+    if (deck.dataPromiseResolve) {
+        console.log('existing iterator found, closing');
+        deck.dataPromiseResolve(true);
+    }
+
+    let abort: boolean | undefined = false;
+    while (!abort) {
         // Wait for data
-        await new Promise<void>((resolve) => {
-            deck.dataPromiseResolve = resolve;
-        });
 
         // And send a segment or some
         const newData = [];
@@ -406,8 +409,12 @@ async function* getData(compno: Compno, deck: DeckData, map2d: boolean) {
             }
             current++;
         }
-
-        //        console.log(compno, newData);
+        // Send to deck
         yield newData;
+
+        // And wait for more data
+        abort = await new Promise<undefined | boolean>((resolve) => {
+            deck.dataPromiseResolve = resolve;
+        });
     }
 }
