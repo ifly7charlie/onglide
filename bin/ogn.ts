@@ -286,7 +286,8 @@ async function main() {
         const headers = {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'OPTIONS, GET, UPGRADE',
-            'Access-Control-Max-Age': 5 * 60 // 5 minutes
+            'Access-Control-Max-Age': 5 * 60, // 5 minutes
+            'Cache-Control': 'max-age=300, immutable, stale-while-revalidate=30'
         };
 
         if (req.method === 'OPTIONS') {
