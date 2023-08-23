@@ -551,7 +551,7 @@ WHERE datecode = todcode(${date}) AND class=${classid}`
                 // We don't handle multiple starts at all so abort
                 if (tp.multiple_start != 0) {
                     console.log('multiple start not supported');
-                    //                    continue;
+                    continue;
                 }
 
                 // can we extract a number off the leading part of the turnpoint name, if so treat it as a trigraph
@@ -587,6 +587,11 @@ WHERE datecode = todcode(${date}) AND class=${classid}`
                 //            "VALUES ";
                 query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
                 values = values.concat([classid, date, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0, tp.altitude]);
+            }
+
+            // If we don't have any valid turnpoints then don't try and download them!
+            if (!query.length || !previousPoint) {
+                return null;
             }
 
             query = query.substring(0, query.length - 1);
