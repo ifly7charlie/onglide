@@ -26,7 +26,7 @@ import {query} from '../lib/react/db';
 import escape from 'sql-template-strings';
 import {Options} from '../lib/react/options';
 
-import {useMeasure} from '../lib/react/measure';
+import {UseMeasure, useMeasure} from '../lib/react/measure';
 
 import cookies from 'next-cookies';
 
@@ -43,7 +43,7 @@ function IncludeJavascript() {
 
 // Requires: classes, link, contestname, contestdates
 
-const Menu = memo(function Menu(props) {
+const Menu = memo(function Menu(props: {comp: any; setSelectedPilot: Function; measureFeatures: UseMeasure; options: any; setOptions: Function; vc: string}) {
     const comp = props.comp;
     const classes =
         comp.classes.length > 1
@@ -111,6 +111,9 @@ export default function CombinePage(props) {
     let {className} = router.query;
     if (!className) {
         className = props.defaultClass;
+    }
+    if (Array.isArray(className)) {
+        className = className[0];
     }
 
     // Next up load the contest and the pilots, we can use defaults for pilots

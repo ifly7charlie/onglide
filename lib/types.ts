@@ -239,14 +239,10 @@ export type ProtobufGenerator = AsyncGenerator<Uint8Array, void, void>;
 export interface DeckData {
     compno: Compno;
     positions: Float32Array;
-    //    indices: Uint32Array;
     agl: Int16Array;
     t: Uint32Array;
-    //    recentIndices: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
-    partial: boolean;
-    //    segmentIndex: number;
     dataPromiseResolve?: () => void;
     getData?: AsyncGenerator<any, void, void>;
 }

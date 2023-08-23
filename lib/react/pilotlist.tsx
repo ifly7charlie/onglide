@@ -298,7 +298,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     {score?.taskTimeRemaining ? distance : null}
                     {times}
                 </ul>
-                <FlightLegs score={score} tz={tz} units={units} />
+                <FlightLegs score={score} tz={tz} units={!!units} />
             </>
         );
     } else {
@@ -307,7 +307,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 <div>
                     Landed out
                     <ul className="status">{distance}</ul>
-                    <FlightLegs score={score} tz={tz} units={units} />
+                    <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
             );
         } else if (score?.flightStatus == PositionStatus.Home) {
@@ -315,7 +315,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 <div>
                     Landed back
                     <ul className="status">{distance}</ul>
-                    <FlightLegs score={score} tz={tz} units={units} />
+                    <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
             );
         } else {
@@ -330,7 +330,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     {score.actual?.grRemaining ? <br /> : ', '}
                     <Optional b="Glide ratio to Finish" v={score.actual?.grRemaining < 200 ? score.actual.grRemaining : null} e=":1" />
                     <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining < 200 ? score.handicapped.grRemaining : null} e=":1" />
-                    <FlightLegs score={score} tz={tz} units={units} />
+                    <FlightLegs score={score} tz={tz} units={!!units} />
                 </>
             );
         }

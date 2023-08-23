@@ -294,15 +294,11 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                         }
                         const deck: DeckData = (result[compno].deck = {
                             compno: compno as Compno,
-                            //                            indices: new Uint32Array(p.indices.slice().buffer),
                             positions: new Float32Array(p.positions.slice().buffer),
                             t: new Uint32Array(p.t.slice().buffer),
                             climbRate: new Int8Array(p.climbRate.slice().buffer),
-                            //                            recentIndices: new Uint32Array(p.recentIndices.slice().buffer),
                             agl: new Int16Array(p.agl.slice().buffer),
-                            posIndex: p.posIndex,
-                            partial: p.partial
-                            //                            segmentIndex: p.segmentIndex
+                            posIndex: p.posIndex
                         });
 
                         console.log('create iterator:', compno);

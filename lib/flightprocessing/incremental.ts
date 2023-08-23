@@ -30,7 +30,6 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData): void {
         agl: new Int16Array(deckPointIncrement),
         t: new Uint32Array(deckPointIncrement),
         climbRate: new Int8Array(deckPointIncrement),
-        partial: true,
         posIndex: 0
     };
 }

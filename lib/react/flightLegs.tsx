@@ -2,7 +2,7 @@ import {memo} from 'react';
 import {TooltipIcon} from './htmlhelper';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {PilotScore, PilotScoreLeg, Epoch, PositionStatus} from '../types';
+import {PilotScore, PilotScoreLeg, Epoch, PositionStatus, TZ} from '../types';
 
 import {useState} from 'react';
 
@@ -19,7 +19,7 @@ import Button from 'react-bootstrap/Button';
 
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
-export const FlightLegs = memo(function FlightLegs({score, units, tz}) {
+export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: any; units: boolean; tz: TZ}) {
     const [viewOptions, setViewOptions] = useState({task: 1, hcapped: 0});
 
     if (!score?.legs) {
