@@ -92,7 +92,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     },
                     pickable: true,
                     tt: true,
-                    // If we are not selected then we are filtered
                     ...filtering
                 })
             );
@@ -371,8 +370,6 @@ export default function MApp(props: {
             let response = '';
             const compno = layer.props.compno ?? object.compno;
             const time = object.t;
-
-            console.log(object);
 
             if (time) {
                 if (compno && pilotScores[compno]?.stats) {
