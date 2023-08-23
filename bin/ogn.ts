@@ -287,7 +287,7 @@ async function main() {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'OPTIONS, GET, UPGRADE',
             'Access-Control-Max-Age': 5 * 60, // 5 minutes
-            'Cache-Control': 'max-age=300, immutable, stale-while-revalidate=30'
+            'Cache-Control': 'public, max-age=300, immutable, stale-while-revalidate=30'
         };
 
         if (req.method === 'OPTIONS') {
@@ -323,6 +323,7 @@ async function main() {
                         console.log(`sending historical data ${baseTimestamp} [current: ${channel.webPathBaseTime}]`);
                         if (channel.webPathData[baseTimestamp]) {
                             res.writeHead(200, headers);
+                            res.setHeader('Content-Type', 'application/octet-stream');
                             res.write(channel.webPathData[baseTimestamp], 'binary');
                             res.end(null, 'binary');
                             return;
