@@ -810,9 +810,9 @@ async function generateHistoricalTracks(channel: Channel): Promise<Buffer> {
     // Figure out the block that preceeds us
     const now = getNow();
     const base = now - webPathBaseTime; // determine the last block block
-    console.log(`generateHistoricalTracks now: ${now}, base: ${base}, previous: ${channel.webPathBaseTime}`);
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
+        console.log(`re-generateHistoricalTracks now: ${now}, base: ${base}, previous: ${channel.webPathBaseTime}`);
         const toStream = reduce(
             gliders,
             (result, glider, compno) => {
@@ -861,7 +861,6 @@ async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
             if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    console.log('sendRecentPilotTracks:', glider.webPathEndPosition ?? 'none', p.posIndex);
                     let start = glider.webPathEndPosition ?? 0;
                     const end = p.posIndex;
                     const length = end - start;
