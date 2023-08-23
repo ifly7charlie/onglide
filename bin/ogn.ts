@@ -304,7 +304,7 @@ async function main() {
         }
 
         // explict score request
-        const [valid, command, channelName, baseTimestamp] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)$/i) || [false, '', ''];
+        const [valid, command, channelName, baseTimestamp] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)$/i) || [false, '', ''];
         if (valid) {
             console.log(command, channelName);
             if (channelName in channels) {
