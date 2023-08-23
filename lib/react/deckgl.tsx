@@ -67,7 +67,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             // For all but selected gliders just show most recent track
             const filtering = {
                 getFilterValue: (a) => a.t - referenceDate,
-                filterRange: [props.t - referenceDate - 60.0, props.t - referenceDate], // p.t[p.posIndex - 1] - referenceDate - 2],
+                filterRange: [props.t - referenceDate - 60.0, props.t - referenceDate + 1], // p.t[p.posIndex - 1] - referenceDate - 2],
                 extensions: [new DataFilterExtension({filterSize: 1})],
                 filterEnabled: !selected
             };
@@ -81,7 +81,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     data: p.getData,
                     getWidth: 5,
                     getPath: (d) => d.p,
-                    positionFormat: 'XYZ', // //map2d ? 'XY' : 'XYZ',
+                    positionFormat: 'XYZ', //map2d ? 'XY' : 'XYZ',
                     getColor: color,
                     jointRounded: true,
                     fp64: false,
@@ -185,7 +185,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = makeLayers(props, taskGeoJSON, map2d, mapStreet); //, [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial, mapLight]);
+    const layers = makeLayers(props, taskGeoJSON, map2d, mapStreet);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
