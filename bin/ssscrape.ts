@@ -685,7 +685,7 @@ async function process_day_results(classid, className, date, day_number, results
                              datafromscoring = "Y",
                              speed=${scoredvals.as}, distance=${scoredvals.ad},
                              hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd},
-                             daypoints=${parseInt(row.Points.replace(',', ''))}, dayrank=${parseInt(row['#'].replace('.', ''))}, totalpoints=${0}, totalrank=${0}, penalty=${0}
+                             daypoints=${parseInt(row.Points.replace(',', ''))}, dayrank=0, totalpoints=${0}, totalrank=${0}, penalty=${0}
                           WHERE datecode=${dateCode} AND compno=${pilot} and class=${classid}`);
 
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );
