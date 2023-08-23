@@ -30,8 +30,7 @@ import {UseMeasure, useMeasure} from '../lib/react/measure';
 
 import cookies from 'next-cookies';
 
-import _find from 'lodash.find';
-import _isEqual from 'lodash.isEqual';
+import {find as _find, isEqual as _isEqual} from 'lodash';
 
 function IncludeJavascript() {
     return (
