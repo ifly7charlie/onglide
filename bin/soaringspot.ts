@@ -213,7 +213,7 @@ async function update_class(compClass, keys) {
 
     // Make sure we have rows for each day and that compstatus is correct
     //    await mysql.query( escape`call contestdays()`);
-    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
+    //    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
 
     // Now add details of pilots
     await update_pilots(compClass._links.self.href, classid, name, keys);
@@ -498,12 +498,18 @@ async function process_day_task(day, classid, classname, keys) {
     await mysql_db
         .transaction()
 
+        // Set the datecode
+        .query(
+            escape`
+                   UPDATE compstatus SET datecode = todcode(${date}) WHERE datecode < todcode(${date}) and class=${classid}`
+        )
+
         // If it is the current day and we have a start time we save it
         .query(
             task_details.no_start && !task_details.no_start.endsWith('00:00:00')
                 ? escape`
                    UPDATE compstatus SET starttime = COALESCE(${convert_to_mysql(task_details.no_start)},starttime)
-WHERE datecode = todcode(${date})`
+WHERE datecode = todcode(${date}) AND class=${classid}`
                 : escape`SELECT 1`
         )
 
@@ -544,7 +550,8 @@ WHERE datecode = todcode(${date})`
             for (const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'].sort((a, b) => a.point_index - b.point_index)) {
                 // We don't handle multiple starts at all so abort
                 if (tp.multiple_start != 0) {
-                    continue;
+                    console.log(`${classid} - ${date}: multiple start not supported`);
+                    break;
                 }
 
                 // can we extract a number off the leading part of the turnpoint name, if so treat it as a trigraph
@@ -580,6 +587,11 @@ WHERE datecode = todcode(${date})`
                 //            "VALUES ";
                 query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
                 values = values.concat([classid, date, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0, tp.altitude]);
+            }
+
+            // If we don't have any valid turnpoints then don't try and download them!
+            if (!query.length || !previousPoint) {
+                return null;
             }
 
             query = query.substring(0, query.length - 1);
@@ -653,7 +665,7 @@ WHERE datecode = todcode(${date})`
         )
 
         .rollback((e) => {
-            console.log('rollback');
+            console.log('rollback', date, classid);
         })
         .commit();
 
