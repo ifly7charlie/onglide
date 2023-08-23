@@ -104,7 +104,7 @@ async function roboControl() {
             await mysql_db.query(escape`
               SELECT url, overwrite
                 FROM scoringsource where type='robocontrol'`)
-        )[0] ?? {url:null, overwrite:true};
+        )[0] ?? {url: null, overwrite: true};
         url = row.url;
         overwrite = row.overwrite ?? true;
     }
@@ -130,10 +130,9 @@ async function roboControl() {
             for (const p of location || []) {
                 if (p.flarm?.length) {
                     console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    if( overwrite ) {
+                    if (overwrite) {
                         mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
-                    }
-                    else {
+                    } else {
                         mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn} and trackerid='unknown'`);
                     }
                     mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
