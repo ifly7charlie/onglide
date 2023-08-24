@@ -352,10 +352,10 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     // Make the new structure it needs enough space for existing and new
                     const combined: DeckData = {
                         compno: compno as Compno,
-                        positions: new Float32Array(p.positions.length + existing?.positions.length || 0),
-                        t: new Uint32Array(p.t.length + existing?.t.length || 0),
-                        climbRate: new Int8Array(p.climbRate.length + existing?.climbRate.length || 0),
-                        agl: new Int16Array(p.agl.length + existing?.agl.length || 0),
+                        positions: new Float32Array(deck.positions.length + existing?.positions.length || 0),
+                        t: new Uint32Array(deck.t.length + existing?.t.length || 0),
+                        climbRate: new Int8Array(deck.climbRate.length + existing?.climbRate.length || 0),
+                        agl: new Int16Array(deck.agl.length + existing?.agl.length || 0),
                         posIndex: p.posIndex + existing?.posIndex
                     };
 
@@ -365,13 +365,13 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     const existingPosition = existingOlder === false ? p.posIndex : 0;
 
                     if (existing) {
-                        combined.positions.set(existing.positions, existingPosition);
+                        combined.positions.set(existing.positions, existingPosition * 3);
                         combined.t.set(existing.t, existingPosition);
                         combined.climbRate.set(existing.climbRate, existingPosition);
                         combined.agl.set(existing.agl, existingPosition);
                     }
 
-                    combined.positions.set(deck.positions, newPosition);
+                    combined.positions.set(deck.positions, newPosition * 3);
                     combined.t.set(deck.t, newPosition);
                     combined.climbRate.set(deck.climbRate, newPosition);
                     combined.agl.set(deck.agl, newPosition);
