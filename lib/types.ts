@@ -45,6 +45,7 @@ import {Point, Feature} from '@turf/helpers';
 export interface AirfieldLocation {
     name: string;
     tz: TZ;
+    tzoffset: number;
     lat: number;
     lng: number;
     officialDelay: Epoch;
