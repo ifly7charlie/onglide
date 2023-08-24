@@ -360,7 +360,7 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     };
 
                     // Figure out which order to put them in
-                    const existingOlder = existing ? existing.t[0] < p.t[0] : null;
+                    const existingOlder = existing ? existing.t[0] < deck.t[0] : null;
                     const newPosition = existingOlder === true ? existing.posIndex : 0;
                     const existingPosition = existingOlder === false ? p.posIndex : 0;
 
@@ -476,7 +476,6 @@ async function decodeWebsocketMessage(
             _foreach(decoded.positions.positions, (p) => {
                 mergePointToPilot(p, trackData);
             });
-            setTrackData(trackData);
         }
 
         if (decoded.ka) {
@@ -493,7 +492,7 @@ async function decodeWebsocketMessage(
 
 // Create an async iterable
 async function* getData(compno: Compno, deck: DeckData) {
-    let current = 0;
+    let current = 1;
     console.log('starting iterator', compno, deck.posIndex);
 
     if (deck.dataPromiseResolve) {
@@ -508,7 +507,7 @@ async function* getData(compno: Compno, deck: DeckData) {
         // And send a segment or some
         const newData = [];
         while (current < deck.posIndex) {
-            const previous = current ? current - 1 : 0;
+            const previous = current - 1;
 
             // No gap, use previous point
             if (deck.t[current] - deck.t[previous] < gapLength) {
@@ -530,8 +529,11 @@ async function* getData(compno: Compno, deck: DeckData) {
             }
             current++;
         }
+
         // Send to deck
-        yield newData;
+        if (newData.length) {
+            yield newData;
+        }
 
         // And wait for more data
         abort = await new Promise<undefined | boolean>((resolve) => {
