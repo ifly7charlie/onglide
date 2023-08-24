@@ -3,13 +3,13 @@ import {useMemo} from 'react';
 export default function Sponsor(props) {
     const sponsorList = [
         <img width="152" height="233" src="https://wwgc2022.co.uk/wp-content/uploads/2022/03/FAI-logo.jpg" alt="" title="FAI logo" />, //
-        <img width="150" height="150" src="http://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
+        <img width="150" height="150" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
         <img width="152" height="233" src="https://wwgc2022.co.uk/wp-content/uploads/2022/03/FAI-logo.jpg" alt="" title="FAI logo" />, //
-        <img width="150" height="150" src="http://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
+        <img width="150" height="150" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
         <img width="152" height="233" src="https://wwgc2022.co.uk/wp-content/uploads/2022/03/FAI-logo.jpg" alt="" title="FAI logo" />, //
-        <img width="150" height="150" src="http://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
+        <img width="150" height="150" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
         <img width="152" height="233" src="https://wwgc2022.co.uk/wp-content/uploads/2022/03/FAI-logo.jpg" alt="" title="FAI logo" />, //
-        <img width="150" height="150" src="http://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
+        <img width="150" height="150" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
         <div>
             If you would like to use onglide for your competition please ask your scorer to send the SoaringSpot API keys to setup@onglide.com
             <hr />
