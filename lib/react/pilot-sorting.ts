@@ -161,9 +161,9 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 if (pilotScore.flightStatus == PositionStatus.Home || pilotScore?.utcFinish) {
                     displayAs = '-';
                     suffix = '';
-                    newKey = '';
+                    newKey = '0';
                 } else {
-                    newKey = -delay;
+                    newKey = delay;
                     [displayAs] = delayToText(delay).split(' ');
                 }
                 break;
