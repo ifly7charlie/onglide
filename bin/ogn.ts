@@ -247,9 +247,10 @@ async function main() {
     initialiseInsights();
 
     // Location comes from the competition table in the database
-    location = (await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1'))[0];
+    location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset FROM competition LIMIT 1'))[0];
     location.point = point([location.lng, location.lat]);
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
+    location.tzoffset = parseInt(location.tzoffset as unknown as string);
 
     // Save the tz for use
     setSiteTz(location.tz);
