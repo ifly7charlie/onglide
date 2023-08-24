@@ -21,7 +21,6 @@ import {OgnFeed} from '../lib/react/ognfeed';
 
 import Router from 'next/router';
 
-//import {pilotsorting} from '../lib/react/pilot-sorting.js';
 import {query} from '../lib/react/db';
 import escape from 'sql-template-strings';
 import {Options} from '../lib/react/options';
