@@ -4,16 +4,16 @@ import {TextLayer, PathLayer} from '@deck.gl/layers';
 import {FlyToInterpolator, LinearInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
 import {DataFilterExtension} from '@deck.gl/extensions';
 import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
-import {LngLat, MercatorCoordinate} from 'mapbox-gl';
+//import {LngLat, MercatorCoordinate} from 'mapbox-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
-import {gapLength} from '../constants';
+import {offlineTime, recentTrackLength} from '../constants';
 
 // Height/Climb helpers
 import {displayHeight, displayClimb} from './displayunits';
 
-import {Epoch, ClassName, Compno, TrackData, PilotTrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
+import {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
@@ -67,7 +67,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             // For all but selected gliders just show most recent track
             const filtering = {
                 getFilterValue: (a) => a.t - referenceDate,
-                filterRange: [props.t - referenceDate - 60.0, props.t - referenceDate + 1], // p.t[p.posIndex - 1] - referenceDate - 2],
+                filterRange: [props.t - referenceDate - recentTrackLength, props.t - referenceDate + 1],
                 extensions: [new DataFilterExtension({filterSize: 1})],
                 filterEnabled: !selected
             };
@@ -128,7 +128,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 data: data,
                 getPosition: (d) => d.coordinates, // map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
                 getText: (d) => d.name,
-                getColor: (d) => (props.t - d.time > gapLength ? [100, 80, 80, 96] : [0, 100, 0, 255]),
+                getColor: (d) => (props.t - d.t > offlineTime ? [100, 80, 80, 96] : [0, 100, 0, 255]),
                 getTextAnchor: 'middle',
                 getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
                 pickage: true,
