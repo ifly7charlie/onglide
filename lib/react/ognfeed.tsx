@@ -356,13 +356,13 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                         t: new Uint32Array(deck.t.length + existing?.t.length || 0),
                         climbRate: new Int8Array(deck.climbRate.length + existing?.climbRate.length || 0),
                         agl: new Int16Array(deck.agl.length + existing?.agl.length || 0),
-                        posIndex: p.posIndex + existing?.posIndex
+                        posIndex: deck.posIndex + existing?.posIndex
                     };
 
                     // Figure out which order to put them in
                     const existingOlder = existing ? existing.t[0] < deck.t[0] : null;
                     const newPosition = existingOlder === true ? existing.posIndex : 0;
-                    const existingPosition = existingOlder === false ? p.posIndex : 0;
+                    const existingPosition = existingOlder === false ? deck.posIndex : 0;
 
                     if (existing) {
                         combined.positions.set(existing.positions, existingPosition * 3);
