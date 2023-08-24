@@ -546,7 +546,7 @@ export function PilotList({
         (o) => {
             setOrder(nextSortOrder(o, order, handicapped || false));
         },
-        [order, handicapped]
+        [order, handicapped, rawOrder]
     );
     const toggleVisible = useCallback(() => {
         setVisible(!visible);

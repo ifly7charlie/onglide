@@ -366,9 +366,13 @@ export function isValidSortOrder(type: SortKey, handicapped: boolean): boolean {
 }
 
 export function getValidSortOrder(type: SortKey, handicapped: boolean): SortKey {
-    const key = getSortOrderType(type);
-    const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
-    return orders[0];
+    if (isValidSortOrder(type, handicapped)) {
+        return type;
+    } else {
+        const key = getSortOrderType(type);
+        const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
+        return orders[0];
+    }
 }
 
 //
