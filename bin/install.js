@@ -127,7 +127,7 @@ async function main() {
         sskey = {type: 'soaringspotkey', url: '', client_id: '', secret: '', actuals: 1};
     }
 
-    const sstypemap = {soaringspotkey: 0, soaringspotscrape: 1, rst: 2};
+    const sstypemap = {soaringspotkey: 0, soaringspotscrape: 1, rst: 2, sgp: 3};
 
     const stquestions = [
         {
@@ -137,6 +137,7 @@ async function main() {
             choices: [
                 {title: 'SoaringSpot API', value: sstypemap['soaringspotkey']},
                 {title: 'SoaringSpot Scraping', value: sstypemap['soaringspotscrape']},
+                {title: 'SGP', value: sstypemap['sgp']},
                 {title: 'RST Online (Sweden)', value: sstypemap['rst']}
             ],
             initial: sstypemap[sskey.type]
@@ -185,6 +186,19 @@ async function main() {
                 initial: sskey.url,
                 validate: (v) => {
                     return !v || !v.match(/en_gb/) || v.match(/\/$/) ? `please enter URL and make sure it is the UK english version of it, with no trailing /` : true;
+                }
+            }
+        ];
+    } else if (stresponse.type == sstypemap['sgp']) {
+        // SoaringSpot is client & key
+        ssquestions = [
+            {
+                type: 'text',
+                name: 'ssurl',
+                message: '(URL)',
+                initial: sskey.url || 'http://glidertracking.fai.org/cuc/SGPF/SGPrace-latest.json',
+                validate: (v) => {
+                    return !v || !v.match(/SGP/ || !v.match(/.json$/)) ? `please enter SGP json URL` : true;
                 }
             }
         ];
@@ -237,6 +251,16 @@ async function main() {
             name: 'wshost',
             message: 'Websocket Host',
             initial: (undefined, v) => (nE.NEXT_PUBLIC_WEBSOCKET_HOST ? nE.NEXT_PUBLIC_WEBSOCKET_HOST : v.url)
+        },
+        {
+            type: 'select',
+            name: 'fairankingimages',
+            message: 'Use FAI ranking list images',
+            choices: [
+                {title: 'Yes', value: '1'},
+                {title: 'No', value: '0'}
+            ],
+            initial: 1
         }
     ];
 
@@ -295,9 +319,16 @@ NEXT_PUBLIC_SITEURL=${wsresponse.url}
         .query('DELETE FROM scoringsource')
         .query(
             escape`INSERT INTO scoringsource VALUES ( ${Object.keys(sstypemap)[stresponse.type]}, ${ssresponse.ssurl || ''},
-                                   ${ssresponse.ssclient || ''}, ${ssresponse.sssecret || ''}, ${ssresponse.sscontest_name || ''}, 1, ${ssresponse.actuals}, ${wsresponse.portoffset}, ${wsresponse.url} )`
+                                   ${ssresponse.ssclient || ''}, ${ssresponse.sssecret || ''}, ${ssresponse.sscontest_name || ''}, 0, ${ssresponse.actuals}, ${wsresponse.portoffset}, ${wsresponse.url} )`
         )
         .commit();
+
+    if (wsresponse.fairankingimages) {
+        await mysql
+            .transaction()
+            .query(escape`INSERT INTO scoringsource (type, url) VALUES ( 'pictureurl', 'http://rankingdata.fai.org/PilotImages/{igc_id}.jpg' )`)
+            .commit();
+    }
 
     // If we have an admin set then configure the main table
     if (nE.MYSQL_ADMIN_PW && nE.MYSQL_ADMIN_USER) {
