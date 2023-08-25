@@ -1,6 +1,7 @@
 import {useCallback, useMemo, useEffect} from 'react';
 import DeckGL from '@deck.gl/react';
 import {TextLayer, PathLayer} from '@deck.gl/layers';
+import {TripsLayer} from '@deck.gl/geo-layers';
 import {FlyToInterpolator, LinearInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
 import {DataFilterExtension} from '@deck.gl/extensions';
 import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
@@ -65,11 +66,17 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             }
 
             // For all but selected gliders just show most recent track
-            const filtering = {
+            /*            const filtering = {
                 getFilterValue: (a) => a.t - referenceDate,
                 filterRange: [props.t - referenceDate - recentTrackLength, props.t - referenceDate + 1],
                 extensions: [new DataFilterExtension({filterSize: 1})],
                 filterEnabled: !selected
+            };
+*/
+            const tripsFiltering = {
+                currentTime: props.t - referenceDate,
+                fadeTrail: !selected, //7,58 ,47
+                trailLength: recentTrackLength
             };
 
             const color = selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224];
@@ -81,6 +88,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     data: p.getData,
                     getWidth: 5,
                     getPath: (d) => d.p,
+                    getTimestamps: (d) => d.t - referenceDate,
                     positionFormat: 'XYZ', //map2d ? 'XY' : 'XYZ',
                     getColor: color,
                     jointRounded: true,
@@ -92,7 +100,8 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     },
                     pickable: true,
                     tt: true,
-                    ...filtering
+                    //...filtering
+                    ...tripsFiltering
                 })
             );
             return result;
