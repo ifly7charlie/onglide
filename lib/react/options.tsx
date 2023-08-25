@@ -26,6 +26,9 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
     const toggleFollow = () => {
         props.setOptions(_cloneDeep({...props.options, follow: !props.options.follow}));
     };
+    const toggleFullPaths = () => {
+        props.setOptions(_cloneDeep({...props.options, fullPaths: !props.options.fullPaths}));
+    };
 
     return (
         <div className="options">
@@ -104,6 +107,19 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={solid('slash')} />
                         <FontAwesomeIcon icon={solid('location-crosshairs')} />
+                    </span>
+                </button>
+            )}
+            &nbsp;
+            {props.options.fullPaths ? (
+                <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
+                    <FontAwesomeIcon icon={solid('route')} />
+                </button>
+            ) : (
+                <button title="Show recent paths for all pilots" onClick={toggleFullPaths}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={solid('slash')} />
+                        <FontAwesomeIcon icon={solid('route')} />
                     </span>
                 </button>
             )}

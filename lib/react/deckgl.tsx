@@ -1,11 +1,9 @@
 import {useCallback, useMemo, useEffect} from 'react';
 import DeckGL from '@deck.gl/react';
-import {TextLayer, PathLayer} from '@deck.gl/layers';
+import {TextLayer} from '@deck.gl/layers';
 import {TripsLayer} from '@deck.gl/geo-layers';
-import {FlyToInterpolator, LinearInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
-import {DataFilterExtension} from '@deck.gl/extensions';
+import {FlyToInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
 import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
-//import {LngLat, MercatorCoordinate} from 'mapbox-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
@@ -37,6 +35,7 @@ import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} 
 // Figure out the baseline date
 const oneYearIsh = 1000 * 3600 * 24 * 365;
 const referenceDate = new Date(Date.now() - (Date.now() % oneYearIsh)).getTime() / 1000;
+console.log(referenceDate);
 
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
@@ -46,7 +45,7 @@ const controller: {type: any; setFollow?: Function; inertia: true; transitionDur
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d, mapLight: boolean) {
+function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d, mapLight: boolean, fullPaths: boolean) {
     if (!props.trackData) {
         console.log('missing layers');
         return [];
@@ -66,23 +65,16 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             }
 
             // For all but selected gliders just show most recent track
-            /*            const filtering = {
-                getFilterValue: (a) => a.t - referenceDate,
-                filterRange: [props.t - referenceDate - recentTrackLength, props.t - referenceDate + 1],
-                extensions: [new DataFilterExtension({filterSize: 1})],
-                filterEnabled: !selected
-            };
-*/
             const tripsFiltering = {
                 currentTime: props.t - referenceDate,
-                fadeTrail: !selected, //7,58 ,47
+                fadeTrail: !fullPaths && !selected,
                 trailLength: recentTrackLength
             };
 
             const color = selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224];
 
             result.push(
-                new PathLayer({
+                new TripsLayer({
                     id: compno, //  + (map2d ? '2d' : '3d'),
                     compno: compno,
                     data: p.getData,
@@ -100,7 +92,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     },
                     pickable: true,
                     tt: true,
-                    //...filtering
                     ...tripsFiltering
                 })
             );
@@ -193,7 +184,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = makeLayers(props, taskGeoJSON, map2d, mapStreet);
+    const layers = makeLayers(props, taskGeoJSON, map2d, mapStreet, options.fullPaths);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
