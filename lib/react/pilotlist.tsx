@@ -524,9 +524,9 @@ export function PilotList({
 
     // Generate the pilot list, sorted by the correct key
     const pilotList = mutatedPilotList.reverse().map((pilot) => {
-        const onClick = useCallback(() => {
+        const onClick = () => {
             selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
-        }, [pilot.compno, selectedPilot]);
+        };
 
         return (
             <Pilot //
