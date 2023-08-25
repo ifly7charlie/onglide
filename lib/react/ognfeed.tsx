@@ -58,8 +58,8 @@ function proposedUrl(vc: ClassName, datecode: Datecode) {
 }
 
 function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string) {
-    const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
-    return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) ? 'https://' : 'http://') + hn + '/tracks/' + (vc + datecode + '.' + baseTime).toUpperCase() + '.bin';
+    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || window.location.host;
+    return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) ? 'https://' : 'http://') + hn + '/tracks/' + (vc + datecode + '.' + baseTime).toUpperCase() + '.bin';
 }
 
 export const OgnFeed = memo(
