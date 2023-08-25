@@ -67,17 +67,13 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     }
 
     // Set the new positions
-    function pushPoint(positions: Float32Array | number[], g: number, t: number) {
-        deck.positions.set(positions, deck.posIndex * 3);
-        deck.t[deck.posIndex] = t;
-        deck.agl[deck.posIndex] = g;
-        deck.posIndex++;
-    }
-    pushPoint([point.lng, point.lat, point.a], point.g, point.t);
-
+    deck.positions.set([point.lng, point.lat, point.a], deck.posIndex * 3);
+    deck.t[deck.posIndex] = point.t;
+    deck.agl[deck.posIndex] = point.g;
     if (point.t - lastTime < gapLength) {
         deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
     }
+    deck.posIndex++;
 
     // Update the altitude and height AGL for the pilot
     // Mutate the vario and altitude back into SWR
