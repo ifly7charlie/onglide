@@ -26,7 +26,7 @@ export const Sorting = memo(function Sorting(props: {setSort: Function; sortOrde
                     &nbsp;
                 </button>
                 <button title="Show L/D Remaining" onClick={() => props.setSort('ld')} className={getSortOrderType(props.sortOrder) == 'ld' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={solid('fast-forward')} />
+                    <FontAwesomeIcon icon={solid('battery-three-quarters')} />
                     &nbsp;
                 </button>
                 <button title="Show Distance Done" onClick={() => props.setSort('distance')} className={getSortOrderType(props.sortOrder) == 'distance' ? 'active' : ''}>

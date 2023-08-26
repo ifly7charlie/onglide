@@ -202,7 +202,7 @@ function HandicappedDistanceComponent({score}: {score: PilotScore}) {
     return (
         <SummaryComponent
             width="100px"
-            id="distance"
+            id="hdistance"
             title="distance" //
             main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped distance done'}}
             data1={{value: score.actual.taskDistance, units: 'km', icon: solid('right-from-bracket'), description: 'actual distance done'}}
@@ -223,17 +223,41 @@ function ActualDistanceComponent({score}: {score: PilotScore}) {
     );
 }
 
-function HandicappedGRComponent({score}: {score: PilotScore}) {
+function grBattery(gr: number): any {
+    if (gr > 999) {
+        return solid('battery-empty');
+    } else if (gr > 100) {
+        return solid('battery-quarter');
+    } else if (gr > 75) {
+        return solid('battery-half');
+    } else if (gr > 40) {
+        return solid('battery-three-quarters');
+    }
+    return solid('battery-full');
+}
+
+const HandicappedGRComponent = memo(function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
+    return (
+        <SummaryComponent
+            width="100px"
+            id="hgr"
+            title="L/D" //
+            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : null, units: ':1', icon: grBattery(handicappedGrRemaining), description: 'handicapped L/D remaining'}}
+            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : null, units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
+        />
+    );
+});
+
+const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {actualGrRemaining: number}) {
     return (
         <SummaryComponent
             width="100px"
             id="gr"
             title="L/D" //
-            main={{value: score.handicapped?.grRemaining < 999 ? score.handicapped.grRemaining : null, units: ':1', icon: solid('fast-forward'), description: 'handicapped L/D remaining'}}
-            data1={{value: score.actual?.grRemaining < 999 ? score.actual.grRemaining : null, units: ':1', icon: solid('fast-forward'), description: 'actual L/D remaining'}}
+            main={{value: actualGrRemaining < 999 ? actualGrRemaining : null, units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
         />
     );
-}
+});
 
 export function Details({units, pilot, score, vario, tz}: {score: PilotScore | null; vario: VarioData | null; tz: TZ; units: number; pilot: API_ClassName_Pilots_PilotDetail}) {
     if (!pilot) {
@@ -247,7 +271,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         </span>
     ) : null;
 
-    const hasHandicappedResults = score?.handicapped;
+    const hasHandicappedResults = !!score?.handicapped;
 
     const speed = score ? ( //
         hasHandicappedResults ? (
@@ -258,6 +282,13 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
     ) : null;
 
     const distance = score ? hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} /> : null;
+    const gr = score ? ( //
+        hasHandicappedResults ? (
+            <HandicappedGRComponent handicappedGrRemaining={score.handicapped.grRemaining} actualGrRemaining={score.actual.grRemaining} />
+        ) : (
+            <ActualGRComponent actualGrRemaining={score.actual.grRemaining} />
+        )
+    ) : null;
 
     let times = null;
     if (score?.utcStart) {
@@ -326,10 +357,8 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                         {speed}
                         {distance}
                         {times}
+                        {gr}
                     </ul>
-                    {score.actual?.grRemaining ? <br /> : ', '}
-                    <Optional b="Glide ratio to Finish" v={score.actual?.grRemaining < 200 ? score.actual.grRemaining : null} e=":1" />
-                    <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining < 200 ? score.handicapped.grRemaining : null} e=":1" />
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </>
             );
