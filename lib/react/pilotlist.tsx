@@ -224,16 +224,16 @@ function ActualDistanceComponent({score}: {score: PilotScore}) {
 }
 
 function grBattery(gr: number): any {
-    if (gr > 999) {
-        return solid('battery-empty');
-    } else if (gr > 100) {
+    if (gr > 100) {
         return solid('battery-quarter');
     } else if (gr > 75) {
         return solid('battery-half');
     } else if (gr > 40) {
         return solid('battery-three-quarters');
+    } else if (gr > 1) {
+        return solid('battery-full');
     }
-    return solid('battery-full');
+    return solid('battery-empty');
 }
 
 const HandicappedGRComponent = memo(function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
@@ -242,8 +242,8 @@ const HandicappedGRComponent = memo(function HandicappedGRComponent({handicapped
             width="100px"
             id="hgr"
             title="L/D" //
-            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : null, units: ':1', icon: grBattery(handicappedGrRemaining), description: 'handicapped L/D remaining'}}
-            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : null, units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
+            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : '∞', units: ' :1', icon: grBattery(handicappedGrRemaining), description: 'handicapped L/D remaining'}}
+            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
         />
     );
 });
@@ -254,7 +254,7 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {
             width="100px"
             id="gr"
             title="L/D" //
-            main={{value: actualGrRemaining < 999 ? actualGrRemaining : null, units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
+            main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
         />
     );
 });
