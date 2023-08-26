@@ -413,8 +413,8 @@ function processPacket(packet: aprsPacket) {
             return;
         }
     }
-    if (speedBetweenKph > 330 /*kph*/) {
-        console.log(`IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph}kph ${packet.timestamp - aircraft.lastMoved}s`);
+    if (speedBetweenKph > 450 /*kph*/) {
+        console.log(`IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph.toFixed(1)}kph ${packet.timestamp - aircraft.lastMoved}s`);
         statistics.jumps++;
         return;
     }
