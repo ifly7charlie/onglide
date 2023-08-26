@@ -440,19 +440,21 @@ async function main() {
                 return client.isAlive === false;
             });
 
+            const now = getNow();
             toterminate.forEach((client) => {
                 console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
+                channel.statistics.totalViewingTime += now - client.connectedAt;
                 client.terminate();
             });
         }
 
         //
         // Aggregate statistics
-        const now = getNow();
         for (const channelName in channels) {
             const channel = channels[channelName];
 
-            console.log(`${channelName}: ${channel.statistics.positionsSent} positions sent, ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`);
+            console.log(`${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`);
+            console.log(`${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time`);
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
@@ -893,11 +895,13 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
 
     console.log('Sending Scores', scores.length);
 
+    const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
+
     // If we have nothing then do nothing...
     if (!channel.clients.length) {
         console.log(`${channel.className}: no clients subscribed`);
     } else {
-        console.log(`${channel.className}: ${channel.clients.length} subscribed, ${channel.activeGliders.size} gliders airborne`);
+        console.log(`${channel.className}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
     }
 
     // For sending the keepalive
