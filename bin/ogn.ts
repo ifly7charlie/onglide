@@ -124,6 +124,7 @@ interface Channel {
     // For the web buffer
     webPathBaseTime: Epoch;
     webPathData: Record<string, Buffer>;
+    mostRecentPosition: Epoch; // last time we had something to send
 }
 
 let channels: Record<ClassName, Channel> = {};
@@ -354,6 +355,7 @@ async function main() {
         console.log(`connection received for ${channel} from ${ws.ognPeer}`);
 
         ws.isAlive = true;
+        ws.connectedAt = getNow();
         if (channel in channels) {
             channels[channel].clients.push(ws);
         } else {
@@ -386,6 +388,10 @@ async function main() {
 
         for (const channelName in channels) {
             const channel = channels[channelName];
+
+            if (channel.toSend.length) {
+                channel.mostRecentPosition = now;
+            }
 
             channel.statistics.activeListeners += channel.clients.length;
             channel.statistics.listenerCycles++;
@@ -530,6 +536,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     activeListeners: 0
                 },
                 webPathBaseTime: 0,
+                mostRecentPosition: getNow(),
                 webPathData: {}
             };
         } else {
@@ -809,9 +816,9 @@ async function sendCurrentState(client: WebSocket) {
     }
 }
 
-async function generateHistoricalTracks(channel: Channel): Promise<Buffer> {
+async function generateHistoricalTracks(channel: Channel): Promise<void> {
     // Figure out the block that preceeds us
-    const now = getNow();
+    const now = channel.mostRecentPosition;
     const base = now - webPathBaseTime; // determine the last block block
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
@@ -846,17 +853,12 @@ async function generateHistoricalTracks(channel: Channel): Promise<Buffer> {
         channel.webPathData[now.toString()] = Buffer.from(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: 0}}).finish());
         channel.webPathBaseTime = now;
     }
-
-    return channel.webPathData[now.toString()];
 }
 
 // Send the abbreviated track for all gliders, used when a new client connects
 async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
-    const now = getNow();
-    const base = now - (now % webPathBaseTime); // determine the last block
-    if (channel.webPathBaseTime !== base) {
-        generateHistoricalTracks(channel);
-    }
+    // Make sure they are up to date (does nothing if they are)
+    await generateHistoricalTracks(channel);
 
     const toStream = reduce(
         gliders,
