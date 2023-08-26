@@ -17,7 +17,7 @@ import {Sorting} from './sorting';
 // Helpers for loading contest information etc
 import {delayToText} from './timehelper.js';
 
-import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
+import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map, cloneDeep as _cloneDeep} from 'lodash';
 
 // Helpers for sorting pilot list
 import {updateSortKeys, nextSortOrder, getValidSortOrder, isValidSortOrder, ShortDisplayKeys, SortKey} from './pilot-sorting';
@@ -526,6 +526,7 @@ export function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
+    setOptions,
     handicapped,
     now,
     tz
@@ -537,14 +538,14 @@ export function PilotList({
     selectedPilot: Compno;
     setSelectedCompno: Function;
     options: any;
+    setOptions: Function;
     handicapped: boolean;
     now: Epoch;
     tz: TZ;
 }) {
     // These are the rendering options
-    const [rawOrder, setOrder] = useState<SortKey>('auto');
     const [visible, setVisible] = useState(true);
-    const order = getValidSortOrder(rawOrder, handicapped);
+    const order = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
 
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
@@ -573,9 +574,9 @@ export function PilotList({
     // Prevent unneeded re-render by using callbacks
     const setSort = useCallback(
         (o) => {
-            setOrder(nextSortOrder(o, order, handicapped || false));
+            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
         },
-        [order, handicapped, rawOrder]
+        [order, handicapped, options]
     );
     const toggleVisible = useCallback(() => {
         setVisible(!visible);

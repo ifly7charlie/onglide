@@ -25,27 +25,36 @@ import {RadarOverlay} from './rainradar';
 
 import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
 
-import {point} from '@turf/helpers';
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
 import distance from '@turf/distance';
+
+import {SortKey} from './pilot-sorting';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
 // Figure out the baseline date
 const oneYearIsh = 1000 * 3600 * 24 * 365;
 const referenceDate = new Date(Date.now() - (Date.now() % oneYearIsh)).getTime() / 1000;
-console.log(referenceDate);
 
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
 import {StopFollowController} from './deckglcontroller';
 // helps with touch scroll on laptops (undocumented)
 const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
+
+import {colourise} from './colourise';
+
+const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any) => number[]) | number[]> = {
+    auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]),
+    climb: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.max(0, d.v * -12.5 + 128))),
+    height: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.p[1][2] >> 5) * 35)),
+    aheight: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.g >> 5) * 35))
+};
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d, mapLight: boolean, fullPaths: boolean) {
+function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, sortKey: SortKey, map2d: boolean, mapLight: boolean, fullPaths: boolean) {
     if (!props.trackData) {
         console.log('missing layers');
         return [];
@@ -71,24 +80,27 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 trailLength: recentTrackLength
             };
 
-            const color = selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224];
+            const sortKeyColour = colours[sortKey] ? sortKey : 'auto';
+            const colour = colours[!props.selectedCompno || selected ? sortKeyColour : 'auto'](mapLight, selected);
 
             result.push(
                 new TripsLayer({
-                    id: compno, //  + (map2d ? '2d' : '3d'),
+                    id: compno,
                     compno: compno,
                     data: p.getData,
-                    getWidth: 5,
+                    getWidth: selected ? 8 : 5,
                     getPath: (d) => d.p,
                     getTimestamps: (d) => d.t - referenceDate,
-                    positionFormat: 'XYZ', //map2d ? 'XY' : 'XYZ',
-                    getColor: color,
+                    positionFormat: 'XYZ',
+                    getColor: colour,
                     jointRounded: true,
                     fp64: false,
-                    widthMinPixels: 2,
-                    billboard: map2d ? false : true,
+                    widthMinPixels: selected ? 3 : 2,
                     onClick: (i) => {
                         props.setSelectedCompno(compno);
+                    },
+                    updateTriggers: {
+                        getColor: sortKeyColour + mapLight + (selected ? 's' : '') + (props.selectedCompno ? 'y' : '')
                     },
                     pickable: true,
                     tt: true,
@@ -184,7 +196,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = makeLayers(props, taskGeoJSON, map2d, mapStreet, options.fullPaths);
+    const layers = makeLayers(props, options.sortKey as SortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);

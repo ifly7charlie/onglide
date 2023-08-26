@@ -238,6 +238,7 @@ export const OgnFeed = memo(
                                 now={wsStatus.at as Epoch}
                                 tz={tz}
                                 options={options}
+                                setOptions={setOptions}
                                 handicapped={handicapped}
                             />
                         )}

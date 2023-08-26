@@ -196,7 +196,7 @@ export async function getServerSideProps(context) {
         const classes = await query(escape`SELECT class FROM classes ORDER BY class`);
 
         return {
-            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : '', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 0, follow: true}}
+            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : ''}
         };
     } catch (e) {
         console.log(e);
