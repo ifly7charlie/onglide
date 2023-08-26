@@ -6,7 +6,7 @@
 // It will also expose the helper functions required to update the screen
 //
 
-import {useState, useMemo, useRef, useCallback, memo} from 'react';
+import {useState, useMemo, useRef, useCallback, useEffect, memo} from 'react';
 
 import {usePilots, Spinner} from './loaders';
 
@@ -147,11 +147,13 @@ export const OgnFeed = memo(
             return null;
         }, [readyState]);
 
-        if (socketUrl != proposedUrl(vc, datecode)) {
-            setPilotScores({});
-            setTrackData({});
-            setSocketUrl(proposedUrl(vc, datecode));
-        }
+        useEffect(() => {
+            if (socketUrl != proposedUrl(vc, datecode)) {
+                setPilotScores({});
+                setTrackData({});
+                setSocketUrl(proposedUrl(vc, datecode));
+            }
+        }, [vc, datecode, socketUrl]);
 
         const setCompno = useCallback(
             (cn) => {
