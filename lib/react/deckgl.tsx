@@ -359,69 +359,72 @@ export default function MApp(props: {
         }
     };
 
-    const toolTip = useCallback(({object, picked, layer, coordinate}) => {
-        if (!picked) {
-            if (process.env.NODE_ENV == 'development' && coordinate) {
-                return `[${coordinate.map((x) => x.toFixed(4))}]`;
+    const toolTip = useCallback(
+        ({object, picked, layer, coordinate}) => {
+            if (!picked) {
+                if (process.env.NODE_ENV == 'development' && coordinate) {
+                    return `[${coordinate.map((x) => x.toFixed(4))}]`;
+                }
+                return null;
             }
-            return null;
-        }
-        if (object) {
-            let response = '';
-            const compno = layer.props.compno ?? object.compno;
-            const time = object.t;
+            if (object) {
+                let response = '';
+                const compno = layer.props.compno ?? object.compno;
+                const time = object.t;
 
-            if (time) {
-                if (compno && pilotScores[compno]?.stats) {
-                    const segment = _find(props.pilots[compno].stats, (c) => c.start <= time && time <= c.end);
-                    if (segment) {
-                        object.stats = segment;
+                if (time) {
+                    if (compno && pilotScores[compno]?.stats) {
+                        const segment = _find(props.pilots[compno].stats, (c) => c.start <= time && time <= c.end);
+                        if (segment) {
+                            object.stats = segment;
+                        }
                     }
+
+                    // Figure out what the local language is for international date strings
+                    const dt = new Date(time * 1000);
+                    response += `${compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
                 }
 
-                // Figure out what the local language is for international date strings
-                const dt = new Date(time * 1000);
-                response += `${compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
-            }
+                if (process.env.NODE_ENV == 'development') {
+                    response += `[${time}]<br/>`;
+                }
+                console.log(object);
+                const a = object.a ?? object.p[1][2] ?? NaN;
+                if (!isNaN(a)) {
+                    response += `${displayHeight(a, props.options.units)} QNH `;
+                }
+                if (object.g && !isNaN(object.g)) {
+                    response += `(${displayHeight(object.g, props.options.units)} AGL) `;
+                }
+                if (object.v) {
+                    response += ` ↕️  ${displayClimb(object.v, props.options.units)}`;
+                }
+                if (object.stats) {
+                    const stats = object.stats;
+                    const elapsed = stats.end - stats.start;
 
-            if (process.env.NODE_ENV == 'development') {
-                response += `[${time}]<br/>`;
-            }
+                    if (elapsed > 30) {
+                        response += `<br/> ${stats.state} for ${elapsed} seconds<br/>`;
 
-            const a = object.a ?? object.p[1][2] ?? NaN;
-            if (!isNaN(a)) {
-                response += `${displayHeight(a, props.options.units)} QNH `;
-            }
-            if (object.g && !isNaN(object.g)) {
-                response += `(${displayHeight(object.g, props.options.units)} AGL) `;
-            }
-            if (object.v) {
-                response += ` ↕️  ${displayClimb(object.v, props.options.units)}`;
-            }
-            if (object.stats) {
-                const stats = object.stats;
-                const elapsed = stats.end - stats.start;
-
-                if (elapsed > 30) {
-                    response += `<br/> ${stats.state} for ${elapsed} seconds<br/>`;
-
-                    if (stats.state == 'thermal') {
-                        response += `average: ${displayClimb(stats.avgDelta, props.options.units)}`;
-                    } else if (stats.state == 'straight') {
-                        response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
-                    }
-                    if (stats.wind.direction) {
-                        response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
+                        if (stats.state == 'thermal') {
+                            response += `average: ${displayClimb(stats.avgDelta, props.options.units)}`;
+                        } else if (stats.state == 'straight') {
+                            response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
+                        }
+                        if (stats.wind.direction) {
+                            response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
+                        }
                     }
                 }
+                return {html: response};
+            } else if (layer && layer.props.tt == true) {
+                return layer.id;
+            } else {
+                return null;
             }
-            return {html: response};
-        } else if (layer && layer.props.tt == true) {
-            return layer.id;
-        } else {
-            return null;
-        }
-    }, []);
+        },
+        [vc, props.options.units]
+    );
 
     const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
 
