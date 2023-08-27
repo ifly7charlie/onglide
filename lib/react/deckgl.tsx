@@ -236,9 +236,9 @@ export default function MApp(props: {
                         return undefined;
                     } */
                 const map = mapRef?.current?.getMap();
-                if (map && map.transform && map.transform.elevation) {
-                    const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
-                    position = [0, 0, mapbox_elevation + (map2d ? 125 : 0)];
+                if (map?.transform?.elevation) {
+                    const mapbox_elevation = map.transform._centerAltitude ?? map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
+                    position = [0, 0, Math.trunc(mapbox_elevation + (map2d ? 125 : 0))];
                 }
                 //                }
 
@@ -345,6 +345,7 @@ export default function MApp(props: {
 
     const skyLayer: any = {
         id: 'sky',
+        key: 'sky',
         type: 'sky',
         paint: {
             'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1],
@@ -450,15 +451,14 @@ export default function MApp(props: {
                 // && !viewState.position) {
                 //&& map.queryTerrainElevation) {
                 //            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
-                const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
-                //			console.log( "3d transform, elevation", mapbox_elevation );
-                //const mapbox_elevation = -40000;
+                const mapbox_elevation = map.transform._centerAltitude ?? map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
+                //                console.log('3d transform, elevation', mapbox_elevation, viewState.zoom, viewState.altitude);
                 if (!mapbox_elevation) {
                     return;
                 }
                 setViewport({
                     ...viewState,
-                    ...{position: [0, 0, mapbox_elevation - (map2d ? +125 : 0)]}
+                    ...{position: [0, 0, Math.trunc(mapbox_elevation - (map2d ? 100 : 0))]}
                 });
             } else {
                 setViewport(viewState);
