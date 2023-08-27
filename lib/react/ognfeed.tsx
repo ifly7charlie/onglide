@@ -496,7 +496,7 @@ async function decodeWebsocketMessage(
 // Create an async iterable
 async function* getData(compno: Compno, deck: DeckData) {
     let current = 1;
-    console.log('starting iterator', compno, deck.posIndex);
+    //    console.log('starting iterator', compno, deck.posIndex);
 
     if (deck.dataPromiseResolve) {
         console.log('existing iterator found, closing');

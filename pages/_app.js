@@ -21,12 +21,10 @@ export default function MyApp({Component, pageProps}) {
 
     const [options, setOptionsState] = useState(getOptions);
     const setOptions = useCallback((newOptions) => {
-        console.log('setOptions', newOptions);
         try {
             window?.localStorage.setItem('options', JSON.stringify(newOptions));
         } catch (e) {
-            // catch possible errors:
-            // https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API/Using_the_Web_Storage_API
+            /**/
         }
         setOptionsState(newOptions);
     }, []);
