@@ -150,9 +150,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 onClick: (i) => {
                     props.setSelectedCompno(i.object?.name || '');
                 },
-                transitions: {
-                    //                    getPosition: 2000
-                },
                 outlineWidth: 2,
                 outlineColor: [255, 255, 255, 255],
                 getBackgroundColor: [255, 255, 255, 255],
@@ -230,20 +227,20 @@ export default function MApp(props: {
                     fbearing = bearing([lng, lat], npol);
                 }
 
-                if (!map2d) {
+                /*                if (!map2d) {
                     if (
                         (Math.abs(fbearing - props.viewport.bearing) < 10 && //
                             distance([lng, lat], [props.viewport.lng, props.viewport.lat]) < 0.4) ||
                         distance([lng, lat], npol) < 0.75
                     ) {
                         return undefined;
-                    }
-                    const map = mapRef?.current?.getMap();
-                    if (map && map.transform && map.transform.elevation) {
-                        const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
-                        position = [0, 0, mapbox_elevation];
-                    }
+                    } */
+                const map = mapRef?.current?.getMap();
+                if (map && map.transform && map.transform.elevation) {
+                    const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
+                    position = [0, 0, mapbox_elevation + (map2d ? 125 : 0)];
                 }
+                //                }
 
                 props.setViewport({
                     ...props.viewport,
@@ -327,31 +324,21 @@ export default function MApp(props: {
     useEffect(() => {
         const map = mapRef?.current?.getMap();
         if (map) {
-            const hasTerrain = !!map.getTerrain();
-            if (hasTerrain && map2d) {
-                console.log('disabling terrain');
-                map.setTerrain(null);
-                map.setFog(null);
-            }
-            if (!hasTerrain && !map2d) {
-                console.log('enabling terrain');
-                if (!map.getSource('mapbox-dem')) {
-                    map.addSource('mapbox-dem', {
-                        type: 'raster-dem',
-                        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-                        tileSize: 512,
-                        maxzoom: 14
-                    });
+            const hasTerrain = !!map.getSource('mapbox-dem');
+            console.log('useTerrainEffect', hasTerrain);
+            if (hasTerrain) {
+                if (map2d) {
+                    map.setFog(null);
                 }
-                setTimeout(() => {
-                    map.setTerrain({source: 'mapbox-dem'});
+                map.setTerrain({source: 'mapbox-dem'});
+                if (!map2d) {
                     map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
-                }, 1000);
+                }
             }
         } else {
             console.log('no mapref');
         }
-    }, [map2d, mapRef]);
+    }, [map2d, mapRef, mapRef?.current?.getMap(), mapRef?.current?.getMap()?.getSource('mapbox-dem')]);
 
     // Do we have a loaded set of details?
     const valid = !(isTLoading || isTError) && taskGeoJSON?.tp && taskGeoJSON?.track;
@@ -450,8 +437,8 @@ export default function MApp(props: {
             if (map2d) {
                 viewState.minPitch = 0;
                 viewState.maxPitch = 0;
-                setViewport(viewState);
-                return;
+                //                setViewport(viewState);
+                //                return;
             } else {
                 viewState.minPitch = 0;
                 viewState.maxPitch = 85;
@@ -459,15 +446,19 @@ export default function MApp(props: {
             }
 
             const map = mapRef?.current?.getMap();
-            if (map && map.transform && map.transform.elevation && !viewState.position) {
+            if (map?.transform?.elevation) {
+                // && !viewState.position) {
                 //&& map.queryTerrainElevation) {
                 //            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
-                const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
+                const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
                 //			console.log( "3d transform, elevation", mapbox_elevation );
                 //const mapbox_elevation = -40000;
+                if (!mapbox_elevation) {
+                    return;
+                }
                 setViewport({
                     ...viewState,
-                    ...{position: [0, 0, mapbox_elevation]}
+                    ...{position: [0, 0, mapbox_elevation - (map2d ? +125 : 0)]}
                 });
             } else {
                 setViewport(viewState);
@@ -526,6 +517,7 @@ export default function MApp(props: {
                         <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                     </Source>
                 ) : null}
+                <Source key="mapbox-dem" id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} maxZoom={14} />
                 <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
                 {!map2d && <Layer {...skyLayer} />}
                 {attribution}
