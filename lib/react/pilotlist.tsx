@@ -59,48 +59,48 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
                     {title}
                     {titleIcon || null}
                 </div>
-                <hr />
+            </a>
+            <hr />
+            <div>
+                <div className="main-icon">
+                    <a href="#" title={main.description} className="tooltipicon">
+                        <FontAwesomeIcon icon={main.icon} />
+                    </a>
+                </div>
+                <div className="main-text">
+                    {main.value}
+                    {main.units ? <div className="units">{main.units}</div> : null}
+                </div>
+            </div>
+            <hr />
+            {data1?.value != undefined ? (
                 <div>
-                    <div className="main-icon">
-                        <a href="#" title={main.description} className="tooltipicon">
-                            <FontAwesomeIcon icon={main.icon} />
+                    <div className="data-icon">
+                        <a href="#" title={data1.description} className="tooltipicon">
+                            <FontAwesomeIcon icon={data1.icon} />
                         </a>
                     </div>
-                    <div className="main-text">
-                        {main.value}
-                        {main.units ? <div className="units">{main.units}</div> : null}
+                    <div className="data-text">
+                        {data1.value}
+                        {data1.units ? <div className="units">{data1.units}</div> : null}
                     </div>
                 </div>
-                <hr />
-                {data1?.value != undefined ? (
-                    <div>
+            ) : null}
+            {data2?.value !== undefined && data2.value !== null ? (
+                <div>
+                    {data2.icon ? (
                         <div className="data-icon">
-                            <a href="#" title={data1.description} className="tooltipicon">
-                                <FontAwesomeIcon icon={data1.icon} />
+                            <a href="#" title={data2.description} className="tooltipicon">
+                                <FontAwesomeIcon icon={data2.icon} />
                             </a>
                         </div>
-                        <div className="data-text">
-                            {data1.value}
-                            {data1.units ? <div className="units">{data1.units}</div> : null}
-                        </div>
+                    ) : null}
+                    <div className="data-text">
+                        {data2.value}
+                        {data2.units ? <div className="units">{data2.units}</div> : null}
                     </div>
-                ) : null}
-                {data2?.value !== undefined && data2.value !== null ? (
-                    <div>
-                        {data2.icon ? (
-                            <div className="data-icon">
-                                <a href="#" title={data2.description} className="tooltipicon">
-                                    <FontAwesomeIcon icon={data2.icon} />
-                                </a>
-                            </div>
-                        ) : null}
-                        <div className="data-text">
-                            {data2.value}
-                            {data2.units ? <div className="units">{data2.units}</div> : null}
-                        </div>
-                    </div>
-                ) : null}
-            </a>
+                </div>
+            ) : null}
         </li>
     );
 }
