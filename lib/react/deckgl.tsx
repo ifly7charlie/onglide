@@ -400,7 +400,6 @@ export default function MApp(props: {
                 if (process.env.NODE_ENV == 'development') {
                     response += `[${time}]<br/>`;
                 }
-                console.log(object);
                 const a = object.a ?? object.p[1][2] ?? NaN;
                 if (!isNaN(a)) {
                     response += `${displayHeight(a, props.options.units)} QNH `;
