@@ -289,21 +289,21 @@ async function main() {
     }
 
     if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
-        const options = {
-            key: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem`),
-            cert: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.cert.pem`)
-        };
+        try {
+            const options = {
+                key: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem`),
+                cert: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.cert.pem`)
+            };
 
-        if (options.key && options.cert) {
-            console.log('initialising SSL');
-            const server = https.createServer(options, setupOgnWebServer);
-            server.listen(parseInt(process.env.WEBSOCKET_PORT) + 1000);
-            setupWebSocketServer(server);
-            console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT) + 1000}`);
-        } else {
-            console.log(`Unable to open SSL certificates "keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem"`);
-            delete options.key;
-            delete options.cert;
+            if (options.key && options.cert) {
+                console.log('initialising SSL');
+                const server = https.createServer(options, setupOgnWebServer);
+                server.listen(parseInt(process.env.WEBSOCKET_PORT) + 1000);
+                setupWebSocketServer(server);
+                console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT) + 1000}`);
+            }
+        } catch (e) {
+            console.log(`Unable to initialise SSL "keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem"`, e);
         }
     }
 
