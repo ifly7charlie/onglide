@@ -6,13 +6,25 @@ import '../styles/onglide.scss';
 
 import {useState, useCallback} from 'react';
 
-const defaultOptions = {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 0, follow: true, sortOrder: 'auto'};
+const defaultOptions = {
+    //
+    rainRadar: 1,
+    rainRadarAdvance: 0,
+    units: 0,
+    mapType: 0,
+    map2d: true,
+    taskUp: 0,
+    follow: true,
+    sortOrder: 'auto',
+    options2d: {taskUp: 0, mapType: 0, follow: true},
+    options3d: {taskUp: 1, mapType: true, follow: true}
+};
 
 // This default export is required in a new `pages/_app.js` file.
 export default function MyApp({Component, pageProps}) {
     const getOptions = () => {
         try {
-            return value ? JSON.parse(value) : defaultOptions;
+            return value ? {...defaultOptions, ...JSON.parse(value)} : defaultOptions;
         } catch (e) {
             // if error, return initial value
             return defaultOptions;
@@ -22,6 +34,7 @@ export default function MyApp({Component, pageProps}) {
     const [options, setOptionsState] = useState(getOptions);
     const setOptions = useCallback((newOptions) => {
         try {
+            console.log('saveoptions', newOptions);
             window?.localStorage.setItem('options', JSON.stringify(newOptions));
         } catch (e) {
             /**/

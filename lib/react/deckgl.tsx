@@ -187,8 +187,8 @@ export default function MApp(props: {
     const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, mapRef, tz, viewport, setViewport} = props;
 
     // Map display style
-    const map2d = options.mapType > 1;
-    const mapStreet = !!(options.mapType % 2);
+    const map2d = options.map2d;
+    const mapStreet = !options.mapType;
     const mapLight = !!mapStreet;
 
     // Track and Task Overlays
