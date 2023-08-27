@@ -386,7 +386,7 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     pruneStartline(deck, pilotScores[compno].utcStart);
                 }
 
-                console.log('create iterator ', existing ? 'merge' : 'set', 'tracks:', compno);
+                //                console.log('create iterator ', existing ? 'merge' : 'set', 'tracks:', compno);
                 deck.getData = getData(compno as Compno, deck);
                 result[compno].deck = deck;
                 [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
@@ -460,7 +460,7 @@ async function decodeWebsocketMessage(
                         // If they have a more recent start then we need to prune and re-do the iterator
                         if (trackData[compno]?.deck && result[compno] && result[compno].utcStart < p.utcStart) {
                             if (pruneStartline(trackData[compno].deck, pilotScores[compno].utcStart)) {
-                                console.log('re create iterator (prune on new start time):', compno);
+                                //                                console.log('re create iterator (prune on new start time):', compno);
                                 trackData[compno].getData = getData(compno as Compno, trackData[compno].deck);
                             }
                         }
