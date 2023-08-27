@@ -1169,6 +1169,8 @@ function timeToText(t: Epoch): string {
 //
 // Function to create and setup the listener for a websocket server
 function setupWebSocketServer(server) {
+    const address = server.address()?.port ?? 'unknown';
+
     // And start our websocket server
     const wss = new WebSocketServer({server});
 
@@ -1178,8 +1180,8 @@ function setupWebSocketServer(server) {
         const channel = req.url.substring(1, req.url.length);
 
         ws.ognChannel = channel;
-        ws.ognPeer = req.headers['x-forwarded-for'];
-        console.log(`connection received for ${channel} from ${ws.ognPeer}`);
+        ws.ognPeer = req.headers['x-forwarded-for'] ?? req.connection.remoteAddress;
+        console.log(`connection received for ${channel} from ${ws.ognPeer} on ${address}`);
 
         ws.isAlive = true;
         ws.connectedAt = getNow();
