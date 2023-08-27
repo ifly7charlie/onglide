@@ -96,6 +96,8 @@ interface Statistics {
     positionsSentCycles: number;
     listenerCycles: number;
     activeListeners: number;
+
+    totalViewingTime: number;
 }
 
 interface Channel {
@@ -511,7 +513,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     let newchannels: Record<string, Channel> = {};
     for (const c of classes) {
         const cname = channelName(c.class, datecode);
-        let channel = channels[cname];
+        let channel: Channel = channels[cname];
 
         // New channel needs setup
         if (!channel) {
@@ -533,9 +535,10 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     positionsSent: 0,
                     positionsSentCycles: 0,
                     listenerCycles: 0,
-                    activeListeners: 0
+                    activeListeners: 0,
+                    totalViewingTime: 0
                 },
-                webPathBaseTime: 0,
+                webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
                 webPathData: {}
             };
