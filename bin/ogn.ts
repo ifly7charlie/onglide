@@ -11,6 +11,9 @@ import {ISSocket} from 'js-aprs-is';
 import {aprsParser} from 'js-aprs-fap';
 
 import http from 'node:http';
+import https from 'node:https';
+
+import {readFileSync} from 'fs';
 
 // Helper function
 //import distance from '@turf/distance';
@@ -260,7 +263,6 @@ async function main() {
 
     console.log('Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL);
     console.log(`db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}`);
-    console.log(`listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
 
     // Set the altitude offset for launching, this will take time to return
     // so there is a period when location altitude will be wrong for launches
@@ -286,99 +288,30 @@ async function main() {
         await updateClasses(internalName, datecode);
     }
 
-    const server = http.createServer((req, res) => {
-        const headers = {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'OPTIONS, GET, UPGRADE',
-            'Access-Control-Max-Age': 5 * 60, // 5 minutes
-            'Cache-Control': 'public, max-age=300, immutable, stale-while-revalidate=30'
+    if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
+        const options = {
+            key: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem`),
+            cert: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.cert.pem`)
         };
 
-        if (req.method === 'OPTIONS') {
-            res.writeHead(204, headers);
-            res.end();
-            return;
-        }
-
-        // health check
-        if (req?.url == '/status') {
-            res.writeHead(200, headers);
-            res.end(http.STATUS_CODES[200]);
-            return;
-        }
-
-        // explict score request
-        const [valid, command, channelName, baseTimestamp] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)$/i) || [false, '', ''];
-        if (valid) {
-            console.log(command, channelName);
-            if (channelName in channels) {
-                const channel = channels[channelName];
-                // Only support returning the scores
-                switch (command) {
-                    case 'scores': {
-                        console.log('sending scores for ', channelName);
-                        const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
-                        res.setHeader('Content-Type', 'application/json');
-                        res.writeHead(200, headers);
-                        res.end(JSON.stringify(msg));
-                        return;
-                    }
-                    case 'tracks': {
-                        console.log(`sending historical data ${baseTimestamp} [current: ${channel.webPathBaseTime}]`);
-                        if (channel.webPathData[baseTimestamp]) {
-                            res.setHeader('Content-Type', 'application/octet-stream');
-                            res.writeHead(200, headers);
-                            res.write(channel.webPathData[baseTimestamp], 'binary');
-                            res.end(null, 'binary');
-                            return;
-                        } else {
-                            console.log('no historical data matching', channelName, baseTimestamp);
-                        }
-                    }
-                }
-            }
-        }
-
-        res.writeHead(404);
-        res.end(http.STATUS_CODES[404]);
-    });
-    server.listen(process.env.WEBSOCKET_PORT || 8080);
-
-    // And start our websocket server
-    const wss = new WebSocketServer({server});
-
-    // What to do when a client connects
-    wss.on('connection', (ws, req) => {
-        // Strip leading /
-        const channel = req.url.substring(1, req.url.length);
-
-        ws.ognChannel = channel;
-        ws.ognPeer = req.headers['x-forwarded-for'];
-        console.log(`connection received for ${channel} from ${ws.ognPeer}`);
-
-        ws.isAlive = true;
-        ws.connectedAt = getNow();
-        if (channel in channels) {
-            channels[channel].clients.push(ws);
+        if (options.key && options.cert) {
+            console.log('initialising SSL');
+            const server = https.createServer(options, setupOgnWebServer);
+            server.listen(parseInt(process.env.WEBSOCKET_PORT) + 1000);
+            setupWebSocketServer(server);
+            console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT) + 1000}`);
         } else {
-            console.log('Unknown channel ' + channel);
-            ws.isAlive = false;
+            console.log(`Unable to open SSL certificates "keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem"`);
+            delete options.key;
+            delete options.cert;
         }
+    }
 
-        ws.on('pong', () => {
-            ws.isAlive = true;
-        });
-        ws.on('close', () => {
-            ws.isAlive = false;
-            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
-        });
-        ws.on('error', console.error);
-        //        ws.on('message', (m) => {
-        //        });
-
-        // Send vario etc for all gliders we are tracking
-        sendCurrentState(ws);
-    });
+    // We always open an non-ssl one
+    const server = http.createServer(setupOgnWebServer);
+    server.listen(process.env.WEBSOCKET_PORT || 8080);
+    setupWebSocketServer(server);
+    console.log(`listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
@@ -1231,4 +1164,101 @@ function timeToText(t: Epoch): string {
     if (!t) return '';
     var cT = new Date(t * 1000);
     return cT.toLocaleTimeString('en-GB', {timeZone: location.tz, hour: '2-digit', minute: '2-digit'});
+}
+
+//
+// Function to create and setup the listener for a websocket server
+function setupWebSocketServer(server) {
+    // And start our websocket server
+    const wss = new WebSocketServer({server});
+
+    // What to do when a client connects
+    wss.on('connection', (ws, req) => {
+        // Strip leading /
+        const channel = req.url.substring(1, req.url.length);
+
+        ws.ognChannel = channel;
+        ws.ognPeer = req.headers['x-forwarded-for'];
+        console.log(`connection received for ${channel} from ${ws.ognPeer}`);
+
+        ws.isAlive = true;
+        ws.connectedAt = getNow();
+        if (channel in channels) {
+            channels[channel].clients.push(ws);
+        } else {
+            console.log('Unknown channel ' + channel);
+            ws.isAlive = false;
+        }
+
+        ws.on('pong', () => {
+            ws.isAlive = true;
+        });
+        ws.on('close', () => {
+            ws.isAlive = false;
+            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
+        });
+        ws.on('error', console.error);
+        //        ws.on('message', (m) => {
+        //        });
+
+        // Send vario etc for all gliders we are tracking
+        sendCurrentState(ws);
+    });
+}
+
+function setupOgnWebServer(req, res) {
+    const headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'OPTIONS, GET, UPGRADE',
+        'Access-Control-Max-Age': 5 * 60, // 5 minutes
+        'Cache-Control': 'public, max-age=300, immutable, stale-while-revalidate=30'
+    };
+
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204, headers);
+        res.end();
+        return;
+    }
+
+    // health check
+    if (req?.url == '/status') {
+        res.writeHead(200, headers);
+        res.end(http.STATUS_CODES[200]);
+        return;
+    }
+
+    // explict score request
+    const [valid, command, channelName, baseTimestamp] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)$/i) || [false, '', ''];
+    if (valid) {
+        console.log(command, channelName);
+        if (channelName in channels) {
+            const channel = channels[channelName];
+            // Only support returning the scores
+            switch (command) {
+                case 'scores': {
+                    console.log('sending scores for ', channelName);
+                    const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
+                    res.setHeader('Content-Type', 'application/json');
+                    res.writeHead(200, headers);
+                    res.end(JSON.stringify(msg));
+                    return;
+                }
+                case 'tracks': {
+                    console.log(`sending historical data ${baseTimestamp} [current: ${channel.webPathBaseTime}]`);
+                    if (channel.webPathData[baseTimestamp]) {
+                        res.setHeader('Content-Type', 'application/octet-stream');
+                        res.writeHead(200, headers);
+                        res.write(channel.webPathData[baseTimestamp], 'binary');
+                        res.end(null, 'binary');
+                        return;
+                    } else {
+                        console.log('no historical data matching', channelName, baseTimestamp);
+                    }
+                }
+            }
+        }
+    }
+
+    res.writeHead(404);
+    res.end(http.STATUS_CODES[404]);
 }
