@@ -516,7 +516,7 @@ export default function MApp(props: {
                         <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                     </Source>
                 ) : null}
-                <Source key="mapbox-dem" id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} maxZoom={13} />
+                <Source key="mapbox-dem" id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
                 <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
                 {!map2d && <Layer {...skyLayer} />}
                 {attribution}
