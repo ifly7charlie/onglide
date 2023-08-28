@@ -141,7 +141,7 @@ export default function CombinePage(props) {
         bearing: 0,
         minPitch: 0,
         maxPitch: 85,
-        altitude: 1.5,
+        //        altitude: 1.5,
         pitch: !(props.options.mapType % 2) ? 70 : 0
     });
 
