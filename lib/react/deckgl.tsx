@@ -326,14 +326,12 @@ export default function MApp(props: {
         const map = mapRef?.current?.getMap();
         if (map) {
             const hasTerrain = !!map.getSource('mapbox-dem');
-            console.log('useTerrainEffect', hasTerrain);
             if (hasTerrain) {
-                if (map2d) {
-                    map.setFog(null);
-                }
                 map.setTerrain({source: 'mapbox-dem'});
                 if (!map2d) {
                     map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
+                } else {
+                    map.setFog(null);
                 }
             }
         } else {
@@ -518,7 +516,7 @@ export default function MApp(props: {
                         <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                     </Source>
                 ) : null}
-                <Source key="mapbox-dem" id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} maxZoom={14} />
+                <Source key="mapbox-dem" id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} maxZoom={13} />
                 <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
                 {!map2d && <Layer {...skyLayer} />}
                 {attribution}
