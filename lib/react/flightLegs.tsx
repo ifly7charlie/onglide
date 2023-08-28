@@ -167,7 +167,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                                 {!score.utcFinish && (
                                     <tr>
                                         {distanceRemainingLegend(score)}
-                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td></td>))}
+                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td key={x.legno.toString()}></td>))}
                                     </tr>
                                 )}
                             </>
