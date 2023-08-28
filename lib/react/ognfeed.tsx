@@ -149,6 +149,7 @@ export const OgnFeed = memo(
 
         useEffect(() => {
             if (socketUrl != proposedUrl(vc, datecode)) {
+                //                console.log('change url');
                 setPilotScores({});
                 setTrackData({});
                 setSocketUrl(proposedUrl(vc, datecode));
