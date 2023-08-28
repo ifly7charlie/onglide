@@ -95,6 +95,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     getColor: colour,
                     jointRounded: true,
                     fp64: false,
+                    billboard: map2d ? false : true,
                     widthMinPixels: selected ? 3 : 2,
                     onClick: (i) => {
                         props.setSelectedCompno(compno);
