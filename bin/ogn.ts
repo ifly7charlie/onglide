@@ -310,6 +310,10 @@ async function main() {
     // We always open an non-ssl one
     const server = http.createServer(setupOgnWebServer);
     server.listen(process.env.WEBSOCKET_PORT || 8080);
+    server.on('clientError', function (ex, _socket) {
+        console.log('****> clientError', ex);
+    });
+
     setupWebSocketServer(server);
     console.log(`listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
 
@@ -1200,8 +1204,9 @@ function setupWebSocketServer(server) {
             console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('error', console.error);
-        //        ws.on('message', (m) => {
-        //        });
+        ws.on('message', () => {
+            /**/
+        });
 
         // Send vario etc for all gliders we are tracking
         sendCurrentState(ws);
