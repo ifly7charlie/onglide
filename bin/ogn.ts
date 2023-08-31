@@ -99,6 +99,7 @@ interface Statistics {
     positionsSentCycles: number;
     listenerCycles: number;
     activeListeners: number;
+    peakListeners: number;
 
     totalViewingTime: number;
 }
@@ -398,8 +399,10 @@ async function main() {
         for (const channelName in channels) {
             const channel = channels[channelName];
 
+            channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, channel.statistics.activeListeners / channel.statistics.listenerCycles);
+
             console.log(`${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`);
-            console.log(`${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time`);
+            console.log(`${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${channel.statistics.peakListeners}`);
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
@@ -473,6 +476,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     positionsSentCycles: 0,
                     listenerCycles: 0,
                     activeListeners: 0,
+                    peakListeners: 0,
                     totalViewingTime: 0
                 },
                 webPathBaseTime: 0 as Epoch,
