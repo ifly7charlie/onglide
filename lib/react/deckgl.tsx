@@ -313,30 +313,32 @@ export default function MApp(props: {
     // on map load (in case it's default for user and on change of map type)
     const onMapLoad = useCallback(
         (evt) => {
-            if (!map2d) {
-                console.log('terrain callback');
-                const map = evt.target;
-                map.setTerrain({source: 'mapbox-dem'});
-                map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
-            }
+            const map = evt.target;
+            map?.once('style.load', () => {
+                console.log('fog callback oml');
+                if (!map2d) {
+                    map.setFog({});
+                }
+                map?.setTerrain({source: 'mapbox-dem'});
+            });
         },
         [map2d]
     );
     useEffect(() => {
         const map = mapRef?.current?.getMap();
-        if (map) {
-            const hasTerrain = !!map.getSource('mapbox-dem');
-            if (hasTerrain) {
-                map.setTerrain({source: 'mapbox-dem'});
-                if (!map2d) {
-                    map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
-                } else {
-                    map.setFog(null);
-                }
+        map?.once('style.load', () => {
+            if (!map2d) {
+                map.setFog({
+                    /*color: 'rgba(135, 206, 235, 255)', color: '#ffffff'*/
+                });
+            } else {
+                map.setFog(null);
             }
-        } else {
-            console.log('no mapref');
-        }
+        });
+        map?.once('idle', () => {
+            console.log('set terrain cb once');
+            map?.setTerrain({source: 'mapbox-dem'});
+        });
     }, [map2d, mapRef, mapRef?.current?.getMap(), mapRef?.current?.getMap()?.getSource('mapbox-dem')]);
 
     // Do we have a loaded set of details?
