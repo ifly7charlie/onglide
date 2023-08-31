@@ -106,7 +106,7 @@ export const OgnFeed = memo(
         //        const [online] = useState(navigator.onLine);
 
         // We are using a webSocket to update our data here
-        const {lastMessage, readyState} = useWebSocket(socketUrl, {
+        const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
             reconnectAttempts: 40,
             reconnectInterval: 16000,
             retryOnError: true
@@ -191,6 +191,13 @@ export const OgnFeed = memo(
         const fitBounds = useCallback(() => {
             setOptions({...options, zoomTask: true});
         }, [vc]);
+
+        // Send the options to the server so we can keep an eye on what settings are
+        // used by default, we don't record any identifiers. This is to try and work
+        // around safari terminating websocket so frequently
+        const sendOptions = useMemo(() => {
+            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', options}));
+        }, [options, selectedCompno]);
 
         return (
             <>
