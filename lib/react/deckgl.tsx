@@ -256,7 +256,8 @@ export default function MApp(props: {
         follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, props.options.taskp] : [null, null, null, null]
     );
 
-    useMemo(() => {
+    useEffect(() => {
+        console.log('change viewport 2d/3d');
         if (props.viewport.pitch == 0 && !map2d) {
             props.setViewport(
                 {
@@ -274,7 +275,7 @@ export default function MApp(props: {
                 map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 500, transitionInterpolator: new FlyToInterpolator()}
             );
         }
-    }, [map2d]);
+    }, [map2d, props.viewport.pitch]);
 
     useMemo(() => {
         if (options.zoomTask) {
