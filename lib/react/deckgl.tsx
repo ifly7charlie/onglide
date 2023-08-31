@@ -239,9 +239,8 @@ export default function MApp(props: {
                 const map = mapRef?.current?.getMap();
                 if (map?.transform?.elevation) {
                     const mapbox_elevation = map.transform._centerAltitude ?? map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
-                    position = [0, 0, Math.trunc(mapbox_elevation + (map2d ? 125 : 0))];
+                    position = [0, 0, Math.trunc(mapbox_elevation - (map2d ? 125 : 0))];
                 }
-                //                }
 
                 props.setViewport({
                     ...props.viewport,
