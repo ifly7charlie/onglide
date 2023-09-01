@@ -86,7 +86,7 @@
         "react-bootstrap": "=2.1.2",
         "react-dom": "^17.0.2",
         "react-map-gl": "=6.1.19",
-        "react-use-websocket": "=2.0.3",
+        "react-use-websocket": "^3.0.0",
         "serverless-mysql": ">=1.5.4",
         "sql-template-strings": ">=2.2.2",
         "stats-incremental": "^1.2.1",

@@ -14,7 +14,7 @@ import {Nbsp, TooltipIcon} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual} from 'lodash';
+import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
 import {Epoch, TZ, Compno, ClassName, Datecode, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
 import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
@@ -345,19 +345,26 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                 // Check if we have a deck already
                 let existing = result[compno].deck;
 
-                let deck: DeckData = {
-                    compno: compno as Compno,
-                    positions: new Float32Array(p.positions.slice().buffer),
-                    t: new Uint32Array(p.t.slice().buffer),
-                    climbRate: new Int8Array(p.climbRate.slice().buffer),
-                    agl: new Int16Array(p.agl.slice().buffer),
-                    posIndex: p.posIndex
-                };
-
                 // If we have just received a baseTime 0 set then we should erase the old stuff
                 if (existing && decoded.tracks.baseTime === 0) {
                     existing = null;
                 }
+
+                const ts = new Uint32Array(p.t.slice().buffer);
+                const indexOfOverlap = existing ? _sortedIndex(ts, existing.t[existing.posIndex - 1]) : 0;
+                //                if (existing) {
+                //                    console.log(`${compno}: existing latest: ${existing?.t[existing.posIndex - 1]}, new range: ${ts[0]} to ${ts[p.posIndex - 1]}`);
+                //                }
+                //                console.log(`${compno}: existing length ${existing?.posIndex}, overlap index: ${indexOfOverlap}`);
+
+                let deck: DeckData = {
+                    compno: compno as Compno,
+                    positions: new Float32Array(p.positions.slice(indexOfOverlap * 3 * Float32Array.BYTES_PER_ELEMENT).buffer),
+                    t: new Uint32Array(p.t.slice(indexOfOverlap * Uint32Array.BYTES_PER_ELEMENT).buffer),
+                    climbRate: new Int8Array(p.climbRate.slice(indexOfOverlap * Int8Array.BYTES_PER_ELEMENT).buffer),
+                    agl: new Int16Array(p.agl.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer),
+                    posIndex: p.posIndex - indexOfOverlap
+                };
 
                 if (existing) {
                     // Make the new structure it needs enough space for existing and new
@@ -424,8 +431,9 @@ async function decodeWebsocketMessage(
         }
         // Merge in changed tracks
         if (decoded?.tracks) {
-            console.log('basetime', decoded.tracks.baseTime);
-            if (decoded.tracks.baseTime) {
+            const ourMostRecent = Object.values(trackData).reduce((oldest, track) => Math.max(oldest, track.t ?? 0), 0);
+            console.log('ourMostRecent', ourMostRecent, 'basetime', decoded.tracks.baseTime);
+            if (decoded.tracks.baseTime && ourMostRecent < decoded.tracks.baseTime) {
                 // We get the initial URL and then decode it the same as if it is from the websocket as it is the same format (recursive)
                 await fetch(oldTracksUrl(vc, datecode, decoded.tracks.baseTime.toString())) //
                     .then((res) => res.arrayBuffer())
@@ -435,7 +443,7 @@ async function decodeWebsocketMessage(
                         updateTracks(decoded, trackData, setTrackData, pilotScores);
                     });
             } else {
-                console.log('updating track starts (https)');
+                console.log('updating track starts', !decoded.tracks.baseTime ? 'https' : 'wss only');
                 updateTracks(decoded, trackData, setTrackData, pilotScores);
             }
         }
