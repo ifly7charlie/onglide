@@ -20,7 +20,9 @@ import {Epoch, TZ, Compno, ClassName, Datecode, TrackData, ScoreData, SelectedPi
 import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
 import {assembleLabeledLine} from './distanceLine';
 
-import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
+//import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
@@ -45,6 +47,15 @@ const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
         </div>
     )
 });
+
+interface WsStatus {
+    listeners: number;
+    airborne: number;
+    timeStamp: number; // websocket message timestamp
+    at: Epoch; // competition time
+    state: 'connecting' | 'open' | 'retry' | 'closed';
+    retry?: number;
+}
 
 //let mutateTimer = 0;
 const httpsTest = new RegExp(/^(https|wss)/i, 'i');
@@ -96,7 +107,7 @@ export const OgnFeed = memo(
         const [pilotScores, setPilotScores] = useState<ScoreData>({});
         const {pilots, isPLoading} = usePilots(vc);
         const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
-        const [wsStatus, setWsStatus] = useState({listeners: 1, airborne: 0, timeStamp: 0, at: 0});
+        const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [follow, setFollow] = useState(false);
 
         // For remote updating of the map
@@ -107,16 +118,21 @@ export const OgnFeed = memo(
 
         // We are using a webSocket to update our data here
         const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
-            reconnectAttempts: 40,
-            reconnectInterval: 16000,
-            retryOnError: true
+            reconnectAttempts: 15,
+            reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
+            retryOnError: true,
+            onOpen: (a) => setWsStatus({...wsStatus, state: 'open', retry: 0}),
+            onError: (a) => {
+                console.warn(a, wsStatus);
+                wsStatus.state != 'closed' ? setWsStatus({...wsStatus, state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
+            },
+            onReconnectStop: (numAttempts) => setWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
         });
 
         // Do we have a loaded set of details?
         const valid = !isPLoading && pilots && Object.keys(pilots).length > 0 && mapRef && mapRef.current && mapRef.current.getMap();
 
         // Have we had a websocket message, if it hasn't changed then ignore it!
-        let updateMessage = null;
         if (lastMessage) {
             if (wsStatus.timeStamp != lastMessage.timeStamp) {
                 wsStatus.timeStamp = lastMessage.timeStamp;
@@ -126,17 +142,17 @@ export const OgnFeed = memo(
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
-                [ReadyState.CONNECTING]: ['Connecting to tracking..', faSpinner],
-                [ReadyState.CLOSING]: ['Closing tracking connection', faSpinner],
-                [ReadyState.CLOSED]: [`Connection to tracking is closed, please reload to reconnect`, faLinkSlash],
-                [ReadyState.UNINSTANTIATED]: ['Messed Up', faSpinner]
-            }[readyState];
+                connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
+                retry: (wsStatus.retry ?? 0) < 4 && wsStatus.at ? null : [(wsStatus.at ? 'Rec' : 'C') + 'onnecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
+                closed: ['Connection to tracking is closed, please reload to reconnect', <FontAwesomeIcon icon={solid('link-slash')} />]
+            }[wsStatus.state ?? 'open'];
+
+            console.log('last timestamp on status change', wsStatus.at, connectionStatusO?.[0]);
 
             if (connectionStatusO) {
-                setWsStatus({listeners: 1, airborne: 0, timeStamp: 0, at: 0}); // clear status will update eventually
                 return (
                     <div>
-                        <TooltipIcon icon={connectionStatusO[1]} tooltip={connectionStatusO[0]} />
+                        {connectionStatusO[1]}
                         <Nbsp />
                         {connectionStatusO[0]}
                         <br style={{clear: 'both'}} />
@@ -145,7 +161,7 @@ export const OgnFeed = memo(
                 );
             }
             return null;
-        }, [readyState]);
+        }, [wsStatus.state, wsStatus.retry]);
 
         useEffect(() => {
             if (socketUrl != proposedUrl(vc, datecode)) {
@@ -273,7 +289,7 @@ function formatTimes(t, tz: TZ) {
     // Figure out what the local language is for international date strings
     const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
 
-    let competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
+    const competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
         ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                 <span style={{color: 'grey'}}>
                  &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
