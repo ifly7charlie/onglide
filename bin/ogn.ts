@@ -359,7 +359,7 @@ async function main() {
                 channel.toSend = [];
             }
         }
-    }, 1000);
+    }, 500);
 
     //
     // Housekeeping
