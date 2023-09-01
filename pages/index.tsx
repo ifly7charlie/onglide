@@ -28,21 +28,7 @@ import {Options} from '../lib/react/options';
 import {UseMeasure, useMeasure} from '../lib/react/measure';
 import {ClassName} from '../lib/types';
 
-import cookies from 'next-cookies';
-
 import {find as _find, isEqual as _isEqual} from 'lodash';
-
-/*function IncludeJavascript() {
-    return (
-        <>
-            <link rel="stylesheet" href="/bootstrap/css/font-awesome.min.css" />
-            <link href="//api.mapbox.com/mapbox-gl-js/v2.3.0/mapbox-gl.css" rel="stylesheet" />
-        </>
-    );
-}
-}*/
-
-// Requires: classes, link, contestname, contestdates
 
 const Menu = memo(
     function Menu(props: {comp: any; setSelectedPilot: Function; measureFeatures: UseMeasure; options: any; setOptions: Function; vc: string}) {
@@ -80,7 +66,7 @@ const Menu = memo(
                     <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
                         {classes}
                         <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                            <Nav.Link href={comp.competition.mainwebsite} className="d-none d-sm-block d-lg-none">
+                            <Nav.Link href={comp.competition.mainwebsite} className="d-xs-block d-sm-block d-lg-none">
                                 {shortName}
                                 <Nbsp />
                                 <FontAwesomeIcon icon={faLink} />
@@ -177,7 +163,7 @@ export default function CombinePage(props) {
                 <title>
                     {comp.competition.name} - {className}
                 </title>
-                <meta name="viewport" content="width=device-width, minimal-ui" />
+                <meta name="viewport" content="width=device-width" />
                 <link rel="manifest" href="/manifest.json" />
                 <link href="//api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
             </Head>
