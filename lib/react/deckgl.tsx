@@ -276,30 +276,24 @@ export default function MApp(props: {
         }
     }, [map2d, props.viewport.pitch]);
 
-    useMemo(() => {
-        if (options.zoomTask) {
+    // If we are supposed to zoom then do this and turn off the flag
+    useEffect(() => {
+        if (options.zoomTask && taskGeoJSONtp) {
             const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
-
             const viewportWebMercator = new WebMercatorViewport(viewport);
-            const {
-                longitude,
-                latitude,
-                zoom
-            } = //
-                viewportWebMercator.fitBounds(
-                    [
-                        [minLng, minLat],
-                        [maxLng, maxLat]
-                    ],
-                    {
-                        padding: 20
-                    }
-                );
+            const {longitude, latitude, zoom} = viewportWebMercator.fitBounds(
+                [
+                    [minLng, minLat],
+                    [maxLng, maxLat]
+                ],
+                {
+                    padding: 80
+                }
+            );
+            setOptions({...options, zoomTask: false});
             setViewport({...props.viewport, longitude, latitude, zoom, transitionInterpolator: new FlyToInterpolator(), transitionDuration: 500});
         }
-
-        setTimeout(() => setOptions({...options, zoomTask: false}), 100);
-    }, [vc, selectedCompno, options.zoomTask]);
+    }, [options.zoomTask, taskGeoJSONtp]);
 
     //
     // Colour and style the task based on the selected pilot and their destination
