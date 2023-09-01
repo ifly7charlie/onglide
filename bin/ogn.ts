@@ -51,7 +51,7 @@ console.log('dev mode', dev);
 let db = undefined;
 
 // lodash
-import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove} from 'lodash';
+import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex} from 'lodash';
 
 //import _remove from 'lodash.remove';
 //import _groupby from 'lodash.groupby';
@@ -761,8 +761,8 @@ async function sendCurrentState(client: WebSocket) {
 }
 
 async function generateHistoricalTracks(channel: Channel): Promise<void> {
-    // Figure out the block that preceeds us
-    const now = channel.mostRecentPosition;
+    // Figure out the block that preceeds us, we do it a little late to allow reconnects to use websocket only
+    const now = (channel.mostRecentPosition - 20) as Epoch;
     const base = now - webPathBaseTime; // determine the last block block
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
@@ -774,7 +774,9 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                     const p = glider.deck;
                     if (p) {
                         const start = 0; //p.recentIndices[0];
-                        const end = p.posIndex;
+                        //                        const end = p.posIndex;
+                        // Find the end as 30 seconds before 'now'
+                        const end = _sortedIndex(p.t.subarray(0, p.posIndex), now) || p.posIndex;
                         const length = end - start;
                         if (length) {
                             result[glider.compno] = {

@@ -257,7 +257,6 @@ export default function MApp(props: {
     );
 
     useEffect(() => {
-        console.log('change viewport 2d/3d');
         if (props.viewport.pitch == 0 && !map2d) {
             props.setViewport(
                 {
