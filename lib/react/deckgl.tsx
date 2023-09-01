@@ -278,22 +278,26 @@ export default function MApp(props: {
 
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
-        if (options.zoomTask && taskGeoJSONtp) {
-            const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
-            const viewportWebMercator = new WebMercatorViewport(viewport);
-            const {longitude, latitude, zoom} = viewportWebMercator.fitBounds(
-                [
-                    [minLng, minLat],
-                    [maxLng, maxLat]
-                ],
-                {
-                    padding: 80
-                }
-            );
-            setOptions({...options, zoomTask: false});
-            setViewport({...props.viewport, longitude, latitude, zoom, transitionInterpolator: new FlyToInterpolator(), transitionDuration: 500});
+        if (options.zoomTask && taskGeoJSONtp && viewport) {
+            try {
+                const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
+                const viewportWebMercator = new WebMercatorViewport(viewport);
+                const {longitude, latitude, zoom} = viewportWebMercator.fitBounds(
+                    [
+                        [minLng, minLat],
+                        [maxLng, maxLat]
+                    ],
+                    {
+                        padding: 80
+                    }
+                );
+                setOptions({...options, zoomTask: false});
+                setViewport({...props.viewport, longitude, latitude, zoom, transitionInterpolator: new FlyToInterpolator(), transitionDuration: 500});
+            } catch (e) {
+                console.error(e);
+            }
         }
-    }, [options.zoomTask, taskGeoJSONtp]);
+    }, [options.zoomTask, taskGeoJSONtp, viewport]);
 
     //
     // Colour and style the task based on the selected pilot and their destination
