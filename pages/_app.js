@@ -15,6 +15,7 @@ const defaultOptions = {
     map2d: true,
     taskUp: 0,
     follow: true,
+    zoomTask: true,
     sortOrder: 'auto',
     options2d: {taskUp: 0, mapType: 0, follow: true},
     options3d: {taskUp: 1, mapType: true, follow: true}
@@ -24,7 +25,7 @@ const defaultOptions = {
 export default function MyApp({Component, pageProps}) {
     const getOptions = () => {
         try {
-            return value ? {...defaultOptions, ...JSON.parse(value)} : defaultOptions;
+            return value ? {...defaultOptions, ...JSON.parse(value), zoomTask: true} : defaultOptions;
         } catch (e) {
             // if error, return initial value
             return defaultOptions;
@@ -34,7 +35,6 @@ export default function MyApp({Component, pageProps}) {
     const [options, setOptionsState] = useState(getOptions);
     const setOptions = useCallback((newOptions) => {
         try {
-            console.log('saveoptions', newOptions);
             window?.localStorage.setItem('options', JSON.stringify(newOptions));
         } catch (e) {
             /**/
