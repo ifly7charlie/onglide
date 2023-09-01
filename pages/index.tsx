@@ -163,7 +163,7 @@ export default function CombinePage(props) {
                 <title>
                     {comp.competition.name} - {className}
                 </title>
-                <meta name="viewport" content="width=device-width" />
+                <meta name="viewport" content="width=device-width, minimal-ui" />
                 <link rel="manifest" href="/manifest.json" />
                 <link href="//api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
             </Head>
