@@ -429,7 +429,7 @@ async function main() {
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
-    }, 30 * 1000);
+    }, 60 * 1000);
 }
 
 main().then(() => console.log('Started'));
@@ -667,7 +667,7 @@ async function updateTrackers(datecode: Datecode) {
 
             const startUtcChanged = gliders[gliderKey]?.utcStart != t.utcStart;
             const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
-            const hadTracker = !!gliders[gliderKey].flarmIdRegex;
+            const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
 
             // glider key not enough to check for datecode changes
             const glider: Glider = (gliders[gliderKey] = Object.assign(gliders[gliderKey] || {}, t));
