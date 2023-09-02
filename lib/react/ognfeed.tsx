@@ -358,7 +358,8 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     t: new Uint32Array(p.t.slice(indexOfOverlap * Uint32Array.BYTES_PER_ELEMENT).buffer),
                     climbRate: new Int8Array(p.climbRate.slice(indexOfOverlap * Int8Array.BYTES_PER_ELEMENT).buffer),
                     agl: new Int16Array(p.agl.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer),
-                    posIndex: p.posIndex - indexOfOverlap
+                    posIndex: p.posIndex - indexOfOverlap,
+                    trackVersion: p.trackVersion
                 };
 
                 if (existing) {
@@ -369,7 +370,8 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                         t: new Uint32Array(deck.t.length + existing?.t.length || 0),
                         climbRate: new Int8Array(deck.climbRate.length + existing?.climbRate.length || 0),
                         agl: new Int16Array(deck.agl.length + existing?.agl.length || 0),
-                        posIndex: deck.posIndex + existing?.posIndex
+                        posIndex: deck.posIndex + existing?.posIndex,
+                        trackVersion: p.trackVersion
                     };
 
                     // Figure out which order to put them in
