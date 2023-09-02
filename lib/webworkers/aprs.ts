@@ -363,7 +363,7 @@ function processPacket(packet: aprsPacket) {
             t: packet.timestamp as Epoch,
             b: packet.course as Bearing,
             s: (Math.round(packet.speed * 10) / 10) as Speed,
-            f: sender + ',' + flarmId,
+            f: flarmId + ',' + sender,
             v: vario,
             l: islate
         };
