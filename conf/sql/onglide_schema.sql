@@ -254,7 +254,9 @@ CREATE TABLE `scoringsource` (
   `secret` char(120) DEFAULT NULL,
   `contest_name` char(120) DEFAULT NULL,
   `overwrite` int(11) DEFAULT '0',
-  `actuals` int(11) DEFAULT '1'
+  `actuals` int(11) DEFAULT '1',
+  `portoffset` int(11) DEFAULT '0',
+  `domain` text
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
@@ -377,7 +379,7 @@ CREATE TABLE `trackpoints` (
   `t` int(11) NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
   `bearing` int(11) DEFAULT NULL,
   `speed` float DEFAULT NULL,
-  `station` char(15) DEFAULT NULL,
+  `station` char(25) DEFAULT NULL,
   PRIMARY KEY (`datecode`,`class`,`t`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 

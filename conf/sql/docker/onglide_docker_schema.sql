@@ -411,7 +411,7 @@ CREATE TABLE `trackpoints` (
   `t` int(11) NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
   `bearing` int(11) DEFAULT NULL,
   `speed` float DEFAULT NULL,
-  `station` char(15) DEFAULT NULL,
+  `station` char(25) DEFAULT NULL,
   PRIMARY KEY (`datecode`,`class`,`t`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
