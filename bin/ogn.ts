@@ -689,7 +689,7 @@ async function updateTrackers(datecode: Datecode) {
                     };
 
                     aprsListener?.postMessage?.(command);
-                    glider.flarmIdRegex = new RegExp(`(${flarmIDs.join('|')})`, 'i');
+                    glider.flarmIdRegex = new RegExp(`^(${flarmIDs.join('|')})`, 'i');
                 }
             }
 
