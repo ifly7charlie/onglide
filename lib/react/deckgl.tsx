@@ -238,7 +238,7 @@ export default function MApp(props: {
                     } */
                 const map = mapRef?.current?.getMap();
                 if (map?.transform?.elevation) {
-                    const mapbox_elevation = map.transform._centerAltitude ?? map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
+                    const mapbox_elevation = map.queryTerrainElevation({lat, lng}, {exaggerated: false});
                     position = [0, 0, Math.trunc(mapbox_elevation - (map2d ? 125 : 0))];
                 }
 
@@ -314,7 +314,14 @@ export default function MApp(props: {
             map?.once('style.load', () => {
                 console.log('fog callback oml');
                 if (!map2d) {
-                    map.setFog({});
+                    map.setFog({
+                        range: [0, 2],
+                        'horizon-blend': 0.3,
+                        color: 'white',
+                        'high-color': '#add8e6',
+                        'space-color': '#d8f2ff',
+                        'star-intensity': 0.0
+                    });
                 }
                 map?.setTerrain({source: 'mapbox-dem'});
             });
@@ -326,7 +333,12 @@ export default function MApp(props: {
         map?.once('style.load', () => {
             if (!map2d) {
                 map.setFog({
-                    /*color: 'rgba(135, 206, 235, 255)', color: '#ffffff'*/
+                    range: [0, 2],
+                    'horizon-blend': 0.3,
+                    color: 'white',
+                    'high-color': '#add8e6',
+                    'space-color': '#d8f2ff',
+                    'star-intensity': 0.0
                 });
             } else {
                 map.setFog(null);
@@ -456,7 +468,7 @@ export default function MApp(props: {
                 }
                 setViewport({
                     ...viewState,
-                    ...{position: [0, 0, Math.trunc(mapbox_elevation - (map2d ? 100 : 0))]}
+                    position: [0, 0, Math.trunc(mapbox_elevation - (map2d ? 125 : 0))]
                 });
             } else {
                 setViewport(viewState);
