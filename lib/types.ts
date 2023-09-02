@@ -18,6 +18,7 @@ export type SpeedKPH = number & As<'SpeedKPH'>;
 
 export type Compno = string & As<'Compno'>;
 export type ClassName = string & As<'ClassName'>;
+export type ChannelName = string & As<'ChannelName'>;
 
 export type TZ = string & As<'TZ'>;
 
@@ -244,6 +245,7 @@ export interface DeckData {
     t: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
+    trackVersion: number;
     dataPromiseResolve?: (a?: boolean) => void;
     getData?: AsyncGenerator<any, void, void>;
 }

@@ -64,8 +64,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     // actually check they started
     let grandPrixStart = task.rules.grandprixstart && task.rules.nostartutc;
 
-    console.log(`${task.details.class}: Startline open: ${task.rules.nostartutc}, gp start valid: ${grandPrixStart}/${task.rules.grandprixstart}`);
-
     // state for the search
     let inStartSector = false;
     let wasInStartSector = false;
@@ -158,14 +156,14 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // If there is a specific start time and we are before it then
                 // do nothing,
                 if (point.t < task.rules.nostartutc - 10) {
-                    if (point._) yield status;
+                    //if (point._) yield status;
                     continue;
                 }
 
                 // If the pilot has a specific utcStart time already then
                 // ignore before - this can happen if scored into soaringspot
                 if (status.utcStart && point.t < status.utcStart) {
-                    if (point._) yield status;
+                    //                    if (point._) yield status;
                     continue;
                 }
 
@@ -173,6 +171,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // updated and the exitTimestamp - relies on the previous if statement to
                 // skip up to the correct point
                 if (grandPrixStart || officialStart) {
+                    resetStart();
                     status.utcStart = officialStart ? officialStart : task.rules.nostartutc;
                     status.startConfirmed = true;
                     status.startFound = true;
@@ -180,6 +179,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status.legs[0].points = [{t: status.utcStart, lat: startLine.nlat, lng: startLine.nlng, a: (previousPoint || point).a}];
                     status.legs[0].exitTimeStamp = status.utcStart;
 
+                    console.log(point.c, 'start reached', new Date(point.t * 1000).toISOString());
                     if (point._) {
                         yield status;
                         await setTimeout(sleepInterval);
@@ -492,6 +492,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             console.log(e);
             console.log(JSON.stringify(current, stripPoints, 4));
             console.log(JSON.stringify(status, stripPoints, 4));
+            //            console.log(JSON.stringify(task, null, 4));
         }
     }
 

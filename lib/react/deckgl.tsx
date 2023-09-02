@@ -85,7 +85,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
 
             result.push(
                 new TripsLayer({
-                    id: compno,
+                    id: compno + p.trackVersion,
                     compno: compno,
                     data: p.getData,
                     getWidth: selected ? 8 : 5,

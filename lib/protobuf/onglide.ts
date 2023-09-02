@@ -36,6 +36,8 @@ export interface PilotTrack {
   agl: Uint8Array;
   /** For colouring, all Uint8 arrays one for each point all optional */
   climbRate: Uint8Array;
+  /** This changes if we need to replace the pilot track */
+  trackVersion: number;
 }
 
 export interface Scores {
@@ -518,6 +520,7 @@ function createBasePilotTrack(): PilotTrack {
     positions: new Uint8Array(0),
     agl: new Uint8Array(0),
     climbRate: new Uint8Array(0),
+    trackVersion: 0,
   };
 }
 
@@ -540,6 +543,9 @@ export const PilotTrack = {
     }
     if (message.climbRate.length !== 0) {
       writer.uint32(66).bytes(message.climbRate);
+    }
+    if (message.trackVersion !== 0) {
+      writer.uint32(104).uint32(message.trackVersion);
     }
     return writer;
   },
@@ -593,6 +599,13 @@ export const PilotTrack = {
 
           message.climbRate = reader.bytes();
           continue;
+        case 13:
+          if (tag !== 104) {
+            break;
+          }
+
+          message.trackVersion = reader.uint32();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -610,6 +623,7 @@ export const PilotTrack = {
       positions: isSet(object.positions) ? bytesFromBase64(object.positions) : new Uint8Array(0),
       agl: isSet(object.agl) ? bytesFromBase64(object.agl) : new Uint8Array(0),
       climbRate: isSet(object.climbRate) ? bytesFromBase64(object.climbRate) : new Uint8Array(0),
+      trackVersion: isSet(object.trackVersion) ? Number(object.trackVersion) : 0,
     };
   },
 
@@ -633,6 +647,9 @@ export const PilotTrack = {
     if (message.climbRate.length !== 0) {
       obj.climbRate = base64FromBytes(message.climbRate);
     }
+    if (message.trackVersion !== 0) {
+      obj.trackVersion = Math.round(message.trackVersion);
+    }
     return obj;
   },
 
@@ -647,6 +664,7 @@ export const PilotTrack = {
     message.positions = object.positions ?? new Uint8Array(0);
     message.agl = object.agl ?? new Uint8Array(0);
     message.climbRate = object.climbRate ?? new Uint8Array(0);
+    message.trackVersion = object.trackVersion ?? 0;
     return message;
   },
 };

@@ -23,14 +23,15 @@ function resize<T extends Int8Array | Int16Array | Uint32Array | Float32Array>(a
     return c;
 }
 
-export function initialiseDeck(compno: Compno, glider: PilotTrackData): void {
+export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVersion: number): void {
     glider.deck = {
         compno: compno,
         positions: new Float32Array(deckPointIncrement * 3),
         agl: new Int16Array(deckPointIncrement),
         t: new Uint32Array(deckPointIncrement),
         climbRate: new Int8Array(deckPointIncrement),
-        posIndex: 0
+        posIndex: 0,
+        trackVersion
     };
 }
 
@@ -42,7 +43,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         if (latest) {
             return false;
         }
-        initialiseDeck(glider.compno, glider);
+        initialiseDeck(glider.compno, glider, 0);
     } else {
         // If not first point then make sure we are in order!
         lastTime = glider.deck.t[glider.deck.posIndex - 1];

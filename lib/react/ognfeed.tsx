@@ -151,12 +151,10 @@ export const OgnFeed = memo(
 
             if (connectionStatusO) {
                 return (
-                    <div>
+                    <div className={'connectionStatus'}>
                         {connectionStatusO[1]}
                         <Nbsp />
                         {connectionStatusO[0]}
-                        <br style={{clear: 'both'}} />
-                        <hr />
                     </div>
                 );
             }
@@ -241,8 +239,8 @@ export const OgnFeed = memo(
                     />
                 </div>
                 <div className="resultsOverlay" key="results">
+                    {connectionStatus}
                     <div className="resultsUnderlay">
-                        {connectionStatus}
                         {notes && notes != '' && (
                             <>
                                 <br />
@@ -325,31 +323,6 @@ function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
     cp.deck?.dataPromiseResolve?.();
 }
 
-export function AlertDisconnected({mutatePilots, attempt}) {
-    const [show, setShow] = useState(attempt);
-    const [pending, setPending] = useState(attempt);
-
-    if (show == attempt) {
-        return (
-            <Alert variant="danger" onClose={() => setShow(attempt + 1)} dismissible>
-                <Alert.Heading>Disconnected</Alert.Heading>
-                <p>Your streaming connection has been disconnected, you can reconnect or just look at the results without live tracking</p>
-                <hr />
-                <Button
-                    variant="success"
-                    onClick={() => {
-                        mutatePilots();
-                        setPending(attempt + 1);
-                    }}
-                >
-                    Reconnect{pending == attempt + 1 ? <Spinner /> : null}
-                </Button>
-            </Alert>
-        );
-    }
-    return null;
-}
-
 function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, setTrackData: (a: TrackData) => void, pilotScores: ScoreData) {
     setTrackData(
         _reduce(
@@ -363,6 +336,12 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
 
                 // If we have just received a baseTime 0 set then we should erase the old stuff
                 if (existing && decoded.tracks.baseTime === 0) {
+                    existing = null;
+                }
+
+                // If it's a new version of the track then we need to ignore the old one
+                if (existing && existing.trackVersion != p.trackVersion) {
+                    console.log(`${compno}:replacing track as version changed ${existing.trackVersion} != ${p.trackVersion}`);
                     existing = null;
                 }
 
@@ -417,8 +396,13 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     pruneStartline(deck, pilotScores[compno].utcStart);
                 }
 
-                //                console.log('create iterator ', existing ? 'merge' : 'set', 'tracks:', compno);
+                // Save the version
+                deck.trackVersion = p.trackVersion;
+
+                // Create new iterators
                 deck.getData = getData(compno as Compno, deck);
+
+                // Store away and update the vario
                 result[compno].deck = deck;
                 [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
                 Object.assign(trackData[compno], result[compno]);
@@ -448,8 +432,26 @@ async function decodeWebsocketMessage(
         // Merge in changed tracks
         if (decoded?.tracks) {
             const ourMostRecent = Object.values(trackData).reduce((oldest, track) => Math.max(oldest, track.t ?? 0), 0);
-            console.log('ourMostRecent', ourMostRecent, 'basetime', decoded.tracks.baseTime);
-            if (decoded.tracks.baseTime && ourMostRecent < decoded.tracks.baseTime) {
+            const numberOfUpdates = Object.keys(decoded?.tracks?.pilots ?? {}).length;
+            const newChecksums =
+                numberOfUpdates <= 1
+                    ? ''
+                    : Object.values(decoded?.tracks?.pilots ?? {})
+                          .map((g) => g.trackVersion.toString(16))
+                          .join(',');
+            const oldChecksums =
+                numberOfUpdates <= 1
+                    ? ''
+                    : Object.values(trackData)
+                          .map((g) => g.deck?.trackVersion.toString(16) ?? g.compno)
+                          .join(',');
+
+            console.log(`ourMostRecent ${new Date((ourMostRecent ?? 0) * 1000).toISOString()}, basetime:${new Date((decoded.tracks.baseTime ?? 0) * 1000).toISOString()}`);
+            if (newChecksums != oldChecksums) {
+                console.log('version checksum changed, fetching all');
+            }
+
+            if (decoded.tracks.baseTime && (ourMostRecent < decoded.tracks.baseTime || newChecksums != oldChecksums)) {
                 // We get the initial URL and then decode it the same as if it is from the websocket as it is the same format (recursive)
                 await fetch(oldTracksUrl(vc, datecode, decoded.tracks.baseTime.toString())) //
                     .then((res) => res.arrayBuffer())

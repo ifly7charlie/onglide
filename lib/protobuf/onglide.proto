@@ -36,6 +36,9 @@ message PilotTrack {
 	//    bytes airSpeed = 9;
 	//    bytes altitudeBand = 10;
 	//    bytes leg = 11;
+
+	// This changes if we need to replace the pilot track
+	uint32 trackVersion = 13;
 };
 
 message Scores {
