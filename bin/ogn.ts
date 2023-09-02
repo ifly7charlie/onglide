@@ -442,7 +442,7 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
 //
 // Get current date code
 async function getDCode(): Promise<Datecode> {
-    return replayBase ? toDateCode(new Date(replayBase * 1000)) : (await db.query('SELECT datecode FROM compstatus LIMIT 1'))[0].datecode;
+    return replayBase ? toDateCode(new Date(replayBase * 1000)) : (await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))[0].datecode;
 }
 
 //
