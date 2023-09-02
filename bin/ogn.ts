@@ -667,6 +667,7 @@ async function updateTrackers(datecode: Datecode) {
 
             const startUtcChanged = gliders[gliderKey]?.utcStart != t.utcStart;
             const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
+            const hadTracker = !!gliders[gliderKey].flarmIdRegex;
 
             // glider key not enough to check for datecode changes
             const glider: Glider = (gliders[gliderKey] = Object.assign(gliders[gliderKey] || {}, t));
@@ -675,7 +676,7 @@ async function updateTrackers(datecode: Datecode) {
             glider.channelName = channelName(t.className, datecode);
 
             // If we have a tracker for it then we need to link that as well
-            if (t.dbTrackerId && t.dbTrackerId != 'unknown') {
+            if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
                 const flarmIDs = _filter(t.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i));
                 if (flarmIDs && flarmIDs.length) {
                     // Tell APRS to start listening for the flarmid
@@ -686,9 +687,8 @@ async function updateTrackers(datecode: Datecode) {
                         trackerId: flarmIDs,
                         channelName: glider.channelName
                     };
-                    //                    if (!process.env.REPLAY) {
+
                     aprsListener?.postMessage?.(command);
-                    //                    }
                     glider.flarmIdRegex = new RegExp(`(${flarmIDs.join('|')})`, 'i');
                 }
             }
