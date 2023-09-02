@@ -632,8 +632,8 @@ async function updateTrackers(datecode: Datecode) {
     const keyedDb = keyBy(cTrackers, makeClassname_Compno);
     const removedGliders = _filter(gliders, (g) => {
         const newValue = keyedDb[makeClassname_Compno(g)];
-        console.log(newValue.compno, newValue.dbTrackerId, g.dbTrackerId);
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
+            console.log(g?.compno, newValue?.dbTrackerId, g.dbTrackerId);
             return true; // removed or it has changed id
         }
         return g.datecode != datecode;
