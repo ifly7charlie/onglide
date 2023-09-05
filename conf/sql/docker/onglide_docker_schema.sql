@@ -38,6 +38,9 @@ CREATE TABLE `classes` (
   `classname` char(30) NOT NULL,
   `description` varchar(200) DEFAULT '',
   `type` char(20) DEFAULT NULL,
+  `handicapped` char(1) DEFAULT 'N',
+  `grandprixstart` char(1) DEFAULT 'N',
+  `Dm` float DEFAULT NULL,
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
@@ -84,19 +87,12 @@ CREATE TABLE `compstatus` (
   `datecode` char(3) DEFAULT NULL COMMENT 'current contest date code for this class',
   
   `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,W=waitlist,X=confirm reg,P=prebrief,B=afterbrief,L=launched,S=startopen/flying,R=all reported,H=all home,Z=scrubbed,O=comp over',
-  `briefing` time DEFAULT '10:00:00' COMMENT 'what time is briefing',
-  `launching` time DEFAULT '11:00:00' COMMENT 'what time is launching',
-  `gridbefore` char(1) DEFAULT 'Y' COMMENT 'Y/N grid before or after briefing',
-  
   `resultsdatecode` char(3) DEFAULT NULL COMMENT 'what date is scoring up to with uploading, results after this date wont be displayed',
   `task` char(1) DEFAULT 'A' COMMENT 'selected task',
   
   `starttime` time DEFAULT NULL COMMENT 'Startline open time',
   `startheight` int(11) DEFAULT '0',
-  
-  `compdate` date DEFAULT NULL,
-  `briefdc` char(4) DEFAULT NULL,
-  `grid` char(20) DEFAULT '',
+  `notes` text  COMMENT 'Headline message to display', 
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Current competition status, one row per class';
 
@@ -154,7 +150,7 @@ CREATE TABLE `images` (
   `compno` char(4) NOT NULL,
   `image` mediumblob,
   `updated` int(11) NOT NULL,
-  PRIMARY KEY (`class`,`compno`,`updated`)
+  PRIMARY KEY (`class`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
 --
@@ -281,7 +277,7 @@ CREATE TABLE `pilots` (
 
 DROP TABLE IF EXISTS `scoringsource`;
 CREATE TABLE `scoringsource` (
-  `type` enum('soaringspotkey','soaringspotscrape','rst') DEFAULT 'soaringspotkey',
+  `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','sgp','pictureurl') DEFAULT 'soaringspotkey',
   `url` text,
   `client_id` char(120) DEFAULT NULL,
   `secret` char(120) DEFAULT NULL,
@@ -310,6 +306,7 @@ CREATE TABLE `taskleg` (
   `bearing` int(11) DEFAULT NULL,
   `nlat` float DEFAULT NULL COMMENT 'location of tp',
   `nlng` float DEFAULT NULL COMMENT 'location of tp',
+  `altitude` float default 0 comment 'altitude of the tp',
   `Hi` float DEFAULT NULL COMMENT 'handicap/windicap adjustment for the leg',
 
   `type` enum('sector','line','thistle') DEFAULT NULL COMMENT 'sector type',
@@ -380,7 +377,7 @@ CREATE TABLE `trackerhistory` (
   `flarmid` char(10) DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes') DEFAULT 'none'
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot') DEFAULT 'none'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
