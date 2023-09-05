@@ -6,7 +6,8 @@
 // It will also expose the helper functions required to update the screen
 //
 
-import {useState, useMemo, useRef, useCallback, useEffect, memo} from 'react';
+import {useState, useMemo, useCallback, useEffect, memo} from 'react';
+import {useRouter} from 'next/router';
 
 import {usePilots, Spinner} from './loaders';
 
@@ -110,9 +111,6 @@ export const OgnFeed = memo(
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [follow, setFollow] = useState(false);
 
-        // For remote updating of the map
-        const mapRef = useRef(null);
-
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
 
@@ -130,7 +128,7 @@ export const OgnFeed = memo(
         });
 
         // Do we have a loaded set of details?
-        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0 && mapRef && mapRef.current && mapRef.current.getMap();
+        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
 
         // Have we had a websocket message, if it hasn't changed then ignore it!
         if (lastMessage) {
@@ -216,14 +214,13 @@ export const OgnFeed = memo(
         return (
             <>
                 <div className={'resizingMap'}>
-                    <MApp
+                    <MApp //
                         key="map"
                         vc={vc}
                         follow={follow}
                         setFollow={setFollow}
                         selectedPilotData={selectedPilotData}
                         setSelectedCompno={setCompno}
-                        mapRef={mapRef} //
                         pilots={pilots}
                         pilotScores={pilotScores}
                         options={options}

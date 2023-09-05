@@ -1,9 +1,9 @@
-import {useCallback, useMemo, useEffect} from 'react';
+import {useCallback, useMemo, useRef, useEffect} from 'react';
 import DeckGL from '@deck.gl/react';
 import {TextLayer} from '@deck.gl/layers';
 import {TripsLayer} from '@deck.gl/geo-layers';
 import {FlyToInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
-import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
+import Map, {Source, Layer, LayerProps} from 'react-map-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
@@ -175,7 +175,6 @@ export default function MApp(props: {
     vc: ClassName;
     selectedCompno: Compno;
     setSelectedCompno: Function;
-    mapRef: any;
     tz: string;
     viewport: any;
     setViewport: Function;
@@ -184,8 +183,11 @@ export default function MApp(props: {
     status: string; // status line
     t: Epoch;
 }) {
+    // For remote updating of the map
+    const mapRef = useRef(null);
+
     // So we get some type info
-    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, mapRef, tz, viewport, setViewport} = props;
+    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
 
     // Map display style
     const map2d = options.map2d;
@@ -236,11 +238,11 @@ export default function MApp(props: {
                     ) {
                         return undefined;
                     } */
-                const map = mapRef?.current?.getMap();
-                if (map?.transform?.elevation) {
-                    const mapbox_elevation = map.queryTerrainElevation({lat, lng}, {exaggerated: false});
-                    position = [0, 0, Math.trunc(mapbox_elevation - (map2d ? 125 : 0))];
-                }
+                const map = mapRef?.current; //?.getMap();
+                //                if (map?.transform?.elevation) {
+                const mapbox_elevation = map?.queryTerrainElevation({lat, lng}, {exaggerated: false});
+                position = [0, 0, Math.trunc(mapbox_elevation - (map2d ? 0 : 0))];
+                //                }
 
                 props.setViewport({
                     ...props.viewport,
@@ -305,51 +307,6 @@ export default function MApp(props: {
         return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle3d(selectedPilotData?.score, mapLight);
     }, [selectedCompno, selectedPilotData?.score?.currentLeg, selectedPilotData?.score?.utcFinish, mapLight, map2d]);
 
-    //
-    // Two different ways to make sure we have terrain loaded
-    // on map load (in case it's default for user and on change of map type)
-    const onMapLoad = useCallback(
-        (evt) => {
-            const map = evt.target;
-            map?.once('style.load', () => {
-                console.log('fog callback oml');
-                if (!map2d) {
-                    map.setFog({
-                        range: [0, 2],
-                        'horizon-blend': 0.3,
-                        color: 'white',
-                        'high-color': '#add8e6',
-                        'space-color': '#d8f2ff',
-                        'star-intensity': 0.0
-                    });
-                }
-                map?.setTerrain({source: 'mapbox-dem'});
-            });
-        },
-        [map2d]
-    );
-    useEffect(() => {
-        const map = mapRef?.current?.getMap();
-        map?.once('style.load', () => {
-            if (!map2d) {
-                map.setFog({
-                    range: [0, 2],
-                    'horizon-blend': 0.3,
-                    color: 'white',
-                    'high-color': '#add8e6',
-                    'space-color': '#d8f2ff',
-                    'star-intensity': 0.0
-                });
-            } else {
-                map.setFog(null);
-            }
-        });
-        map?.once('idle', () => {
-            console.log('set terrain cb once');
-            map?.setTerrain({source: 'mapbox-dem'});
-        });
-    }, [map2d, mapRef, mapRef?.current?.getMap(), mapRef?.current?.getMap()?.getSource('mapbox-dem')]);
-
     // Do we have a loaded set of details?
     const valid = !(isTLoading || isTError) && taskGeoJSON?.tp && taskGeoJSON?.track;
 
@@ -373,7 +330,8 @@ export default function MApp(props: {
         ({object, picked, layer, coordinate}) => {
             if (!picked) {
                 if (process.env.NODE_ENV == 'development' && coordinate) {
-                    return `[${coordinate.map((x) => x.toFixed(4))}]`;
+                    const map = mapRef?.current; // ?.getMap();
+                    return `[${coordinate.map((x) => x.toFixed(4))}, ${map?.queryTerrainElevation({lat: coordinate[1], lng: coordinate[0]}, {exaggerated: false})?.toFixed(0)}]`;
                 }
                 return null;
             }
@@ -432,22 +390,24 @@ export default function MApp(props: {
                 return null;
             }
         },
-        [vc, props.options.units]
+        [vc, props.options.units, mapRef, mapRef?.current]
     );
 
     const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
 
     // Update the view and synchronise with mapbox
-    const onViewStateChange = useCallback(
-        ({viewState}) => {
+    const onViewStateChange = //useCallback(
+        (a) => {
+            const {viewState} = a;
             //
             //            console.log(map2d, props.options.mapType);
             if (props.options.taskUp == 0) {
                 viewState.bearing = 0;
             }
             if (map2d) {
-                viewState.minPitch = 0;
-                viewState.maxPitch = 0;
+                viewState.minPitch = 1;
+                viewState.maxPitch = 1;
+                viewState.pitch = 1;
                 //                setViewport(viewState);
                 //                return;
             } else {
@@ -456,26 +416,24 @@ export default function MApp(props: {
                 viewState.pitch = Math.max(Math.min(viewState.pitch, 85), 0);
             }
 
-            const map = mapRef?.current?.getMap();
-            if (map?.transform?.elevation) {
-                // && !viewState.position) {
-                //&& map.queryTerrainElevation) {
-                //            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
-                const mapbox_elevation = map.transform._centerAltitude ?? map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
-                //                console.log('3d transform, elevation', mapbox_elevation, viewState.zoom, viewState.altitude);
+            const map = mapRef?.current;
+
+            if (map) {
+                const mapbox_elevation = /*map.transform?._centerAltitude ??*/ map.queryTerrainElevation(map.getCenter(), {exaggerated: false});
+                console.log('3d transform, elevation', mapbox_elevation, viewState.zoom, viewState.altitude, map.getCenter());
                 if (!mapbox_elevation) {
-                    return;
+                    //       return;
                 }
                 setViewport({
                     ...viewState,
-                    position: [0, 0, Math.trunc(mapbox_elevation - (map2d ? 125 : 0))]
+                    position: [0, 0, Math.trunc(mapbox_elevation - (map2d ? 0 : 0))]
                 });
             } else {
                 setViewport(viewState);
             }
-        },
-        [map2d, props.options.taskUp, mapRef]
-    );
+        };
+    //        [map2d, props.options.taskUp, mapRef, mapRef?.current]
+    //  );
 
     const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
     const getCursor = useCallback(() => 'crosshair', []);
@@ -485,14 +443,28 @@ export default function MApp(props: {
         <DeckGL
             viewState={viewport}
             onViewStateChange={onViewStateChange}
-            //            controller={{type: StopFollowController, setFollow, inertia: true, transitionDuration: 0}} // helps with touch scroll on laptops (undocumented)
+            //            controller={{inertia: true, transitionDuration: 0}} // helps with touch scroll on laptops (undocumented)
             controller={controller} // helps with touch scroll on laptops (undocumented)
+            //            controller={true}
             getTooltip={toolTip}
             {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
             layers={layers} //
             onClick={onClick}
         >
-            <StaticMap mapboxApiAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN} mapStyle={mapStreet ? 'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' /*"mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk"*/ : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'} onLoad={onMapLoad} ref={mapRef} attributionControl={false}>
+            <Map //
+                mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+                mapStyle={mapStreet ? /*'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' */ 'mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk' : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'}
+                ref={mapRef}
+                reuseMaps={true}
+                fog={{
+                    range: [-0.75, 20],
+                    color: 'rgba(233, 241, 251, 1)',
+                    'space-color': 'rgba(135, 206, 235, 0.5)',
+                    'star-intensity': 0.4
+                }}
+                terrain={{source: 'mapbox-dem', exaggeration: 1}}
+                attributionControl={false}
+            >
                 {options.constructionLines && taskGeoJSON?.Dm ? (
                     <Source type="geojson" data={taskGeoJSON.Dm} key="y">
                         <Layer {...DmPointStyle} />
@@ -504,7 +476,7 @@ export default function MApp(props: {
                     </Source>
                 ) : null}
                 {valid ? (
-                    <Source type="geojson" data={taskGeoJSONtp}>
+                    <Source type="geojson" id="x" data={taskGeoJSONtp}>
                         <Layer {...turnpointStyleFlat} key="tps" />
                         <Layer {...turnpointStyle} key="tgjp" />
                     </Source>
@@ -527,12 +499,12 @@ export default function MApp(props: {
                         <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                     </Source>
                 ) : null}
-                <Source key="mapbox-dem" id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
                 <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
+                <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
                 {!map2d && <Layer {...skyLayer} />}
                 {attribution}
                 {radarOverlay.layer}
-            </StaticMap>
+            </Map>
         </DeckGL>
     );
 }
@@ -615,7 +587,7 @@ const DmPointStyle: LayerProps = {
 };
 
 function getSunPosition(mapRef, date?) {
-    const map = mapRef?.current?.getMap();
+    const map = mapRef?.current; //?.getMap();
     if (map) {
         const center = map.getCenter();
         const sunPos = SunCalc.getPosition(date || Date.now(), center.lat, center.lng);
