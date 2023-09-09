@@ -197,7 +197,7 @@ async function update_pilots(pilots) {
             flarmIds.push(pilot.ognTrackerPaired.match(/[0-9A-F]{6}$/gi));
         }
 
-        t.query(escape`
+        await t.query(escape`
               INSERT INTO tracker ( class, compno, type, trackerid ) 
                   VALUES ( 'sgp', ${pilot.competitionId.substring(0, 4)}, 'flarm', ${flarmIds.filter((d) => d?.length).join(',')} )
                 ON DUPLICATE KEY UPDATE trackerid=values(trackerid)`);

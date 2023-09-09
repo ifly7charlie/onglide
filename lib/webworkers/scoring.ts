@@ -93,6 +93,18 @@ export class ScoringController {
         this.worker.postMessage({action: ScoringCommandEnum.newtask, className: this.className, datecode: this.datecode, task});
     }
 
+    clearTask() {
+        this.worker.postMessage({action: ScoringCommandEnum.cleartask, className: this.className, datecode: this.datecode});
+    }
+
+    rescoreGlider(compno: Compno, handicap: number, utcStart: Epoch) {
+        this.worker.postMessage({action: ScoringCommandEnum.rescoreGlider, className: this.className, datecode: this.datecode, compno, handicap, utcStart});
+    }
+
+    clearGlider(compno: Compno) {
+        this.worker.postMessage({action: ScoringCommandEnum.clearGlider, className: this.className, datecode: this.datecode, compno});
+    }
+
     shutdown() {
         this.worker.postMessage({action: ScoringCommandEnum.shutdown});
     }
@@ -123,23 +135,29 @@ interface GliderState {
 
     // scoring is the output generator - of the type appropriate
     // for the scoring of the task
-    scoring: null;
+    scoring: any;
+
+    task: any;
 }
 
 // What are we scoring - we will register each one when
 // an initial track is set
 let gliders: Record<ClassName_Compno, GliderState> = {};
+let scoreUpdater: ReturnType<typeof scoreCollector>;
 
 // Control function via post message
 enum ScoringCommandEnum {
     none,
     shutdown,
     newtask,
+    cleartask,
     track,
-    initialTrack
+    initialTrack,
+    rescoreGlider,
+    clearGlider
 }
 
-export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | any;
+export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | any;
 
 interface ScoringCommandBase {
     className: ClassName;
@@ -151,6 +169,14 @@ interface ScoringCommandNewTask extends ScoringCommandBase {
     action: ScoringCommandEnum.newtask;
 
     task: any; // should define type, this is what is returned by API call
+}
+
+interface ScoringCommandRescoreGlider extends ScoringCommandBase {
+    action: ScoringCommandEnum.rescoreGlider;
+
+    compno: Compno;
+    handicap: number;
+    utcStart: Epoch;
 }
 
 // Data for glider from DB - will reset track point
@@ -199,28 +225,52 @@ if (!isMainThread) {
             process.exit();
         }
 
-        let start = Date.now();
-
         // Load data for specific tracker and add it to the list
         // of gliders to track
-
         if (task.action == ScoringCommandEnum.initialTrack) {
             const itTask: ScoringCommandTrack = task;
             console.log(`${task.className}/${task.compno}: initial track received ${itTask.points.length} positions ${itTask.handicap} hcap, ${itTask.utcStart} utcStart`);
+            const alreadyScoring = !!gliders[makeClassname_Compno(task)]?.scoring;
+            const existingTask = gliders[makeClassname_Compno(task)]?.task;
+
             gliders[makeClassname_Compno(task)] = {
                 className: task.className,
                 compno: task.compno,
                 handicap: task.handicap,
                 utcStart: task.utcStart,
                 inorder: bindChannelForInOrderPackets(task.className, task.datecode, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
-                scoring: null
+                scoring: null,
+                task: existingTask
             };
+
+            if (alreadyScoring && existingTask) {
+                rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart);
+            }
         }
 
         // Actually start scoring the task, will score all the gliders we have tracks for
         if (task.action == ScoringCommandEnum.newtask) {
-            console.log(`${task.className}/${task.compno}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})}`);
+            console.log(`${task.className}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})}`);
             startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task);
+            // Save task in case we rescore
+            Object.values(gliders).forEach((g) => {
+                g.task = task.task;
+            });
+        }
+
+        if (task.action == ScoringCommandEnum.cleartask) {
+            console.log(`${task.className}: scoring task cleared`);
+            scoreUpdater.reset();
+        }
+
+        if (task.action == ScoringCommandEnum.rescoreGlider) {
+            console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.hcap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
+            rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart);
+        }
+
+        if (task.action == ScoringCommandEnum.clearGlider) {
+            console.log(`${task.className}/${task.compno}: stopping scoring for ${task.compno}`);
+            scoreUpdater.clearGlider(task.compno);
         }
     });
 }
@@ -231,65 +281,78 @@ function startScoring(config: ScoringConfig, task: any) {
     console.log(`${config.className} -/ newTask ${task.details.taskid}/${task.details.task}: ${task.legs.map((l) => l.name).join(',')}...`);
     console.log(`${config.className} -> gliders: ${Object.keys(gliders).join(',')}`);
 
-    // Correct timing for the competition
-    const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
-    let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
-
-    // And the replay
-    if (process.env.REPLAY) {
-        let start = Math.trunc(Date.now() / 1000);
-        let multiplier = parseInt(process.env.REPLAY_MULTIPLIER || '1');
-        const replayBase = parseInt(process.env.REPLAY);
-
-        getNow = (): Epoch => {
-            const now = Math.trunc(Date.now() / 1000);
-            const elapsed = now - start;
-            const effectiveElapsed = elapsed * multiplier;
-            return (replayBase + effectiveElapsed) as Epoch;
-        };
-    }
-
     try {
         const iterators: Record<Compno, any> = {};
 
-        // Loop through all of them
-        for (const cncn in gliders) {
-            const glider: GliderState = gliders[cncn];
-
-            const log =
-                glider.compno == '--'
-                    ? console.log
-                    : () => {
-                          /*noop*/
-                      };
-
-            const getScoringChain = () => {
-                // 0. Check if we are flying etc
-                const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
-
-                // 1. Figure out where in the task we are
-                const tpg = taskPositionGenerator(task, glider.utcStart, epg, log);
-
-                // 2. Figure out what that means for leg distances
-                const distances = task.rules.aat // what kind of scoring do we do
-                    ? assignedAreaScoringGenerator(task, tpg, log)
-                    : racingScoringGenerator(task, tpg, log);
-
-                // 3. Once we have distances we can calculate task lengths
-                //    and therefore speeds
-                const scores = taskScoresGenerator(task, glider.compno, glider.handicap, distances, log);
-
-                return scores;
-            };
-
-            iterators[glider.compno] = getScoringChain();
+        for (const glider of Object.values(gliders)) {
+            // Loop through all of them
+            glider.scoring = iterators[glider.compno] = getScoringChain(glider, config, task);
+            glider.task = task;
         }
 
         // This setups up a set of async listeners for each of the above iterators
         // and a timer to collect the results to bundle them up and send back to the
         // parent port
-        scoreCollector(15 as Epoch, parentPort, task, iterators, getNow, console.log);
+        scoreUpdater = scoreCollector(15 as Epoch, parentPort, task, iterators, getNow, console.log);
     } catch (e) {
         console.log(e);
     }
+}
+
+function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, utcStart: Epoch) {
+    //
+    const glider = gliders[makeClassname_Compno(config.className, compno)];
+    glider.handicap = handicap;
+    glider.utcStart = utcStart;
+
+    if (!glider || !glider.task) {
+        console.error(`unable to rescore glider ${compno}, ${config.className}: no task or glider not found`);
+    } else {
+        scoreUpdater.collect(compno, (glider.scoring = getScoringChain(glider, config, glider.task)));
+    }
+}
+
+// Loop through all of them
+function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) {
+    const log =
+        glider.compno == '--'
+            ? console.log
+            : () => {
+                  /*noop*/
+              };
+
+    // 0. Check if we are flying etc
+    const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
+
+    // 1. Figure out where in the task we are
+    const tpg = taskPositionGenerator(task, glider.utcStart, epg, log);
+
+    // 2. Figure out what that means for leg distances
+    const distances = task.rules.aat // what kind of scoring do we do
+        ? assignedAreaScoringGenerator(task, tpg, log)
+        : racingScoringGenerator(task, tpg, log);
+
+    // 3. Once we have distances we can calculate task lengths
+    //    and therefore speeds
+    const scores = taskScoresGenerator(task, glider.compno, glider.handicap, distances, log);
+
+    return scores;
+}
+
+// Correct timing for the competition
+const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
+let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
+
+// And the replay
+if (process.env.REPLAY) {
+    let start = Math.trunc(Date.now() / 1000);
+    let multiplier = parseInt(process.env.REPLAY_MULTIPLIER || '1');
+    const replayBase = parseInt(process.env.REPLAY);
+
+    getNow = (): Epoch => {
+        const now = Math.trunc(Date.now() / 1000);
+        const elapsed = now - start;
+        const effectiveElapsed = elapsed * multiplier;
+        return (replayBase + effectiveElapsed) as Epoch;
+    };
 }

@@ -104,7 +104,7 @@ async function roboControl() {
             await mysql_db.query(escape`
               SELECT url, overwrite
                 FROM scoringsource where type='robocontrol'`)
-        )[0] ?? {url:null, overwrite:true};
+        )[0] ?? {url: null, overwrite: true};
         url = row.url;
         overwrite = row.overwrite ?? true;
     }
@@ -130,10 +130,9 @@ async function roboControl() {
             for (const p of location || []) {
                 if (p.flarm?.length) {
                     console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    if( overwrite ) {
+                    if (overwrite) {
                         mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
-                    }
-                    else {
+                    } else {
                         mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn} and trackerid='unknown'`);
                     }
                     mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
@@ -685,7 +684,7 @@ async function process_day_results(classid, className, date, day_number, results
                              datafromscoring = "Y",
                              speed=${scoredvals.as}, distance=${scoredvals.ad},
                              hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd},
-                             daypoints=${parseInt(row.Points.replace(',', ''))}, dayrank=${parseInt(row['#'].replace('.', ''))}, totalpoints=${0}, totalrank=${0}, penalty=${0}
+                             daypoints=${parseInt(row.Points.replace(',', ''))}, dayrank=0, totalpoints=${0}, totalrank=${0}, penalty=${0}
                           WHERE datecode=${dateCode} AND compno=${pilot} and class=${classid}`);
 
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );

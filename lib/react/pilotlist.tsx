@@ -1,4 +1,5 @@
 // What do we need to render the bootstrap part of the page
+import {memo} from 'react';
 import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
@@ -8,7 +9,7 @@ import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, Position
 import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
 import {Optional, OptionalTime, OptionalDuration, OptionalDurationMM} from './optional';
-import {useState, useEffect} from 'react';
+import {useState, useCallback} from 'react';
 
 import {FlightLegs} from './flightLegs';
 import {Sorting} from './sorting';
@@ -16,7 +17,7 @@ import {Sorting} from './sorting';
 // Helpers for loading contest information etc
 import {delayToText} from './timehelper.js';
 
-import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
+import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map, cloneDeep as _cloneDeep} from 'lodash';
 
 // Helpers for sorting pilot list
 import {updateSortKeys, nextSortOrder, getValidSortOrder, isValidSortOrder, ShortDisplayKeys, SortKey} from './pilot-sorting';
@@ -58,46 +59,48 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
                     {title}
                     {titleIcon || null}
                 </div>
-                <hr />
+            </a>
+            <hr />
+            <div>
+                <div className="main-icon">
+                    <a href="#" title={main.description} className="tooltipicon">
+                        <FontAwesomeIcon icon={main.icon} />
+                    </a>
+                </div>
+                <div className="main-text">
+                    {main.value}
+                    {main.units ? <div className="units">{main.units}</div> : null}
+                </div>
+            </div>
+            <hr />
+            {data1?.value != undefined ? (
                 <div>
-                    <div className="main-icon">
-                        <a href="#" title={main.description} className="tooltipicon">
-                            <FontAwesomeIcon icon={main.icon} />
+                    <div className="data-icon">
+                        <a href="#" title={data1.description} className="tooltipicon">
+                            <FontAwesomeIcon icon={data1.icon} />
                         </a>
                     </div>
-                    <div className="main-text">
-                        {main.value}
-                        {main.units ? <div className="units">{main.units}</div> : null}
+                    <div className="data-text">
+                        {data1.value}
+                        {data1.units ? <div className="units">{data1.units}</div> : null}
                     </div>
                 </div>
-                <hr />
-                {data1?.value != undefined ? (
-                    <div>
-                        <div className="data-icon">
-                            <a href="#" title={data1.description} className="tooltipicon">
-                                <FontAwesomeIcon icon={data1.icon} />
-                            </a>
-                        </div>
-                        <div className="data-text">
-                            {data1.value}
-                            {data1.units ? <div className="units">{data1.units}</div> : null}
-                        </div>
-                    </div>
-                ) : null}
-                {data2?.value !== undefined && data2.value !== null ? (
-                    <div>
+            ) : null}
+            {data2?.value !== undefined && data2.value !== null ? (
+                <div>
+                    {data2.icon ? (
                         <div className="data-icon">
                             <a href="#" title={data2.description} className="tooltipicon">
                                 <FontAwesomeIcon icon={data2.icon} />
                             </a>
                         </div>
-                        <div className="data-text">
-                            {data2.value}
-                            {data2.units ? <div className="units">{data2.units}</div> : null}
-                        </div>
+                    ) : null}
+                    <div className="data-text">
+                        {data2.value}
+                        {data2.units ? <div className="units">{data2.units}</div> : null}
                     </div>
-                ) : null}
-            </a>
+                </div>
+            ) : null}
         </li>
     );
 }
@@ -124,14 +127,27 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
     );
 }
 
-function StartComponent({score, tz}: {score: PilotScore; tz: TZ}) {
-    const [endTime, description, icon] = score.utcFinish
-        ? [OptionalTime(' ', score.utcFinish as Epoch, tz), 'finish time', solid('hourglass-end')] //
-        : score.taskTimeRemaining
-        ? [OptionalDuration('', score.taskTimeRemaining as Epoch), 'remaining time', solid('history')]
+const StartComponent = memo(function StartComponent({
+    utcStart,
+    utcFinish,
+    taskTimeRemaining,
+    taskDuration,
+    tz
+}: //
+{
+    utcStart: Epoch;
+    utcFinish: Epoch;
+    taskTimeRemaining: Epoch;
+    taskDuration: Epoch;
+    tz: TZ;
+}) {
+    const [endTime, description, icon] = utcFinish
+        ? [OptionalTime(' ', utcFinish, tz), 'finish time', solid('hourglass-end')] //
+        : taskTimeRemaining
+        ? [OptionalDuration('', taskTimeRemaining), 'remaining time', solid('history')]
         : ['', 'finish time', null];
 
-    const duration = OptionalDuration('+', score.taskDuration as Epoch).split(':');
+    const duration = OptionalDuration('+', taskDuration as Epoch).split(':');
 
     return (
         <SummaryComponent
@@ -139,38 +155,54 @@ function StartComponent({score, tz}: {score: PilotScore; tz: TZ}) {
             title="times" //
             width="110px"
             main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: solid('stopwatch'), description: 'elapsed time'}}
-            data1={{value: OptionalTime('', score.utcStart as Epoch, tz), icon: solid('hourglass-start'), description: 'start time'}}
+            data1={{value: OptionalTime('', utcStart, tz), icon: solid('hourglass-start'), description: 'start time'}}
             data2={{value: endTime, icon, description: description}}
         />
     );
-}
+});
 
-function HandicappedSpeedComponent({score}: {score: PilotScore}) {
+const HandicappedSpeedComponent = memo(function HandicappedSpeedComponent({
+    utcFinish,
+    handicappedTaskSpeed,
+    actualTaskSpeed
+}: //
+{
+    utcFinish: Epoch;
+    handicappedTaskSpeed: number;
+    actualTaskSpeed: number;
+}) {
     return (
         <SummaryComponent
             id="speed"
             title="speed" //
-            main={{value: score.handicapped.taskSpeed, units: 'kph', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped speed'}}
-            data1={{value: score.actual.taskSpeed, units: 'kph', icon: solid('tachometer-alt'), description: 'actual speed'}}
+            main={{value: handicappedTaskSpeed, units: 'kph', icon: utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped speed'}}
+            data1={{value: actualTaskSpeed, units: 'kph', icon: solid('tachometer-alt'), description: 'actual speed'}}
         />
     );
-}
-function ActualSpeedComponent({score}: {score: PilotScore}) {
+});
+const ActualSpeedComponent = memo(function ActualSpeedComponent({
+    utcFinish,
+    actualTaskSpeed
+}: //
+{
+    utcFinish: Epoch;
+    actualTaskSpeed: number;
+}) {
     return (
         <SummaryComponent
             width="100px"
             id="speed"
             title="speed" //
-            main={{value: score.actual.taskSpeed, units: 'kph', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual speed'}}
+            main={{value: actualTaskSpeed, units: 'kph', icon: utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual speed'}}
         />
     );
-}
+});
 
 function HandicappedDistanceComponent({score}: {score: PilotScore}) {
     return (
         <SummaryComponent
             width="100px"
-            id="distance"
+            id="hdistance"
             title="distance" //
             main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped distance done'}}
             data1={{value: score.actual.taskDistance, units: 'km', icon: solid('right-from-bracket'), description: 'actual distance done'}}
@@ -191,17 +223,41 @@ function ActualDistanceComponent({score}: {score: PilotScore}) {
     );
 }
 
-function HandicappedGRComponent({score}: {score: PilotScore}) {
+function grBattery(gr: number): any {
+    if (gr > 100) {
+        return solid('battery-quarter');
+    } else if (gr > 75) {
+        return solid('battery-half');
+    } else if (gr > 40) {
+        return solid('battery-three-quarters');
+    } else if (gr > 1) {
+        return solid('battery-full');
+    }
+    return solid('battery-empty');
+}
+
+const HandicappedGRComponent = memo(function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
+    return (
+        <SummaryComponent
+            width="100px"
+            id="hgr"
+            title="L/D" //
+            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : '∞', units: ' :1', icon: grBattery(handicappedGrRemaining), description: 'handicapped L/D remaining'}}
+            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
+        />
+    );
+});
+
+const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {actualGrRemaining: number}) {
     return (
         <SummaryComponent
             width="100px"
             id="gr"
             title="L/D" //
-            main={{value: score.handicapped?.grRemaining < 999 ? score.handicapped.grRemaining : null, units: ':1', icon: solid('fast-forward'), description: 'handicapped L/D remaining'}}
-            data1={{value: score.actual?.grRemaining < 999 ? score.actual.grRemaining : null, units: ':1', icon: solid('fast-forward'), description: 'actual L/D remaining'}}
+            main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
         />
     );
-}
+});
 
 export function Details({units, pilot, score, vario, tz}: {score: PilotScore | null; vario: VarioData | null; tz: TZ; units: number; pilot: API_ClassName_Pilots_PilotDetail}) {
     if (!pilot) {
@@ -215,15 +271,36 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
         </span>
     ) : null;
 
-    const hasHandicappedResults = score?.handicapped;
+    const hasHandicappedResults = !!score?.handicapped;
 
-    const speed = score ? hasHandicappedResults ? <HandicappedSpeedComponent score={score} /> : <ActualSpeedComponent score={score} /> : null;
+    const speed = score ? ( //
+        hasHandicappedResults ? (
+            <HandicappedSpeedComponent utcFinish={score.utcFinish as Epoch} handicappedTaskSpeed={score.handicapped.taskSpeed} actualTaskSpeed={score.actual.taskSpeed} />
+        ) : (
+            <ActualSpeedComponent utcFinish={score.utcFinish as Epoch} actualTaskSpeed={score.actual.taskSpeed} />
+        )
+    ) : null;
 
     const distance = score ? hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} /> : null;
+    const gr = score ? ( //
+        hasHandicappedResults ? (
+            <HandicappedGRComponent handicappedGrRemaining={score.handicapped.grRemaining} actualGrRemaining={score.actual.grRemaining} />
+        ) : (
+            <ActualGRComponent actualGrRemaining={score.actual.grRemaining} />
+        )
+    ) : null;
 
     let times = null;
     if (score?.utcStart) {
-        times = <StartComponent score={score} tz={tz} />;
+        times = (
+            <StartComponent //
+                taskDuration={score.taskDuration as Epoch}
+                taskTimeRemaining={score.taskTimeRemaining as Epoch}
+                utcStart={score.utcStart as Epoch}
+                utcFinish={score.utcFinish as Epoch}
+                tz={tz}
+            />
+        );
     }
 
     // Figure out what to show based on the db status
@@ -252,7 +329,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                     {score?.taskTimeRemaining ? distance : null}
                     {times}
                 </ul>
-                <FlightLegs score={score} tz={tz} units={units} />
+                <FlightLegs score={score} tz={tz} units={!!units} />
             </>
         );
     } else {
@@ -261,7 +338,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 <div>
                     Landed out
                     <ul className="status">{distance}</ul>
-                    <FlightLegs score={score} tz={tz} units={units} />
+                    <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
             );
         } else if (score?.flightStatus == PositionStatus.Home) {
@@ -269,7 +346,7 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                 <div>
                     Landed back
                     <ul className="status">{distance}</ul>
-                    <FlightLegs score={score} tz={tz} units={units} />
+                    <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
             );
         } else {
@@ -280,11 +357,9 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
                         {speed}
                         {distance}
                         {times}
+                        {gr}
                     </ul>
-                    {score.actual?.grRemaining ? <br /> : ', '}
-                    <Optional b="Glide ratio to Finish" v={score.actual?.grRemaining < 200 ? score.actual.grRemaining : null} e=":1" />
-                    <Optional b=", HCap Ratio" v={score.handicapped?.grRemaining < 200 ? score.handicapped.grRemaining : null} e=":1" />
-                    <FlightLegs score={score} tz={tz} units={units} />
+                    <FlightLegs score={score} tz={tz} units={!!units} />
                 </>
             );
         }
@@ -397,10 +472,10 @@ function PilotHeightBar({pilot}) {
 
 //
 // Figure out what status the pilot is in and choose the correct icon
-function PilotStatusIcon({display}: {display: ShortDisplayKeys}) {
+function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
     // If it's very delayed and we have had a point and
     // we are in the right mode then display a spinner
-    if (display.icon == 'nosignal') {
+    if (displayIcon == 'nosignal') {
         return (
             <span className="pilotstatus">
                 <FontAwesomeIcon icon={solid('spinner')} spin={true} />
@@ -410,43 +485,37 @@ function PilotStatusIcon({display}: {display: ShortDisplayKeys}) {
 
     return (
         <span className="pilotstatus">
-            <FontAwesomeIcon icon={display.icon} spin={false} />
+            <FontAwesomeIcon icon={displayIcon} spin={false} />
         </span>
     );
 }
 
 //
 // Render the pilot
-function Pilot({pilot, display, selected, select}: {pilot: API_ClassName_Pilots_PilotDetail; display: ShortDisplayKeys; selected: boolean; select: Function}) {
+const Pilot = memo(function Pilot({pilot, displayAs, displayUnits, displayIcon, selected, onClick}: {pilot: API_ClassName_Pilots_PilotDetail; displayAs: string; displayUnits: string; displayIcon: any; selected: boolean; onClick: any}) {
     const className = selected ? 'small-pic pilot pilothovercapture selected' : 'small-pic pilot pilothovercapture';
 
     // Render the normal pilot icon
     return (
         <li className={className} id={pilot.compno}>
-            <a
-                href="#"
-                title={pilot.compno + ': ' + pilot.name}
-                onClick={() => {
-                    select();
-                }}
-            >
+            <a href="#" title={pilot.compno + ': ' + pilot.name} onClick={onClick}>
                 <PilotImage image={pilot.image} country={pilot.country} compno={pilot.compno} class={pilot.class} />
                 <div>
                     <PilotHeightBar pilot={pilot} />
 
                     <div className="caption">
                         {pilot.compno}
-                        <PilotStatusIcon display={display} />
+                        <PilotStatusIcon displayIcon={displayIcon} />
                     </div>
                     <div>
-                        <div className="data">{display.displayAs}</div>
-                        <div className="units">{display.units}</div>
+                        <div className="data">{displayAs}</div>
+                        <div className="units">{displayUnits}</div>
                     </div>
                 </div>
             </a>
         </li>
     );
-}
+});
 
 //
 // Render the list of pilots
@@ -457,6 +526,7 @@ export function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
+    setOptions,
     handicapped,
     now,
     tz
@@ -468,14 +538,14 @@ export function PilotList({
     selectedPilot: Compno;
     setSelectedCompno: Function;
     options: any;
+    setOptions: Function;
     handicapped: boolean;
     now: Epoch;
     tz: TZ;
 }) {
     // These are the rendering options
-    const [rawOrder, setOrder] = useState<SortKey>('auto');
     const [visible, setVisible] = useState(true);
-    const order = getValidSortOrder(rawOrder, handicapped);
+    const order = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
 
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
@@ -484,33 +554,38 @@ export function PilotList({
 
     // Generate the pilot list, sorted by the correct key
     const pilotList = mutatedPilotList.reverse().map((pilot) => {
+        const onClick = () => {
+            selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
+        };
+
         return (
-            <Pilot
-                key={pilot.compno + 'pl'}
+            <Pilot //
+                key={pilot.compno}
                 pilot={pilots[pilot.compno]}
-                display={pilot}
+                displayUnits={pilot.units}
+                displayIcon={pilot.icon}
+                displayAs={pilot.displayAs.toString()}
                 selected={selectedPilot === pilot.compno}
-                select={() => {
-                    selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
-                }}
+                onClick={onClick}
             />
         );
     });
 
+    // Prevent unneeded re-render by using callbacks
+    const setSort = useCallback(
+        (o) => {
+            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
+        },
+        [order, handicapped, options]
+    );
+    const toggleVisible = useCallback(() => {
+        setVisible(!visible);
+    }, [visible]);
+
     // Output the whole of the pilots list component
     return (
         <>
-            <Sorting
-                setSort={(o) => {
-                    setOrder(nextSortOrder(o, order, handicapped || false));
-                }}
-                sortOrder={order}
-                visible={visible}
-                toggleVisible={() => {
-                    setVisible(!visible);
-                }}
-                handicapped={handicapped || false}
-            />
+            <Sorting setSort={setSort} sortOrder={order} visible={visible} toggleVisible={toggleVisible} handicapped={handicapped || false} />
             <Collapse in={visible}>
                 <ul className="pilots">{pilotList}</ul>
             </Collapse>

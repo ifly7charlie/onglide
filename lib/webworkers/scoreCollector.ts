@@ -13,9 +13,14 @@ import {MessagePort} from 'node:worker_threads';
  * collect scores from a collection of different generators and post update messages
  *
  */
+interface AddToScoreCollector {
+    collect: (compno: Compno, input: TaskScoresGenerator) => Promise<void>;
+    reset: () => void;
+    clearGlider: (compno: Compno) => void;
+}
 //
 // Get a generator to calculate task status
-export async function scoreCollector(interval: Epoch, port: MessagePort, task: Task, scoreStreams: Record<Compno, TaskScoresGenerator>, getNow: () => Epoch, log?: Function): Promise<void> {
+export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, scoreStreams: Record<Compno, TaskScoresGenerator>, getNow: () => Epoch, log?: Function): AddToScoreCollector {
     // Generate log function as it's quite slow to read environment all the time
     if (!log)
         log = (...a) => {
@@ -31,6 +36,7 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     // of scores when nothing happening
     const mostRecentScore: Record<Compno, PilotScore> = {};
     const mostRecentStart: Record<Compno, Epoch> = {};
+    const optionsForCompno: Record<Compno, {restartCount: number}> = {};
     let startsToSend: Record<Compno, Epoch> = {};
     let latestSent = false;
     let running = true;
@@ -79,7 +85,9 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
         //
         // Encode this as a protobuf
         const msg = OnglideWebSocketMessage.encode({scores: {pilots: scores}}).finish();
-        console.log(`[${id}/${taskId}] Startline update: ${className} :${Object.keys(startsToSend).join(',')}`);
+        if (countStartsToSend) {
+            console.log(`[${id}/${taskId}] Startline update: ${className} :${Object.keys(startsToSend).join(',')}`);
+        }
         console.log(`[${id}/${taskId}] Score update: ${className} : ${Object.keys(scores).join(',')} => ${msg.byteLength} bytes`);
         console.log(`[${id}/${taskId}] Period: ${className} : [${new Date(oldestUpdate * 1000).toUTCString()}-${new Date(newestUpdate * 1000).toUTCString()}] ${oldestUpdate}-${newestUpdate} : ${Math.max(now - newestUpdate, now - oldestUpdate)}`);
 
@@ -91,13 +99,13 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
     }
 
     // Start async functions to read scores and update our most recent
-    const promises = [];
     for (const compno in scoreStreams) {
-        promises.push(iterateAndUpdate(id, task.details.class, compno as Compno, scoreStreams[compno], updateScore));
+        optionsForCompno[compno] = {restartCount: 1};
+        iterateAndUpdate(id, task.details.class, compno as Compno, scoreStreams[compno], updateScore, optionsForCompno[compno]);
     }
 
     // And a timer callback that posts the message to front end
-    const timer = setInterval(() => {
+    setInterval(() => {
         if (!latestSent) {
             composeAndSendProtobuf(task.details.class, port, mostRecentScore, startsToSend);
             startsToSend = {};
@@ -105,26 +113,42 @@ export async function scoreCollector(interval: Epoch, port: MessagePort, task: T
         }
     }, interval * 1000);
 
-    // Wait for all the scoring to finish
-    await Promise.allSettled(promises);
+    // Return a function to
+    return {
+        collect: async function addToScoreCollector(compno: Compno, input: TaskScoresGenerator) {
+            optionsForCompno[compno] = Object.assign(optionsForCompno[compno] ?? {}, {restartCount: (optionsForCompno[compno]?.restartCount ?? 0) + 1});
+            return iterateAndUpdate(id, task.details.class, compno, input, updateScore, optionsForCompno[compno]);
+        },
+        reset: function () {
+            Object.values(optionsForCompno).forEach((option) => option.restartCount++);
+        },
+        clearGlider: function (compno: Compno) {
+            if (compno in optionsForCompno) {
+                optionsForCompno[compno].restartCount++;
+            }
+        }
+    };
 
-    // And then clear the interval and return - no need to keep running it if nothing is
-    // scoring any longer
-    clearInterval(timer);
+    // Nah, we might need to restart so don't do this...
+    // Abandon promises, intervals and some hope
 }
 
-async function iterateAndUpdate(id: string, className: ClassName, compno: Compno, input: TaskScoresGenerator, updateScore: Function): Promise<void> {
+async function iterateAndUpdate(id: string, className: ClassName, compno: Compno, input: TaskScoresGenerator, updateScore: Function, options: {restartCount: number}): Promise<void> {
     // Loop till we are told to stop
+    const myRestartCount = options.restartCount;
     try {
         for await (const value of input) {
+            if (myRestartCount != options.restartCount) {
+                break;
+            }
             if (!updateScore(compno, value)) {
                 break;
             }
         }
     } catch (e) {
-        console.log(compno, e);
+        console.log(compno, 'scoreCollector exception', e);
     }
     trackMetric('sc.done.' + className, 1);
     trackMetric('sc.done', 1);
-    console.log(`[${id}] SC: Completed scoring iteration for ${compno}`);
+    console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno}`);
 }

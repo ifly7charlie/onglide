@@ -6,7 +6,8 @@
 // It will also expose the helper functions required to update the screen
 //
 
-import {useState, useMemo, useRef, useCallback} from 'react';
+import {useState, useMemo, useCallback, useEffect, memo} from 'react';
+import {useRouter} from 'next/router';
 
 import {usePilots, Spinner} from './loaders';
 
@@ -14,13 +15,15 @@ import {Nbsp, TooltipIcon} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map} from 'lodash';
+import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-import {Epoch, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
+import {Epoch, TZ, Compno, ClassName, Datecode, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
 import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
 import {assembleLabeledLine} from './distanceLine';
 
-import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
+//import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
@@ -29,8 +32,10 @@ import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
 import {OptionalDurationMM} from './optional';
 
+import {gapLength} from '../constants';
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
+import {UseMeasure} from './measure';
 
 import dynamic from 'next/dynamic';
 const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
@@ -44,10 +49,19 @@ const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     )
 });
 
-//let mutateTimer = 0;
-const httpsTest = new RegExp(/^https/i, 'i');
+interface WsStatus {
+    listeners: number;
+    airborne: number;
+    timeStamp: number; // websocket message timestamp
+    at: Epoch; // competition time
+    state: 'connecting' | 'open' | 'retry' | 'closed';
+    retry?: number;
+}
 
-function proposedUrl(vc, datecode) {
+//let mutateTimer = 0;
+const httpsTest = new RegExp(/^(https|wss)/i, 'i');
+
+function proposedUrl(vc: ClassName, datecode: Datecode) {
     const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
     if (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) {
         return process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX + hn + '/' + (vc + datecode).toUpperCase();
@@ -55,168 +69,222 @@ function proposedUrl(vc, datecode) {
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST) ? 'wss://' : 'ws://') + hn + '/' + (vc + datecode).toUpperCase();
 }
 
-export function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
-    const [trackData, setTrackData] = useState<TrackData>({});
-    const [pilotScores, setPilotScores] = useState<ScoreData>({});
-    const {pilots, isPLoading} = usePilots(vc);
-    const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
-    const [wsStatus, setWsStatus] = useState({listeners: 1, airborne: 0, timeStamp: 0, at: 0});
-    const [follow, setFollow] = useState(false);
-    const [attempt, setAttempt] = useState(0);
-
-    // For remote updating of the map
-    const mapRef = useRef(null);
-
-    // Keep track of online/offline status of the page
-    const [online] = useState(navigator.onLine);
-
-    // We are using a webSocket to update our data here
-    const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
-        reconnectAttempts: 40,
-        reconnectInterval: 16000,
-        //        onReconnectStop: () => {
-        //            setAttempt(-100);
-        //        },
-        retryOnError: true
-    });
-
-    // Do we have a loaded set of details?
-    const valid = !isPLoading && pilots && Object.keys(pilots).length > 0 && mapRef && mapRef.current && mapRef.current.getMap();
-
-    // Have we had a websocket message, if it hasn't changed then ignore it!
-    let updateMessage = null;
-    if (lastMessage) {
-        if (wsStatus.timeStamp != lastMessage.timeStamp) {
-            wsStatus.timeStamp = lastMessage.timeStamp;
-            decodeWebsocketMessage(lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus, selectedCompno, follow);
-        }
-    }
-
-    const connectionStatus = useMemo(() => {
-        const connectionStatusO = {
-            [ReadyState.CONNECTING]: ['Connecting to tracking..', faSpinner],
-            [ReadyState.CLOSING]: ['Closing tracking connection', faSpinner],
-            [ReadyState.CLOSED]: [`Connection to tracking is closed, ${attempt < Infinity ? 'please reload to reconnect' : 'retrying shortly'}`, faLinkSlash],
-            [ReadyState.UNINSTANTIATED]: ['Messed Up', faSpinner]
-        }[readyState];
-
-        if (connectionStatusO) {
-            setWsStatus({listeners: 1, airborne: 0, timeStamp: 0, at: 0}); // clear status will update eventually
-            return (
-                <div>
-                    <TooltipIcon icon={connectionStatusO[1]} tooltip={connectionStatusO[0]} />
-                    <Nbsp />
-                    {connectionStatusO[0]}
-                    <br style={{clear: 'both'}} />
-                    <hr />
-                </div>
-            );
-        }
-        return null;
-    }, [readyState, attempt]);
-
-    if (socketUrl != proposedUrl(vc, datecode)) {
-        setPilotScores({});
-        setTrackData({});
-        setSocketUrl(proposedUrl(vc, datecode));
-    }
-
-    function setCompno(cn) {
-        setSelectedCompno(cn);
-        console.log('setCompno', cn, pilots[cn]);
-        if (cn && pilots && pilots[cn]) {
-            setFollow(true);
-            console.log(cn, trackData[cn]?.deck?.partial);
-            if (!trackData[cn]?.deck || trackData[cn]?.deck?.partial) {
-                sendMessage(cn);
-            }
-        }
-    }
-
-    // And the pilot object
-    const selectedPilotData: SelectedPilotDetails | null = pilots
-        ? {
-              pilot: pilots[selectedCompno],
-              score: pilotScores[selectedCompno],
-              track: trackData[selectedCompno]
-          }
-        : null;
-
-    // Cache the calculated times and only refresh every 60 seconds
-    const status = useMemo(() => {
-        return (
-            (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
-            ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
-        );
-    }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
-
-    // Scale map to fit the bounds
-    const fitBounds = useCallback(() => {
-        setOptions({...options, zoomTask: true});
-    }, [vc]);
-
-    return (
-        <>
-            <div className={'resizingMap'}>
-                <MApp
-                    key="map"
-                    vc={vc}
-                    follow={follow}
-                    setFollow={setFollow}
-                    selectedPilotData={selectedPilotData}
-                    setSelectedCompno={(x) => setCompno(x)}
-                    mapRef={mapRef} //
-                    pilots={pilots}
-                    pilotScores={pilotScores}
-                    options={options}
-                    setOptions={setOptions}
-                    tz={tz}
-                    t={wsStatus.at as Epoch}
-                    viewport={viewport}
-                    setViewport={setViewport}
-                    trackData={trackData}
-                    selectedCompno={selectedCompno}
-                    measureFeatures={measureFeatures}
-                    status={status}
-                />
-            </div>
-            <div className="resultsOverlay" key="results">
-                <div className="resultsUnderlay">
-                    {connectionStatus}
-                    {notes && notes != '' && (
-                        <>
-                            <br />
-                            <span style={{clear: 'both', color: 'red'}}>{notes}</span>
-                            <br />
-                        </>
-                    )}
-                    <TaskDetails vc={vc} fitBounds={fitBounds} />
-                    {valid && (
-                        <PilotList
-                            key="pilotList"
-                            pilots={pilots}
-                            pilotScores={pilotScores} //
-                            trackData={trackData}
-                            selectedPilot={selectedCompno}
-                            setSelectedCompno={(x) => setCompno(x)}
-                            now={wsStatus.at as Epoch}
-                            tz={tz}
-                            options={options}
-                            handicapped={handicapped}
-                        />
-                    )}
-                </div>
-            </div>
-            {selectedPilotData?.pilot ? <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} /> : <Sponsors at={wsStatus.at} />}
-        </>
-    );
+function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string) {
+    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || window.location.host;
+    return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) ? 'https://' : 'http://') + hn + '/tracks/' + (vc + datecode + '.' + baseTime).toUpperCase() + '.bin';
 }
 
-function formatTimes(t, tz) {
+export const OgnFeed = memo(
+    //
+    function OgnFeed({
+        vc,
+        datecode,
+        tz,
+        selectedCompno,
+        setSelectedCompno,
+        viewport,
+        setViewport,
+        options,
+        setOptions,
+        measureFeatures,
+        handicapped,
+        notes
+    }: //
+    {
+        vc: ClassName;
+        datecode: Datecode;
+        tz: TZ;
+        selectedCompno: Compno;
+        setSelectedCompno: Function;
+        viewport: any;
+        setViewport: Function;
+        measureFeatures: UseMeasure;
+        options: any;
+        setOptions: Function;
+        handicapped: any;
+        notes: string;
+    }) {
+        const [trackData, setTrackData] = useState<TrackData>({});
+        const [pilotScores, setPilotScores] = useState<ScoreData>({});
+        const {pilots, isPLoading} = usePilots(vc);
+        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
+        const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
+        const [follow, setFollow] = useState(false);
+
+        // Keep track of online/offline status of the page
+        //        const [online] = useState(navigator.onLine);
+
+        // We are using a webSocket to update our data here
+        const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
+            reconnectAttempts: 15,
+            reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
+            retryOnError: true,
+            onOpen: (a) => setWsStatus({...wsStatus, state: 'open', retry: 0}),
+            onError: (a) => {
+                console.warn(a, wsStatus);
+                wsStatus.state != 'closed' ? setWsStatus({...wsStatus, state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
+            },
+            onReconnectStop: (numAttempts) => setWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
+        });
+
+        // Do we have a loaded set of details?
+        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
+
+        // Have we had a websocket message, if it hasn't changed then ignore it!
+        if (lastMessage) {
+            if (wsStatus.timeStamp != lastMessage.timeStamp) {
+                wsStatus.timeStamp = lastMessage.timeStamp;
+                decodeWebsocketMessage(vc, datecode, lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus);
+            }
+        }
+
+        const connectionStatus = useMemo(() => {
+            const connectionStatusO = {
+                connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
+                retry: (wsStatus.retry ?? 0) < 4 && wsStatus.at ? null : [(wsStatus.at ? 'Rec' : 'C') + 'onnecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
+                closed: ['Connection to tracking is closed, please reload to reconnect', <FontAwesomeIcon icon={solid('link-slash')} />]
+            }[wsStatus.state ?? 'open'];
+
+            console.log('last timestamp on status change', wsStatus.at, connectionStatusO?.[0]);
+
+            if (connectionStatusO) {
+                return (
+                    <div className={'connectionStatus'}>
+                        {connectionStatusO[1]}
+                        <Nbsp />
+                        {connectionStatusO[0]}
+                    </div>
+                );
+            }
+            return null;
+        }, [wsStatus.state, wsStatus.retry]);
+
+        useEffect(() => {
+            if (socketUrl != proposedUrl(vc, datecode)) {
+                //                console.log('change url');
+                setPilotScores({});
+                setTrackData({});
+                setSocketUrl(proposedUrl(vc, datecode));
+            }
+        }, [vc, datecode, socketUrl]);
+
+        const setCompno = useCallback(
+            (cn) => {
+                setSelectedCompno(cn);
+                if (cn && pilots && pilots[cn]) {
+                    setFollow(true);
+                }
+            },
+            [setSelectedCompno, pilots]
+        );
+
+        // And the pilot object
+        const selectedPilotData: SelectedPilotDetails | null = useMemo(
+            () =>
+                pilots
+                    ? {
+                          pilot: pilots[selectedCompno],
+                          score: pilotScores[selectedCompno],
+                          track: trackData[selectedCompno]
+                      }
+                    : null,
+            [pilots, selectedCompno]
+        );
+
+        // Cache the calculated times and only refresh every 60 seconds
+        const status = useMemo(() => {
+            return (
+                (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
+                ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
+            );
+        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
+
+        // Scale map to fit the bounds
+        const fitBounds = useCallback(() => {
+            setOptions({...options, zoomTask: true});
+        }, [vc]);
+
+        // Send the options to the server so we can keep an eye on what settings are
+        // used by default, we don't record any identifiers. This is to try and work
+        // around safari terminating websocket so frequently
+        const sendOptions = useMemo(() => {
+            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', options}));
+        }, [options, selectedCompno]);
+
+        return (
+            <>
+                <div className={'resizingMap'}>
+                    <MApp //
+                        key="map"
+                        vc={vc}
+                        follow={follow}
+                        setFollow={setFollow}
+                        selectedPilotData={selectedPilotData}
+                        setSelectedCompno={setCompno}
+                        pilots={pilots}
+                        pilotScores={pilotScores}
+                        options={options}
+                        setOptions={setOptions}
+                        tz={tz}
+                        t={wsStatus.at as Epoch}
+                        viewport={viewport}
+                        setViewport={setViewport}
+                        trackData={trackData}
+                        selectedCompno={selectedCompno}
+                        measureFeatures={measureFeatures}
+                        status={status}
+                    />
+                </div>
+                <div className="resultsOverlay" key="results">
+                    {connectionStatus}
+                    <div className="resultsUnderlay">
+                        {notes && notes != '' && (
+                            <>
+                                <br />
+                                <span style={{clear: 'both', color: 'red'}}>{notes}</span>
+                                <br />
+                            </>
+                        )}
+                        <TaskDetails vc={vc} fitBounds={fitBounds} />
+                        {valid && (
+                            <PilotList
+                                key="pilotList"
+                                pilots={pilots}
+                                pilotScores={pilotScores} //
+                                trackData={trackData}
+                                selectedPilot={selectedCompno}
+                                setSelectedCompno={setCompno}
+                                now={wsStatus.at as Epoch}
+                                tz={tz}
+                                options={options}
+                                setOptions={setOptions}
+                                handicapped={handicapped}
+                            />
+                        )}
+                    </div>
+                </div>
+                {selectedPilotData?.pilot ? <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} /> : <Sponsors at={wsStatus.at} />}
+            </>
+        );
+    },
+    // Memo comparison, skip all the functions
+    (o, n) =>
+        o.selectedCompno === n.selectedCompno && //
+        o.vc === n.vc &&
+        o.datecode == n.datecode &&
+        _isEqual(o.viewport, n.viewport) &&
+        _isEqual(o.measureFeatures[0], n.measureFeatures[0]) &&
+        _isEqual(o.options, n.options) &&
+        o.notes === n.notes &&
+        o.handicapped === n.handicapped
+    //    function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
+);
+
+function formatTimes(t, tz: TZ) {
     // Figure out what the local language is for international date strings
     const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
 
-    let competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
+    const competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
         ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                 <span style={{color: 'grey'}}>
                  &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
@@ -249,67 +317,152 @@ function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
 
     // Merge into the geoJSON objects as needed
     mergePoint(point, cp, false);
+    cp.deck?.dataPromiseResolve?.();
 }
 
-export function AlertDisconnected({mutatePilots, attempt}) {
-    const [show, setShow] = useState(attempt);
-    const [pending, setPending] = useState(attempt);
+function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, setTrackData: (a: TrackData) => void, pilotScores: ScoreData) {
+    setTrackData(
+        _reduce(
+            decoded.tracks?.pilots,
+            (result, p, compno) => {
+                if (!result[compno]) {
+                    result[compno] = {compno: compno};
+                }
+                // Check if we have a deck already
+                let existing = result[compno].deck;
 
-    if (show == attempt) {
-        return (
-            <Alert variant="danger" onClose={() => setShow(attempt + 1)} dismissible>
-                <Alert.Heading>Disconnected</Alert.Heading>
-                <p>Your streaming connection has been disconnected, you can reconnect or just look at the results without live tracking</p>
-                <hr />
-                <Button
-                    variant="success"
-                    onClick={() => {
-                        mutatePilots();
-                        setPending(attempt + 1);
-                    }}
-                >
-                    Reconnect{pending == attempt + 1 ? <Spinner /> : null}
-                </Button>
-            </Alert>
-        );
-    }
-    return null;
+                // If we have just received a baseTime 0 set then we should erase the old stuff
+                if (existing && decoded.tracks.baseTime === 0) {
+                    existing = null;
+                }
+
+                // If it's a new version of the track then we need to ignore the old one
+                if (existing && existing.trackVersion != p.trackVersion) {
+                    console.log(`${compno}:replacing track as version changed ${existing.trackVersion} != ${p.trackVersion}`);
+                    existing = null;
+                }
+
+                const ts = new Uint32Array(p.t.slice().buffer);
+                const indexOfOverlap = existing ? _sortedIndex(ts, existing.t[existing.posIndex - 1]) : 0;
+                //                if (existing) {
+                //                    console.log(`${compno}: existing latest: ${existing?.t[existing.posIndex - 1]}, new range: ${ts[0]} to ${ts[p.posIndex - 1]}`);
+                //                }
+                //                console.log(`${compno}: existing length ${existing?.posIndex}, overlap index: ${indexOfOverlap}`);
+
+                let deck: DeckData = {
+                    compno: compno as Compno,
+                    positions: new Float32Array(p.positions.slice(indexOfOverlap * 3 * Float32Array.BYTES_PER_ELEMENT).buffer),
+                    t: new Uint32Array(p.t.slice(indexOfOverlap * Uint32Array.BYTES_PER_ELEMENT).buffer),
+                    climbRate: new Int8Array(p.climbRate.slice(indexOfOverlap * Int8Array.BYTES_PER_ELEMENT).buffer),
+                    agl: new Int16Array(p.agl.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer),
+                    posIndex: p.posIndex - indexOfOverlap,
+                    trackVersion: p.trackVersion
+                };
+
+                if (existing) {
+                    // Make the new structure it needs enough space for existing and new
+                    const combined: DeckData = {
+                        compno: compno as Compno,
+                        positions: new Float32Array(deck.positions.length + existing?.positions.length || 0),
+                        t: new Uint32Array(deck.t.length + existing?.t.length || 0),
+                        climbRate: new Int8Array(deck.climbRate.length + existing?.climbRate.length || 0),
+                        agl: new Int16Array(deck.agl.length + existing?.agl.length || 0),
+                        posIndex: deck.posIndex + existing?.posIndex,
+                        trackVersion: p.trackVersion
+                    };
+
+                    // Figure out which order to put them in
+                    const existingOlder = existing ? existing.t[0] < deck.t[0] : null;
+                    const newPosition = existingOlder === true ? existing.posIndex : 0;
+                    const existingPosition = existingOlder === false ? deck.posIndex : 0;
+
+                    if (existing) {
+                        combined.positions.set(existing.positions, existingPosition * 3);
+                        combined.t.set(existing.t, existingPosition);
+                        combined.climbRate.set(existing.climbRate, existingPosition);
+                        combined.agl.set(existing.agl, existingPosition);
+                    }
+
+                    combined.positions.set(deck.positions, newPosition * 3);
+                    combined.t.set(deck.t, newPosition);
+                    combined.climbRate.set(deck.climbRate, newPosition);
+                    combined.agl.set(deck.agl, newPosition);
+
+                    deck = combined;
+                }
+
+                if (pilotScores[compno]?.utcStart) {
+                    pruneStartline(deck, pilotScores[compno].utcStart);
+                }
+
+                // Save the version
+                deck.trackVersion = p.trackVersion;
+
+                // Create new iterators
+                deck.getData = getData(compno as Compno, deck);
+
+                // Store away and update the vario
+                result[compno].deck = deck;
+                [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
+                Object.assign(trackData[compno], result[compno]);
+                return result;
+            },
+            trackData
+        )
+    );
 }
 
-function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData, pilotScores: ScoreData, setPilotScores, wsStatus, setWsStatus, selectedCompno: Compno, follow: boolean) {
-    new Response(data).arrayBuffer().then((ab) => {
+async function decodeWebsocketMessage(
+    vc: ClassName, //
+    datecode: Datecode,
+    data: Buffer,
+    trackData: TrackData,
+    setTrackData: (a: TrackData) => void,
+    pilotScores: ScoreData,
+    setPilotScores: (a: ScoreData) => void,
+    wsStatus: any,
+    setWsStatus: (a: any) => void
+): Promise<void> {
+    return new Response(data).arrayBuffer().then(async (ab) => {
         const decoded = OnglideWebSocketMessage.decode(new Uint8Array(ab));
+        if (!decoded) {
+            console.log('unable to decode websocket message');
+        }
         // Merge in changed tracks
         if (decoded?.tracks) {
-            setTrackData(
-                _reduce(
-                    decoded.tracks?.pilots,
-                    (result, p, compno) => {
-                        if (!result[compno]) {
-                            result[compno] = {compno: compno};
-                        }
-                        const deck: DeckData = (result[compno].deck = {
-                            compno: compno as Compno,
-                            indices: new Uint32Array(p.indices.slice().buffer),
-                            positions: new Float32Array(p.positions.slice().buffer),
-                            t: new Uint32Array(p.t.slice().buffer),
-                            climbRate: new Int8Array(p.climbRate.slice().buffer),
-                            recentIndices: new Uint32Array(p.recentIndices.slice().buffer),
-                            agl: new Int16Array(p.agl.slice().buffer),
-                            posIndex: p.posIndex,
-                            partial: p.partial,
-                            segmentIndex: p.segmentIndex
-                        });
-                        //                        result[compno].colors = new Uint8Array(_map(result[compno].t, (_) => [Math.floor(Math.random() * 255), 128, 128]).flat());
-                        if (!p.partial && pilotScores[compno]?.utcStart) {
-                            pruneStartline(deck, pilotScores[compno].utcStart);
-                        }
-                        [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
-                        return result;
-                    },
-                    trackData
-                )
-            );
+            const ourMostRecent = Object.values(trackData).reduce((oldest, track) => Math.max(oldest, track.t ?? 0), 0);
+            const numberOfUpdates = Object.keys(decoded?.tracks?.pilots ?? {}).length;
+            const newChecksums =
+                numberOfUpdates <= 1
+                    ? ''
+                    : Object.values(decoded?.tracks?.pilots ?? {})
+                          .map((g) => g.trackVersion.toString(16))
+                          .join(',');
+            const oldChecksums =
+                numberOfUpdates <= 1
+                    ? ''
+                    : Object.values(trackData)
+                          .map((g) => g.deck?.trackVersion.toString(16) ?? g.compno)
+                          .join(',');
+
+            console.log(`ourMostRecent ${new Date((ourMostRecent ?? 0) * 1000).toISOString()}, basetime:${new Date((decoded.tracks.baseTime ?? 0) * 1000).toISOString()}`);
+            if (newChecksums != oldChecksums) {
+                console.log('version checksum changed, fetching all');
+            }
+
+            if (decoded.tracks.baseTime && (ourMostRecent < decoded.tracks.baseTime || newChecksums != oldChecksums)) {
+                // We get the initial URL and then decode it the same as if it is from the websocket as it is the same format (recursive)
+                await fetch(oldTracksUrl(vc, datecode, decoded.tracks.baseTime.toString())) //
+                    .then((res) => res.arrayBuffer())
+                    .then(async (ab) => decodeWebsocketMessage(vc, datecode, Buffer.from(ab), trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus))
+                    .then(() => {
+                        console.log('updating track remainders (wss)');
+                        updateTracks(decoded, trackData, setTrackData, pilotScores);
+                    });
+            } else {
+                console.log('updating track starts', !decoded.tracks.baseTime ? 'https' : 'wss only');
+                updateTracks(decoded, trackData, setTrackData, pilotScores);
+            }
         }
 
         // If we have been sent scores then merge them in,
@@ -337,6 +490,14 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
                             p.taskGeoJSON = JSON.parse(p.taskGeoJSON);
                         }
 
+                        // If they have a more recent start then we need to prune and re-do the iterator
+                        if (trackData[compno]?.deck && result[compno] && result[compno].utcStart < p.utcStart) {
+                            if (pruneStartline(trackData[compno].deck, pilotScores[compno].utcStart)) {
+                                //                                console.log('re create iterator (prune on new start time):', compno);
+                                trackData[compno].getData = getData(compno as Compno, trackData[compno].deck);
+                            }
+                        }
+
                         // Save into the pilot structure
                         result[compno] = p;
                         return result;
@@ -351,7 +512,6 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
             _foreach(decoded.positions.positions, (p) => {
                 mergePointToPilot(p, trackData);
             });
-            setTrackData(trackData);
         }
 
         if (decoded.ka) {
@@ -364,4 +524,56 @@ function decodeWebsocketMessage(data: Buffer, trackData: TrackData, setTrackData
             setWsStatus(wsStatus);
         }
     });
+}
+
+// Create an async iterable
+async function* getData(compno: Compno, deck: DeckData) {
+    let current = 1;
+    //    console.log('starting iterator', compno, deck.posIndex);
+
+    if (deck.dataPromiseResolve) {
+        console.log('existing iterator found, closing');
+        deck.dataPromiseResolve(true);
+    }
+
+    let abort: boolean | undefined = false;
+    while (!abort) {
+        // Wait for data
+
+        // And send a segment or some
+        const newData = [];
+        while (current < deck.posIndex) {
+            const previous = current - 1;
+
+            // No gap, use previous point
+            if (deck.t[current] - deck.t[previous] < gapLength) {
+                newData.push({
+                    p: [[...deck.positions.subarray(previous * 3, previous * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
+                    t: deck.t[current],
+                    v: deck.climbRate[current],
+                    g: deck.agl[current]
+                });
+            }
+            // gap, use current point twice
+            else {
+                newData.push({
+                    p: [[...deck.positions.subarray(current * 3, current * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
+                    t: deck.t[current],
+                    v: deck.climbRate[current],
+                    g: deck.agl[current]
+                });
+            }
+            current++;
+        }
+
+        // Send to deck
+        if (newData.length) {
+            yield newData;
+        }
+
+        // And wait for more data
+        abort = await new Promise<undefined | boolean>((resolve) => {
+            deck.dataPromiseResolve = resolve;
+        });
+    }
 }

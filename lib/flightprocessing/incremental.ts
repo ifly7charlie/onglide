@@ -23,18 +23,15 @@ function resize<T extends Int8Array | Int16Array | Uint32Array | Float32Array>(a
     return c;
 }
 
-export function initialiseDeck(compno: Compno, glider: PilotTrackData): void {
+export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVersion: number): void {
     glider.deck = {
         compno: compno,
         positions: new Float32Array(deckPointIncrement * 3),
-        indices: new Uint32Array(deckSegmentIncrement),
         agl: new Int16Array(deckPointIncrement),
         t: new Uint32Array(deckPointIncrement),
-        recentIndices: new Uint32Array(2),
         climbRate: new Int8Array(deckPointIncrement),
-        partial: true,
         posIndex: 0,
-        segmentIndex: 0
+        trackVersion
     };
 }
 
@@ -46,7 +43,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         if (latest) {
             return false;
         }
-        initialiseDeck(glider.compno, glider);
+        initialiseDeck(glider.compno, glider, 0);
     } else {
         // If not first point then make sure we are in order!
         lastTime = glider.deck.t[glider.deck.posIndex - 1];
@@ -55,7 +52,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         }
     }
 
-    // Last point we go
+    // Last point we got
     glider.t = point.t as Epoch;
 
     // Now we will work with this data
@@ -70,52 +67,14 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         deck.climbRate = resize(Int8Array, deck.climbRate, newLength);
     }
 
-    if (deck.segmentIndex + 2 >= deck.indices.length) {
-        deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
-    }
-
     // Set the new positions
-    function pushPoint(positions: Float32Array | number[], g: number, t: number) {
-        deck.positions.set(positions, deck.posIndex * 3);
-        deck.t[deck.posIndex] = t;
-        deck.agl[deck.posIndex] = g;
-        //		deck.colours.set( [ 64, 64, 64 ], deck.posIndex*3 );
-        deck.posIndex++;
-        // Also the indicies array needs to be terminated
-        deck.indices[deck.segmentIndex] = deck.posIndex;
+    deck.positions.set([point.lng, point.lat, point.a], deck.posIndex * 3);
+    deck.t[deck.posIndex] = point.t;
+    deck.agl[deck.posIndex] = point.g;
+    if (point.t - lastTime < gapLength) {
+        deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
     }
-
-    // Start the first segment
-    if (deck.posIndex == 0) {
-        deck.indices[deck.segmentIndex++] = 0;
-    } else {
-        // If the gap is too long then we need to start the next segment as well
-        if (point.t - lastTime > gapLength) {
-            // If we have only one point in the previous segment then we should duplicate it
-            const previousSegmentStart = deck.indices[deck.segmentIndex - 1];
-            if (previousSegmentStart == deck.posIndex) {
-                // add it to the previous segment so there are two points in it, it's not a line
-                // without two points
-                pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
-            }
-
-            // Start a new segment, on the next point (which has not yet been pushed)
-            deck.segmentIndex++;
-        } else {
-            deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
-        }
-    }
-
-    // Push the new point into the data array
-    pushPoint([point.lng, point.lat, point.a], point.g, point.t);
-
-    // Generate the recent track for the glider
-    let recentOldest = deck.recentIndices[0];
-    while (point.t - deck.t[recentOldest] > gapLength && recentOldest < deck.posIndex) {
-        recentOldest++;
-    }
-    deck.recentIndices[0] = recentOldest;
-    deck.recentIndices[1] = deck.posIndex;
+    deck.posIndex++;
 
     // Update the altitude and height AGL for the pilot
     // Mutate the vario and altitude back into SWR
@@ -150,62 +109,25 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     //    console.log('pruneStartline', deck.compno, startTime);
     // Keep 30 seconds before start
     if (!deck || deck.t[0] >= startTime) {
+        //        console.log(`can't prune startline for ${deck?.compno} first point later than startTime ${startTime}`);
         return false;
     }
 
     // Find the point in the array of times
     let indexRemove = _sortedIndex(deck.t.subarray(0, deck.posIndex - 1), startTime);
     if (!indexRemove || indexRemove == deck.posIndex - 1) {
-        console.log(`can't prune startline for ${deck.compno} no enough points yet ${indexRemove} <> ${deck.posIndex}`);
+        console.log(`can't prune startline for ${deck.compno} no enough points yet ${indexRemove} == ${deck.posIndex}-1 [${deck.t[deck.posIndex - 1]} <= ${startTime}`);
         return false;
     }
 
-    // Find the index into the segments that is the index or above
-    let segmentPos = _sortedIndex(deck.indices.subarray(0, deck.segmentIndex), indexRemove);
-
-    //    for (let c = 0; c <= deck.segmentIndex; c++) {
-    //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
-    //    }
-
-    // A segment starts on this position - we can remove all before
-    if (deck.indices[segmentPos] == indexRemove) {
-    }
-    // A segment starts one afterwards - this is tricky it means
-    // the start point was the last point of previous segment
-    // ie indexRemove points to the last point in the previous segment
-    else if (deck.indices[segmentPos] == indexRemove + 1) {
-        // in this case we will truncate the previous segment and keep one
-        // more point
-        segmentPos--;
-        indexRemove--;
-    }
-    // in segment keep this segment but remove the segment before
-    else {
-        segmentPos--;
-    }
-
-    // first we need to remove old segments - start with the older list as may be points in it
-    deck.recentIndices[0] = Math.max(deck.recentIndices[0] - indexRemove, 0);
-    deck.recentIndices[1] = Math.max(deck.recentIndices[1] - indexRemove, 0);
-
-    // Remove before
-    deck.indices = new Uint32Array(deck.indices.subarray(segmentPos).map((p) => Math.max(0, p - indexRemove)));
-
-    // Adjust the offsets and If we are removing anything then resze it down
-    deck.segmentIndex -= segmentPos;
+    // reduce the index
     deck.posIndex -= indexRemove;
-    deck.indices[deck.segmentIndex] = deck.posIndex;
 
     // And then take the end of the buffer for displaying data
     deck.positions = deck.positions.slice(indexRemove * 3);
     deck.agl = deck.agl.slice(indexRemove);
     deck.t = deck.t.slice(indexRemove);
     deck.climbRate = deck.climbRate.slice(indexRemove);
-
-    //    console.log('ir:', indexRemove, 'sp:', segmentPos, 'start:', startTime);
-    //    for (let c = 0; c <= deck.segmentIndex; c++) {
-    //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
-    //    }
 
     return true;
 }

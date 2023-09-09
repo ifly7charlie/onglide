@@ -1,7 +1,8 @@
+import {memo} from 'react';
 import {TooltipIcon} from './htmlhelper';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {PilotScore, PilotScoreLeg, Epoch, PositionStatus} from '../types';
+import {PilotScore, PilotScoreLeg, Epoch, PositionStatus, TZ} from '../types';
 
 import {useState} from 'react';
 
@@ -18,7 +19,7 @@ import Button from 'react-bootstrap/Button';
 
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
-export function FlightLegs({score, units, tz}) {
+export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: any; units: boolean; tz: TZ}) {
     const [viewOptions, setViewOptions] = useState({task: 1, hcapped: 0});
 
     if (!score?.legs) {
@@ -55,7 +56,7 @@ export function FlightLegs({score, units, tz}) {
         }
         if (l.maxPossible && l.minPossible && Math.trunc(l.minPossible) != Math.round(l.maxPossible)) {
             return (
-                <td style={{fontSize: 'small'}}>
+                <td style={{fontSize: 'small'}} key="mp_dr">
                     {Math.trunc(l.minPossible)}-{Math.round(l.maxPossible)}
                     <br />
                     {l.distanceRemaining}
@@ -64,7 +65,7 @@ export function FlightLegs({score, units, tz}) {
         }
         if (l.maxPossible) {
             return (
-                <td style={{fontSize: 'small'}}>
+                <td style={{fontSize: 'small'}} key="mp">
                     {l.maxPossible}
                     <br />
                     {l.distanceRemaining}
@@ -72,7 +73,7 @@ export function FlightLegs({score, units, tz}) {
             );
         }
         if (l.distanceRemaining > 0) {
-            return <td>{l.distanceRemaining}</td>;
+            return <td key="dr">{l.distanceRemaining}</td>;
         }
         return null;
     };
@@ -80,7 +81,7 @@ export function FlightLegs({score, units, tz}) {
         const l = accessor(x);
         if (l && l.maxPossible) {
             return (
-                <td style={{fontSize: 'small'}}>
+                <td style={{fontSize: 'small'}} key="legend">
                     Possible
                     <br />
                     Shortest
@@ -88,7 +89,7 @@ export function FlightLegs({score, units, tz}) {
             );
         }
         if (l.distanceRemaining > 0) {
-            return <td>Shortest</td>;
+            return <td key="legend">Shortest</td>;
         }
         return null;
     };
@@ -130,7 +131,7 @@ export function FlightLegs({score, units, tz}) {
                         <tr>
                             <td>&nbsp;</td>
                             {_map(actualLegs, (x) => (
-                                <td>
+                                <td key={x.legno.toString()}>
                                     Leg {x.legno} {legIcon(x)}
                                 </td>
                             ))}
@@ -139,34 +140,34 @@ export function FlightLegs({score, units, tz}) {
                     <tbody>
                         <tr style={{fontSize: 'small'}}>
                             <td>Leg Start Altitude</td>
-                            {_map(actualLegs, (x) => (x?.alt > 0 ? <td>{displayHeight(x?.alt, units)}</td> : null))}
+                            {_map(actualLegs, (x) => (x?.alt > 0 ? <td key={x.legno.toString()}>{displayHeight(x?.alt, units)}</td> : null))}
                         </tr>
                         <tr>
                             <td>Leg Start</td>
-                            {_map(actualLegs, (x) => (x.time ? <td>{OptionalTimeHHMM('', x.time as Epoch, tz)}</td> : null))}
+                            {_map(actualLegs, (x) => (x.time ? <td key={x.legno.toString()}>{OptionalTimeHHMM('', x.time as Epoch, tz)}</td> : null))}
                         </tr>
                         <tr style={{fontSize: 'small'}}>
                             <td>Leg Duration</td>
-                            {_map(actualLegs, (x) => (x.duration ? <td>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
+                            {_map(actualLegs, (x) => (x.duration ? <td key={x.legno.toString()}>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
                         </tr>
                         {!viewOptions.task ? (
                             <>
                                 <tr>
                                     <td>Leg Distance</td>
                                     {_map(actualLegs, (x) => (
-                                        <td>{accessor(x)?.distance || ''}</td>
+                                        <td key={x.legno.toString()}>{accessor(x)?.distance || ''}</td>
                                     ))}
                                 </tr>
                                 <tr>
                                     <td>Leg Speed</td>
                                     {_map(actualLegs, (x) => (
-                                        <td>{accessor(x)?.legSpeed}</td>
+                                        <td key={x.legno.toString()}>{accessor(x)?.legSpeed}</td>
                                     ))}
                                 </tr>
                                 {!score.utcFinish && (
                                     <tr>
                                         {distanceRemainingLegend(score)}
-                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td></td>))}
+                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td key={x.legno.toString()}></td>))}
                                     </tr>
                                 )}
                             </>
@@ -176,19 +177,19 @@ export function FlightLegs({score, units, tz}) {
                                 <tr>
                                     <td>Task Speed</td>
                                     {_map(actualLegs, (x) => (
-                                        <td>{accessor(x)?.taskSpeed || ''}</td>
+                                        <td key={x.legno.toString()}>{accessor(x)?.taskSpeed || ''}</td>
                                     ))}
                                 </tr>
                                 <tr>
                                     <td>Task Distance</td>
                                     {_map(actualLegs, (x) => (
-                                        <td>{accessor(x)?.taskDistance || ''}</td>
+                                        <td key={x.legno.toString()}>{accessor(x)?.taskDistance || ''}</td>
                                     ))}
                                 </tr>
                                 {!score.utcFinish && (
                                     <tr>
                                         {distanceRemainingLegend(score)}
-                                        {_map(actualLegs, (x) => (x.legno == score.currentLeg ? distanceRemaining(score) : <td />))}
+                                        {_map(actualLegs, (x) => (x.legno == score.currentLeg ? distanceRemaining(score) : <td key={x.legno.toString()} />))}
                                     </tr>
                                 )}
                             </>
@@ -208,4 +209,4 @@ export function FlightLegs({score, units, tz}) {
             )}
         </>
     );
-}
+});

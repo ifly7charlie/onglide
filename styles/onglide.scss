@@ -8,6 +8,7 @@ body {
 }
 
 .resizingMap {
+    height: 96vh;
     height: 100dvh;
     min-height: 100dvh;
     width: 100vw;
@@ -37,7 +38,7 @@ body {
     .navbar-nav.pull-right {
         float: none !important;
     }
-    button {
+    /*    button {
         border: 0px;
         padding-left: 4px;
         padding-right: 4px;
@@ -46,9 +47,10 @@ body {
         border: 0px;
         padding-left: 4px;
         padding-right: 4px;
-    }
+    } */
 
     .resizingMap {
+        height: 96vh;
         height: 100dvh;
     }
 
@@ -59,7 +61,8 @@ body {
 
     div.options {
         padding: 0px !important;
-        margin: 0px !important;
+        margin: 7px 0px 0px 0px !important;
+        height: 100%;
     }
 
     .sponsor {
@@ -68,7 +71,7 @@ body {
 
     .resultsOverlay {
         left: 0px;
-        height: 90px;
+        height: 108px;
         width: 100vw;
         overflow-x: auto;
         overflow-y: hidden;
@@ -87,17 +90,6 @@ body {
     .results {
         font-size: 90%;
         top: 90px;
-    }
-
-    button {
-        border: 0px;
-        padding-left: 4px;
-        padding-right: 4px;
-    }
-    button.active {
-        border: 0px;
-        padding-left: 4px;
-        padding-right: 4px;
     }
 
     .details {
@@ -134,7 +126,7 @@ body {
     }
 
     .navbar {
-        font-size: 0.75em;
+        //        font-size: 0.75em;
         //        font-size: 3vw;
     }
     html {

@@ -14,7 +14,7 @@
 // Import the APRS server
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Compno, InOrderGenerator} from '../types';
+import {Epoch, ClassName_Compno, makeClassname_Compno, ClassName, Datecode, Compno, InOrderGenerator} from '../types';
 
 import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:worker_threads';
 
@@ -36,8 +36,8 @@ export class ReplayController {
     }
 
     // Load these points into scoring
-    setInitialTrack(compno: Compno, points: PositionMessage[]) {
-        this.worker.postMessage({action: ReplayCommandEnum.initialTrack, className: this.className, compno: compno, points: points});
+    setInitialTrack(compno: Compno, points: PositionMessage[], channelName: string, datecode: Datecode) {
+        this.worker.postMessage({action: ReplayCommandEnum.initialTrack, className: this.className, compno, datecode, points: points, channelName});
     }
 
     // This actually starts scoring for the task
@@ -69,6 +69,7 @@ interface GliderState {
     inorder: InOrderGenerator;
 
     channel?: any;
+    channelName?: string;
 }
 
 // What are we scoring - we will register each one when
@@ -88,6 +89,7 @@ export type ReplayCommand = ReplayCommandShutdown | ReplayCommandNewTask | Repla
 
 interface ReplayCommandBase {
     className: ClassName;
+    channelName: string;
 }
 
 // Task has changed
@@ -103,6 +105,7 @@ interface ReplayCommandTrack {
     action: ReplayCommandEnum.initialTrack;
 
     compno: Compno;
+    datecode: Datecode;
     handicap: number;
 
     // Historical points, must be in sorted order
@@ -143,8 +146,8 @@ if (!isMainThread) {
         // of gliders to track
         if (task.action == ReplayCommandEnum.initialTrack) {
             const itTask: ReplayCommandTrack = task;
-            if (!channels[task.className]) {
-                channels[task.className] = new BroadcastChannel(task.className);
+            if (!channels[task.channelName]) {
+                channels[task.channelName] = new BroadcastChannel(task.channelName);
             }
 
             let start = Math.trunc(Date.now() / 1000);
@@ -154,13 +157,14 @@ if (!isMainThread) {
             // base + time elapsed * multiplier
 
             gliders[makeClassname_Compno(task)] = {
+                channelName: task.channelName,
                 className: task.className,
                 compno: task.compno,
                 handicap: task.handicap,
                 inorder: bindChannelForInOrderPackets(
-                    'replay' as ClassName,
-                    task.compno,
+                    ('REPLAY' + task.className) as ClassName, // otherwise we will receive our own packets and add them to the list and it WILL GO WRONG ;)
                     task.datecode,
+                    task.compno,
                     itTask.points,
                     true
                 )((): Epoch => {
@@ -169,7 +173,7 @@ if (!isMainThread) {
                     const effectiveElapsed = elapsed * multiplier;
                     return (replayBase + effectiveElapsed) as Epoch;
                 }),
-                channel: channels[task.className]
+                channel: channels[task.channelName]
             };
         }
 
@@ -181,10 +185,10 @@ if (!isMainThread) {
 }
 
 //
-// Connect to the APRS Server
+// Fake the APRS server
 async function startReplay(config: ReplayConfig) {
-    console.log(`${config.className} -/ starting replay`);
-    console.log(`${config.className} -> gliders: ${Object.keys(gliders).join(',')}`);
+    console.log(`${config.className} R-/ starting replay`);
+    console.log(`${config.className} R-> gliders: ${Object.keys(gliders).join(',')}`);
 
     try {
         const iterators: Record<Compno, any> = {};
@@ -203,6 +207,9 @@ async function startReplay(config: ReplayConfig) {
                         delete value.l;
                         value.v = '';
                         glider.channel.postMessage(value);
+                        if (value.c === '88') {
+                            console.log('send ->', glider.channelName, value.c);
+                        }
                     }
                 } catch (e) {
                     console.log(`replay for ${glider.compno} failed, error:`, e);

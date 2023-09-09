@@ -11,6 +11,9 @@ import {ISSocket} from 'js-aprs-is';
 import {aprsParser} from 'js-aprs-fap';
 
 import http from 'node:http';
+import https from 'node:https';
+
+import {readFileSync} from 'fs';
 
 // Helper function
 //import distance from '@turf/distance';
@@ -48,7 +51,7 @@ console.log('dev mode', dev);
 let db = undefined;
 
 // lodash
-import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove} from 'lodash';
+import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex} from 'lodash';
 
 //import _remove from 'lodash.remove';
 //import _groupby from 'lodash.groupby';
@@ -57,6 +60,8 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 // Launch our listener
 import {spawnAprsContestListener, AprsCommandTrack, AprsCommandEnum} from '../lib/webworkers/aprs';
 import {ReplayController, ReplayConfig} from '../lib/webworkers/replay';
+
+import {webPathBaseTime} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -77,7 +82,7 @@ import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlandin
 
 import {setSiteTz, getSiteTz} from '../lib/flightprocessing/timehelper.js';
 
-import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, Task, DeckData, AirfieldLocation} from '../lib/types';
+import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
 // Where is the comp based
@@ -94,6 +99,9 @@ interface Statistics {
     positionsSentCycles: number;
     listenerCycles: number;
     activeListeners: number;
+    peakListeners: number;
+
+    totalViewingTime: number;
 }
 
 interface Channel {
@@ -118,9 +126,14 @@ interface Channel {
     lastScores?: any;
 
     statistics: Statistics;
+
+    // For the web buffer
+    webPathBaseTime: Epoch;
+    webPathData: Record<string, Buffer>;
+    mostRecentPosition: Epoch; // last time we had something to send
 }
 
-let channels: Record<ClassName, Channel> = {};
+let channels: Record<ChannelName, Channel> = {};
 /*EG: { 'PMSRMAM202007I': { className: 'blue', clients: [], launching: false, datecode: '070' },
                     'PMSRMAM202007H': { className: 'red', clients: [], launching: false, datecode: '070' },
                     }; */
@@ -128,7 +141,9 @@ let channels: Record<ClassName, Channel> = {};
 interface Glider {
     compno: Compno;
     className: ClassName;
-    //    flarmid?: FlarmID;
+    channelName: ChannelName;
+
+    flarmIdRegex: RegExp;
 
     greg: string;
     handicap: number;
@@ -139,6 +154,7 @@ interface Glider {
     scoringConfigured?: boolean;
 
     deck: DeckData;
+    webPathEndPosition: number;
 }
 
 // Associative array of all the trackers
@@ -240,16 +256,16 @@ async function main() {
     initialiseInsights();
 
     // Location comes from the competition table in the database
-    location = (await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1'))[0];
+    location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset FROM competition LIMIT 1'))[0];
     location.point = point([location.lng, location.lat]);
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
+    location.tzoffset = parseInt(location.tzoffset as unknown as string);
 
     // Save the tz for use
     setSiteTz(location.tz);
 
     console.log('Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL);
     console.log(`db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}`);
-    console.log(`listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
 
     // Set the altitude offset for launching, this will take time to return
     // so there is a period when location altitude will be wrong for launches
@@ -271,77 +287,39 @@ async function main() {
 
     {
         const datecode = await getDCode();
-        await updateTrackers(datecode);
         await updateClasses(internalName, datecode);
+        await updateTrackers(datecode);
+        await updateTasks();
     }
 
-    const server = http.createServer((req, res) => {
-        // health check
-        if (req?.url == '/status') {
-            res.writeHead(200);
-            res.end(http.STATUS_CODES[200]);
-            return;
-        }
+    if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
+        try {
+            const options = {
+                key: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem`),
+                cert: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.cert.pem`)
+            };
 
-        // explict score request
-        const [valid, command, channelName] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+).json$/i) || [false, '', ''];
-        if (valid) {
-            if (channelName in channels) {
-                const channel = channels[channelName];
-                // Only support returning the scores
-                if (command == 'scores') {
-                    console.log('sending scores for ', channelName);
-                    const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
-                    res.setHeader('Content-Type', 'application/json');
-                    res.writeHead(200);
-                    res.end(JSON.stringify(msg));
-                    return;
-                }
+            if (options.key && options.cert) {
+                console.log('initialising SSL');
+                const server = https.createServer(options, setupOgnWebServer);
+                server.listen(parseInt(process.env.WEBSOCKET_PORT) + 1000);
+                setupWebSocketServer(server);
+                console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT) + 1000}`);
             }
+        } catch (e) {
+            console.log(`Unable to initialise SSL "keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem"`, e);
         }
-        res.writeHead(404);
-        res.end(http.STATUS_CODES[404]);
-    });
+    }
+
+    // We always open an non-ssl one
+    const server = http.createServer(setupOgnWebServer);
     server.listen(process.env.WEBSOCKET_PORT || 8080);
-
-    // And start our websocket server
-    const wss = new WebSocketServer({server});
-
-    // What to do when a client connects
-    wss.on('connection', (ws, req) => {
-        // Strip leading /
-        const channel = req.url.substring(1, req.url.length);
-
-        ws.ognChannel = channel;
-        ws.ognPeer = req.headers['x-forwarded-for'];
-        console.log(`connection received for ${channel} from ${ws.ognPeer}`);
-
-        ws.isAlive = true;
-        if (channel in channels) {
-            channels[channel].clients.push(ws);
-        } else {
-            console.log('Unknown channel ' + channel);
-            ws.isAlive = false;
-        }
-
-        ws.on('pong', () => {
-            ws.isAlive = true;
-        });
-        ws.on('close', () => {
-            ws.isAlive = false;
-            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
-        });
-        ws.on('error', console.error);
-        ws.on('message', (m) => {
-            if (ws.isAlive) {
-                console.log('requested pilot track', '' + m);
-                sendPilotTrack(ws, ('' + m) as Compno);
-            }
-        });
-
-        // Send vario etc for all gliders we are tracking
-        sendCurrentState(ws);
+    server.on('clientError', function (ex, _socket) {
+        console.log('****> clientError', ex);
     });
+
+    setupWebSocketServer(server);
+    console.log(`listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
@@ -354,10 +332,16 @@ async function main() {
         for (const channelName in channels) {
             const channel = channels[channelName];
 
+            if (channel.toSend.length) {
+                channel.mostRecentPosition = now;
+            }
+
             channel.statistics.activeListeners += channel.clients.length;
             channel.statistics.listenerCycles++;
 
             if (channel.clients.length) {
+                // Send if we have an update or if it's been 30 seconds since we last sent one
+                //                if (channel.toSend.length || (now - channel.lastSentPositions ?? 0) > 30) {
                 // Encode all the changes, we only keep latest per glider if multiple received
                 // there shouldn't be multiple!
                 const msg = OnglideWebSocketMessage.encode({positions: {positions: channel.toSend}, t: Math.trunc(now)}).finish();
@@ -376,11 +360,12 @@ async function main() {
                         client.send(msg, {binary: true});
                     }
                 });
+                //              }
             } else {
                 channel.toSend = [];
             }
         }
-    }, 1000);
+    }, 500);
 
     //
     // Housekeeping
@@ -407,19 +392,23 @@ async function main() {
                 return client.isAlive === false;
             });
 
+            const now = getNow();
             toterminate.forEach((client) => {
                 console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
+                channel.statistics.totalViewingTime += now - client.connectedAt;
                 client.terminate();
             });
         }
 
         //
         // Aggregate statistics
-        const now = getNow();
         for (const channelName in channels) {
             const channel = channels[channelName];
 
-            console.log(`${channelName}: ${channel.statistics.positionsSent} positions sent, ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`);
+            channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, channel.statistics.activeListeners / channel.statistics.listenerCycles);
+
+            console.log(`${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`);
+            console.log(`${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${channel.statistics.peakListeners}`);
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
@@ -437,31 +426,29 @@ async function main() {
     // Update competition information
     setInterval(async function () {
         const datecode = await getDCode();
-        await updateTrackers(datecode);
         await updateClasses(internalName, datecode);
-    }, 300 * 1000);
+        await updateTrackers(datecode);
+        await updateTasks();
+    }, 60 * 1000);
 }
 
 main().then(() => console.log('Started'));
 
 // So we have a different channel for each date
-function channelName(className, datecode: Datecode) {
-    return (className + datecode).toUpperCase();
+function channelName(className: ClassName, datecode: Datecode): ChannelName {
+    return (className + datecode).toUpperCase() as ChannelName;
 }
 
 //
 // Get current date code
 async function getDCode(): Promise<Datecode> {
-    return replayBase ? toDateCode(new Date(replayBase * 1000)) : (await db.query('SELECT datecode FROM compstatus LIMIT 1'))[0].datecode;
+    return replayBase ? toDateCode(new Date(replayBase * 1000)) : (await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))[0].datecode;
 }
 
 //
 // Fetch the trackers from the database
 async function updateClasses(internalName: string, datecode: Datecode) {
     console.log(`updateClasses(${internalName}, ${datecode})`);
-
-    // Do we need to do this again straight away to restart the scoring?
-    let runAgain = false;
 
     // Fetch the trackers from the database and the channel they are supposed to be in
     const classes = await db.query('SELECT class FROM compstatus');
@@ -470,7 +457,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     let newchannels: Record<string, Channel> = {};
     for (const c of classes) {
         const cname = channelName(c.class, datecode);
-        let channel = channels[cname];
+        let channel: Channel = channels[cname];
 
         // New channel needs setup
         if (!channel) {
@@ -492,18 +479,19 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     positionsSent: 0,
                     positionsSentCycles: 0,
                     listenerCycles: 0,
-                    activeListeners: 0
-                }
+                    activeListeners: 0,
+                    peakListeners: 0,
+                    totalViewingTime: 0
+                },
+                webPathBaseTime: 0 as Epoch,
+                mostRecentPosition: getNow(),
+                webPathData: {}
             };
         } else {
             // We move it to the new list
             delete channels[cname];
         }
         newchannels[cname] = channel;
-
-        const classGliders = _filter(gliders, (_g) => _g.className == channel.className);
-        const gliderHash = reduce(classGliders, (a, _g) => a.update([_g.utcStart, _g.handicap, _g.compno].join(',')), createHash('md5')) //
-            .digest('hex');
 
         // Make sure we have a broadcast channel for the class
         if (!channel.broadcastChannel) {
@@ -515,45 +503,13 @@ async function updateClasses(internalName: string, datecode: Datecode) {
             channel.broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => processAprsMessage(c.class, channel, ev.data);
         }
 
-        const updatedTask = await updateTasks(c.class, datecode);
-        // We have a task but we aren't yet scoring
-        if (!channel.scoring && updatedTask) {
-            // Setup the thread
-            channel.scoring = new ScoringController({className: c.class, datecode, airfield: location});
+        // Prep for scoring
+        if (!channel.scoring) {
+            channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
             channel.scoring.hookScores(({scores, recentStarts}) => sendScores(channel, scores, recentStarts));
-
-            // Get tracks and configure pilots to score
-            if (process.env.REPLAY && !channel.replay) {
-                await getInitialTrackPointsForReplay(channel);
-            } else {
-                await getInitialTrackPoints(channel);
-            }
-            // Actually start scoring the tasks
-            channel.task = updatedTask;
-            channel.gliderHash = gliderHash;
-            channel.scoring.setTask(channel.task);
         }
-
-        // We have a task and we previous had one, in this case we need to check for a change
-        if (channel.gliderHash != gliderHash || !_isEqual(channel.task || {}, updatedTask || {})) {
-            console.log(`new task for ${c.class}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] gliders: ${channel.gliderHash} == ${gliderHash} (#${classGliders.length}}`);
-            // At present the only way to do this is to close everything down
-            // we won't miss any track points because we don't stop the APRS listener
-            if (channel.scoring) {
-                channel.scoring.shutdown();
-                delete channel.scoring;
-                delete channel.lastScores;
-
-                // We need to mark them as not configured for scoring as well
-                forEach(classGliders, (_g, k) => {
-                    _g.scoringConfigured = false;
-                });
-            }
-            channel.gliderHash = gliderHash;
-            delete channel.task;
-            if (updatedTask) {
-                runAgain = true;
-            }
+        if (process.env.REPLAY && !channel.replay) {
+            getInitialTrackPointsForReplay(channel);
         }
     }
 
@@ -563,6 +519,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         console.log('closing channels: ', Object.keys(channels).join(','));
         Object.values(channels).forEach((channel) => {
             channel.broadcastChannel.close();
+            channel.scoring.shutdown();
         });
         unknownChannel.close();
         unknownChannel = undefined;
@@ -577,16 +534,13 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 
     // replace (do we need to close the old ones?)
     channels = newchannels;
-    console.log(`Updated Channels: ${_map(channels, (c) => c.className + '_' + c.datecode).join(',')}`);
-
-    if (runAgain) {
-        setImmediate(() => updateClasses(internalName, datecode));
-    }
+    console.log(`Updated Channels: ${_map(channels, (c) => channelName(c.className, c.datecode)).join(',')}`);
 }
 
-async function updateTasks(className: ClassName, datecode: Datecode): Promise<Task | null> {
+async function updateTasks(): Promise<void> {
     // Get the details for the task
-    const taskdetails = ((await db.query(escape`
+    const getTask = async (className: ClassName, datecode: Datecode) => {
+        const taskdetails = ((await db.query(escape`
          SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped,
                CASE WHEN nostart ='00:00:00' THEN 0
                     ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
@@ -597,49 +551,70 @@ async function updateTasks(className: ClassName, datecode: Datecode): Promise<Ta
              AND tasks.class= ${className} and tasks.flown='Y'
     `)) || {})[0];
 
-    if (!taskdetails || !taskdetails.type) {
-        console.log(`${className}/${datecode}: no active task`, taskdetails);
-        return null;
-    }
+        if (!taskdetails || !taskdetails.type) {
+            console.log(`${className}/${datecode}: no active task`, taskdetails);
+            return null;
+        }
 
-    const taskid = taskdetails.taskid;
+        const taskid = taskdetails.taskid;
 
-    const tasklegs = await db.query(escape`
+        const tasklegs = await db.query(escape`
       SELECT taskleg.*, nname name
         FROM taskleg
        WHERE taskleg.taskid = ${taskid}
       ORDER BY legno
     `);
 
-    if (tasklegs.length < 2) {
-        console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
-        return null;
-    }
+        if (tasklegs.length < 2) {
+            console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
+            return null;
+        }
 
-    // These are invalid
-    delete taskdetails.hdistance;
-    delete taskdetails.distance;
-    delete taskdetails.maxmarkingdistance;
+        // These are invalid
+        delete taskdetails.hdistance;
+        delete taskdetails.distance;
+        delete taskdetails.maxmarkingdistance;
 
-    let task = {
-        rules: {
-            grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
-            nostartutc: taskdetails.nostartutc,
-            aat: taskdetails.type == 'A',
-            dh: taskdetails.type == 'D',
-            handicapped: taskdetails.handicapped == 'Y'
-        },
-        details: taskdetails,
-        legs: tasklegs
+        let task = {
+            rules: {
+                grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
+                nostartutc: taskdetails.nostartutc,
+                aat: taskdetails.type == 'A',
+                dh: taskdetails.type == 'D',
+                handicapped: taskdetails.handicapped == 'Y'
+            },
+            details: taskdetails,
+            legs: tasklegs
+        };
+        calculateTask(task);
+        return task;
     };
 
-    calculateTask(task);
-    return task;
+    // Go through all the channels and check for a change of task
+    for (const channel of Object.values(channels)) {
+        const updatedTask = await getTask(channel.className, channel.datecode);
+
+        if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
+            console.log(`new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs?.reduce((a, l) => a + l.length, 0).toFixed(1)}km`);
+            console.log(`${channel.className}: Startline open: ${updatedTask.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
+
+            // If it has a task stop it scoring and start the new task
+            if (channel.task) {
+                channel.scoring.clearTask();
+                delete channel.lastScores;
+            }
+
+            // We have a task so we will score what we know
+            if (updatedTask) {
+                channel.task = updatedTask;
+                channel.scoring.setTask(channel.task);
+            }
+        }
+    }
 }
 
 async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
-
     let cTrackers = await db.query(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
                                            ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
@@ -648,14 +623,24 @@ async function updateTrackers(datecode: Datecode) {
                                              (select compno,class,start from pilotresult pr where pr.datecode=${datecode}) as ppr
                                       ON ppr.class=p.class and ppr.compno=p.compno`);
 
-    console.log('tracker update');
+    const initialGliderCount = Object.keys(gliders).length;
+    let updatedGliderCount = 0;
+    let loadedGliderCount = 0;
 
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
     // unknowns as they won't be in the trackers pick
     const keyedDb = keyBy(cTrackers, makeClassname_Compno);
-    const removedGliders = _filter(gliders, (g) => g.datecode != datecode || !keyedDb[makeClassname_Compno(g)]);
+    const removedGliders = _filter(gliders, (g) => {
+        const newValue = keyedDb[makeClassname_Compno(g)];
+        if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
+            console.log(g?.compno, newValue?.dbTrackerId, g.dbTrackerId);
+            return true; // removed or it has changed id
+        }
+        return g.datecode != datecode;
+    });
 
     // Now unsubsribe from each of them
+    const keyedRemoved = keyBy(removedGliders, makeClassname_Compno);
     removedGliders.forEach((g) => {
         if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
             const flarmIDs = _filter(g.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i)) as string[];
@@ -666,34 +651,32 @@ async function updateTrackers(datecode: Datecode) {
                     action: AprsCommandEnum.untrack,
                     compno: g.compno, //
                     className: g.className,
-                    channelName: channelName(g.className, g.datecode),
+                    channelName: g.channelName,
                     trackerId: flarmIDs
                 };
-                aprsListener.postMessage(command);
+                aprsListener?.postMessage?.(command);
             }
         }
         delete gliders[makeClassname_Compno(g)];
     });
 
     // Now go through all the desired gliders and make sure we have linked them
-    cTrackers.forEach((t) => {
-        const gliderKey = makeClassname_Compno(t);
+    await Promise.allSettled(
+        cTrackers.map(async (t) => {
+            const gliderKey = makeClassname_Compno(t);
 
-        // glider key not enough to check for datecode changes
-        const glider = gliders[gliderKey];
-        if (glider && glider.datecode != datecode) {
-            console.log('datecode changed', gliderKey, glider.datecode, datecode);
-        }
+            const startUtcChanged = gliders[gliderKey]?.utcStart != t.utcStart;
+            const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
+            const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
 
-        const trackersChanged = glider?.dbTrackerId !== t.dbTrackerId;
+            // glider key not enough to check for datecode changes
+            const glider: Glider = (gliders[gliderKey] = Object.assign(gliders[gliderKey] || {}, t));
+            glider.greg = t?.greg?.replace(/[^A-Z0-9]/i, '');
+            glider.datecode = datecode as Datecode;
+            glider.channelName = channelName(t.className, datecode);
 
-        gliders[gliderKey] = Object.assign(gliders[gliderKey] || {}, t);
-        gliders[gliderKey].greg = t?.greg?.replace(/[^A-Z0-9]/i, '');
-        gliders[gliderKey].datecode = datecode as Datecode;
-
-        // If we have a tracker for it then we need to link that as well
-        if (t.dbTrackerId && t.dbTrackerId != 'unknown' && trackersChanged) {
-            if (!process.env.REPLAY) {
+            // If we have a tracker for it then we need to link that as well
+            if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
                 const flarmIDs = _filter(t.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i));
                 if (flarmIDs && flarmIDs.length) {
                     // Tell APRS to start listening for the flarmid
@@ -702,13 +685,36 @@ async function updateTrackers(datecode: Datecode) {
                         compno: t.compno,
                         className: t.className,
                         trackerId: flarmIDs,
-                        channelName: channelName(t.className, datecode)
+                        channelName: glider.channelName
                     };
-                    aprsListener.postMessage(command);
+
+                    aprsListener?.postMessage?.(command);
+                    glider.flarmIdRegex = new RegExp(`^(${flarmIDs.join('|')})`, 'i');
                 }
             }
-        }
-    });
+
+            if (glider.scoringConfigured) {
+                if (startUtcChanged || handicapChanged) {
+                    console.log(`${glider.className}:${glider.compno}: startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
+                    channels[glider.channelName].scoring.rescoreGlider(glider.compno, glider.handicap, glider.utcStart);
+                    updatedGliderCount++;
+                }
+            } else {
+                try {
+                    loadedGliderCount++;
+                    await loadGliderPoints(glider, !keyedRemoved[makeClassname_Compno(glider)]);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+        })
+    );
+
+    const newGlidersCount = Object.keys(gliders).length;
+    if (removedGliders.length || updatedGliderCount || newGlidersCount != initialGliderCount) {
+        console.log(`updatedTrackers: ${removedGliders.length} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
+        console.log(`${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
+    }
 
     // identify any competition numbers that may be duplicates and mark them.  This
     // will affect how we match from the DDB
@@ -763,7 +769,7 @@ async function sendCurrentState(client: WebSocket) {
     }
 
     // Send them the GeoJSONs, they need to keep this up to date
-    sendRecentPilotTracks(channels[client.ognChannel].className, client);
+    sendRecentPilotTracks(channels[client.ognChannel], client);
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
@@ -772,56 +778,72 @@ async function sendCurrentState(client: WebSocket) {
     }
 }
 
-async function sendPilotTrack(client: WebSocket, compno: Compno) {
-    const p = gliders[makeClassname_Compno(channels[client.ognChannel].className, compno)]?.deck;
-    const toStream = {};
-    if (p) {
-        console.log('sendPilotTrack', client.ognChannel, compno, ', points=', p.posIndex, ', segments=', p.segmentIndex);
-        toStream[compno] = {
-            compno: compno,
-            positions: new Uint8Array(p.positions.buffer, 0, p.posIndex * 3 * 4),
-            indices: new Uint8Array(p.indices.buffer, 0, (p.segmentIndex + 1) * 4),
-            t: new Uint8Array(p.t.buffer, 0, p.posIndex * 4),
-            climbRate: new Uint8Array(p.climbRate.buffer, 0, p.posIndex),
-            recentIndices: new Uint8Array(p.recentIndices.buffer),
-            agl: new Uint8Array(p.agl.buffer, 0, p.posIndex * 2),
-            posIndex: p.posIndex,
-            partial: false,
-            segmentIndex: p.segmentIndex
-        };
-    }
+async function generateHistoricalTracks(channel: Channel): Promise<void> {
+    // Figure out the block that preceeds us, we do it a little late to allow reconnects to use websocket only
+    const now = (channel.mostRecentPosition - 20) as Epoch;
+    const base = now - webPathBaseTime; // determine the last block block
 
-    // Send the client the current version of the tracks
-    const message = OnglideWebSocketMessage.encode({tracks: {pilots: toStream}}).finish();
-    if (client.readyState === WebSocket.OPEN) {
-        client.send(message, {binary: true});
+    if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
+        console.log(`re-generateHistoricalTracks now: ${now}, base: ${base}, previous: ${channel.webPathBaseTime}`);
+        const toStream = reduce(
+            gliders,
+            (result, glider, compno) => {
+                if (glider.className == channel.className) {
+                    const p = glider.deck;
+                    if (p) {
+                        const start = 0; //p.recentIndices[0];
+                        //                        const end = p.posIndex;
+                        // Find the end as 30 seconds before 'now'
+                        const end = _sortedIndex(p.t.subarray(0, p.posIndex), now) || p.posIndex;
+                        const length = end - start;
+                        //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${p.t[end]} => ${p.t[start]}, posIndex: ${p.posIndex}`);
+                        if (length) {
+                            result[glider.compno] = {
+                                compno: glider.compno,
+                                positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
+                                t: new Uint8Array(p.t.buffer, start * 4, length * 4),
+                                climbRate: new Uint8Array(p.climbRate.buffer, start, length),
+                                agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                                posIndex: length,
+                                trackVersion: p.trackVersion
+                            };
+                        }
+                        glider.webPathEndPosition = end;
+                    }
+                }
+                return result;
+            },
+            {}
+        );
+        // Send the client the current version of the tracks
+        channel.webPathData[now.toString()] = Buffer.from(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: 0}}).finish());
+        channel.webPathBaseTime = now;
     }
 }
 
 // Send the abbreviated track for all gliders, used when a new client connects
-async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
+async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
+    // Make sure they are up to date (does nothing if they are)
+    await generateHistoricalTracks(channel);
+
     const toStream = reduce(
         gliders,
         (result, glider, compno) => {
-            if (glider.className == className) {
+            if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    const start = p.recentIndices[0];
-                    const end = p.recentIndices[1];
+                    let start = glider.webPathEndPosition ?? 0;
+                    const end = p.posIndex;
                     const length = end - start;
-                    const segments = new Uint32Array([0, length]);
                     if (length) {
                         result[glider.compno] = {
                             compno: glider.compno,
                             positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
-                            indices: new Uint8Array(segments.buffer),
                             t: new Uint8Array(p.t.buffer, start * 4, length * 4),
                             climbRate: new Uint8Array(p.climbRate.buffer, start, length),
-                            recentIndices: new Uint8Array(segments.buffer),
                             agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
                             posIndex: length,
-                            partial: true,
-                            segmentIndex: 1
+                            trackVersion: p.trackVersion
                         };
                     }
                 }
@@ -831,7 +853,45 @@ async function sendRecentPilotTracks(className: ClassName, client: WebSocket) {
         {}
     );
     // Send the client the current version of the tracks
-    client.send(OnglideWebSocketMessage.encode({tracks: {pilots: toStream}}).finish(), {binary: true});
+    client.send(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish(), {binary: true});
+}
+
+async function updateGliderTrack(channel: Channel, glider: Glider) {
+    // We need to replace the start data as well
+    channel.webPathBaseTime = 0 as Epoch;
+    // Make sure they are up to date (does nothing if they are)
+    await generateHistoricalTracks(channel);
+
+    const toStream = {};
+    const p = glider.deck;
+    if (p) {
+        let start = 0; // glider.webPathEndPosition ?? 0;
+        const end = p.posIndex;
+        const length = end - start;
+        //        if (length) {
+        toStream[glider.compno] = {
+            compno: glider.compno,
+            positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
+            t: new Uint8Array(p.t.buffer, start * 4, length * 4),
+            climbRate: new Uint8Array(p.climbRate.buffer, start, length),
+            agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+            posIndex: length,
+            trackVersion: p.trackVersion
+        };
+        //        }
+    }
+
+    // Generate the protobuf message for the full track
+    const trackMessage = OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish();
+
+    console.log(`${channel.className}/${glider.compno}: sending full track over websocket v${p.trackVersion} ${trackMessage.length} bytes, ${channel.clients.length} clients = ${trackMessage.length * channel.clients.length} bytes`);
+
+    // Send the client the current version of the tracks, we don't care how long it takes (don't wait)
+    channel.clients.forEach(async (client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(trackMessage, {binary: true});
+        }
+    });
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -842,11 +902,13 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
 
     console.log('Sending Scores', scores.length);
 
+    const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
+
     // If we have nothing then do nothing...
     if (!channel.clients.length) {
         console.log(`${channel.className}: no clients subscribed`);
     } else {
-        console.log(`${channel.className}: ${channel.clients.length} subscribed, ${channel.activeGliders.size} gliders airborne`);
+        console.log(`${channel.className}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
     }
 
     // For sending the keepalive
@@ -880,92 +942,31 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
 
     // Prune startline
     for (const compno in recentStarts) {
-        const deck = gliders[makeClassname_Compno(channel.className, compno as Compno)]?.deck;
-        if (deck) {
-            console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}`);
-            pruneStartline(deck, recentStarts[compno]);
-        }
-    }
-}
-
-//
-// Get the intitial track points from the database and make sure everything has been
-// setup properly
-//
-async function getInitialTrackPoints(channel: Channel): Promise<void> {
-    /*    const pilotStarts = db.query(escape`SELECT CASE WHEN start ='00:00:00' THEN 0
-          ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(channel.datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
-                                        END utcStart,
-                                         CASE WHEN finish ='00:00:00' THEN 0
-                                         ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(channel.datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
-                                        END utcFinish
-                                     FROM pilotresult WHERE class=${channel.className} and datecode=${channel.datecode}`);
-    */
-
-    const tBase = getNow() + (process.env.REPLAY ? 0 : 10);
-    console.log(tBase, new Date(tBase * 1000).toUTCString(), getNow());
-    //
-    // Now we will fetch the points for the pilots
-    const rawpoints: PositionMessage[] = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
-                                              FROM trackpoints
-                                             WHERE datecode=${channel.datecode} AND class=${channel.className} AND t <= ${tBase}
-                                             ORDER BY t ASC`);
-
-    console.log(`${channel.className}: fetched ${rawpoints.length} rows of trackpoints (getInitialTrackPoints)`);
-
-    // AND compno='LS3'
-
-    const groupedPoints: Record<Compno, PositionMessage[]> = _groupby(rawpoints, 'c');
-
-    for (const compno in groupedPoints) {
-        console.log(compno, groupedPoints[compno].length);
-        // Find the glider
         const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
-
-        if (!glider) {
-            console.log('missing glider', compno, gliders);
-            continue;
-        }
-
-        if (!glider.deck) {
-            initialiseDeck(compno as Compno, glider);
-
-            // Merge it into deck datastructures
-            for (const point of groupedPoints[compno]) {
-                mergePoint(point, glider);
+        if (glider) {
+            const deck = glider.deck;
+            if (deck) {
+                console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}/${timeToText(recentStarts[compno])}`);
+                pruneStartline(deck, recentStarts[compno]);
             }
-        }
 
-        // And pass the whole set to scoring to be loaded into the glider history
-        channel.scoring.setInitialTrack(compno as Compno, glider.handicap, glider.utcStart, groupedPoints[compno]);
-        glider.scoringConfigured = true;
-    }
-
-    // We also need to go through all the gliders that don't have track points and set them up as well.
-    for (const gn in gliders) {
-        const glider = gliders[gn];
-        if (glider.className == channel.className) {
-            if (!glider.scoringConfigured) {
-                channel.scoring.setInitialTrack(glider.compno as Compno, glider.handicap, glider.utcStart, []);
-                glider.scoringConfigured = true;
-            }
-            if (!glider.deck) {
-                initialiseDeck(glider.compno as Compno, glider);
-            }
+            // Reset the glider starting point, but also the channel so we don't use invalid
+            // mix of the two
+            glider.webPathEndPosition = 0;
+            channel.webPathBaseTime = 0;
         }
     }
-
-    // Group them by comp number, this is quicker than multiple sub queries from the DB
-    console.log(`${channel.className} reloaded all points for ${Object.keys(gliders).length} gliders`);
 }
 
 async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
+    const now = getNow();
     //
     // Now we will fetch the points for the pilots
-    const rawpoints: PositionMessage[] = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
+    const rawpoints: PositionMessage[] =
+        (await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
                                               FROM trackpoints
-                                             WHERE datecode=${channel.datecode} AND class=${channel.className} 
-                                             ORDER BY t ASC`);
+                                   WHERE datecode=${channel.datecode} AND class=${channel.className} AND t > ${now}
+                                             ORDER BY t ASC`)) ?? [];
 
     // AND compno='LS3'
     console.log(`${channel.className}: fetched ${rawpoints.length} rows of trackpoints (getInitialTrackPointsForReplay)`);
@@ -973,47 +974,52 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
     const groupedPoints: Record<Compno, PositionMessage[]> = _groupby(rawpoints, 'c');
 
     // Setup replay but only first time
-    if (!channel.replay) {
-        channel.replay = new ReplayController({className: channel.className});
-        for (const compno in groupedPoints) {
-            console.log(compno, groupedPoints[compno].length);
-            channel.replay.setInitialTrack(compno as Compno, groupedPoints[compno]);
-        }
-    }
-
-    // Merge it into deck datastructures
+    channel.replay = new ReplayController({className: channel.className});
     for (const compno in groupedPoints) {
-        const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
-        let newDeck = !glider.deck;
-        if (newDeck) {
-            initialiseDeck(compno as Compno, glider);
-        }
-
-        for (const point of groupedPoints[compno]) {
-            if (newDeck) {
-                mergePoint(point, glider);
-            }
-            channel.scoring.setInitialTrack(compno as Compno, glider.handicap, glider.utcStart, [point]);
-            break; // only score the first point as it's a replay
-        }
-        // And pass the whole set to scoring to be loaded into the glider history
-        glider.scoringConfigured = true;
-    }
-
-    // We also need to go through all the gliders that don't have track points and set them up as well.
-    for (const gn in gliders) {
-        if (!gliders[gn].scoringConfigured && gliders[gn].className == channel.className) {
-            channel.scoring.setInitialTrack(gliders[gn].compno as Compno, gliders[gn].handicap, gliders[gn].utcStart, []);
-            initialiseDeck(gliders[gn].compno as Compno, gliders[gn]);
-        }
+        console.log(compno, groupedPoints[compno].length);
+        channel.replay.setInitialTrack(compno as Compno, groupedPoints[compno], channelName(channel.className, channel.datecode), channel.datecode);
     }
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
-    console.log(`${channel.className} reloaded all points`);
+    console.log(`replay: ${channel.className} reloaded all points`);
 
     setTimeout(() => {
         channel.replay.start({className: channel.className});
-    }, 20000);
+    }, 10000);
+}
+
+async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<void> {
+    const now = getNow();
+    const channel = channels[glider.channelName];
+    //
+    // Now we will fetch the points for the pilots
+    const rawpoints: Array<PositionMessage & {x: string}> =
+        (await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l, station as x
+                                              FROM trackpoints
+                                              WHERE datecode=${channel.datecode} AND class=${channel.className} AND compno=${glider.compno} AND t < ${now}
+                                              ORDER BY t ASC`)) ?? [];
+
+    // Make sure the flarm ID is valid for this data so we can exclude dodgy trackers more easily
+    const points = rawpoints.filter((row) => glider.flarmIdRegex.test(row.x));
+
+    initialiseDeck(glider.compno as Compno, glider, randomBytes(4).readUInt32BE(0));
+
+    // Merge it into deck datastructures
+    for (const point of points) {
+        mergePoint(point, glider);
+    }
+
+    // And pass the whole set to scoring to be loaded into the glider history
+    channel.scoring.setInitialTrack(glider.compno, glider.handicap, glider.utcStart, points);
+    glider.scoringConfigured = true;
+
+    // Group them by comp number, this is quicker than multiple sub queries from the DB
+    console.log(`${channel.className}  ${firstTime ? 'first load' : 'reload'} all points for ${glider.compno} glider [${rawpoints.length - points.length} removed, ${points.length} loaded] ${glider.flarmIdRegex} ${timeToText(points[0]?.t)} to ${timeToText(points[points.length - 1]?.t)} @ ${timeToText(now)} - v${glider.deck.trackVersion.toString(16)}`);
+
+    // If it's not the first time then we need to update the channel with the track
+    if (!firstTime) {
+        updateGliderTrack(channel, glider);
+    }
 }
 
 //
@@ -1047,7 +1053,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
             channel.statistics.outOfOrderPackets++;
         } else {
             if (dev) {
-                console.log('ok', JSON.stringify(message));
+                //                console.log('ok', JSON.stringify(message));
             }
         }
     } else {
@@ -1143,7 +1149,7 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
             trackerId: flarmId,
             channelName: channelName(match.className, datecode)
         };
-        aprsListener.postMessage(command);
+        aprsListener?.postMessage(command);
 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {
@@ -1163,4 +1169,104 @@ function timeToText(t: Epoch): string {
     if (!t) return '';
     var cT = new Date(t * 1000);
     return cT.toLocaleTimeString('en-GB', {timeZone: location.tz, hour: '2-digit', minute: '2-digit'});
+}
+
+//
+// Function to create and setup the listener for a websocket server
+function setupWebSocketServer(server) {
+    const address = server.address()?.port ?? 'unknown';
+
+    // And start our websocket server
+    const wss = new WebSocketServer({server});
+
+    // What to do when a client connects
+    wss.on('connection', (ws, req) => {
+        // Strip leading /
+        const channel = req.url.substring(1, req.url.length);
+
+        ws.ognChannel = channel;
+        ws.ognPeer = req.headers['x-forwarded-for'] ?? req.connection.remoteAddress;
+        console.log(`connection received for ${channel} from ${ws.ognPeer} on ${address}`);
+
+        ws.isAlive = true;
+        ws.connectedAt = getNow();
+        if (channel in channels) {
+            channels[channel].clients.push(ws);
+        } else {
+            console.log('Unknown channel ' + channel);
+            ws.isAlive = false;
+        }
+
+        ws.on('pong', () => {
+            ws.isAlive = true;
+        });
+        ws.on('close', () => {
+            ws.isAlive = false;
+            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
+        });
+        ws.on('error', console.error);
+        ws.on('message', () => {
+            /**/
+        });
+
+        // Send vario etc for all gliders we are tracking
+        sendCurrentState(ws);
+    });
+}
+
+function setupOgnWebServer(req, res) {
+    const headers = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'OPTIONS, GET, UPGRADE',
+        'Access-Control-Max-Age': 5 * 60, // 5 minutes
+        'Cache-Control': 'public, max-age=300, immutable, stale-while-revalidate=30'
+    };
+
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204, headers);
+        res.end();
+        return;
+    }
+
+    // health check
+    if (req?.url == '/status') {
+        res.writeHead(200, headers);
+        res.end(http.STATUS_CODES[200]);
+        return;
+    }
+
+    // explict score request
+    const [valid, command, channelName, baseTimestamp] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)$/i) || [false, '', ''];
+    if (valid) {
+        console.log(command, channelName);
+        if (channelName in channels) {
+            const channel = channels[channelName];
+            // Only support returning the scores
+            switch (command) {
+                case 'scores': {
+                    console.log('sending scores for ', channelName);
+                    const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
+                    res.setHeader('Content-Type', 'application/json');
+                    res.writeHead(200, headers);
+                    res.end(JSON.stringify(msg));
+                    return;
+                }
+                case 'tracks': {
+                    console.log(`sending historical data ${baseTimestamp} [current: ${channel.webPathBaseTime}]`);
+                    if (channel.webPathData[baseTimestamp]) {
+                        res.setHeader('Content-Type', 'application/octet-stream');
+                        res.writeHead(200, headers);
+                        res.write(channel.webPathData[baseTimestamp], 'binary');
+                        res.end(null, 'binary');
+                        return;
+                    } else {
+                        console.log('no historical data matching', channelName, baseTimestamp);
+                    }
+                }
+            }
+        }
+    }
+
+    res.writeHead(404);
+    res.end(http.STATUS_CODES[404]);
 }

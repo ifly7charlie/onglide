@@ -1,13 +1,13 @@
-import {useCallback, useMemo, useEffect} from 'react';
-import DeckGL from '@deck.gl/react';
+import {useCallback, useMemo, useRef, useEffect} from 'react';
+import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 import {TextLayer} from '@deck.gl/layers';
-import {FlyToInterpolator, LinearInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
-import {StaticMap, Source, Layer, LayerProps} from 'react-map-gl';
-import {LngLat, MercatorCoordinate} from 'mapbox-gl';
+import {TripsLayer} from '@deck.gl/geo-layers';
+import {FlyToInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
+import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
-import {gapLength} from '../constants';
+import {offlineTime, recentTrackLength} from '../constants';
 
 // Height/Climb helpers
 import {displayHeight, displayClimb} from './displayunits';
@@ -15,6 +15,16 @@ import {displayHeight, displayClimb} from './displayunits';
 import {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
+
+function DeckGLOverlay(
+    props: MapboxOverlayProps & {
+        interleaved?: boolean;
+    }
+) {
+    const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props));
+    overlay.setProps(props);
+    return null;
+}
 
 // Figure out where the sun should be
 import SunCalc from 'suncalc';
@@ -25,79 +35,87 @@ import {RadarOverlay} from './rainradar';
 
 import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
 
-import {point} from '@turf/helpers';
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
 import distance from '@turf/distance';
 
+import {SortKey} from './pilot-sorting';
+
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
-// Create an async iterable
-/*async function* getData() {
-  for (let i = 0; i < 10; i++) {
-    await const chunk = fetchChunk(...);
-    yield chunk;
-  }
-}*/
+// Figure out the baseline date
+const oneYearIsh = 1000 * 3600 * 24 * 365;
+const referenceDate = new Date(Date.now() - (Date.now() % oneYearIsh)).getTime() / 1000;
 
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
-import {OgnPathLayer} from './ognpathlayer';
 import {StopFollowController} from './deckglcontroller';
+// helps with touch scroll on laptops (undocumented)
+const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
+
+import {colourise} from './colourise';
+
+const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any) => number[]) | number[]> = {
+    auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]),
+    climb: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.max(0, d.v * -12.5 + 128))),
+    height: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.p[1][2] >> 5) * 35)),
+    aheight: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.g >> 5) * 35))
+};
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, taskGeoJSON, map2d, mapLight: boolean) {
+function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, sortKey: SortKey, map2d: boolean, mapLight: boolean, fullPaths: boolean) {
     if (!props.trackData) {
         console.log('missing layers');
         return [];
     }
-
-    //    console.log('deckgl', props.trackData.length);
 
     // Add a layer for the recent points for each pilot
     let layers = _reduce(
         props.trackData,
         (result, track, compno) => {
             // Don't include current pilot in list of all
-            if (compno == props.selectedCompno) {
-                return result;
-            }
+            const selected = compno == props.selectedCompno;
+
             const p = track.deck;
-            if (!p) {
+            if (!p || !p.getData) {
                 console.log(`deck missing from ${compno}`, track);
                 return result;
             }
+
+            // For all but selected gliders just show most recent track
+            const tripsFiltering = {
+                currentTime: props.t - referenceDate,
+                fadeTrail: !fullPaths && !selected,
+                trailLength: recentTrackLength
+            };
+
+            const sortKeyColour = colours[sortKey] ? sortKey : 'auto';
+            const colour = colours[!props.selectedCompno || selected ? sortKeyColour : 'auto'](mapLight, selected);
+
             result.push(
-                new OgnPathLayer({
-                    id: compno,
+                new TripsLayer({
+                    id: compno + p.trackVersion,
                     compno: compno,
-                    data: {
-                        length: 1,
-                        startIndices: new Uint32Array([0, p.recentIndices[1] - p.recentIndices[0]]),
-                        timing: p.t.subarray(p.recentIndices[0], p.recentIndices[1]),
-                        climbRate: p.climbRate.subarray(p.recentIndices[0], p.recentIndices[1]),
-                        agl: p.agl.subarray(p.recentIndices[0], p.recentIndices[1]),
-                        attributes: {
-                            getPath: {value: p.positions.subarray(p.recentIndices[0] * 3, p.recentIndices[1] * 3), size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0}
-                        }
-                    },
-                    _pathType: 'open',
-                    positionFormat: map2d ? 'XY' : 'XYZ',
-                    getWidth: 5,
-                    getColor: mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224],
+                    data: p.getData,
+                    getWidth: selected ? 8 : 5,
+                    getPath: (d) => d.p,
+                    getTimestamps: (d) => d.t - referenceDate,
+                    positionFormat: 'XYZ',
+                    getColor: colour,
                     jointRounded: true,
                     fp64: false,
-                    widthMinPixels: 2,
                     billboard: map2d ? false : true,
+                    widthMinPixels: selected ? 3 : 2,
                     onClick: (i) => {
                         props.setSelectedCompno(compno);
                     },
                     updateTriggers: {
-                        getPath: p.posIndex
+                        getColor: sortKeyColour + mapLight + (selected ? 's' : '') + (props.selectedCompno ? 'y' : '')
                     },
                     pickable: true,
-                    tt: true
+                    tt: true,
+                    ...tripsFiltering
                 })
             );
             return result;
@@ -118,10 +136,10 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         return {
             name: track.compno,
             compno: track.compno,
-            climbRate: p.climbRate[p.posIndex - 1], //
-            agl: p?.agl[p.posIndex - 1],
-            alt: p.positions[(p.posIndex - 1) * 3 + 2],
-            time: p.t[p.posIndex - 1],
+            v: p.climbRate[p.posIndex - 1], //
+            g: p?.agl[p.posIndex - 1],
+            a: p.positions[(p.posIndex - 1) * 3 + 2],
+            t: p.t[p.posIndex - 1],
             coordinates: p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)
         };
     });
@@ -129,66 +147,29 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
     if (data.length) {
         layers.push(
             new TextLayer({
-                id: 'labels',
+                id: 'labels' + (map2d ? '2d' : '3d'),
                 data: data,
-                getPosition: map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
+                getPosition: (d) => d.coordinates, // map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
                 getText: (d) => d.name,
-                getColor: (d) => (props.t - d.time > gapLength ? [100, 80, 80, 96] : [0, 100, 0, 255]),
+                getColor: (d) => (props.t - d.t > offlineTime ? [100, 80, 80, 96] : [0, 100, 0, 255]),
                 getTextAnchor: 'middle',
+                getAlignmentBaseline: 'bottom',
                 getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
                 pickage: true,
                 background: true,
                 fontSettings: {sdf: true},
-                backgroundPadding: [2, 0, 2, 0],
+                backgroundPadding: [2, 1, 2, 0],
                 onClick: (i) => {
                     props.setSelectedCompno(i.object?.name || '');
                 },
                 outlineWidth: 2,
                 outlineColor: [255, 255, 255, 255],
                 getBackgroundColor: [255, 255, 255, 255],
-                getBorderColor: [40, 40, 40, 255],
+                getBorderColor: (d) => (d.name === props.selectedCompno ? [255, 0, 255, 192] : [40, 40, 40, 255]),
                 getBorderWidth: 1,
                 pickable: true
             })
         );
-    }
-
-    //
-    // If there is a selected pilot then we need to add the full track for that pilot
-    //
-    if (props.selectedCompno && props.trackData[props.selectedCompno]?.deck) {
-        const p = props.trackData[props.selectedCompno].deck;
-        if (p.posIndex) {
-            layers.push(
-                new OgnPathLayer({
-                    id: 'selected' + props.selectedCompno + p.partial + p.posIndex,
-                    compno: props.selectedCompno,
-                    data: {
-                        length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
-                        startIndices: p.indices,
-                        timing: p.t,
-                        climbRate: p.climbRate,
-                        agl: p.agl,
-                        attributes: {
-                            getPath: {value: p.positions, size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0}
-                        }
-                    },
-                    _pathType: 'open',
-                    positionFormat: map2d ? 'XY' : 'XYZ',
-                    getWidth: 5,
-                    billboard: map2d ? false : true,
-                    getColor: [255, 0, 255, 192],
-                    jointRounded: true,
-                    widthMinPixels: 3,
-                    fp64: false,
-                    pickable: true,
-                    tt: true,
-                    updateTriggers: {
-                        getPath: p.posIndex
-                    }
-                })
-            );
-        }
     }
 
     return layers;
@@ -202,29 +183,31 @@ export default function MApp(props: {
     selectedPilotData: SelectedPilotDetails | null;
     follow: boolean;
     setFollow: Function;
-    t: Epoch;
     vc: ClassName;
     selectedCompno: Compno;
     setSelectedCompno: Function;
-    mapRef: any;
     tz: string;
     viewport: any;
     setViewport: Function;
     trackData: TrackData;
     measureFeatures: UseMeasure;
     status: string; // status line
+    t: Epoch;
 }) {
+    // For remote updating of the map
+    const mapRef = useRef(null);
+
     // So we get some type info
-    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, t, vc, selectedCompno, mapRef, tz, viewport, setViewport} = props;
+    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
 
     // Map display style
-    const map2d = options.mapType > 1;
-    const mapStreet = !!(options.mapType % 2);
+    const map2d = options.map2d;
+    const mapStreet = !options.mapType;
     const mapLight = !!mapStreet;
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = useMemo(() => makeLayers(props, taskGeoJSON, map2d, mapStreet), [t, pilots, selectedCompno, taskGeoJSON, map2d, props.trackData[props.selectedCompno || '']?.deck?.partial, mapLight]);
+    const layers = makeLayers(props, options.sortKey as SortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
@@ -242,95 +225,83 @@ export default function MApp(props: {
                 selectedPilotData &&
                 selectedPilotData.track?.vario?.lat && //
                 selectedPilotData.score?.currentLeg !== undefined &&
-                taskGeoJSON?.tp?.features
+                taskGeoJSON?.track?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
-                const lat = selectedPilotData.track.vario.lat;
-                const lng = selectedPilotData.track.vario.lng;
+                const lat = Math.round(selectedPilotData.track.vario.lat * 100) / 100;
+                const lng = Math.round(selectedPilotData.track.vario.lng * 100) / 100;
 
-                let fbearing = props.options.taskUp == 2 ? props.viewport.bearing : 0;
+                // Next point - if we haven't started or we have finished use the startline
                 const npol =
-                    selectedPilotData.score.minDistancePoints.length > 6 // make sure we have next point or use first tp
-                        ? selectedPilotData.score.minDistancePoints.slice(4, 6)
-                        : taskGeoJSON?.track?.features?.[0]?.geometry?.coordinates?.[1];
-                let position = props.viewport?.position;
-                if (props.options.taskUp == 1) {
-                    fbearing = bearing([lng, lat], npol);
-                }
+                    !selectedPilotData.score.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) //
+                        ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[1]
+                        : selectedPilotData.score.utcFinish
+                        ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
+                        : selectedPilotData.score.minDistancePoints.slice(4, 6);
 
-                if (!map2d) {
-                    if (
-                        (Math.abs(fbearing - props.viewport.bearing) < 10 && //
-                            distance([lng, lat], [props.viewport.lng, props.viewport.lat]) < 0.4) ||
-                        distance([lng, lat], npol) < 0.75
-                    ) {
-                        return undefined;
-                    }
-                    const map = mapRef?.current?.getMap();
-                    if (map && map.transform && map.transform.elevation) {
-                        const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
-                        position = [0, 0, mapbox_elevation];
-                    }
-                }
+                // If we are user selected or we don't have a valid next point don't change anything
+                const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol) : 0;
 
-                props.setViewport({
-                    ...props.viewport,
-                    latitude: lat,
-                    longitude: lng,
-                    bearing: fbearing,
-                    position
+                console.log(lat, lng, fbearing, npol);
+                mapRef?.current?.flyTo({
+                    center: [lng, lat],
+                    bearing: Math.round(fbearing),
+                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
                 });
-                return fbearing;
             }
-            return undefined;
         },
-        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, Math.trunc(props.t / 60), props.options.taskp] : [null, null, null, null, null]
+        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, props.options.taskp] : [null, null, null, null]
     );
 
-    useMemo(() => {
+    useEffect(() => {
         if (props.viewport.pitch == 0 && !map2d) {
-            props.setViewport(
-                {
-                    ...props.viewport,
-                    pitch: 70
-                },
-                map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 300, transitionInterpolator: new FlyToInterpolator()}
-            );
-        } else if (props.viewport.pitch != 0 && map2d) {
-            props.setViewport(
-                {
-                    ...props.viewport,
+            mapRef?.current?.getMap().setMaxPitch(80);
+            mapRef?.current?.easeTo({
+                pitch: 75
+            });
+        } else if (map2d && props.viewport.pitch != 0) {
+            mapRef?.current
+                ?.easeTo({
                     pitch: 0
-                },
-                map2d ? {} : {transitionInterruption: TRANSITION_EVENTS.SNAP_TO_END, transitionDuration: 500, transitionInterpolator: new FlyToInterpolator()}
-            );
+                })
+                .once('moveend', () => mapRef?.current?.getMap().setMaxPitch(0));
         }
+        //        console.log( mapRef?.current?.getMap().
     }, [map2d]);
 
-    useMemo(() => {
-        if (options.zoomTask) {
-            const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
-
-            const viewportWebMercator = new WebMercatorViewport(viewport);
-            const {
-                longitude,
-                latitude,
-                zoom
-            } = //
-                viewportWebMercator.fitBounds(
+    // If we are supposed to zoom then do this and turn off the flag
+    useEffect(() => {
+        if (options.zoomTask && taskGeoJSONtp && viewport) {
+            try {
+                const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
+                setOptions({...options, zoomTask: false});
+                mapRef?.current?.fitBounds(
                     [
                         [minLng, minLat],
                         [maxLng, maxLat]
                     ],
                     {
-                        padding: 20
+                        pitch: map2d ? 0 : 50,
+                        padding: 20,
+                        offset: [-140, 0],
+                        bearing: 0
                     }
                 );
-            setViewport({...props.viewport, longitude, latitude, zoom, transitionInterpolator: new FlyToInterpolator(), transitionDuration: 500});
+            } catch (e) {
+                console.error(e);
+            }
         }
+    }, [options.zoomTask, taskGeoJSONtp, viewport]);
 
-        setTimeout(() => setOptions({...options, zoomTask: false}), 100);
-    }, [vc, selectedCompno, options.zoomTask]);
+    const isMoving = mapRef?.current?.isMoving() ?? true;
+
+    // If we are north up then reset north on bearing change
+    // NOOP for others
+    useEffect(() => {
+        if (!isMoving && options.taskUp === 0 && Math.trunc(viewport.bearing / 2) != 0) {
+            mapRef?.current?.resetNorth({duration: 250});
+        }
+    }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving]);
 
     //
     // Colour and style the task based on the selected pilot and their destination
@@ -338,54 +309,12 @@ export default function MApp(props: {
         return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle3d(selectedPilotData?.score, mapLight);
     }, [selectedCompno, selectedPilotData?.score?.currentLeg, selectedPilotData?.score?.utcFinish, mapLight, map2d]);
 
-    //
-    // Two different ways to make sure we have terrain loaded
-    // on map load (in case it's default for user and on change of map type)
-    const onMapLoad = useCallback(
-        (evt) => {
-            if (!map2d) {
-                console.log('terrain callback');
-                const map = evt.target;
-                map.setTerrain({source: 'mapbox-dem'});
-                map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
-            }
-        },
-        [map2d]
-    );
-    useEffect(() => {
-        const map = mapRef?.current?.getMap();
-        if (map) {
-            const hasTerrain = !!map.getTerrain();
-            if (hasTerrain && map2d) {
-                console.log('disabling terrain');
-                map.setTerrain(null);
-                map.setFog(null);
-            }
-            if (!hasTerrain && !map2d) {
-                console.log('enabling terrain');
-                if (!map.getSource('mapbox-dem')) {
-                    map.addSource('mapbox-dem', {
-                        type: 'raster-dem',
-                        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-                        tileSize: 512,
-                        maxzoom: 14
-                    });
-                }
-                setTimeout(() => {
-                    map.setTerrain({source: 'mapbox-dem'});
-                    map.setFog({color: 'rgba(135, 206, 235, .5)', range: [0.5, 1.5], 'horizon-blend': 0.1});
-                }, 1000);
-            }
-        } else {
-            console.log('no mapref');
-        }
-    }, [map2d, mapRef]);
-
     // Do we have a loaded set of details?
     const valid = !(isTLoading || isTError) && taskGeoJSON?.tp && taskGeoJSON?.track;
 
     const skyLayer: any = {
         id: 'sky',
+        key: 'sky',
         type: 'sky',
         paint: {
             'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1],
@@ -399,156 +328,170 @@ export default function MApp(props: {
         }
     };
 
-    function toolTip({object, picked, layer, coordinate}) {
-        if (!picked) {
-            if (process.env.NODE_ENV == 'development' && coordinate) {
-                return `[${coordinate.map((x) => x.toFixed(4))}]`;
-            }
-            return null;
-        }
-        if (object) {
-            let response = '';
-
-            if (object.compno && object.time && pilotScores[object.compno]?.stats) {
-                const segment = _find(props.pilots[object.compno].stats, (c) => c.start <= object.time && object.time <= c.end);
-                if (segment) {
-                    object.stats = segment;
+    const toolTip = useCallback(
+        ({object, picked, layer, coordinate}) => {
+            if (!picked) {
+                if (process.env.NODE_ENV == 'development' && coordinate) {
+                    const map = mapRef?.current; // ?.getMap();
+                    return `[${coordinate.map((x) => x.toFixed(4))}, ${map?.queryTerrainElevation({lat: coordinate[1], lng: coordinate[0]}, {exaggerated: false})?.toFixed(0)}]`;
                 }
+                return null;
             }
-            if (object.time) {
-                // Figure out what the local language is for international date strings
-                const dt = new Date(object.time * 1000);
-                response += `${object.compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
-            }
+            if (object) {
+                let response = '';
+                const compno = layer.props.compno ?? object.compno;
+                const time = object.t;
 
-            if (process.env.NODE_ENV == 'development') {
-                response += `[${object.time}]<br/>`;
-            }
-
-            if (object.alt && !isNaN(object.alt)) {
-                response += `${displayHeight(object.alt, props.options.units)} QNH `;
-            }
-            if (object.agl && !isNaN(object.agl)) {
-                response += `(${displayHeight(object.agl, props.options.units)} AGL) `;
-            }
-            if (object.climbRate) {
-                response += ` ↕️  ${displayClimb(object.climbRate, props.options.units)}`;
-            }
-            if (object.stats) {
-                const stats = object.stats;
-                const elapsed = stats.end - stats.start;
-
-                if (elapsed > 30) {
-                    response += `<br/> ${stats.state} for ${elapsed} seconds<br/>`;
-
-                    if (stats.state == 'thermal') {
-                        response += `average: ${displayClimb(stats.avgDelta, props.options.units)}`;
-                    } else if (stats.state == 'straight') {
-                        response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
+                if (time) {
+                    if (compno && pilotScores[compno]?.stats) {
+                        const segment = _find(props.pilots[compno].stats, (c) => c.start <= time && time <= c.end);
+                        if (segment) {
+                            object.stats = segment;
+                        }
                     }
-                    if (stats.wind.direction) {
-                        response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
+
+                    // Figure out what the local language is for international date strings
+                    const dt = new Date(time * 1000);
+                    response += `${compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
+                }
+
+                if (process.env.NODE_ENV == 'development') {
+                    response += `[${time}]<br/>`;
+                }
+                const a = object.a ?? object.p[1][2] ?? NaN;
+                if (!isNaN(a)) {
+                    response += `${displayHeight(a, props.options.units)} QNH `;
+                }
+                if (object.g && !isNaN(object.g)) {
+                    response += `(${displayHeight(object.g, props.options.units)} AGL) `;
+                }
+                if (object.v) {
+                    response += ` ↕️  ${displayClimb(object.v, props.options.units)}`;
+                }
+                if (object.stats) {
+                    const stats = object.stats;
+                    const elapsed = stats.end - stats.start;
+
+                    if (elapsed > 30) {
+                        response += `<br/> ${stats.state} for ${elapsed} seconds<br/>`;
+
+                        if (stats.state == 'thermal') {
+                            response += `average: ${displayClimb(stats.avgDelta, props.options.units)}`;
+                        } else if (stats.state == 'straight') {
+                            response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
+                        }
+                        if (stats.wind.direction) {
+                            response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
+                        }
                     }
                 }
-            }
-            return {html: response};
-        } else if (layer && layer.props.tt == true) {
-            return layer.id;
-        } else {
-            return null;
-        }
-    }
-
-    const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
-
-    // Update the view and synchronise with mapbox
-    const onViewStateChange = useCallback(
-        ({viewState}) => {
-            //
-            //            console.log(map2d, props.options.mapType);
-            if (props.options.taskUp == 0) {
-                viewState.bearing = 0;
-            }
-            if (map2d) {
-                viewState.minPitch = 0;
-                viewState.maxPitch = 0;
-                setViewport(viewState);
-                return;
+                return {html: response};
+            } else if (layer && layer.props.tt == true) {
+                return layer.id;
             } else {
-                viewState.minPitch = 0;
-                viewState.maxPitch = 85;
-                viewState.pitch = Math.max(Math.min(viewState.pitch, 85), 0);
-            }
-
-            const map = mapRef?.current?.getMap();
-            if (map && map.transform && map.transform.elevation && !viewState.position) {
-                //&& map.queryTerrainElevation) {
-                //            const mapbox_elevation = map.transform.elevation.getAtPoint(MercatorCoordinate.fromLngLat(map.getCenter()));
-                const mapbox_elevation = map.queryTerrainElevation(map.getCenter(), {exaggerated: true});
-                //			console.log( "3d transform, elevation", mapbox_elevation );
-                //const mapbox_elevation = -40000;
-                setViewport({
-                    ...viewState,
-                    ...{position: [0, 0, mapbox_elevation]}
-                });
-            } else {
-                setViewport(viewState);
+                return null;
             }
         },
-        [map2d, props.options.taskUp, mapRef]
+        [vc, props.options.units, mapRef, mapRef?.current]
     );
 
+    const attribution = useMemo(
+        () => (
+            <AttributionControl //
+                key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')}
+                customAttribution={[radarOverlay.attribution, props.status].join(' | ')}
+                style={attributionStyle}
+            />
+        ),
+        [radarOverlay.key, props.status]
+    );
+
+    // Initial options depending on if we are on 2d or 3d
+    const viewOptions = map2d ? {minPitch: 0, maxPitch: 0, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
+
+    // We keep our saved viewstate up to date in case of re-render
+    const onViewStateChange = useCallback(({viewState}) => {
+        props.setViewport(viewState);
+    }, []);
+
+    const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
+    const getCursor = useCallback(() => 'crosshair', []);
+
+    // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
+    // much quicker than changing the style.
+    useEffect(() => {
+        try {
+            mapRef?.current?.getMap()?.setLayoutProperty('satellite', 'visibility', !mapStreet ? 'none' : 'visible');
+            mapRef?.current?.getMap()?.setLayoutProperty('background', 'visibility', !mapStreet ? 'none' : 'visible');
+        } catch (e) {}
+    }, [mapStreet]);
+
     return (
-        <DeckGL
-            viewState={viewport}
-            onViewStateChange={(e) => onViewStateChange(e)}
-            controller={{type: StopFollowController, setFollow, inertia: true, transitionDuration: 0}} // helps with touch scroll on laptops (undocumented)
-            getTooltip={toolTip}
-            {...(isMeasuring(props.measureFeatures) ? {getCursor: () => 'crosshair'} : {})}
-            layers={layers} //
-            onClick={measureClick(props.measureFeatures)}
+        <Map //
+            initialViewState={{...props.viewport, ...viewOptions}}
+            onMove={onViewStateChange}
+            mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+            mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
+            ref={mapRef}
+            reuseMaps={true}
+            fog={{
+                range: [-0.75, 20],
+                color: 'rgba(233, 241, 251, 1)'
+                //                'space-color': 'rgba(135, 206, 235, 0.5)',
+                //                'star-intensity': 0.4
+            }}
+            terrain={{source: 'mapbox-dem', exaggeration: 1}}
+            attributionControl={false}
         >
-            <StaticMap mapboxApiAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN} mapStyle={mapStreet ? 'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' /*"mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk"*/ : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'} onLoad={onMapLoad} ref={mapRef} attributionControl={false}>
-                {options.constructionLines && taskGeoJSON?.Dm ? (
-                    <Source type="geojson" data={taskGeoJSON.Dm} key="y">
-                        <Layer {...DmPointStyle} />
-                    </Source>
-                ) : null}
-                {valid ? (
-                    <Source type="geojson" data={taskGeoJSON.track}>
-                        <Layer {...trackLineStyle} key="tls" />
-                    </Source>
-                ) : null}
-                {valid ? (
-                    <Source type="geojson" data={taskGeoJSONtp}>
-                        <Layer {...turnpointStyleFlat} key="tps" />
-                        <Layer {...turnpointStyle} key="tgjp" />
-                    </Source>
-                ) : null}
-                {selectedPilotData && options.constructionLines && selectedPilotData.score?.minGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_'}>
-                        <Layer {...minLineStyle} />
-                        <Layer {...distanceLineLabelStyle(minLineStyle)} />
-                    </Source>
-                ) : null}
-                {selectedPilotData && options.constructionLines && selectedPilotData.score?.maxGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_'}>
-                        <Layer {...maxLineStyle} />
-                        <Layer {...distanceLineLabelStyle(maxLineStyle)} />
-                    </Source>
-                ) : null}
-                {selectedPilotData && selectedPilotData?.score?.scoredGeoJSON ? (
-                    <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_'}>
-                        <Layer {...scoredLineStyle} />
-                        <Layer {...distanceLineLabelStyle(scoredLineStyle)} />
-                    </Source>
-                ) : null}
-                <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
-                {!map2d && <Layer {...skyLayer} />}
-                {attribution}
-                {radarOverlay.layer}
-            </StaticMap>
-        </DeckGL>
+            <DeckGLOverlay
+                getTooltip={toolTip}
+                {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
+                onClick={onClick}
+                layers={layers} //
+                interleaved={true}
+            />
+            {options.constructionLines && taskGeoJSON?.Dm ? (
+                <Source type="geojson" data={taskGeoJSON.Dm} key="y">
+                    <Layer {...DmPointStyle} />
+                </Source>
+            ) : null}
+            {valid ? (
+                <Source type="geojson" data={taskGeoJSON.track}>
+                    <Layer {...trackLineStyle} key="tls" />
+                </Source>
+            ) : null}
+            {valid ? (
+                <Source type="geojson" id="x" data={taskGeoJSONtp}>
+                    <Layer {...turnpointStyleFlat} key="tps" />
+                    <Layer {...turnpointStyle} key="tgjp" />
+                </Source>
+            ) : null}
+            {selectedPilotData && options.constructionLines && selectedPilotData.score?.minGeoJSON ? (
+                <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_'}>
+                    <Layer {...minLineStyle} />
+                    <Layer {...distanceLineLabelStyle(minLineStyle)} />
+                </Source>
+            ) : null}
+            {selectedPilotData && options.constructionLines && selectedPilotData.score?.maxGeoJSON ? (
+                <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_'}>
+                    <Layer {...maxLineStyle} />
+                    <Layer {...distanceLineLabelStyle(maxLineStyle)} />
+                </Source>
+            ) : null}
+            {selectedPilotData && selectedPilotData?.score?.scoredGeoJSON ? (
+                <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_'}>
+                    <Layer key="scoredLine" {...scoredLineStyle} />
+                    <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
+                </Source>
+            ) : null}
+            <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
+            <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
+            {!map2d && <Layer {...skyLayer} />}
+            {attribution}
+            {radarOverlay.layer}
+            <ScaleControl position="bottom-left" />
+            <NavigationControl showCompass showZoom visualizePitch position="bottom-left" />
+        </Map>
     );
 }
 
@@ -630,7 +573,7 @@ const DmPointStyle: LayerProps = {
 };
 
 function getSunPosition(mapRef, date?) {
-    const map = mapRef?.current?.getMap();
+    const map = mapRef?.current; //?.getMap();
     if (map) {
         const center = map.getCenter();
         const sunPos = SunCalc.getPosition(date || Date.now(), center.lat, center.lng);

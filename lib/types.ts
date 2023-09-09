@@ -18,6 +18,7 @@ export type SpeedKPH = number & As<'SpeedKPH'>;
 
 export type Compno = string & As<'Compno'>;
 export type ClassName = string & As<'ClassName'>;
+export type ChannelName = string & As<'ChannelName'>;
 
 export type TZ = string & As<'TZ'>;
 
@@ -45,6 +46,7 @@ import {Point, Feature} from '@turf/helpers';
 export interface AirfieldLocation {
     name: string;
     tz: TZ;
+    tzoffset: number;
     lat: number;
     lng: number;
     officialDelay: Epoch;
@@ -219,7 +221,7 @@ export interface CalculatedTaskStatus extends TaskStatus {
 export type SoftenGenerator<Type extends TimeStampType> = AsyncGenerator<Type, Type | void, void>;
 
 export type InOrderGenerator = AsyncGenerator<PositionMessage, void, Epoch | void>;
-export type InOrderGeneratorFunction = (log: Function | null) => InOrderGenerator;
+export type InOrderGeneratorFunction = (getNow: Function | null) => InOrderGenerator;
 
 // Figure out what is happening in the flight
 export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition, void, Epoch | void>;
@@ -239,14 +241,13 @@ export type ProtobufGenerator = AsyncGenerator<Uint8Array, void, void>;
 export interface DeckData {
     compno: Compno;
     positions: Float32Array;
-    indices: Uint32Array;
     agl: Int16Array;
     t: Uint32Array;
-    recentIndices: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
-    partial: boolean;
-    segmentIndex: number;
+    trackVersion: number;
+    dataPromiseResolve?: (a?: boolean) => void;
+    getData?: AsyncGenerator<any, void, void>;
 }
 
 export interface VarioData {
@@ -271,7 +272,6 @@ export interface PilotTrackData {
     deck?: DeckData;
     vario?: VarioData;
     t?: Epoch;
-    //    colors?: Uint8Array; // deck colour picking
 }
 
 export {PilotScore, PilotScoreLeg} from './protobuf/onglide';

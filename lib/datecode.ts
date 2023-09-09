@@ -1,6 +1,7 @@
 // Get a string date
-export function fromDateCode(dcode: string): string {
+export function fromDateCode(dcodeA: string): string {
     const now = new Date();
+    const dcode = dcodeA.toUpperCase();
     const year = parseInt(dcode.charAt(0)) + now.getFullYear() - (now.getFullYear() % 10);
     const month = parseInt(dcode.charAt(1), 36);
     const day = parseInt(dcode.charAt(2), 36);
@@ -17,5 +18,5 @@ export function toDateCode(date?: string | Date): string {
     const year = date.getUTCFullYear() % 10;
     const month = (date.getUTCMonth() + 1).toString(36);
     const day = date.getUTCDate().toString(36);
-    return `${year}${month}${day}`;
+    return `${year}${month}${day}`.toUpperCase();
 }

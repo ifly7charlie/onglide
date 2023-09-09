@@ -11,11 +11,20 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
     const constructionLines = () => {
         props.setOptions(_cloneDeep({...props.options, constructionLines: !props.options.constructionLines}));
     };
-    const toggle3d = () => {
-        props.setOptions(_cloneDeep({...props.options, mapType: props.options.mapType ^ 2}));
+    const toggle2d = () => {
+        const newOptions = _cloneDeep({...props.options, map2d: !props.options.map2d});
+        // Save away the current options and
+        if (props.options.map2d) {
+            Object.assign(newOptions, {options2d: {taskUp: newOptions.taskUp, follow: newOptions.follow, mapType: newOptions.mapType}});
+            Object.assign(newOptions, {...(props.options.options3d ?? {taskUp: 1, mapType: 1})});
+        } else {
+            Object.assign(newOptions, {options3d: {taskUp: newOptions.taskUp, follow: newOptions.follow, mapType: newOptions.mapType}});
+            Object.assign(newOptions, {...(props.options.options2d ?? {taskUp: 0, mapType: 0})});
+        }
+        props.setOptions(newOptions);
     };
     const toggleSatellite = () => {
-        props.setOptions(_cloneDeep({...props.options, mapType: props.options.mapType ^ 1}));
+        props.setOptions(_cloneDeep({...props.options, mapType: !props.options.mapType}));
     };
     const toggleUnits = () => {
         props.setOptions(_cloneDeep({...props.options, units: !props.options.units}));
@@ -25,6 +34,9 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
     };
     const toggleFollow = () => {
         props.setOptions(_cloneDeep({...props.options, follow: !props.options.follow}));
+    };
+    const toggleFullPaths = () => {
+        props.setOptions(_cloneDeep({...props.options, fullPaths: !props.options.fullPaths}));
     };
 
     return (
@@ -61,17 +73,17 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
                 </button>
             )}
             &nbsp;
-            {props.options.mapType & 2 ? (
-                <button title="Displaying 2D, Click to switch to 3D" onClick={toggle3d}>
+            {props.options.map2d ? (
+                <button title="Displaying 2D, Click to switch to 3D" onClick={toggle2d}>
                     <FontAwesomeIcon icon={solid('map')} />{' '}
                 </button>
             ) : (
-                <button title="Displaying 3D, Click to switch to 2D" onClick={toggle3d}>
+                <button title="Displaying 3D, Click to switch to 2D" onClick={toggle2d}>
                     <FontAwesomeIcon icon={solid('globe')} />
                 </button>
             )}
-            <br className="smallScreen" />
-            {props.options.mapType & 1 ? (
+            {false ? <br className="smallScreen" /> : null}
+            {props.options.mapType ? (
                 <button title="Displaying road map, Click to switch to satellite map" onClick={toggleSatellite}>
                     <FontAwesomeIcon icon={solid('road')} />
                 </button>
@@ -83,7 +95,7 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
             &nbsp;
             {
                 [
-                    <button title="Map rientation is currently locked to North Up, Change to Task Track Up when following" onClick={toggleTaskUp}>
+                    <button title="Map orientation is currently locked to North Up, Change to Task Track Up when following" onClick={toggleTaskUp}>
                         <FontAwesomeIcon icon={regular('compass')} transform={{rotate: -45}} />
                     </button>,
                     <button title="Follow orientation is currently Task Track Up, Change to Manual (user controlled)" onClick={toggleTaskUp}>
@@ -104,6 +116,19 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={solid('slash')} />
                         <FontAwesomeIcon icon={solid('location-crosshairs')} />
+                    </span>
+                </button>
+            )}
+            &nbsp;
+            {props.options.fullPaths ? (
+                <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
+                    <FontAwesomeIcon icon={solid('route')} />
+                </button>
+            ) : (
+                <button title="Show recent paths for all pilots" onClick={toggleFullPaths}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={solid('slash')} />
+                        <FontAwesomeIcon icon={solid('route')} />
                     </span>
                 </button>
             )}

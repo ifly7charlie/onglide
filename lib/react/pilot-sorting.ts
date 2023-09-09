@@ -18,7 +18,7 @@ export interface ShortDisplayKeys {
     sortKey: string | number;
     displayAs: string | number | null;
     units: string;
-    icon: any;
+    icon: string | any;
 }
 
 export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'delay' | 'ald' | 'ld' | 'done' | 'auto' | 'times';
@@ -161,9 +161,9 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
                 if (pilotScore.flightStatus == PositionStatus.Home || pilotScore?.utcFinish) {
                     displayAs = '-';
                     suffix = '';
-                    newKey = '';
+                    newKey = '0';
                 } else {
-                    newKey = -delay;
+                    newKey = delay;
                     [displayAs] = delayToText(delay).split(' ');
                 }
                 break;
@@ -366,9 +366,13 @@ export function isValidSortOrder(type: SortKey, handicapped: boolean): boolean {
 }
 
 export function getValidSortOrder(type: SortKey, handicapped: boolean): SortKey {
-    const key = getSortOrderType(type);
-    const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
-    return orders[0];
+    if (isValidSortOrder(type, handicapped)) {
+        return type;
+    } else {
+        const key = getSortOrderType(type);
+        const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
+        return orders[0];
+    }
 }
 
 //

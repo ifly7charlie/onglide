@@ -1,4 +1,5 @@
 ///import next from 'next';
+import {memo} from 'react';
 import {useRouter} from 'next/router';
 import Head from 'next/head';
 
@@ -20,85 +21,76 @@ import {OgnFeed} from '../lib/react/ognfeed';
 
 import Router from 'next/router';
 
-//import {pilotsorting} from '../lib/react/pilot-sorting.js';
 import {query} from '../lib/react/db';
 import escape from 'sql-template-strings';
 import {Options} from '../lib/react/options';
 
-import {useMeasure} from '../lib/react/measure';
+import {UseMeasure, useMeasure} from '../lib/react/measure';
+import {ClassName} from '../lib/types';
 
-import cookies from 'next-cookies';
+import {find as _find, isEqual as _isEqual} from 'lodash';
 
-import _find from 'lodash.find';
+const Menu = memo(
+    function Menu(props: {comp: any; setSelectedPilot: Function; measureFeatures: UseMeasure; options: any; setOptions: Function; vc: string}) {
+        const comp = props.comp;
+        const classes =
+            comp.classes.length > 1
+                ? comp.classes.map((c) => (
+                      <Nav.Item key={'navitem' + c.class}>
+                          <Nav.Link
+                              href="#"
+                              key={'navlink' + c.class}
+                              eventKey={c.class}
+                              onClick={() => {
+                                  Router.push('/?className=' + c.class, undefined, {shallow: true});
+                                  props.setSelectedPilot(null);
+                              }}
+                          >
+                              {c.classname.replace(/\s+(meter|metre)/, 'm')}
+                          </Nav.Link>
+                      </Nav.Item>
+                  ))
+                : null;
 
-function IncludeJavascript() {
-    return (
-        <>
-            <link rel="stylesheet" href="/bootstrap/css/font-awesome.min.css" />
-            <link href="//api.mapbox.com/mapbox-gl-js/v2.3.0/mapbox-gl.css" rel="stylesheet" />
-        </>
-    );
-}
+        // Try and extract a short form of the name, only letters and spaces stop at first number
+        const shortName =
+            comp.competition.name
+                .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
+                .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
+                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/, 'u'))?.[1]
+                ?.trim() || comp.competition.name.substring(0, 25) + '...';
 
-// Requires: classes, link, contestname, contestdates
-
-function Menu(props) {
-    const comp = props.comp;
-    const classes =
-        comp.classes.length > 1
-            ? comp.classes.map((c) => (
-                  <Nav.Item key={'navitem' + c.class}>
-                      <Nav.Link
-                          href="#"
-                          key={'navlink' + c.class}
-                          eventKey={c.class}
-                          onClick={() => {
-                              Router.push('/?className=' + c.class, undefined, {shallow: true});
-                              props.setSelectedPilot(null);
-                          }}
-                      >
-                          {c.classname.replace(/\s+(meter|metre)/, 'm')}
-                      </Nav.Link>
-                  </Nav.Item>
-              ))
-            : null;
-
-    // Try and extract a short form of the name, only letters and spaces stop at first number
-    const shortName =
-        comp.competition.name
-            .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
-            .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
-            .match(new RegExp(/^([0-9]*[\p{L}\s]*)/, 'u'))?.[1]
-            ?.trim() || comp.competition.name.substring(0, 25) + '...';
-
-    return (
-        <>
-            <Navbar bg="light" fixed="top">
-                <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
-                    {classes}
-                    <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-sm-block d-lg-none">
-                            {shortName}
-                            <Nbsp />
-                            <FontAwesomeIcon icon={faLink} />
-                        </Nav.Link>
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
-                            {comp.competition.name}
-                            <div style={{fontSize: '70%'}}>
-                                {comp.competition.start} to {comp.competition.end}
-                                <FontAwesomeIcon icon={faLink} />{' '}
-                            </div>
-                        </Nav.Link>
-                    </Nav.Item>
-                    <Nav.Item key="settings">
-                        <Options {...props} />
-                    </Nav.Item>
-                </Nav>
-            </Navbar>
-            <br style={{clear: 'both'}} />
-        </>
-    );
-}
+        return (
+            <>
+                <Navbar bg="light" fixed="top">
+                    <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
+                        {classes}
+                        <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
+                            <Nav.Link href={comp.competition.mainwebsite} className="d-xs-block d-sm-block d-lg-none">
+                                {shortName}
+                                <Nbsp />
+                                <FontAwesomeIcon icon={faLink} />
+                            </Nav.Link>
+                            <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
+                                {comp.competition.name}
+                                <div style={{fontSize: '70%'}}>
+                                    {comp.competition.start} to {comp.competition.end}
+                                    <FontAwesomeIcon icon={faLink} />{' '}
+                                </div>
+                            </Nav.Link>
+                        </Nav.Item>
+                        <Nav.Item key="settings">
+                            <Options {...props} />
+                        </Nav.Item>
+                    </Nav>
+                </Navbar>
+                <br style={{clear: 'both'}} />
+            </>
+        );
+    },
+    // Memo comparison, skip all the functions
+    (o, n) => o.vc === n.vc && o.comp === n.comp && _isEqual(o.measureFeatures[0], n.measureFeatures[0]) && _isEqual(o.options, n.options)
+);
 
 //
 // Main page rendering :)
@@ -110,6 +102,9 @@ export default function CombinePage(props) {
     let {className} = router.query;
     if (!className) {
         className = props.defaultClass;
+    }
+    if (Array.isArray(className)) {
+        className = className[0];
     }
 
     // Next up load the contest and the pilots, we can use defaults for pilots
@@ -128,12 +123,11 @@ export default function CombinePage(props) {
         longitude: props.lng,
         zoom: 8.5,
         minZoom: 6.5,
-        maxZoom: 14,
+        maxZoom: 13,
         bearing: 0,
         minPitch: 0,
         maxPitch: 85,
-        altitude: 1.5,
-        pitch: !(props.options.mapType % 2) ? 70 : 0
+        pitch: !props.options.map2d ? 70 : 0
     });
 
     //
@@ -170,11 +164,11 @@ export default function CombinePage(props) {
                 </title>
                 <meta name="viewport" content="width=device-width, minimal-ui" />
                 <link rel="manifest" href="/manifest.json" />
-                <IncludeJavascript />
+                <link href="//api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
             <div className="resizingContainer">
-                <OgnFeed vc={className} tz={props.tz} datecode={selectedClass ? selectedClass.datecode : '07C'} selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno} viewport={viewport} setViewport={setViewport} options={props.options} setOptions={props.setOptions} measureFeatures={measureFeatures} handicapped={selectedClass?.handicapped == 'Y'} notes={selectedClass?.notes} />
+                <OgnFeed vc={className as ClassName} tz={props.tz} datecode={selectedClass ? selectedClass.datecode : '07C'} selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno} viewport={viewport} setViewport={setViewport} options={props.options} setOptions={props.setOptions} measureFeatures={measureFeatures} handicapped={selectedClass?.handicapped == 'Y'} notes={selectedClass?.notes} />
             </div>
         </>
     );
@@ -188,7 +182,7 @@ export async function getServerSideProps(context) {
         const classes = await query(escape`SELECT class FROM classes ORDER BY class`);
 
         return {
-            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : '', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 0, follow: true}}
+            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : ''}
         };
     } catch (e) {
         console.log(e);
