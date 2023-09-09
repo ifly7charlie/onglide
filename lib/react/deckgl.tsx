@@ -404,26 +404,23 @@ export default function MApp(props: {
         props.setViewport(viewState);
     }, []);
 
-    /* figure out where the view should be and adjust the map accordingly */
-
     const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
     const getCursor = useCallback(() => 'crosshair', []);
 
-    const initialStyle = useMemo(() => (mapStreet ? /*'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' */ 'mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk' : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'), []);
+    // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
+    // much quicker than changing the style.
+    useEffect(() => {
+        mapRef?.current?.getMap()?.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
+        mapRef?.current?.getMap()?.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
+    }, [mapStreet]);
 
-    const changeStyle = useEffect(() => mapRef?.current?.getMap().setStyle(mapStreet ? /*'mapbox://styles/mapbox/cjaudgl840gn32rnrepcb9b9g' */ 'mapbox://styles/ifly7charlie/ckck9441m0fg21jp3ti62umjk' : 'mapbox://styles/ifly7charlie/cksj3g4jgdefa17peted8w05m'), [mapStreet]);
-
-    //    controller.setFollow = setFollow;
     return (
         <Map //
             initialViewState={{...props.viewport, ...viewOptions}}
-            //    {...props.viewport}
-            //            {...viewOptions}
             onMove={onViewStateChange}
-            doubleClickZoom={true}
-            //            dragPan={false}
+            //            doubleClickZoom={true}
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
-            mapStyle={initialStyle}
+            mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
             ref={mapRef}
             reuseMaps={true}
             fog={{
