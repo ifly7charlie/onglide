@@ -259,11 +259,12 @@ export default function MApp(props: {
             mapRef?.current?.easeTo({
                 pitch: 75
             });
-        } else if (props.viewport.pitch != 0 && map2d) {
-            mapRef?.current?.getMap().setMaxPitch(0);
-            mapRef?.current?.easeTo({
-                pitch: 0
-            });
+        } else if (map2d && props.viewport.pitch != 0) {
+            mapRef?.current
+                ?.easeTo({
+                    pitch: 0
+                })
+                .once('moveend', () => mapRef?.current?.getMap().setMaxPitch(0));
         }
         //        console.log( mapRef?.current?.getMap().
     }, [map2d]);
@@ -394,13 +395,22 @@ export default function MApp(props: {
         [vc, props.options.units, mapRef, mapRef?.current]
     );
 
-    const attribution = <AttributionControl key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')} customAttribution={[radarOverlay.attribution, props.status].join(' | ')} style={attributionStyle} />;
+    const attribution = useMemo(
+        () => (
+            <AttributionControl //
+                key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')}
+                customAttribution={[radarOverlay.attribution, props.status].join(' | ')}
+                style={attributionStyle}
+            />
+        ),
+        [radarOverlay.key, props.status]
+    );
 
     // Initial options depending on if we are on 2d or 3d
     const viewOptions = map2d ? {minPitch: 0, maxPitch: 0, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
 
+    // We keep our saved viewstate up to date in case of re-render
     const onViewStateChange = useCallback(({viewState}) => {
-        console.log(viewState);
         props.setViewport(viewState);
     }, []);
 
@@ -410,15 +420,16 @@ export default function MApp(props: {
     // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
     // much quicker than changing the style.
     useEffect(() => {
-        mapRef?.current?.getMap()?.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
-        mapRef?.current?.getMap()?.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
+        try {
+            mapRef?.current?.getMap()?.setLayoutProperty('satellite', 'visibility', !mapStreet ? 'none' : 'visible');
+            mapRef?.current?.getMap()?.setLayoutProperty('background', 'visibility', !mapStreet ? 'none' : 'visible');
+        } catch (e) {}
     }, [mapStreet]);
 
     return (
         <Map //
             initialViewState={{...props.viewport, ...viewOptions}}
             onMove={onViewStateChange}
-            //            doubleClickZoom={true}
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
             ref={mapRef}
@@ -435,6 +446,7 @@ export default function MApp(props: {
             <DeckGLOverlay
                 getTooltip={toolTip}
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
+                onClick={onClick}
                 layers={layers} //
                 interleaved={true}
             />
