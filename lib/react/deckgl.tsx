@@ -216,6 +216,9 @@ export default function MApp(props: {
     // What task are we using on display
     const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
 
+    // Get coordinates on the screen for center point of view
+    const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
+
     // We will calculate the nearest point every 60 seconds or when the TP changes or selected pilot changes
     useEffect(
         () => {
@@ -228,8 +231,8 @@ export default function MApp(props: {
                 taskGeoJSON?.track?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
-                const lat = Math.round(selectedPilotData.track.vario.lat * 100) / 100;
-                const lng = Math.round(selectedPilotData.track.vario.lng * 100) / 100;
+                const lat = Math.round(selectedPilotData.track.vario.lat * 1000) / 1000;
+                const lng = Math.round(selectedPilotData.track.vario.lng * 1000) / 1000;
 
                 // Next point - if we haven't started or we have finished use the startline
                 const npol =
@@ -242,12 +245,29 @@ export default function MApp(props: {
                 // If we are user selected or we don't have a valid next point don't change anything
                 const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol) : 0;
 
-                console.log(lat, lng, fbearing, npol);
-                mapRef?.current?.easeTo({
-                    center: [lng, lat],
-                    bearing: Math.round(fbearing)
-                    //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
-                });
+                const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
+                console.log(`looking from ${lat}, ${lng}, to ${npol} -> ${fbearing.toFixed(0)} [${props.viewport.latitude.toFixed(2)}, ${props.viewport.longitude.toFixed(2)}, ${props.viewport.bearing}] z:${props.viewport.zoom}, sp:${screenPoint.x},${screenPoint.y}, nsp:${newScreenPoint.x},${newScreenPoint.y}`);
+
+                // In 2d we need more movement before we adjust the map
+                const pointCheck = (a: number, b: number, s: number): boolean => {
+                    return Math.abs(a - b) / s > (map2d ? 0.25 /*25% of screen in either direction*/ : 0.1); /*10% of screen in either direction*/
+                };
+
+                const screenSizeX = mapRef?.current?.getMap()?._containerWidth ?? 1300,
+                    screenSizeY = mapRef?.current?.getMap()?._containerHeight ?? 500;
+
+                if (
+                    pointCheck(newScreenPoint.x, screenPoint.x, screenSizeX) ||
+                    pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
+                    Math.round(fbearing) >> 2 != Math.round(props.viewport.bearing) >> 2
+                ) {
+                    mapRef?.current?.easeTo({
+                        center: [lng, lat],
+                        bearing: Math.round(fbearing),
+                        zoom: props.viewport.zoom
+                        //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
+                    });
+                }
             }
         },
         follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, props.options.taskp, props.options.taskUp, map2d] : [null, null, null, null, null, null]
