@@ -246,7 +246,7 @@ export default function MApp(props: {
                 const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol) : 0;
 
                 const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
-                console.log(`looking from ${lat}, ${lng}, to ${npol} -> ${fbearing.toFixed(0)} [${props.viewport.latitude.toFixed(2)}, ${props.viewport.longitude.toFixed(2)}, ${props.viewport.bearing}] z:${props.viewport.zoom}, sp:${screenPoint.x},${screenPoint.y}, nsp:${newScreenPoint.x},${newScreenPoint.y}`);
+                //                console.log(`looking from ${lat}, ${lng}, to ${npol} -> ${fbearing.toFixed(0)} [${props.viewport.latitude.toFixed(2)}, ${props.viewport.longitude.toFixed(2)}, ${props.viewport.bearing}] z:${props.viewport.zoom}, sp:${screenPoint.x},${screenPoint.y}, nsp:${newScreenPoint.x},${newScreenPoint.y}`);
 
                 // In 2d we need more movement before we adjust the map
                 const pointCheck = (a: number, b: number, s: number): boolean => {
