@@ -203,7 +203,7 @@ export default function MApp(props: {
     // Map display style
     const map2d = options.map2d;
     const mapStreet = !options.mapType;
-    const mapLight = !!mapStreet;
+    const mapLight = !mapStreet;
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
@@ -243,23 +243,23 @@ export default function MApp(props: {
                 const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol) : 0;
 
                 console.log(lat, lng, fbearing, npol);
-                mapRef?.current?.flyTo({
+                mapRef?.current?.easeTo({
                     center: [lng, lat],
-                    bearing: Math.round(fbearing),
-                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
+                    bearing: Math.round(fbearing)
+                    //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
                 });
             }
         },
-        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, props.options.taskp] : [null, null, null, null]
+        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, props.options.taskp, props.options.taskUp, map2d] : [null, null, null, null, null, null]
     );
 
     useEffect(() => {
-        if (props.viewport.pitch == 0 && !map2d) {
+        if (Math.trunc(props.viewport.pitch) == 0 && !map2d) {
             mapRef?.current?.getMap().setMaxPitch(80);
             mapRef?.current?.easeTo({
                 pitch: 75
             });
-        } else if (map2d && props.viewport.pitch != 0) {
+        } else if (map2d) {
             mapRef?.current
                 ?.easeTo({
                     pitch: 0
@@ -435,10 +435,8 @@ export default function MApp(props: {
             ref={mapRef}
             reuseMaps={true}
             fog={{
-                range: [-0.75, 20],
+                range: [-1, 18.5],
                 color: 'rgba(233, 241, 251, 1)'
-                //                'space-color': 'rgba(135, 206, 235, 0.5)',
-                //                'star-intensity': 0.4
             }}
             terrain={{source: 'mapbox-dem', exaggeration: 1}}
             attributionControl={false}
