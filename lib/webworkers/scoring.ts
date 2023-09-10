@@ -64,7 +64,7 @@ import {cloneDeep as _clonedeep} from 'lodash';
 //     process
 //
 
-export type scoresCallback = (message: {scores: Buffer; recentStarts: Record<Compno, Epoch>}) => void;
+export type scoresCallback = (message: {allScores: Buffer; recentScores: Buffer; recentStarts: Record<Compno, Epoch>}) => void;
 
 export interface ScoringConfig {
     className: ClassName;

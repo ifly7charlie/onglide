@@ -123,7 +123,8 @@ interface Channel {
     replay?: ReplayController; // are we replaying?
 
     lastKeepAliveMsg?: any;
-    lastScores?: any;
+    recentScores?: any;
+    allScores?: any;
 
     statistics: Statistics;
 
@@ -506,7 +507,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // Prep for scoring
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
-            channel.scoring.hookScores(({scores, recentStarts}) => sendScores(channel, scores, recentStarts));
+            channel.scoring.hookScores(({allScores, recentScores, recentStarts}) => sendScores(channel, allScores, recentScores, recentStarts));
         }
         if (process.env.REPLAY && !channel.replay) {
             getInitialTrackPointsForReplay(channel);
@@ -601,7 +602,8 @@ async function updateTasks(): Promise<void> {
             // If it has a task stop it scoring and start the new task
             if (channel.task) {
                 channel.scoring.clearTask();
-                delete channel.lastScores;
+                delete channel.allScores;
+                delete channel.recentScores;
             }
 
             // We have a task so we will score what we know
@@ -762,8 +764,8 @@ async function sendCurrentState(client: WebSocket) {
     }
 
     // Make sure we send the pilots ASAP
-    if (channels[client.ognChannel]?.lastScores) {
-        client.send(channels[client.ognChannel].lastScores, {binary: true});
+    if (channels[client.ognChannel]?.allScores) {
+        client.send(channels[client.ognChannel].allScores, {binary: true});
     } else {
         console.log('no current scores', client.ognChannel);
     }
@@ -897,10 +899,10 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
 // We need to fetch and repeat the scores for each class, enriched with vario information
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
-async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Compno, Epoch>) {
+async function sendScores(channel: any, allScores: Buffer, recentScores: Buffer, recentStarts: Record<Compno, Epoch>) {
     const now = getNow();
 
-    console.log('Sending Scores', scores.length);
+    console.log('Sending Scores', allScores?.length, recentScores?.length);
 
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 
@@ -922,19 +924,20 @@ async function sendScores(channel: any, scores: Buffer, recentStarts: Record<Com
     }).finish();
 
     // We don't know how many scores we have without decoding the protobuf message :(
-    trackMetric(channel.className + '.scoring.bytesSent', scores.byteLength * channel.clients.length);
+    trackMetric(channel.className + '.scoring.bytesSent', recentScores.byteLength * channel.clients.length);
 
     // Protobuf encode the scores message
-    channel.lastScores = scores;
+    channel.recentScores = recentScores;
+    channel.allScores = allScores;
 
     // Reset for next iteration
     channel.activeGliders.clear();
 
     // Send to each client and if they don't respond they will be cleaned up next time around
-    channel.clients.forEach((client) => {
+    channel.clients.forEach((client: any) => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(channel.lastKeepAliveMsg, {binary: true});
-            client.send(channel.lastScores, {binary: true});
+            client.send(recentScores, {binary: true});
         }
         client.isAlive = false;
         client.ping(function () {});
@@ -1245,7 +1248,7 @@ function setupOgnWebServer(req, res) {
             switch (command) {
                 case 'scores': {
                     console.log('sending scores for ', channelName);
-                    const msg: any = channel.lastScores ? OnglideWebSocketMessage.decode(channel.lastScores) : {};
+                    const msg: any = channel.allScores ? OnglideWebSocketMessage.decode(channel.allScores) : {};
                     res.setHeader('Content-Type', 'application/json');
                     res.writeHead(200, headers);
                     res.end(JSON.stringify(msg));
