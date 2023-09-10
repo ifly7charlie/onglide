@@ -52,9 +52,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
             const toNotify = resolveNotifications.slice();
             resolveNotifications.length = 0;
-            if (toNotify.length) {
-                toNotify.forEach((resolveFunction) => resolveFunction(insertIndex));
-            }
+            toNotify.forEach((resolveFunction) => resolveFunction(insertIndex));
         }
     };
 
@@ -63,9 +61,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         setInterval(() => {
             const toNotify = resolveNotifications.slice();
             resolveNotifications.length = 0;
-            if (toNotify.length) {
-                toNotify.forEach((resolveFunction) => resolveFunction(messageQueue.length + 1));
-            }
+            toNotify.forEach((resolveFunction) => resolveFunction(messageQueue.length + 1));
         }, 1000);
     }
 
