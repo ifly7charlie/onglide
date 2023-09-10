@@ -123,7 +123,7 @@ export default function CombinePage(props) {
         longitude: props.lng,
         zoom: 8.5,
         minZoom: 6.5,
-        maxZoom: 13,
+        maxZoom: 13.4,
         bearing: 0,
         minPitch: 0,
         maxPitch: 85,
