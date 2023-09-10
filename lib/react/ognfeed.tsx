@@ -199,7 +199,7 @@ export const OgnFeed = memo(
                           track: trackData[selectedCompno]
                       }
                     : null,
-            [pilotScores[selectedCompno], trackData[selectedCompno]?.vario, pilots[selectedCompno], selectedCompno]
+            [pilotScores[selectedCompno], trackData[selectedCompno]?.vario, pilots?.[selectedCompno], selectedCompno]
         );
 
         // Cache the calculated times and only refresh every 60 seconds
