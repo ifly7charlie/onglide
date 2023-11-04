@@ -2,8 +2,9 @@ import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 import {TextLayer} from '@deck.gl/layers';
 import {TripsLayer} from '@deck.gl/geo-layers';
-import {FlyToInterpolator, TRANSITION_EVENTS, WebMercatorViewport} from '@deck.gl/core';
+
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
+import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
@@ -37,7 +38,7 @@ import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
 
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
-import distance from '@turf/distance';
+import destination from '@turf/destination';
 
 import {SortKey} from './pilot-sorting';
 
@@ -147,7 +148,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
     if (data.length) {
         layers.push(
             new TextLayer({
-                id: 'labels' + (map2d ? '2d' : '3d'),
+                id: 'labels', //+ (map2d ? '2d' : '3d'),
                 data: data,
                 getPosition: (d) => d.coordinates, // map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
                 getText: (d) => d.name,
@@ -200,10 +201,12 @@ export default function MApp(props: {
     // So we get some type info
     const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
 
+    const isMoving = mapRef?.current?.isMoving() ?? true;
+
     // Map display style
     const map2d = options.map2d;
     const mapStreet = !options.mapType;
-    const mapLight = !!mapStreet;
+    const mapLight = !mapStreet;
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
@@ -216,10 +219,24 @@ export default function MApp(props: {
     // What task are we using on display
     const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
 
+    // Get coordinates on the screen for center point of view
+    const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
+
+    const npol = !selectedPilotData?.score
+        ? null
+        : !selectedPilotData.score.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) //
+        ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[1]
+        : selectedPilotData.score.utcFinish
+        ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
+        : selectedPilotData.score.minDistancePoints.slice(4, 6);
+
     // We will calculate the nearest point every 60 seconds or when the TP changes or selected pilot changes
     useEffect(
         () => {
+            const map = mapRef?.current?.getMap();
+
             if (
+                !map?.isMoving() &&
                 props.options.follow &&
                 follow &&
                 selectedPilotData &&
@@ -228,38 +245,66 @@ export default function MApp(props: {
                 taskGeoJSON?.track?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
-                const lat = Math.round(selectedPilotData.track.vario.lat * 100) / 100;
-                const lng = Math.round(selectedPilotData.track.vario.lng * 100) / 100;
+                const lat = Math.round(selectedPilotData.track.vario.lat * 1000) / 1000;
+                const lng = Math.round(selectedPilotData.track.vario.lng * 1000) / 1000;
 
                 // Next point - if we haven't started or we have finished use the startline
-                const npol =
-                    !selectedPilotData.score.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) //
-                        ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[1]
-                        : selectedPilotData.score.utcFinish
-                        ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
-                        : selectedPilotData.score.minDistancePoints.slice(4, 6);
 
                 // If we are user selected or we don't have a valid next point don't change anything
                 const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol) : 0;
 
-                console.log(lat, lng, fbearing, npol);
-                mapRef?.current?.flyTo({
-                    center: [lng, lat],
-                    bearing: Math.round(fbearing),
-                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
-                });
+                const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
+
+                // In 2d we need more movement before we adjust the map
+                const pointCheck = (a: number, b: number, s: number): boolean => {
+                    return Math.abs(a - b) / s > (map2d ? 0.25 /*25% of screen in either direction*/ : 0.1); /*10% of screen in either direction*/
+                };
+
+                const screenSizeX = mapRef?.current?.getMap()?._containerWidth ?? 1300,
+                    screenSizeY = mapRef?.current?.getMap()?._containerHeight ?? 500;
+
+                if (
+                    pointCheck(newScreenPoint.x, screenPoint.x, screenSizeX) ||
+                    pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
+                    Math.round(fbearing) >> 2 != Math.round(props.viewport.bearing) >> 2
+                ) {
+                    if (!map2d) {
+                        const map = mapRef?.current?.getMap();
+                        const camera = map.getFreeCameraOptions();
+
+                        // Position the camera 5km behind the aircraft
+                        const cameraPosition: LngLatLike = destination([lng, lat], 5, ((fbearing + 360) % 360) - 180, {units: 'kilometers'}).geometry.coordinates as LngLatLike;
+                        // 200m below
+                        camera.position = MercatorCoordinate.fromLngLat(cameraPosition, (selectedPilotData.track.vario.altitude ?? 20000) - 200);
+
+                        // Looking at the turnpoint
+                        camera.lookAtPoint([lng, lat]);
+
+                        // Apply camera changes
+                        map.setFreeCameraOptions(camera);
+                    } else {
+                        mapRef?.current?.easeTo({
+                            center: [lng, lat],
+                            bearing: Math.round(fbearing),
+                            zoom: props.viewport.zoom
+                            //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
+                        });
+                    }
+                }
             }
         },
-        follow && props.options.follow ? [selectedCompno, selectedPilotData?.track?.vario?.lat, selectedPilotData?.score?.currentLeg, props.options.taskp] : [null, null, null, null]
+        follow && props.options.follow //
+            ? [selectedCompno, selectedPilotData?.track?.vario?.lat, npol, props.options, isMoving]
+            : [null, null, null, null, null]
     );
 
     useEffect(() => {
-        if (props.viewport.pitch == 0 && !map2d) {
-            mapRef?.current?.getMap().setMaxPitch(80);
+        if (Math.trunc(props.viewport.pitch) == 0 && !map2d) {
+            mapRef?.current?.getMap().setMaxPitch(85);
             mapRef?.current?.easeTo({
                 pitch: 75
             });
-        } else if (map2d && props.viewport.pitch != 0) {
+        } else if (map2d) {
             mapRef?.current
                 ?.easeTo({
                     pitch: 0
@@ -292,8 +337,6 @@ export default function MApp(props: {
             }
         }
     }, [options.zoomTask, taskGeoJSONtp, viewport]);
-
-    const isMoving = mapRef?.current?.isMoving() ?? true;
 
     // If we are north up then reset north on bearing change
     // NOOP for others
@@ -407,7 +450,7 @@ export default function MApp(props: {
     );
 
     // Initial options depending on if we are on 2d or 3d
-    const viewOptions = map2d ? {minPitch: 0, maxPitch: 0, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
+    const viewOptions = map2d ? {minPitch: 0, maxPitch: 0, pitch: 0} : {minPitch: 0, maxPitch: 85, pitch: 70};
 
     // We keep our saved viewstate up to date in case of re-render
     const onViewStateChange = useCallback(({viewState}) => {
@@ -434,13 +477,6 @@ export default function MApp(props: {
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
             ref={mapRef}
             reuseMaps={true}
-            fog={{
-                range: [-0.75, 20],
-                color: 'rgba(233, 241, 251, 1)'
-                //                'space-color': 'rgba(135, 206, 235, 0.5)',
-                //                'star-intensity': 0.4
-            }}
-            terrain={{source: 'mapbox-dem', exaggeration: 1}}
             attributionControl={false}
         >
             <DeckGLOverlay
