@@ -63,7 +63,7 @@ var argv = require('yargs/yargs')(process.argv.slice(2)).argv;
 runScore((argv.datecode || '28K') as Datecode, (argv.class || 'standard') as ClassName, (argv.compno || '') as Compno, 100);
 
 async function runScore(datecode, className, compno: Compno, handicap) {
-    let location: AirfieldLocation = (await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any[0];
+    let location: AirfieldLocation = ((await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any)[0];
     location.point = point([location.lng, location.lat]);
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
 

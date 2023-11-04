@@ -61,8 +61,24 @@ export function preprocessSector(tp: TaskLeg) {
     tp.point = [tp.nlng, tp.nlat];
     tp.maxR = Math.max(tp.r1, tp.r2) as DistanceKM;
 
+    // some sanity checking - we should really report this
+    if (tp.r2 > tp.r1) {
+        tp.r2 = tp.r1;
+    }
+
+    if (tp.a1 > 180) {
+        tp.a1 = 180 as Bearing;
+    }
+
+    if (tp.a2 > 180) {
+        tp.a2 = 180 as Bearing;
+    }
+
+    console.log(tp);
+
     // Help speed up turnpoint checking
     if (tp.type == 'sector' && tp.a1 == 180 && !tp.a12 && !tp.r2) {
+        console.log('->tp quickSector');
         tp.quickSector = true;
     }
 }
@@ -137,19 +153,6 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
         default:
             //        console.log( turnpoint.direction + " not implemented yet" );
             break;
-    }
-
-    // some sanity checking - we should really report this
-    if (turnpoint.r2 > turnpoint.r1) {
-        turnpoint.r2 = turnpoint.r1;
-    }
-
-    if (turnpoint.a1 > 180) {
-        turnpoint.a1 = 180 as Bearing;
-    }
-
-    if (turnpoint.a2 > 180) {
-        turnpoint.a2 = 180 as Bearing;
     }
 
     //    turnpoint.centerAngle = ((center + _2pi) % _2pi) as Bearing;
