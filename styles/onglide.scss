@@ -10,12 +10,14 @@ body {
 .resizingMap {
     height: 96vh;
     height: 100dvh;
+    min-height: 96vh;
     min-height: 100dvh;
     width: 100vw;
     position: absolute;
     top: 0px;
 }
 .resizingContainer {
+    min-height: 96vh;
     min-height: 100dvh;
     width: 100vw;
     //    position: relative;
@@ -147,6 +149,20 @@ body {
 @include media-breakpoint-up(sm) {
     br.smallScreen {
         display: none;
+    }
+}
+
+@include media-breakpoint-down(xs) {
+    .resultsOverlay {
+        height: 118px;
+        margin-top: 16px;
+    }
+
+    .connectionStatus {
+        display: block;
+        width: 100%;
+        margin-top: 8px;
+        margin-left: 10px;
     }
 }
 
