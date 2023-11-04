@@ -113,7 +113,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
                 // As we do out of order if it's inserted before us then
                 // we just skip forward
-                const insertIndex = await new Promise((resolve) => resolveNotifications.push(resolve));
+                const insertIndex = await new Promise<number>((resolve) => resolveNotifications.push(resolve));
                 if (insertIndex < position && position < messageQueue.length) {
                     position++;
                 }
