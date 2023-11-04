@@ -1,4 +1,4 @@
-import {PositionMessage, Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task} from '../lib/types';
+import {PositionMessage, Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task, PilotScore} from '../lib/types';
 
 import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 'lodash';
 
@@ -63,7 +63,7 @@ var argv = require('yargs/yargs')(process.argv.slice(2)).argv;
 runScore((argv.datecode || '28K') as Datecode, (argv.class || 'standard') as ClassName, (argv.compno || '') as Compno, 100);
 
 async function runScore(datecode, className, compno: Compno, handicap) {
-    let location: AirfieldLocation = (await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1'))[0];
+    let location: AirfieldLocation = (await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any[0];
     location.point = point([location.lng, location.lat]);
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
 
@@ -94,6 +94,9 @@ async function runScore(datecode, className, compno: Compno, handicap) {
               };
 
     const task = await updateTasks(className, datecode);
+    if (!task) {
+        return;
+    }
 
     for (const compno in groupedPoints) {
         console.log(compno, groupedPoints[compno].length);
@@ -115,17 +118,17 @@ async function runScore(datecode, className, compno: Compno, handicap) {
         //    and therefore speeds
         const scores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
 
-        let lastScore = null;
+        let lastScore: PilotScore | undefined;
         let numberOfScores = 0;
         for await (const value of scores) {
-            if (argv.verbose) {
+            if (argv.verbose && lastScore !== undefined) {
                 console.log(`${compno}: #${numberOfScores} - latest ${value.t} ${new Date(value.t * 1000).toUTCString()} ${lastScore?.actual?.taskDistance?.toFixed(0)}km, ${lastScore?.currentLeg}`);
             }
             lastScore = value;
             numberOfScores++;
         }
 
-        console.log(`${compno}: done, ${printDate(lastScore.utcStart)} -${printDate(lastScore.utcFinish)}` + `${lastScore.actual?.taskDistance || 0}km, ${lastScore.actual?.taskSpeed}kph`);
+        console.log(`${compno}: done, ${printDate(lastScore?.utcStart)} -${printDate(lastScore?.utcFinish)}` + `${lastScore?.actual?.taskDistance || 0}km, ${lastScore?.actual?.taskSpeed}kph`);
         //        console.log(JSON.stringify(lastScore));
     }
 }
