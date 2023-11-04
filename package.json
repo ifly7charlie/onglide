@@ -81,9 +81,9 @@
         "pngjs": ">=5.0.0",
         "prompts": ">=2.3.2",
         "protobufjs": "^7.0.0",
-        "react": "^17.0.2",
+        "react": "^18.0.0",
         "react-bootstrap": "=2.1.2",
-        "react-dom": "^17.0.2",
+        "react-dom": "^18.0.0",
         "react-map-gl": "^7.1.5",
         "react-use-websocket": "^3.0.0",
         "serverless-mysql": ">=1.5.4",
@@ -91,7 +91,7 @@
         "stats-incremental": "^1.2.1",
         "suncalc": "^1.8.0",
         "swr": ">=0.2.3",
-        "tabletojson": "^2.0.7",
+        "tabletojson": "^4.0.0",
         "ws": ">=7.3"
     },
     "devDependencies": {
@@ -100,17 +100,14 @@
         "@types/lodash.reduce": "^4.6.7",
         "@types/node": "^18.6.0",
         "@types/node-fetch": "^2.6.2",
-        "@types/react": "^17.0.2",
-        "@types/react-dom": "^17.0.2",
+        "@types/react": "^18.0.0",
+        "@types/react-dom": "^18.0.0",
         "@types/yargs": "^17.0.11",
         "prettier": "^2.7.1",
         "sass": "^1.36.0",
         "ts-proto": "^1.121.1",
         "tsc-watch": "^5.0.3",
-        "typescript": "^4.7.4",
+        "typescript": "^5.1.6",
         "yargs": "^17.5.1"
-    },
-    "resolutions": {
-        "@types/react": "17.0.2"
     }
 }
