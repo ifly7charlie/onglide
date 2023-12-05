@@ -1,7 +1,5 @@
 import {Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, EstimatedTurnType, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, PositionStatus} from '../types';
 
-import {cloneDeep as _clonedeep, keyBy as _keyby} from 'lodash';
-
 import Graph from '../flightprocessing/dijkstras';
 
 import {distHaversine, sumPath} from '../flightprocessing/taskhelper';
@@ -25,8 +23,9 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
         };
 
     let compno = '';
+    let lastClosestToNext: DistanceKM | undefined = Infinity as DistanceKM;
 
-    let flightStatus: PositionStatus = PositionStatus.Unknown;
+    let flightStatus: PositionStatus | undefined = PositionStatus.Unknown;
 
     for await (const current of taskStatusGenerator) {
         try {
@@ -47,7 +46,11 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 continue;
             }
 
-            compno = taskStatus.compno;
+            // Make sure the task position has changed
+            if (lastClosestToNext === taskStatus.closestToNext) {
+                continue;
+            }
+            lastClosestToNext = taskStatus.closestToNext;
 
             taskStatus.distance = 0 as DistanceKM;
 
@@ -150,7 +153,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                         taskStatus.legs[leg].minPossible = {distance, point};
                         taskStatus.distanceRemaining = (taskStatus.distanceRemaining + distance) as DistanceKM;
                     });
-                    taskStatus.legs[taskStatus.currentLeg].minPossible.start = taskStatus.lastProcessedPoint;
+                    taskStatus.legs[taskStatus.currentLeg].minPossible!.start = taskStatus.lastProcessedPoint;
                 } catch (e) {
                     // Lazy, should really confirm everything is valid ;)
                 }
