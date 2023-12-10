@@ -18,6 +18,9 @@ FROM buildbase AS nextbuildimage
 WORKDIR /onglide
 COPY ./next.config.js ./next.config.js
 COPY ./tsconfig.json ./tsconfig.json
+COPY ./.babelrc ./.babelrc
+COPY ./babel-plugin-macros.config.js ./babel-plugin-macros.config.js
+COPY ./next-env.d.ts ./next-env.d.ts
 COPY ./styles ./styles
 COPY ./pages ./pages
 COPY ./lib ./lib
