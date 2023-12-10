@@ -121,3 +121,5 @@ out/
 lib/.#htmlhelper.js
 
 keys/*
+*aprs
+.env*
