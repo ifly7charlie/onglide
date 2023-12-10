@@ -1,3 +1,7 @@
+# Hosted?
+
+If you'd like your competition hosted for you please let me know at melissa-hosting1 [at] onglide.com
+
 ## Running (Docker)
 
 This repo includes docker commands to launch everything required to
