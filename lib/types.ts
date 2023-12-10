@@ -22,7 +22,7 @@ export type ChannelName = string & As<'ChannelName'>;
 
 export type TZ = string & As<'TZ'>;
 
-export function makeClassname_Compno(t: {className: string; compno: string} | ClassName, cn?: Compno): ClassName_Compno {
+export function makeClassname_Compno(t: {className: string | ClassName; compno: string | Compno} | ClassName, cn?: Compno): ClassName_Compno {
     if (typeof t != 'object') {
         return (t + '_' + cn) as ClassName_Compno;
     }

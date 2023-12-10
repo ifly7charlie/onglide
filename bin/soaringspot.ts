@@ -12,7 +12,7 @@ const https = require('node:https');
 //import https from 'node:https';
 
 // We use these to get IGCs from SoaringSpot streaming
-import {point} from '@turf/helpers';
+import {point, Coord} from '@turf/helpers';
 import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import {getElevationOffset} from '../lib/getelevationoffset';
@@ -29,7 +29,7 @@ import _forEach from 'lodash.foreach';
 import escape from 'sql-template-strings';
 const mysql = require('serverless-mysql');
 
-let mysql_db = undefined;
+let mysql_db;
 //const fetch = require('node:fetch');
 
 // Fix the turpoint types from SoaringSpot to what we know
@@ -48,6 +48,9 @@ async function main() {
         process.exit();
     }
 
+    console.error('HELLO');
+    console.log(JSON.stringify(process.env));
+
     mysql_db = mysql({
         config: {
             host: process.env.MYSQL_HOST || 'db',
@@ -61,7 +64,7 @@ async function main() {
     soaringSpot();
     roboControl();
 
-    console.log('Background download from soaring spot enabled');
+    console.log('Background api download from soaring spot enabled');
     setInterval(function () {
         soaringSpot();
     }, 5 * 60 * 1000);
@@ -75,23 +78,28 @@ main();
 async function roboControl() {
     // Allow the use of environment variables to configure the soaring spot endpoint
     // rather than it being in the database
-    let robocontrol_url = null;
+    let robocontrol_url: string | null = null;
+    let overwrite = false;
     if (process.env.ROBOCONTROL_URL) {
         robocontrol_url = process.env.ROBOCONTROL_URL;
     }
 
     if (!robocontrol_url) {
         // Get the soaring spot keys from database
-        robocontrol_url = (
+        const row = (
             await mysql_db.query(escape`
               SELECT url
                 FROM scoringsource where type='robocontrol'`)
-        )[0]?.url;
+        )[0] ?? {url: null, overwrite: true};
+        robocontrol_url = row.url;
+        overwrite = row.overwrite ?? true;
     }
 
     if (!robocontrol_url) {
         return;
     }
+
+    console.log(`robocontrol url ${robocontrol_url} configured`);
 
     await fetch(robocontrol_url)
         .then((res) => {
@@ -110,7 +118,11 @@ async function roboControl() {
             for (const p of location || []) {
                 if (p.flarm?.length) {
                     console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    await mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
+                    if (overwrite) {
+                        await mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
+                    } else {
+                        mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn} and trackerid='unknown'`);
+                    }
                     await mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
                 }
             }
@@ -312,7 +324,7 @@ async function update_pilots(class_url, classid, classname, keys) {
         //  .query( 'DELETE FROM tracker where concat(class,compno) not in (select concat(class,compno) from pilots)' );
 
         // And update the pilots picture to the latest one in the image table - this should be set by download_picture
-        .query('UPDATE PILOTS SET image=CASE ' + '   WHEN (SELECT count(*) FROM images i WHERE i.compno=pilots.compno AND i.class = pilots.class AND i.image IS NOT NULL) > 0 THEN "Y" ' + '   ELSE "N" END')
+        .query('UPDATE pilots SET image=CASE ' + '   WHEN (SELECT count(*) FROM images i WHERE i.compno=pilots.compno AND i.class = pilots.class AND i.image IS NOT NULL) > 0 THEN "Y" ' + '   ELSE "N" END')
 
         .rollback((e) => {
             console.log('rollback');
@@ -376,7 +388,7 @@ async function process_class_tasks(class_url, classid, classname, keys) {
         console.log(`${classname}: unable to fetch tasks ${tasks.message}`);
         return 0;
     }
-    let dates = [];
+    let dates: string[] = [];
     for (const day of tasks._embedded['http://api.soaringspot.com/rel/tasks']) {
         dates.push(day.task_date);
 
@@ -396,7 +408,7 @@ async function process_class_results(class_url, classid, classname, keys) {
         return 0;
     }
 
-    let dates = [];
+    let dates: string[] = [];
     for (const day of results._embedded['http://api.soaringspot.com/rel/class_results']) {
         dates.push(day.task_date);
 
@@ -501,7 +513,7 @@ async function process_day_task(day, classid, classname, keys) {
         // Set the datecode
         .query(
             escape`
-                   UPDATE compstatus SET datecode = todcode(${date}) WHERE datecode < todcode(${date}) and class=${classid}`
+                   UPDATE compstatus SET datecode = todcode(${date}) WHERE (datecode < todcode(${date}) or datecode is null) and class=${classid}`
         )
 
         // If it is the current day and we have a start time we save it
@@ -541,11 +553,11 @@ WHERE datecode = todcode(${date}) AND class=${classid}`
                 return null;
             }
 
-            let values = [];
+            let values: any[] = [];
             let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12, altitude ) ' + 'VALUES ';
 
-            let previousPoint = null;
-            let currentPoint = null;
+            let previousPoint: Coord | null = null;
+            let currentPoint: Coord | null = null;
 
             for (const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'].sort((a, b) => a.point_index - b.point_index)) {
                 // We don't handle multiple starts at all so abort
@@ -586,7 +598,26 @@ WHERE datecode = todcode(${date}) AND class=${classid}`
                 //              "length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) "+
                 //            "VALUES ";
                 query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
-                values = values.concat([classid, date, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0, tp.altitude]);
+                values = values.concat([
+                    classid, //
+                    date,
+                    taskid,
+                    tp.point_index,
+                    leglength,
+                    bearingDeg,
+                    toDeg(tp.latitude),
+                    toDeg(tp.longitude),
+                    hi,
+                    trigraph,
+                    tpname,
+                    oz_types[tp.oz_type],
+                    tp.oz_radius1 / 1000,
+                    tp.oz_line ? 90 : toDeg(tp.oz_angle1),
+                    tp.oz_radius2 / 1000,
+                    toDeg(tp.oz_angle2),
+                    tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0,
+                    tp.altitude
+                ]);
             }
 
             // If we don't have any valid turnpoints then don't try and download them!
@@ -872,7 +903,7 @@ async function update_contest(contest, keys) {
     }
 
     // And fix the URL to whatever is configured in soaringspot
-    let [url] = ('' + contest._links['http://api.soaringspot.com/rel/www'].href).match(/(http[^']*)/);
+    let url = ('' + contest._links['http://api.soaringspot.com/rel/www'].href).match(/(http[^']*)/)?.[0];
     if (url) {
         await mysql_db.query(escape`UPDATE competition set mainwebsite=${url}`);
     }
