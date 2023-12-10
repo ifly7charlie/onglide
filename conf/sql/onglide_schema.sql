@@ -308,14 +308,10 @@ CREATE TABLE `tasks` (
 
   `type` enum('S','A','D','E','G') DEFAULT 'S' COMMENT 'Speed, AAT, Handicapped Distance, Eglide, SGP',
 
-  `distance` float DEFAULT NULL COMMENT 'Actual distance',
-  `hdistance` float DEFAULT NULL COMMENT 'distance at handicap 100 aka windicapped distance',
-  `maxmarkingdistance` float DEFAULT NULL COMMENT 'Distance for lowesthandicapped glider',
-  
   `duration` time DEFAULT NULL COMMENT 'AAT time',
   `nostart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
 
-  `hash` TEXT  COMMENT 'hash of value from soaring spot to prevent redownloading',
+  `hash` TEXT COMMENT 'hash of value from soaring spot to prevent redownloading',
   
   PRIMARY KEY (`taskid`),
   UNIQUE KEY `integrity` (`class`,`datecode`,`task`),

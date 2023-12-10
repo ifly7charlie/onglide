@@ -23,7 +23,7 @@ const fetcher = (url) => fetch(url).then((res) => res.json());
 const https = require('node:https');
 
 // We use these to get IGCs from SoaringSpot streaming
-import {point} from '@turf/helpers';
+import {point, Coord} from '@turf/helpers';
 import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import {getElevationOffset} from '../lib/getelevationoffset';
@@ -37,7 +37,7 @@ import _forEach from 'lodash.foreach';
 //const db = require('../db')
 import escape from 'sql-template-strings';
 const mysql = require('serverless-mysql');
-let mysql_db = undefined;
+let mysql_db;
 
 let cnhandicaps = {};
 
@@ -76,7 +76,7 @@ async function main() {
     ssscrape();
     roboControl();
 
-    console.log('Background download from soaring spot enabled');
+    console.log('Background scraping from soaring spot enabled');
     setInterval(function () {
         ssscrape();
     }, 5 * 60 * 1000);
@@ -92,7 +92,7 @@ main().then(() => {
 async function roboControl() {
     // Allow the use of environment variables to configure the soaring spot endpoint
     // rather than it being in the database
-    let url = null;
+    let url: string | null = null;
     let overwrite = false;
     if (process.env.ROBOCONTROL_URL) {
         url = process.env.ROBOCONTROL_URL;
@@ -112,6 +112,8 @@ async function roboControl() {
     if (!url) {
         return;
     }
+
+    console.log(`robocontrol url ${url} configured`);
 
     fetch(url)
         .then((res) => {
@@ -159,9 +161,9 @@ async function ssscrape(deep = false) {
     }
 
     if (!keys) {
-        console.log('no soaringspot keys configured');
+        console.log('no soaringspot url configured');
         return {
-            error: 'no soaringspot keys configured'
+            error: 'no soaringspot url configured'
         };
     }
 
@@ -466,11 +468,11 @@ async function process_day_task(day, classid, classname) {
                 return null;
             }
 
-            let values = [];
+            let values: (string | number)[] = [];
             let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) ' + 'VALUES ';
 
-            let previousPoint = null;
-            let currentPoint = null;
+            let previousPoint: Coord | null = null;
+            let currentPoint: Coord | null = null;
             for (const tp of day.task_points.sort((a, b) => a.point_index - b.point_index)) {
                 console.log(tp);
 
@@ -498,7 +500,25 @@ async function process_day_task(day, classid, classname) {
 
                 query = query + "( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
 
-                values = values.concat([classid, dateCode, taskid, tp.point_index, leglength, bearingDeg, toDeg(tp.latitude), toDeg(tp.longitude), hi, trigraph, tpname, oz_types[tp.oz_type], tp.oz_radius1 / 1000, tp.oz_line ? 90 : toDeg(tp.oz_angle1), tp.oz_radius2 / 1000, toDeg(tp.oz_angle2), tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0]);
+                values = values.concat([
+                    classid, //
+                    dateCode,
+                    taskid,
+                    tp.point_index,
+                    leglength,
+                    bearingDeg,
+                    toDeg(tp.latitude),
+                    toDeg(tp.longitude),
+                    hi,
+                    trigraph,
+                    tpname,
+                    oz_types[tp.oz_type],
+                    tp.oz_radius1 / 1000,
+                    tp.oz_line ? 90 : toDeg(tp.oz_angle1),
+                    tp.oz_radius2 / 1000,
+                    toDeg(tp.oz_angle2),
+                    tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0
+                ]);
             }
 
             query = query.substring(0, query.length - 1);

@@ -22,7 +22,7 @@ export type ChannelName = string & As<'ChannelName'>;
 
 export type TZ = string & As<'TZ'>;
 
-export function makeClassname_Compno(t: {className: string; compno: string} | ClassName, cn?: Compno): ClassName_Compno {
+export function makeClassname_Compno(t: {className: string | ClassName; compno: string | Compno} | ClassName, cn?: Compno): ClassName_Compno {
     if (typeof t != 'object') {
         return (t + '_' + cn) as ClassName_Compno;
     }
@@ -34,6 +34,11 @@ export type ClassName_Compno = string & As<'ClassName_Compno'>;
 export type Datecode = string & As<'Datecode'>;
 
 export type FlarmID = string & As<'FlarmID'>;
+
+export type StartTime = string & As<'StartTime'>;
+export type Duration = string & As<'Duration'>;
+
+export type TaskId = number & As<'TaskId'>;
 
 // Base class for things that are timestamped
 export interface TimeStampType {
@@ -93,7 +98,7 @@ export interface EnrichedPosition extends PositionMessage {
 }
 
 // A leg in the task
-export interface TaskLeg {
+export interface TaskLeg extends TaskLegsTableRow {
     type: 'line' | 'sector';
     legno: number;
     finish?: boolean;
@@ -117,7 +122,7 @@ export interface TaskLeg {
     geoJSON?: any; // geoJSON for the sector
     lineString?: any;
     point?: any; // coordiantes of center geoJSON style
-    altitude?: number; // altitude of the point
+    altitude?: AltitudeAMSL; // altitude of the point
     coordinates?: any; // array of geoJSON ordered points eg [ [lng,lat], [lng,lat] ]
     quickSector?: boolean; // are we simple or not?
     legDistanceAdjust?: DistanceKM; // start/finish rings need length adjustment
@@ -291,4 +296,56 @@ export interface SelectedPilotDetails {
     pilot: API_ClassName_Pilots_PilotDetail; // from db
     score: PilotScoreDisplay;
     track: PilotTrackData; // deck, vario
+}
+
+/// Database types
+export interface TasksTableRow {
+    datecode: Datecode;
+    class: ClassName;
+    taskid: TaskId;
+    task: string;
+    flown: string;
+    description: string;
+    type: 'S' | 'A' | 'D' | 'E' | 'G';
+    distance: DistanceKM;
+    //    hdistance: number,
+    //    maxmarkingdistance: number,
+    duration: Duration;
+    nostart: StartTime;
+    hash: string;
+}
+
+export interface TaskLegsTableRow {
+    datecode: Datecode;
+    class: ClassName;
+    taskid: TaskId;
+    legno: number;
+
+    ntrigraph: string;
+    name: string;
+
+    length: DistanceKM;
+    bearing: number;
+    nlat: number;
+    nlng: number;
+    altitude?: AltitudeAMSL;
+    Hi: number;
+
+    type: 'sector' | 'line';
+    direction: 'fixed' | 'np' | 'symmetrical' | 'pp';
+    r1: DistanceKM;
+    a1: Bearing;
+    r2: DistanceKM;
+    a2: Bearing;
+    a12: Bearing;
+}
+
+export interface ClassesTableRow {
+    class: ClassName;
+    classname: string;
+    description: string;
+    type: string | null;
+    handicapped: 'Y' | 'N';
+    grandprixstart: 'Y' | 'N';
+    Dm: number | null;
 }

@@ -6,10 +6,6 @@
 
 import {initialiseInsights, trackMetric, trackAggregatedMetric} from '../lib/insights';
 
-// Import the APRS server
-import {ISSocket} from 'js-aprs-is';
-import {aprsParser} from 'js-aprs-fap';
-
 import http from 'node:http';
 import https from 'node:https';
 
@@ -24,10 +20,7 @@ import {WebSocket, WebSocketServer} from 'ws';
 
 import {OnglideWebSocketMessage} from '../lib/protobuf/onglide';
 
-// Helper
-const fetcher = (url) => fetch(url).then((res) => res.json());
-
-//import {setTimeout} from 'timers/promises';
+import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
 // DB access
 //const db from '../db')
@@ -44,11 +37,11 @@ import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode, toDateCode} from '../lib/datecode';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage} from '../lib/types';
+import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
 console.log('dev mode', dev);
 
-let db = undefined;
+let db: ReturnType<typeof mysql>;
 
 // lodash
 import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex} from 'lodash';
@@ -195,7 +188,7 @@ const start = Math.trunc(Date.now() / 1000);
 // Correct timing for the competition
 const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
 let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
-const replayBase = parseInt(process.env.REPLAY);
+const replayBase = parseInt(process.env.REPLAY ?? '0');
 
 // And the replay
 if (process.env.REPLAY) {
@@ -256,8 +249,29 @@ async function main() {
     // and we do a LOT of them
     initialiseInsights();
 
-    // Location comes from the competition table in the database
-    location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset FROM competition LIMIT 1'))[0];
+    const checkReady = async (): Promise<boolean> => {
+        // Location comes from the competition table in the database
+        location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset FROM competition LIMIT 1'))?.[0];
+
+        if (!location) {
+            console.error('no competition entry in the database, please confirm soaringspot integration is working');
+            return false;
+        }
+
+        if (!process.env.REPLAY && !(await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))?.[0]?.datecode) {
+            console.error('no current date found for competition');
+            console.table(await db.query<any[]>('SELECT * FROM compstatus'));
+            console.table(await db.query<any[]>('SELECT * FROM competition'));
+            console.table(await db.query<any[]>('SELECT * FROM classes'));
+            return false;
+        }
+        return true;
+    };
+
+    while (!(await checkReady())) {
+        await setTimeoutPromise(30000);
+    }
+
     location.point = point([location.lng, location.lat]);
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
     location.tzoffset = parseInt(location.tzoffset as unknown as string);
@@ -443,7 +457,9 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
 //
 // Get current date code
 async function getDCode(): Promise<Datecode> {
-    return replayBase ? toDateCode(new Date(replayBase * 1000)) : (await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))[0].datecode;
+    return replayBase //
+        ? toDateCode(new Date(replayBase * 1000))
+        : (await db.query<{datecode: Datecode}[]>('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))[0].datecode;
 }
 
 //
@@ -452,7 +468,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     console.log(`updateClasses(${internalName}, ${datecode})`);
 
     // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await db.query('SELECT class FROM compstatus');
+    const classes = await db.query<{class: ClassName}[]>('SELECT class FROM compstatus');
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
@@ -520,7 +536,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         console.log('closing channels: ', Object.keys(channels).join(','));
         Object.values(channels).forEach((channel) => {
             channel.broadcastChannel.close();
-            channel.scoring.shutdown();
+            channel.scoring?.shutdown();
         });
         unknownChannel.close();
         unknownChannel = undefined;
@@ -541,7 +557,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 async function updateTasks(): Promise<void> {
     // Get the details for the task
     const getTask = async (className: ClassName, datecode: Datecode) => {
-        const taskdetails = ((await db.query(escape`
+        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch} & ClassesTableRow)[]>(escape`
          SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped,
                CASE WHEN nostart ='00:00:00' THEN 0
                     ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
@@ -559,7 +575,7 @@ async function updateTasks(): Promise<void> {
 
         const taskid = taskdetails.taskid;
 
-        const tasklegs = await db.query(escape`
+        const tasklegs = await db.query<TaskLegsTableRow[]>(escape`
       SELECT taskleg.*, nname name
         FROM taskleg
        WHERE taskleg.taskid = ${taskid}
@@ -572,9 +588,6 @@ async function updateTasks(): Promise<void> {
         }
 
         // These are invalid
-        delete taskdetails.hdistance;
-        delete taskdetails.distance;
-        delete taskdetails.maxmarkingdistance;
 
         let task = {
             rules: {
@@ -597,11 +610,11 @@ async function updateTasks(): Promise<void> {
 
         if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
             console.log(`new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs?.reduce((a, l) => a + l.length, 0).toFixed(1)}km`);
-            console.log(`${channel.className}: Startline open: ${updatedTask.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
+            console.log(`${channel.className}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
 
             // If it has a task stop it scoring and start the new task
             if (channel.task) {
-                channel.scoring.clearTask();
+                channel.scoring?.clearTask();
                 delete channel.allScores;
                 delete channel.recentScores;
             }
@@ -609,15 +622,25 @@ async function updateTasks(): Promise<void> {
             // We have a task so we will score what we know
             if (updatedTask) {
                 channel.task = updatedTask;
-                channel.scoring.setTask(channel.task);
+                channel.scoring?.setTask(channel.task);
             }
         }
     }
 }
 
+interface CTrackerRow {
+    compno: Compno;
+    greg: string;
+    dbTrackerId: string;
+    duplicate: number;
+    handicap: number;
+    className: ClassName;
+    utcStart: Epoch;
+}
+
 async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
-    let cTrackers = await db.query(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
+    let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
                                            ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
                                         END utcStart
@@ -631,7 +654,7 @@ async function updateTrackers(datecode: Datecode) {
 
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
     // unknowns as they won't be in the trackers pick
-    const keyedDb = keyBy(cTrackers, makeClassname_Compno);
+    const keyedDb = keyBy<CTrackerRow>(cTrackers, makeClassname_Compno);
     const removedGliders = _filter(gliders, (g) => {
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
@@ -671,15 +694,17 @@ async function updateTrackers(datecode: Datecode) {
             const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
             const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
 
-            // glider key not enough to check for datecode changes
-            const glider: Glider = (gliders[gliderKey] = Object.assign(gliders[gliderKey] || {}, t));
-            glider.greg = t?.greg?.replace(/[^A-Z0-9]/i, '');
-            glider.datecode = datecode as Datecode;
-            glider.channelName = channelName(t.className, datecode);
+            // glider key not enough to check for datecode changes (force ignore of
+            // typescript types as we don't want the rest set yet because we need
+            // to see if it's changed on existing object)
+            const glider: Glider = (gliders[gliderKey] = Object.assign(
+                gliders[gliderKey] || {}, //
+                {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
+            ));
 
             // If we have a tracker for it then we need to link that as well
             if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
-                const flarmIDs = _filter(t.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i));
+                const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
                 if (flarmIDs && flarmIDs.length) {
                     // Tell APRS to start listening for the flarmid
                     const command: AprsCommandTrack = {
@@ -698,7 +723,7 @@ async function updateTrackers(datecode: Datecode) {
             if (glider.scoringConfigured) {
                 if (startUtcChanged || handicapChanged) {
                     console.log(`${glider.className}:${glider.compno}: startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
-                    channels[glider.channelName].scoring.rescoreGlider(glider.compno, glider.handicap, glider.utcStart);
+                    channels[glider.channelName].scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart);
                     updatedGliderCount++;
                 }
             } else {
@@ -720,7 +745,7 @@ async function updateTrackers(datecode: Datecode) {
 
     // identify any competition numbers that may be duplicates and mark them.  This
     // will affect how we match from the DDB
-    const duplicates = await db.query('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
+    const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
     duplicates.forEach((d: {compno: string; count: number; classes: string}) => {
         d.classes.split(',').forEach((c) => {
             gliders[c + '_' + d.compno].duplicate = 1;
@@ -987,7 +1012,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
     console.log(`replay: ${channel.className} reloaded all points`);
 
     setTimeout(() => {
-        channel.replay.start({className: channel.className});
+        channel.replay?.start({className: channel.className});
     }, 10000);
 }
 
@@ -1013,7 +1038,7 @@ async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<voi
     }
 
     // And pass the whole set to scoring to be loaded into the glider history
-    channel.scoring.setInitialTrack(glider.compno, glider.handicap, glider.utcStart, points);
+    channel.scoring?.setInitialTrack(glider.compno, glider.handicap, glider.utcStart, points);
     glider.scoringConfigured = true;
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
@@ -1068,7 +1093,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
 
     // Pop into the database
     if (!readOnly) {
-        db.query(
+        db.query<{affectedRows: number}>(
             Object.assign(
                 escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
