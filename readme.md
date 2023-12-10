@@ -30,7 +30,10 @@ To enable SSL add ONGLIDE_SSL to the .env file
 ONGLIDE_SSL=yes
 ```
 
-Once you have configure the environment variables use docker compose to create all the 'services' required
+Once you have configure the environment variables use docker compose to create all the 'services' required.
+
+_NOTE_ You need to re-run build if you change the environment variables as the are copied into the
+containers
 
 ```
 > docker compose build
@@ -49,6 +52,12 @@ This will launch the following:
 
 Your website will be available on port 80, and if it is actually reachable at that URL
 then an LetsEncrypt SSL certificate should be issued and it will also be available on port 443
+
+You can also link to robocontrol (soaringspot only) to fetch the official flarm ids
+
+```
+ROBOCONTROL_URL=
+```
 
 ### RST
 
