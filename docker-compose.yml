@@ -2,7 +2,7 @@ version: '3.9'
 services:
     mysql:
         image: mysql:8-oracle
-        command: --default-authentication-plugin=mysql_native_password
+        command: --default-authentication-plugin=mysql_native_password --lower-case-table-names=2
         healthcheck:
             test: mysql ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
             interval: 10s
@@ -55,7 +55,7 @@ services:
         build:
             dockerfile: ./conf/Dockerfile
             target: ogn
-        command: node bin/ssscrape.js
+        command: node bin/soaringspot.js
         platform: 'linux/amd64'
         depends_on:
             mysql:
