@@ -4,15 +4,16 @@ This repo includes docker commands to launch everything required to
 run your own competition.
 
 You should clone the repository, and then configure a file called
-**.env** to have at least the mapbox access token
-(https://account.mapbox.com/auth/signup/), the 'URL' for the site and a
-database password. Without this docker compose build will fail to
-build a valid website
+**.env** to have at least NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN mapbox access token
+(https://account.mapbox.com/auth/signup/), the 'NEXT_PUBLIC_SITEURL' for the site and a
+database password (MYSQL_PASSWORD). Without this docker compose build will fail to
+build a valid website.
 
 ```
 MYSQL_PASSWORD=<random string>
 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=<access token>
 NEXT_PUBLIC_SITEURL=<url less protocol, eg localhost:3000 or regionals.onglide.com>
+SERVER_ADMIN=<your email address>
 ```
 
 You can also use it to specify the soaring spot credentials, or you
@@ -21,6 +22,12 @@ can pass then in through your service provider environment variables.
 ```
 SOARINGSPOT_CLIENT_ID=
 SOARINGSPOT_SECRET=
+```
+
+To enable SSL add ONGLIDE_SSL to the .env file
+
+```
+ONGLIDE_SSL=yes
 ```
 
 Once you have configure the environment variables use docker compose to create all the 'services' required
@@ -34,13 +41,14 @@ This will launch the following:
 
 ```
 * onglide-mysql (db)
-* onglide-soaringspot (data syncrhonisation)
+* onglide-soaringspot (data synchronisation)
 * onglide-ogn (ogn/flarm data feed handler and websocket provider)
 * onglide-next (front end next.js)
 * onglide-apache (web proxy to route things to the right place)
 ```
 
-Your website will be available on localhost:8080
+Your website will be available on port 80, and if it is actually reachable at that URL
+then an LetsEncrypt SSL certificate should be issued and it will also be available on port 443
 
 ### RST
 

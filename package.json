@@ -4,7 +4,7 @@
     "description": "OnGlide competition website",
     "main": "index.js",
     "author": "Melissa Jenkins",
-    "license": "BSD",
+    "license": "BSD-3-Clause-Attribution",
     "scripts": {
         "build": "yarn build:protobuf && yarn build:tsc",
         "build:tsc": "tsc --project tsconfig-bin.json",

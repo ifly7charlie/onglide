@@ -1,77 +1,88 @@
 version: '3.9'
 services:
-  mysql:
-    image: mysql:8-oracle
-    command: --default-authentication-plugin=mysql_native_password
-    healthcheck:
-      test: mysql ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
-      interval: 10s
-      timeout: 10s
-      retries: 10
-    environment:
-      MYSQL_ROOT_PASSWORD: "$MYSQL_PASSWORD"
-    volumes:
-      - ./conf/sql/docker:/docker-entrypoint-initdb.d
-  next:
-    build:
-      context: .
-      dockerfile: ./conf/Dockerfile-fe
-      args:
-        NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
-    command: yarn next start
-    depends_on:
-      mysql:
-        condition: service_healthy
-    environment:
-      MYSQL_PASSWORD: $MYSQL_PASSWORD
-      MYSQL_HOST: mysql
-      MYSQL_USER: root
-      MYSQL_DATABASE: ogn
-      NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
-      NEXT_SCORE_REFRESH_INTERVAL: $NEXT_SCORE_REFRESH_INTERVAL
-    restart: always
-  ogn:
-    build: 
-      dockerfile: ./conf/Dockerfile-be
-    command: node bin/ogn.js
-    depends_on:
-      mysql:
-        condition: service_healthy
-    restart: always
-    environment:
-      MYSQL_PASSWORD: $MYSQL_PASSWORD
-      MYSQL_HOST: mysql
-      MYSQL_USER: root
-      MYSQL_DATABASE: ogn
-      NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: $NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
-      NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
-      NEXT_SCORE_REFRESH_INTERVAL: ${NEXT_SCORE_REFRESH_INTERVAL:-60000}
-      API_HOSTNAME: next:3000
-  soaringspot:
-    build: 
-      dockerfile: ./conf/Dockerfile-be
-    command: node bin/soaringspot.js
-    depends_on:
-      mysql:
-        condition: service_healthy
-    restart: always
-    environment:
-      MYSQL_PASSWORD: $MYSQL_PASSWORD
-      MYSQL_HOST: mysql
-      MYSQL_USER: root
-      MYSQL_DATABASE: ogn
-      NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
-      SOARINGSPOT_CLIENT_ID: $SOARINGSPOT_CLIENT_ID
-      SOARINGSPOT_SECRET: ${SOARINGSPOT_SECRET?SoaringSpot Secret not set}
-      SOARINGSPOT_OVERWRITE: ${SOARINGSPOT_OVERWRITE:-1}
-      SOARINGSPOT_ACTUALS: ${SOARINGSPOT_ACTUALS:-1}
-  apache:
-    build: ./conf/apache
-    restart: always
-    tty: true
-    stdin_open: true
-    depends_on:
-      - next
-      - ogn
-    ports:
-      - 8080:8000
+    mysql:
+        image: mysql:8-oracle
+        command: --default-authentication-plugin=mysql_native_password
+        healthcheck:
+            test: mysql ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
+            interval: 10s
+            timeout: 10s
+            retries: 10
+        environment:
+            MYSQL_ROOT_PASSWORD: '$MYSQL_PASSWORD'
+        volumes:
+            - ./conf/sql/docker:/docker-entrypoint-initdb.d
+    next:
+        build:
+            context: .
+            dockerfile: ./conf/Dockerfile
+            target: next
+            args:
+                NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
+        command: yarn next start
+        platform: 'linux/amd64'
+        depends_on:
+            mysql:
+                condition: service_healthy
+        environment:
+            MYSQL_PASSWORD: $MYSQL_PASSWORD
+            MYSQL_HOST: mysql
+            MYSQL_USER: root
+            MYSQL_DATABASE: ogn
+            NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
+            NEXT_SCORE_REFRESH_INTERVAL: ${NEXT_SCORE_REFRESH_INTERVAL:-60000}
+        restart: always
+    ogn:
+        build:
+            dockerfile: ./conf/Dockerfile
+            target: ogn
+        command: node bin/ogn.js
+        platform: 'linux/amd64'
+        depends_on:
+            mysql:
+                condition: service_healthy
+        restart: always
+        environment:
+            MYSQL_PASSWORD: $MYSQL_PASSWORD
+            MYSQL_HOST: mysql
+            MYSQL_USER: root
+            MYSQL_DATABASE: ogn
+            NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: $NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
+            NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
+            NEXT_SCORE_REFRESH_INTERVAL: ${NEXT_SCORE_REFRESH_INTERVAL:-60000}
+            API_HOSTNAME: next:3000
+    soaringspot:
+        build:
+            dockerfile: ./conf/Dockerfile
+            target: ogn
+        command: node bin/ssscrape.js
+        platform: 'linux/amd64'
+        depends_on:
+            mysql:
+                condition: service_healthy
+        restart: always
+        environment:
+            MYSQL_PASSWORD: $MYSQL_PASSWORD
+            MYSQL_HOST: mysql
+            MYSQL_USER: root
+            MYSQL_DATABASE: ogn
+            NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
+            SOARINGSPOT_CLIENT_ID: $SOARINGSPOT_CLIENT_ID
+            SOARINGSPOT_SECRET: ${SOARINGSPOT_SECRET?SoaringSpot Secret not set}
+            SOARINGSPOT_OVERWRITE: ${SOARINGSPOT_OVERWRITE:-1}
+            SOARINGSPOT_ACTUALS: ${SOARINGSPOT_ACTUALS:-1}
+    apache:
+        build: ./conf/apache
+        restart: always
+        command: httpd-foreground -D${ONGLIDE_SSL-NO_ONGLIDE_SSL}
+        tty: true
+        stdin_open: true
+        depends_on:
+            - next
+            - ogn
+        ports:
+            - 8080:80
+            - 8443:443
+        environment:
+            NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL?URL for the site is not set}
+            SERVER_ADMIN: $SERVER_ADMIN
