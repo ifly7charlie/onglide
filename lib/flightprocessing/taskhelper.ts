@@ -74,11 +74,8 @@ export function preprocessSector(tp: TaskLeg) {
         tp.a2 = 180 as Bearing;
     }
 
-    console.log(tp);
-
     // Help speed up turnpoint checking
     if (tp.type == 'sector' && tp.a1 == 180 && !tp.a12 && !tp.r2) {
-        console.log('->tp quickSector');
         tp.quickSector = true;
     }
 }
