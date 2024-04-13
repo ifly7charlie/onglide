@@ -1,6 +1,0 @@
-FROM ognbase:latest
-WORKDIR /onglide
-COPY ./dist ./dist
-COPY ./.env.local ./.env.local
-EXPOSE 8080
-CMD node dist/bin/ogn.js

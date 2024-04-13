@@ -28,7 +28,7 @@ import {Coord, point} from '@turf/helpers';
 import KalmanFilter from 'kalmanjs';
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName_Compno, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, Bearing, Speed} from '../types';
+import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, Bearing, Speed} from '../types';
 
 // APRS connection
 let connection;
@@ -51,9 +51,9 @@ export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | any;
 export interface AprsCommandTrack {
     action: AprsCommandEnum; //= AprsCommandEnum.track
 
-    className: string;
+    className: string | ClassName;
     channelName: string;
-    compno: string;
+    compno: string | Compno;
     trackerId: string | string[];
 }
 
@@ -322,8 +322,8 @@ function startAprsListener(config: AprsListenerConfig) {
 // collect points, emit to competition db every 30 seconds
 function processPacket(packet: aprsPacket) {
     // Flarm ID we use is last 6 characters, check if OGN tracker or regular flarm
-    const flarmId = packet.sourceCallsign.slice(packet.sourceCallsign.length - 6);
-    const ognTracker = packet.sourceCallsign.slice(0, 3) == 'OGN';
+    const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6);
+    const ognTracker = packet.sourceCallsign?.slice(0, 3) == 'OGN';
 
     // Lookup the altitude adjustment for the
     let sender = packet.digipeaters?.pop()?.callsign || 'unknown';
@@ -334,6 +334,10 @@ function processPacket(packet: aprsPacket) {
     let aoa = ognTracker ? 0 : altitudeOffsetAdjust[sender] || 0;
     if (aoa == null) {
         //        console.log(`ignoring packet from ${sender} as blocked`);
+        return;
+    }
+
+    if (!packet.latitude || !packet.longitude || !flarmId || !packet.timestamp) {
         return;
     }
 
@@ -362,7 +366,7 @@ function processPacket(packet: aprsPacket) {
             g: Math.round(Math.max(altitude - gl, 0)),
             t: packet.timestamp as Epoch,
             b: packet.course as Bearing,
-            s: (Math.round(packet.speed * 10) / 10) as Speed,
+            s: (Math.round((packet.speed ?? 0) * 10) / 10) as Speed,
             f: flarmId + ',' + sender,
             v: vario,
             l: islate
@@ -372,7 +376,7 @@ function processPacket(packet: aprsPacket) {
         // (and it's low enough for a launch) then let somebody
         // identify it for us, otherwise we'll send it for tracking
         if (aircraft) {
-            aircraft.channel.postMessage(message);
+            aircraft.channel!.postMessage(message);
         } else if (message.g < 750 /*m*/) {
             unknownChannel.postMessage(message);
         }
@@ -397,7 +401,7 @@ function processPacket(packet: aprsPacket) {
     statistics.knownReceived++;
 
     // Ignore duplicates
-    if (aircraft.lastTime >= packet.timestamp) {
+    if ((aircraft.lastTime ?? 0) >= packet.timestamp) {
         return;
     }
 
@@ -406,7 +410,7 @@ function processPacket(packet: aprsPacket) {
     // better. the 1 ensures that first packet gets picked up after restart
     // Also make sure the speed between points is < 330kph - ignoring ordering
     const distanceFromLast = aircraft.lastPoint ? distance(jPoint, aircraft.lastPoint) : 1;
-    const speedBetweenKph = distanceFromLast / (Math.abs(packet.timestamp - aircraft.lastMoved) / 3600);
+    const speedBetweenKph = distanceFromLast / (Math.abs(packet.timestamp - (aircraft.lastMoved ?? 0)) / 3600);
     if (distanceFromLast < 0.01) {
         if (packet.timestamp - aircraft.lastTime < 10) {
             aircraft.stationary++;

@@ -12,7 +12,7 @@ const defaultOptions = {
     rainRadarAdvance: 0,
     units: 0,
     mapType: 0,
-    map2d: true,
+    map2d: false,
     taskUp: 0,
     follow: true,
     zoomTask: true,
@@ -25,8 +25,10 @@ const defaultOptions = {
 export default function MyApp({Component, pageProps}) {
     const getOptions = () => {
         try {
+            const value = window?.localStorage.getItem('options');
             return value ? {...defaultOptions, ...JSON.parse(value), zoomTask: true} : defaultOptions;
         } catch (e) {
+            console.log('unable to load options', e);
             // if error, return initial value
             return defaultOptions;
         }

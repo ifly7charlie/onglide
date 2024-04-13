@@ -110,6 +110,7 @@ export const OgnFeed = memo(
         const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [follow, setFollow] = useState(false);
+        const router = useRouter();
 
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
@@ -134,7 +135,17 @@ export const OgnFeed = memo(
         if (lastMessage) {
             if (wsStatus.timeStamp != lastMessage.timeStamp) {
                 wsStatus.timeStamp = lastMessage.timeStamp;
-                decodeWebsocketMessage(vc, datecode, lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus);
+                if (lastMessage.data === 'reload') {
+                    // Force a page reload
+                    const currentReloadCount = parseInt((router.query?.reloaded as string) ?? '0');
+                    console.log('reloading', currentReloadCount, (1 << currentReloadCount) * 1000);
+                    const newParams = {
+                        query: {...router.query, reloaded: currentReloadCount + 1}
+                    };
+                    setTimeout(() => router.replace(newParams), (1 << currentReloadCount) * 1000);
+                } else {
+                    decodeWebsocketMessage(vc, datecode, lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus);
+                }
             }
         }
 
@@ -188,7 +199,7 @@ export const OgnFeed = memo(
                           track: trackData[selectedCompno]
                       }
                     : null,
-            [pilots, selectedCompno]
+            [pilotScores[selectedCompno], trackData[selectedCompno]?.vario, pilots?.[selectedCompno], selectedCompno]
         );
 
         // Cache the calculated times and only refresh every 60 seconds

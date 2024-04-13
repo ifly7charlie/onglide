@@ -1,9 +1,0 @@
-FROM ognbase:latest
-WORKDIR /onglide
-COPY ./.build ./.build
-COPY ./next.config.js ./next.config.js
-COPY ./.env.local ./.env
-COPY ./LICENSE ./LICENSE
-EXPOSE 3000
-CMD yarn next start
-

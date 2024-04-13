@@ -34,7 +34,8 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
 
     // Record of scores per pilot and a flag to optimise transfer
     // of scores when nothing happening
-    const mostRecentScore: Record<Compno, PilotScore> = {};
+    const mostRecentScores: Record<Compno, PilotScore> = {};
+    const allScores: Record<Compno, PilotScore> = {};
     const mostRecentStart: Record<Compno, Epoch> = {};
     const optionsForCompno: Record<Compno, {restartCount: number}> = {};
     let startsToSend: Record<Compno, Epoch> = {};
@@ -47,9 +48,10 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
     // Called when a new score is available, save it in the
     // object structure and flag that it's there
     function updateScore(compno: Compno, score: PilotScore) {
-        mostRecentScore[compno] = score;
+        mostRecentScores[compno] = score;
+        allScores[compno] = score;
 
-        if (process.env.NODE_ENV == 'development') {
+        if (process.env.NODE_ENV == 'development' || compno == 'SD') {
             console.log(`[${id}/${taskId}] score for ${compno}`);
         }
 
@@ -65,8 +67,9 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
         return running;
     }
 
-    function composeAndSendProtobuf(className: ClassName, port: MessagePort, scores: Record<Compno, PilotScore>, startsToSend: Record<Compno, Epoch>) {
-        const countScoredPilots = Object.keys(scores).length;
+    function composeAndSendProtobuf() {
+        //className: ClassName, port: MessagePort, scores: Record<Compno, PilotScore>, startsToSend: Record<Compno, Epoch>) {
+        const countScoredPilots = Object.keys(allScores).length;
         const countStartsToSend = Object.keys(startsToSend).length;
 
         // Nothing to report don't report
@@ -84,18 +87,23 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
 
         //
         // Encode this as a protobuf
-        const msg = OnglideWebSocketMessage.encode({scores: {pilots: scores}}).finish();
+        const msg = OnglideWebSocketMessage.encode({scores: {pilots: allScores}}).finish();
+        const changedScores = OnglideWebSocketMessage.encode({scores: {pilots: mostRecentScores}}).finish();
         if (countStartsToSend) {
             console.log(`[${id}/${taskId}] Startline update: ${className} :${Object.keys(startsToSend).join(',')}`);
         }
-        console.log(`[${id}/${taskId}] Score update: ${className} : ${Object.keys(scores).join(',')} => ${msg.byteLength} bytes`);
+        console.log(`[${id}/${taskId}] Score update: ${className} : ${Object.keys(mostRecentScores).join(',')} => ${changedScores.byteLength} bytes`);
         console.log(`[${id}/${taskId}] Period: ${className} : [${new Date(oldestUpdate * 1000).toUTCString()}-${new Date(newestUpdate * 1000).toUTCString()}] ${oldestUpdate}-${newestUpdate} : ${Math.max(now - newestUpdate, now - oldestUpdate)}`);
 
         oldestUpdate = Infinity;
         newestUpdate = 0;
+        for (var compno in mostRecentScores) {
+            delete mostRecentScores[compno];
+        }
+
         // Now we need to send it back to the main thread - allow transfer, we don't
         // need the buffer again
-        port.postMessage({scores: msg, recentStarts: startsToSend}, [msg.buffer]);
+        port.postMessage({allScores: msg, recentScores: changedScores, recentStarts: startsToSend}, [msg.buffer]);
     }
 
     // Start async functions to read scores and update our most recent
@@ -107,7 +115,7 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
     // And a timer callback that posts the message to front end
     setInterval(() => {
         if (!latestSent) {
-            composeAndSendProtobuf(task.details.class, port, mostRecentScore, startsToSend);
+            composeAndSendProtobuf(); //task.details.class, port, mostRecentScore, startsToSend);
             startsToSend = {};
             latestSent = true;
         }

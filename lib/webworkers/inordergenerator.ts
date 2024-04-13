@@ -52,9 +52,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
             const toNotify = resolveNotifications.slice();
             resolveNotifications.length = 0;
-            if (toNotify.length) {
-                toNotify.forEach((resolveFunction) => resolveFunction(insertIndex));
-            }
+            toNotify.forEach((resolveFunction) => resolveFunction(insertIndex));
         }
     };
 
@@ -63,9 +61,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         setInterval(() => {
             const toNotify = resolveNotifications.slice();
             resolveNotifications.length = 0;
-            if (toNotify.length) {
-                toNotify.forEach((resolveFunction) => resolveFunction(messageQueue.length + 1));
-            }
+            toNotify.forEach((resolveFunction) => resolveFunction(messageQueue.length + 1));
         }, 1000);
     }
 
@@ -117,7 +113,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
                 // As we do out of order if it's inserted before us then
                 // we just skip forward
-                const insertIndex = await new Promise((resolve) => resolveNotifications.push(resolve));
+                const insertIndex = await new Promise<number>((resolve) => resolveNotifications.push(resolve));
                 if (insertIndex < position && position < messageQueue.length) {
                     position++;
                 }

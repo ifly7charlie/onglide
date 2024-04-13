@@ -299,7 +299,7 @@ export const OnglideWebSocketMessage = {
       scores: isSet(object.scores) ? Scores.fromJSON(object.scores) : undefined,
       positions: isSet(object.positions) ? Positions.fromJSON(object.positions) : undefined,
       ka: isSet(object.ka) ? KeepAlive.fromJSON(object.ka) : undefined,
-      t: isSet(object.t) ? Number(object.t) : undefined,
+      t: isSet(object.t) ? globalThis.Number(object.t) : undefined,
     };
   },
 
@@ -399,7 +399,7 @@ export const PilotTracks = {
           return acc;
         }, {})
         : {},
-      baseTime: isSet(object.baseTime) ? Number(object.baseTime) : 0,
+      baseTime: isSet(object.baseTime) ? globalThis.Number(object.baseTime) : 0,
     };
   },
 
@@ -483,7 +483,7 @@ export const PilotTracks_PilotsEntry = {
 
   fromJSON(object: any): PilotTracks_PilotsEntry {
     return {
-      key: isSet(object.key) ? String(object.key) : "",
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
       value: isSet(object.value) ? PilotTrack.fromJSON(object.value) : undefined,
     };
   },
@@ -617,13 +617,13 @@ export const PilotTrack = {
 
   fromJSON(object: any): PilotTrack {
     return {
-      compno: isSet(object.compno) ? String(object.compno) : "",
-      posIndex: isSet(object.posIndex) ? Number(object.posIndex) : 0,
+      compno: isSet(object.compno) ? globalThis.String(object.compno) : "",
+      posIndex: isSet(object.posIndex) ? globalThis.Number(object.posIndex) : 0,
       t: isSet(object.t) ? bytesFromBase64(object.t) : new Uint8Array(0),
       positions: isSet(object.positions) ? bytesFromBase64(object.positions) : new Uint8Array(0),
       agl: isSet(object.agl) ? bytesFromBase64(object.agl) : new Uint8Array(0),
       climbRate: isSet(object.climbRate) ? bytesFromBase64(object.climbRate) : new Uint8Array(0),
-      trackVersion: isSet(object.trackVersion) ? Number(object.trackVersion) : 0,
+      trackVersion: isSet(object.trackVersion) ? globalThis.Number(object.trackVersion) : 0,
     };
   },
 
@@ -794,7 +794,7 @@ export const Scores_PilotsEntry = {
 
   fromJSON(object: any): Scores_PilotsEntry {
     return {
-      key: isSet(object.key) ? String(object.key) : "",
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
       value: isSet(object.value) ? PilotScore.fromJSON(object.value) : undefined,
     };
   },
@@ -939,14 +939,14 @@ export const SpeedDist = {
 
   fromJSON(object: any): SpeedDist {
     return {
-      distance: isSet(object.distance) ? Number(object.distance) : undefined,
-      taskDistance: isSet(object.taskDistance) ? Number(object.taskDistance) : 0,
-      distanceRemaining: isSet(object.distanceRemaining) ? Number(object.distanceRemaining) : undefined,
-      maxPossible: isSet(object.maxPossible) ? Number(object.maxPossible) : undefined,
-      minPossible: isSet(object.minPossible) ? Number(object.minPossible) : undefined,
-      grRemaining: isSet(object.grRemaining) ? Number(object.grRemaining) : undefined,
-      legSpeed: isSet(object.legSpeed) ? Number(object.legSpeed) : undefined,
-      taskSpeed: isSet(object.taskSpeed) ? Number(object.taskSpeed) : undefined,
+      distance: isSet(object.distance) ? globalThis.Number(object.distance) : undefined,
+      taskDistance: isSet(object.taskDistance) ? globalThis.Number(object.taskDistance) : 0,
+      distanceRemaining: isSet(object.distanceRemaining) ? globalThis.Number(object.distanceRemaining) : undefined,
+      maxPossible: isSet(object.maxPossible) ? globalThis.Number(object.maxPossible) : undefined,
+      minPossible: isSet(object.minPossible) ? globalThis.Number(object.minPossible) : undefined,
+      grRemaining: isSet(object.grRemaining) ? globalThis.Number(object.grRemaining) : undefined,
+      legSpeed: isSet(object.legSpeed) ? globalThis.Number(object.legSpeed) : undefined,
+      taskSpeed: isSet(object.taskSpeed) ? globalThis.Number(object.taskSpeed) : undefined,
     };
   },
 
@@ -1156,16 +1156,16 @@ export const PilotScoreLeg = {
 
   fromJSON(object: any): PilotScoreLeg {
     return {
-      legno: isSet(object.legno) ? Number(object.legno) : 0,
-      time: isSet(object.time) ? Number(object.time) : 0,
-      duration: isSet(object.duration) ? Number(object.duration) : undefined,
-      taskDuration: isSet(object.taskDuration) ? Number(object.taskDuration) : undefined,
+      legno: isSet(object.legno) ? globalThis.Number(object.legno) : 0,
+      time: isSet(object.time) ? globalThis.Number(object.time) : 0,
+      duration: isSet(object.duration) ? globalThis.Number(object.duration) : undefined,
+      taskDuration: isSet(object.taskDuration) ? globalThis.Number(object.taskDuration) : undefined,
       point: isSet(object.point) ? BasePositionMessage.fromJSON(object.point) : undefined,
-      alt: isSet(object.alt) ? Number(object.alt) : undefined,
-      agl: isSet(object.agl) ? Number(object.agl) : undefined,
-      estimatedEnd: isSet(object.estimatedEnd) ? Boolean(object.estimatedEnd) : undefined,
-      estimatedStart: isSet(object.estimatedStart) ? Boolean(object.estimatedStart) : undefined,
-      inPenalty: isSet(object.inPenalty) ? Boolean(object.inPenalty) : undefined,
+      alt: isSet(object.alt) ? globalThis.Number(object.alt) : undefined,
+      agl: isSet(object.agl) ? globalThis.Number(object.agl) : undefined,
+      estimatedEnd: isSet(object.estimatedEnd) ? globalThis.Boolean(object.estimatedEnd) : undefined,
+      estimatedStart: isSet(object.estimatedStart) ? globalThis.Boolean(object.estimatedStart) : undefined,
+      inPenalty: isSet(object.inPenalty) ? globalThis.Boolean(object.inPenalty) : undefined,
       handicapped: isSet(object.handicapped) ? SpeedDist.fromJSON(object.handicapped) : undefined,
       actual: isSet(object.actual) ? SpeedDist.fromJSON(object.actual) : undefined,
     };
@@ -1286,8 +1286,8 @@ export const Wind = {
 
   fromJSON(object: any): Wind {
     return {
-      speed: isSet(object.speed) ? Number(object.speed) : 0,
-      direction: isSet(object.direction) ? Number(object.direction) : 0,
+      speed: isSet(object.speed) ? globalThis.Number(object.speed) : 0,
+      direction: isSet(object.direction) ? globalThis.Number(object.direction) : 0,
     };
   },
 
@@ -1473,18 +1473,18 @@ export const StatSegment = {
 
   fromJSON(object: any): StatSegment {
     return {
-      start: isSet(object.start) ? Number(object.start) : 0,
-      end: isSet(object.end) ? Number(object.end) : 0,
-      state: isSet(object.state) ? String(object.state) : "",
+      start: isSet(object.start) ? globalThis.Number(object.start) : 0,
+      end: isSet(object.end) ? globalThis.Number(object.end) : 0,
+      state: isSet(object.state) ? globalThis.String(object.state) : "",
       wind: isSet(object.wind) ? Wind.fromJSON(object.wind) : undefined,
-      turncount: isSet(object.turncount) ? Number(object.turncount) : 0,
-      distance: isSet(object.distance) ? Number(object.distance) : 0,
-      achievedDistance: isSet(object.achievedDistance) ? Number(object.achievedDistance) : 0,
-      delta: isSet(object.delta) ? Number(object.delta) : 0,
-      avgDelta: isSet(object.avgDelta) ? Number(object.avgDelta) : 0,
-      direction: isSet(object.direction) ? Number(object.direction) : 0,
-      heightgain: isSet(object.heightgain) ? Number(object.heightgain) : 0,
-      heightloss: isSet(object.heightloss) ? Number(object.heightloss) : 0,
+      turncount: isSet(object.turncount) ? globalThis.Number(object.turncount) : 0,
+      distance: isSet(object.distance) ? globalThis.Number(object.distance) : 0,
+      achievedDistance: isSet(object.achievedDistance) ? globalThis.Number(object.achievedDistance) : 0,
+      delta: isSet(object.delta) ? globalThis.Number(object.delta) : 0,
+      avgDelta: isSet(object.avgDelta) ? globalThis.Number(object.avgDelta) : 0,
+      direction: isSet(object.direction) ? globalThis.Number(object.direction) : 0,
+      heightgain: isSet(object.heightgain) ? globalThis.Number(object.heightgain) : 0,
+      heightloss: isSet(object.heightloss) ? globalThis.Number(object.heightloss) : 0,
     };
   },
 
@@ -1587,7 +1587,9 @@ export const Stats = {
 
   fromJSON(object: any): Stats {
     return {
-      segments: Array.isArray(object?.segments) ? object.segments.map((e: any) => StatSegment.fromJSON(e)) : [],
+      segments: globalThis.Array.isArray(object?.segments)
+        ? object.segments.map((e: any) => StatSegment.fromJSON(e))
+        : [],
     };
   },
 
@@ -1666,9 +1668,9 @@ export const BasePositionMessage = {
 
   fromJSON(object: any): BasePositionMessage {
     return {
-      t: isSet(object.t) ? Number(object.t) : 0,
-      lat: isSet(object.lat) ? Number(object.lat) : 0,
-      lng: isSet(object.lng) ? Number(object.lng) : 0,
+      t: isSet(object.t) ? globalThis.Number(object.t) : 0,
+      lat: isSet(object.lat) ? globalThis.Number(object.lat) : 0,
+      lng: isSet(object.lng) ? globalThis.Number(object.lng) : 0,
     };
   },
 
@@ -1985,35 +1987,37 @@ export const PilotScore = {
 
   fromJSON(object: any): PilotScore {
     return {
-      t: isSet(object.t) ? Number(object.t) : 0,
-      compno: isSet(object.compno) ? String(object.compno) : "",
-      utcStart: isSet(object.utcStart) ? Number(object.utcStart) : 0,
-      utcFinish: isSet(object.utcFinish) ? Number(object.utcFinish) : 0,
-      taskDuration: isSet(object.taskDuration) ? Number(object.taskDuration) : undefined,
-      taskTimeRemaining: isSet(object.taskTimeRemaining) ? Number(object.taskTimeRemaining) : undefined,
-      inSector: isSet(object.inSector) ? Boolean(object.inSector) : undefined,
-      inPenalty: isSet(object.inPenalty) ? Boolean(object.inPenalty) : undefined,
-      stationary: isSet(object.stationary) ? Boolean(object.stationary) : undefined,
-      flightStatus: isSet(object.flightStatus) ? Number(object.flightStatus) : undefined,
+      t: isSet(object.t) ? globalThis.Number(object.t) : 0,
+      compno: isSet(object.compno) ? globalThis.String(object.compno) : "",
+      utcStart: isSet(object.utcStart) ? globalThis.Number(object.utcStart) : 0,
+      utcFinish: isSet(object.utcFinish) ? globalThis.Number(object.utcFinish) : 0,
+      taskDuration: isSet(object.taskDuration) ? globalThis.Number(object.taskDuration) : undefined,
+      taskTimeRemaining: isSet(object.taskTimeRemaining) ? globalThis.Number(object.taskTimeRemaining) : undefined,
+      inSector: isSet(object.inSector) ? globalThis.Boolean(object.inSector) : undefined,
+      inPenalty: isSet(object.inPenalty) ? globalThis.Boolean(object.inPenalty) : undefined,
+      stationary: isSet(object.stationary) ? globalThis.Boolean(object.stationary) : undefined,
+      flightStatus: isSet(object.flightStatus) ? globalThis.Number(object.flightStatus) : undefined,
       actual: isSet(object.actual) ? SpeedDist.fromJSON(object.actual) : undefined,
       handicapped: isSet(object.handicapped) ? SpeedDist.fromJSON(object.handicapped) : undefined,
-      currentLeg: isSet(object.currentLeg) ? Number(object.currentLeg) : 0,
+      currentLeg: isSet(object.currentLeg) ? globalThis.Number(object.currentLeg) : 0,
       legs: isObject(object.legs)
         ? Object.entries(object.legs).reduce<{ [key: number]: PilotScoreLeg }>((acc, [key, value]) => {
-          acc[Number(key)] = PilotScoreLeg.fromJSON(value);
+          acc[globalThis.Number(key)] = PilotScoreLeg.fromJSON(value);
           return acc;
         }, {})
         : {},
       stats: isSet(object.stats) ? Stats.fromJSON(object.stats) : undefined,
       wind: isSet(object.wind) ? Wind.fromJSON(object.wind) : undefined,
-      scoredPoints: Array.isArray(object?.scoredPoints) ? object.scoredPoints.map((e: any) => Number(e)) : [],
-      minDistancePoints: Array.isArray(object?.minDistancePoints)
-        ? object.minDistancePoints.map((e: any) => Number(e))
+      scoredPoints: globalThis.Array.isArray(object?.scoredPoints)
+        ? object.scoredPoints.map((e: any) => globalThis.Number(e))
         : [],
-      maxDistancePoints: Array.isArray(object?.maxDistancePoints)
-        ? object.maxDistancePoints.map((e: any) => Number(e))
+      minDistancePoints: globalThis.Array.isArray(object?.minDistancePoints)
+        ? object.minDistancePoints.map((e: any) => globalThis.Number(e))
         : [],
-      taskGeoJSON: isSet(object.taskGeoJSON) ? String(object.taskGeoJSON) : undefined,
+      maxDistancePoints: globalThis.Array.isArray(object?.maxDistancePoints)
+        ? object.maxDistancePoints.map((e: any) => globalThis.Number(e))
+        : [],
+      taskGeoJSON: isSet(object.taskGeoJSON) ? globalThis.String(object.taskGeoJSON) : undefined,
     };
   },
 
@@ -2112,7 +2116,7 @@ export const PilotScore = {
     message.currentLeg = object.currentLeg ?? 0;
     message.legs = Object.entries(object.legs ?? {}).reduce<{ [key: number]: PilotScoreLeg }>((acc, [key, value]) => {
       if (value !== undefined) {
-        acc[Number(key)] = PilotScoreLeg.fromPartial(value);
+        acc[globalThis.Number(key)] = PilotScoreLeg.fromPartial(value);
       }
       return acc;
     }, {});
@@ -2173,7 +2177,7 @@ export const PilotScore_LegsEntry = {
 
   fromJSON(object: any): PilotScore_LegsEntry {
     return {
-      key: isSet(object.key) ? Number(object.key) : 0,
+      key: isSet(object.key) ? globalThis.Number(object.key) : 0,
       value: isSet(object.value) ? PilotScoreLeg.fromJSON(object.value) : undefined,
     };
   },
@@ -2319,15 +2323,15 @@ export const PilotPosition = {
 
   fromJSON(object: any): PilotPosition {
     return {
-      c: isSet(object.c) ? String(object.c) : "",
-      lat: isSet(object.lat) ? Number(object.lat) : 0,
-      lng: isSet(object.lng) ? Number(object.lng) : 0,
-      a: isSet(object.a) ? Number(object.a) : 0,
-      g: isSet(object.g) ? Number(object.g) : 0,
-      t: isSet(object.t) ? Number(object.t) : 0,
-      b: isSet(object.b) ? Number(object.b) : 0,
-      s: isSet(object.s) ? Number(object.s) : 0,
-      v: isSet(object.v) ? String(object.v) : "",
+      c: isSet(object.c) ? globalThis.String(object.c) : "",
+      lat: isSet(object.lat) ? globalThis.Number(object.lat) : 0,
+      lng: isSet(object.lng) ? globalThis.Number(object.lng) : 0,
+      a: isSet(object.a) ? globalThis.Number(object.a) : 0,
+      g: isSet(object.g) ? globalThis.Number(object.g) : 0,
+      t: isSet(object.t) ? globalThis.Number(object.t) : 0,
+      b: isSet(object.b) ? globalThis.Number(object.b) : 0,
+      s: isSet(object.s) ? globalThis.Number(object.s) : 0,
+      v: isSet(object.v) ? globalThis.String(object.v) : "",
     };
   },
 
@@ -2418,7 +2422,9 @@ export const Positions = {
 
   fromJSON(object: any): Positions {
     return {
-      positions: Array.isArray(object?.positions) ? object.positions.map((e: any) => PilotPosition.fromJSON(e)) : [],
+      positions: globalThis.Array.isArray(object?.positions)
+        ? object.positions.map((e: any) => PilotPosition.fromJSON(e))
+        : [],
     };
   },
 
@@ -2507,10 +2513,10 @@ export const KeepAlive = {
 
   fromJSON(object: any): KeepAlive {
     return {
-      keepalive: isSet(object.keepalive) ? Boolean(object.keepalive) : false,
-      at: isSet(object.at) ? Number(object.at) : 0,
-      listeners: isSet(object.listeners) ? Number(object.listeners) : 0,
-      airborne: isSet(object.airborne) ? Number(object.airborne) : 0,
+      keepalive: isSet(object.keepalive) ? globalThis.Boolean(object.keepalive) : false,
+      at: isSet(object.at) ? globalThis.Number(object.at) : 0,
+      listeners: isSet(object.listeners) ? globalThis.Number(object.listeners) : 0,
+      airborne: isSet(object.airborne) ? globalThis.Number(object.airborne) : 0,
     };
   },
 
@@ -2544,30 +2550,11 @@ export const KeepAlive = {
   },
 };
 
-declare const self: any | undefined;
-declare const window: any | undefined;
-declare const global: any | undefined;
-const tsProtoGlobalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
 function bytesFromBase64(b64: string): Uint8Array {
-  if (tsProtoGlobalThis.Buffer) {
-    return Uint8Array.from(tsProtoGlobalThis.Buffer.from(b64, "base64"));
+  if (globalThis.Buffer) {
+    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
   } else {
-    const bin = tsProtoGlobalThis.atob(b64);
+    const bin = globalThis.atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) {
       arr[i] = bin.charCodeAt(i);
@@ -2577,21 +2564,22 @@ function bytesFromBase64(b64: string): Uint8Array {
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if (tsProtoGlobalThis.Buffer) {
-    return tsProtoGlobalThis.Buffer.from(arr).toString("base64");
+  if (globalThis.Buffer) {
+    return globalThis.Buffer.from(arr).toString("base64");
   } else {
     const bin: string[] = [];
     arr.forEach((byte) => {
-      bin.push(String.fromCharCode(byte));
+      bin.push(globalThis.String.fromCharCode(byte));
     });
-    return tsProtoGlobalThis.btoa(bin.join(""));
+    return globalThis.btoa(bin.join(""));
   }
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
 export type DeepPartial<T> = T extends Builtin ? T
-  : T extends Array<infer U> ? Array<DeepPartial<U>> : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
+  : T extends globalThis.Array<infer U> ? globalThis.Array<DeepPartial<U>>
+  : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
 
