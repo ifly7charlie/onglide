@@ -253,6 +253,7 @@ CREATE TABLE `scoringsource` (
   `client_id` char(120) DEFAULT NULL,
   `secret` char(120) DEFAULT NULL,
   `contest_name` char(120) DEFAULT NULL,
+
   `overwrite` int(11) DEFAULT '0',
   `actuals` int(11) DEFAULT '1',
   `portoffset` int(11) DEFAULT '0',
