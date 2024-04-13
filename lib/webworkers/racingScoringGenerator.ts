@@ -46,6 +46,8 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 continue;
             }
 
+            compno = taskStatus.compno;
+
             // Make sure the task position has changed
             if (lastClosestToNext === taskStatus.closestToNext) {
                 continue;

@@ -588,6 +588,9 @@ async function updateTasks(): Promise<void> {
         }
 
         // These are invalid
+        delete taskdetails.hdistance;
+        delete taskdetails.distance;
+        delete taskdetails.maxmarkingdistance;
 
         let task = {
             rules: {
@@ -705,6 +708,7 @@ async function updateTrackers(datecode: Datecode) {
             // If we have a tracker for it then we need to link that as well
             if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
                 const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
+
                 if (flarmIDs && flarmIDs.length) {
                     // Tell APRS to start listening for the flarmid
                     const command: AprsCommandTrack = {
@@ -928,6 +932,8 @@ async function sendScores(channel: any, allScores: Buffer, recentScores: Buffer,
     const now = getNow();
 
     console.log('Sending Scores', allScores?.length, recentScores?.length);
+
+    const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 

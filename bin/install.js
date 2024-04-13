@@ -247,12 +247,6 @@ async function main() {
             initial: sskey.portoffset || 0
         },
         {
-            type: 'text',
-            name: 'wshost',
-            message: 'Websocket Host',
-            initial: (undefined, v) => (nE.NEXT_PUBLIC_WEBSOCKET_HOST ? nE.NEXT_PUBLIC_WEBSOCKET_HOST : v.url)
-        },
-        {
             type: 'select',
             name: 'fairankingimages',
             message: 'Use FAI ranking list images',
@@ -318,8 +312,11 @@ NEXT_PUBLIC_SITEURL=${wsresponse.url}
         .transaction()
         .query('DELETE FROM scoringsource')
         .query(
-            escape`INSERT INTO scoringsource VALUES ( ${Object.keys(sstypemap)[stresponse.type]}, ${ssresponse.ssurl || ''},
-                                   ${ssresponse.ssclient || ''}, ${ssresponse.sssecret || ''}, ${ssresponse.sscontest_name || ''}, 0, ${ssresponse.actuals}, ${wsresponse.portoffset}, ${wsresponse.url} )`
+            escape`
+INSERT INTO scoringsource (type,url,client_id,secret,contest_name,overwrite,actuals,portoffset,domain)
+VALUES ( ${Object.keys(sstypemap)[stresponse.type]}, ${ssresponse.ssurl || ''},
+         ${ssresponse.ssclient || ''}, ${ssresponse.sssecret || ''}, ${ssresponse.sscontest_name || ''},
+0, ${ssresponse.actuals}, ${wsresponse.portoffset}, ${wsresponse.url} )`
         )
         .commit();
 
