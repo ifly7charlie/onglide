@@ -6,7 +6,7 @@ import {TextLayer} from '@deck.gl/layers';
 import {TripsLayer} from '@deck.gl/geo-layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
-import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
+//import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
 
 import {useTaskGeoJSON} from './loaders';
 
@@ -96,7 +96,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             const tripsFiltering = {
                 currentTime: props.t - referenceDate,
                 fadeTrail: !fullPaths && !selected,
-                trailLength: 240 //recentTrackLength
+                trailLength: recentTrackLength
             };
 
             const sortKeyColour = colours[sortKey] ? sortKey : 'auto';
