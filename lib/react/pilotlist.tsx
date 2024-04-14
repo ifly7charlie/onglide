@@ -114,7 +114,7 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
             : solid('circle-arrow-right')
         : solid('question');
 
-    const convertedClimb = convertClimb(vario.average, units);
+    const convertedClimb = convertClimb(vario?.average ?? 0, units);
 
     return (
         <SummaryComponent

@@ -123,7 +123,7 @@ export default function CombinePage(props) {
         longitude: props.lng,
         zoom: 8.5,
         minZoom: 6.5,
-        //        maxZoom: 13.4,
+        maxZoom: 12,
         bearing: 0,
         minPitch: 0,
         maxPitch: 85,
@@ -164,7 +164,7 @@ export default function CombinePage(props) {
                 </title>
                 <meta name="viewport" content="width=device-width, minimal-ui" />
                 <link rel="manifest" href="/manifest.json" />
-                <link href="//api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
+                <link href="//api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
             <div className="resizingContainer">

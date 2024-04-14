@@ -1,3 +1,5 @@
+'use client';
+
 import '@fortawesome/fontawesome-svg-core/styles.css';
 import {config} from '@fortawesome/fontawesome-svg-core';
 config.autoAddCss = false;
@@ -26,6 +28,7 @@ export default function MyApp({Component, pageProps}) {
     const getOptions = () => {
         try {
             const value = window?.localStorage.getItem('options');
+            console.log('load options', JSON.parse(value));
             return value ? {...defaultOptions, ...JSON.parse(value), zoomTask: true} : defaultOptions;
         } catch (e) {
             console.log('unable to load options', e);
@@ -37,6 +40,7 @@ export default function MyApp({Component, pageProps}) {
     const [options, setOptionsState] = useState(getOptions);
     const setOptions = useCallback((newOptions) => {
         try {
+            console.log('set options', newOptions);
             window?.localStorage.setItem('options', JSON.stringify(newOptions));
         } catch (e) {
             /**/

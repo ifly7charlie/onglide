@@ -62,7 +62,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 t: taskStatus.utcStart,
                 lat: task.legs[0].nlat,
                 lng: task.legs[0].nlng,
-                a: previousLeg.points[0]?.a
+                a: previousLeg?.points?.[0]?.a ?? 0
             };
 
             delete previousLeg.minPossible;
@@ -76,10 +76,10 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                     leg.distance = (Math.round(task.legs[legno].length * 10) / 10) as DistanceKM; // already adjusted for start/finish rings
                     taskStatus.distance = (Math.round((taskStatus.distance + leg.distance) * 10) / 10) as DistanceKM;
                     leg.point = {
-                        t: leg.entryTimeStamp || leg.penaltyTimeStamp, //
+                        t: (leg.entryTimeStamp || leg.penaltyTimeStamp) ?? (0 as Epoch), //
                         lat: task.legs[legno].nlat,
                         lng: task.legs[legno].nlng,
-                        a: leg.points[0]?.a || 0
+                        a: leg?.points?.[0]?.a ?? 0
                     };
                     delete leg.minPossible;
                 }

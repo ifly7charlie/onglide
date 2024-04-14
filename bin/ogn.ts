@@ -935,8 +935,6 @@ async function sendScores(channel: any, allScores: Buffer, recentScores: Buffer,
 
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 
-    const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
-
     // If we have nothing then do nothing...
     if (!channel.clients.length) {
         console.log(`${channel.className}: no clients subscribed`);

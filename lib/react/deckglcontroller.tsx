@@ -8,10 +8,10 @@ export class StopFollowController extends MapController {
         //        this.setFollow = options.setFollow;
     }
 
-    handleEvent(event) {
+    handleEvent(event): boolean {
         if (event.type == 'panstart') {
             //            this.setFollow(false);
         }
-        super.handleEvent(event);
+        return super.handleEvent(event);
     }
 }

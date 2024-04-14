@@ -1,3 +1,5 @@
+'use client';
+
 import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 import {TextLayer} from '@deck.gl/layers';
@@ -45,20 +47,26 @@ import {SortKey} from './pilot-sorting';
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
 // Figure out the baseline date
-const oneYearIsh = 1000 * 3600 * 24 * 365;
-const referenceDate = new Date(Date.now() - (Date.now() % oneYearIsh)).getTime() / 1000;
+const oneHalfYearIsh = 3600 * 24 * 180;
+const referenceDate =
+    (process.env.NEXT_PUBLIC_REPLAY //
+        ? parseInt(process.env.NEXT_PUBLIC_REPLAY) - (parseInt(process.env.NEXT_PUBLIC_REPLAY) % oneHalfYearIsh)
+        : new Date(Date.now() - (Date.now() % (oneHalfYearIsh * 1000))).getTime() / 1000) - oneHalfYearIsh;
 
 // Import our layer override so we can distinguish which point on a
 // line has been clicked or hovered
-import {StopFollowController} from './deckglcontroller';
+//import {StopFollowController} from './deckglcontroller';
 // helps with touch scroll on laptops (undocumented)
-const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
+//const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
 
 import {colourise} from './colourise';
 
 const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any) => number[]) | number[]> = {
     auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]),
-    climb: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.max(0, d.v * -12.5 + 128))),
+    climb:
+        (_mapLight: boolean, _selected: boolean) =>
+        (d): number[] =>
+            colourise(Math.min(255, Math.max(0, d.v * -12.5 + 128))),
     height: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.p[1][2] >> 5) * 35)),
     aheight: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.g >> 5) * 35))
 };
@@ -88,11 +96,15 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             const tripsFiltering = {
                 currentTime: props.t - referenceDate,
                 fadeTrail: !fullPaths && !selected,
-                trailLength: recentTrackLength
+                trailLength: 240 //recentTrackLength
             };
 
             const sortKeyColour = colours[sortKey] ? sortKey : 'auto';
             const colour = colours[!props.selectedCompno || selected ? sortKeyColour : 'auto'](mapLight, selected);
+
+            if (compno == 'SD') {
+                //                console.log(compno, props.t, referenceDate, tripsFiltering.currentTime, Math.fround(tripsFiltering.currentTime));
+            }
 
             result.push(
                 new TripsLayer({
@@ -101,9 +113,11 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     data: p.getData,
                     getWidth: selected ? 8 : 5,
                     getPath: (d) => d.p,
-                    getTimestamps: (d) => d.t - referenceDate,
+                    getTimestamps: (d) => {
+                        return [d.t[0] - referenceDate, d.t[1] - referenceDate];
+                    },
                     positionFormat: 'XYZ',
-                    getColor: colour,
+                    getColor: colour as any,
                     jointRounded: true,
                     fp64: false,
                     billboard: map2d ? false : true,
@@ -270,25 +284,27 @@ export default function MApp(props: {
                 ) {
                     if (!map2d) {
                         const map = mapRef?.current?.getMap();
-                        const camera = map.getFreeCameraOptions();
+                        if (map) {
+                            const camera = map.getFreeCameraOptions();
 
-                        // Position the camera 5km behind the aircraft
-                        const cameraPosition: LngLatLike = destination([lng, lat], 5, ((fbearing + 360) % 360) - 180, {units: 'kilometers'}).geometry.coordinates as LngLatLike;
-                        // 200m below
-                        camera.position = MercatorCoordinate.fromLngLat(cameraPosition, (selectedPilotData.track.vario.altitude ?? 20000) - 200);
+                            // Position the camera 5km behind the aircraft
+                            const cameraPosition: LngLatLike = destination([lng, lat], 5, ((fbearing + 360) % 360) - 180, {units: 'kilometers'}).geometry.coordinates as LngLatLike;
+                            // 200m below
+                            camera.position = MercatorCoordinate.fromLngLat(cameraPosition, (selectedPilotData.track?.vario?.altitude ?? 20000) - 200);
 
-                        // Looking at the turnpoint
-                        camera.lookAtPoint([lng, lat]);
+                            // Looking at the turnpoint
+                            camera.lookAtPoint([lng, lat]);
 
-                        // Apply camera changes
-                        map.setFreeCameraOptions(camera);
+                            // Apply camera changes
+                            map.setFreeCameraOptions(camera);
+                        }
                     } else {
-                        mapRef?.current?.easeTo({
-                            center: [lng, lat],
-                            bearing: Math.round(fbearing),
-                            zoom: props.viewport.zoom
-                            //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
-                        });
+                        //                        mapRef?.current?.easeTo({
+                        //                          center: [lng, lat],
+                        //                        bearing: Math.round(fbearing)
+                        //                            zoom: props.viewport.zoom
+                        //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
+                        //                  });
                     }
                 }
             }
@@ -372,7 +388,7 @@ export default function MApp(props: {
     };
 
     const toolTip = useCallback(
-        ({object, picked, layer, coordinate}) => {
+        ({object, picked, layer, coordinate}: {object?: any; picked: boolean; layer: any; coordinate?: number[]}) => {
             if (!picked) {
                 if (process.env.NODE_ENV == 'development' && coordinate) {
                     const map = mapRef?.current; // ?.getMap();
@@ -383,7 +399,7 @@ export default function MApp(props: {
             if (object) {
                 let response = '';
                 const compno = layer.props.compno ?? object.compno;
-                const time = object.t;
+                const time = object.t[1];
 
                 if (time) {
                     if (compno && pilotScores[compno]?.stats) {
@@ -469,6 +485,13 @@ export default function MApp(props: {
         } catch (e) {}
     }, [mapStreet]);
 
+    // Cancel any follow
+    const onDragStart = useCallback(() => {
+        if (follow) {
+            setFollow(false);
+        }
+    }, [setFollow, follow]);
+
     return (
         <Map //
             initialViewState={{...props.viewport, ...viewOptions}}
@@ -483,6 +506,7 @@ export default function MApp(props: {
                 getTooltip={toolTip}
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
+                onDragStart={onDragStart}
                 layers={layers} //
                 interleaved={true}
             />

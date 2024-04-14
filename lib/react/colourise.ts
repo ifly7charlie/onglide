@@ -1,7 +1,7 @@
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep, zip as _zip} from 'lodash';
 
 const steps = 11;
-export function colourise(v) {
+export function colourise(v: number) {
     return colourMaps[Math.trunc(((v / 255) * steps) % steps)];
 }
 

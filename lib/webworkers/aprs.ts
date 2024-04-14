@@ -360,8 +360,8 @@ function processPacket(packet: aprsPacket) {
     const withElevation = async (gl: number) => {
         let message: PositionMessage = {
             c: aircraft ? (aircraft.compno as Compno) : (flarmId as FlarmID),
-            lat: Math.round(packet.latitude * 1000000) / 1000000,
-            lng: Math.round(packet.longitude * 1000000) / 1000000,
+            lat: Math.round(packet!.latitude * 1000000) / 1000000,
+            lng: Math.round(packet!.longitude * 1000000) / 1000000,
             a: altitude,
             g: Math.round(Math.max(altitude - gl, 0)),
             t: packet.timestamp as Epoch,

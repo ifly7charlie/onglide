@@ -70,7 +70,8 @@ function proposedUrl(vc: ClassName, datecode: Datecode) {
 }
 
 function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string) {
-    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || window.location.host;
+    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
+    console.log('oldTracksUrl', hn);
     return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) ? 'https://' : 'http://') + hn + '/tracks/' + (vc + datecode + '.' + baseTime).toUpperCase() + '.bin';
 }
 
@@ -560,7 +561,7 @@ async function* getData(compno: Compno, deck: DeckData) {
             if (deck.t[current] - deck.t[previous] < gapLength) {
                 newData.push({
                     p: [[...deck.positions.subarray(previous * 3, previous * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
-                    t: deck.t[current],
+                    t: [deck.t[previous], deck.t[current]],
                     v: deck.climbRate[current],
                     g: deck.agl[current]
                 });
@@ -569,7 +570,7 @@ async function* getData(compno: Compno, deck: DeckData) {
             else {
                 newData.push({
                     p: [[...deck.positions.subarray(current * 3, current * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
-                    t: deck.t[current],
+                    t: [deck.t[current], deck.t[current]],
                     v: deck.climbRate[current],
                     g: deck.agl[current]
                 });
