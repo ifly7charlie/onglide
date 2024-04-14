@@ -321,7 +321,7 @@ export default function MApp(props: {
     );
 
     useEffect(() => {
-        if (!isMoving && Math.trunc(props.viewport.pitch) == 0 && !map2d) {
+        if (!isMoving && !map2d && mapRef?.current?.getMap()?.getMaxPitch() != 80) {
             mapRef?.current?.getMap().setMaxPitch(80);
             mapRef?.current?.easeTo({
                 pitch: 75
@@ -483,12 +483,13 @@ export default function MApp(props: {
 
     // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
     // much quicker than changing the style.
-    useEffect(() => {
+    const fixupMap = useCallback(() => {
         try {
             mapRef?.current?.getMap()?.setLayoutProperty('satellite', 'visibility', !mapStreet ? 'none' : 'visible');
             mapRef?.current?.getMap()?.setLayoutProperty('background', 'visibility', !mapStreet ? 'none' : 'visible');
         } catch (e) {}
-    }, [mapStreet, mapRef?.current]);
+    }, [mapStreet]);
+    useEffect(fixupMap, [mapStreet, mapRef?.current]);
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
@@ -500,20 +501,22 @@ export default function MApp(props: {
     return (
         <Map //
             initialViewState={{...props.viewport, ...viewOptions}}
+            id={'map' + (map2d ? '2d' : '3d')}
             onMove={onViewStateChange}
+            onLoad={fixupMap}
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
-            ref={mapRef}
-            reuseMaps={true}
+            reuseMaps={false}
             attributionControl={false}
         >
             <DeckGLOverlay
+                id={'new' + (map2d ? '2d' : '3d')}
                 getTooltip={toolTip}
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
                 layers={layers} //
-                interleaved={true}
+                interleaved={!map2d}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (
                 <Source type="geojson" data={taskGeoJSON.Dm} key="y">
