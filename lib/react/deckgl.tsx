@@ -102,10 +102,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             const sortKeyColour = colours[sortKey] ? sortKey : 'auto';
             const colour = colours[!props.selectedCompno || selected ? sortKeyColour : 'auto'](mapLight, selected);
 
-            if (compno == 'SD') {
-                //                console.log(compno, props.t, referenceDate, tripsFiltering.currentTime, Math.fround(tripsFiltering.currentTime));
-            }
-
             result.push(
                 new TripsLayer({
                     id: compno + p.trackVersion,
@@ -236,10 +232,10 @@ export default function MApp(props: {
     // Get coordinates on the screen for center point of view
     const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
 
-    const npol = !selectedPilotData?.score
+    const npol = !taskGeoJSON?.track?.features?.[0]
         ? null
-        : !selectedPilotData.score.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) //
-        ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[1]
+        : !selectedPilotData?.score?.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) //
+        ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[0]
         : selectedPilotData.score.utcFinish
         ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
         : selectedPilotData.score.minDistancePoints.slice(4, 6);
@@ -253,19 +249,18 @@ export default function MApp(props: {
                 !map?.isMoving() &&
                 props.options.follow &&
                 follow &&
-                selectedPilotData &&
-                selectedPilotData.track?.vario?.lat && //
-                selectedPilotData.score?.currentLeg !== undefined &&
+                selectedPilotData?.track?.vario?.lat && //
+                //                selectedPilotData.score?.currentLeg !== undefined &&
                 taskGeoJSON?.track?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
-                const lat = Math.round(selectedPilotData.track.vario.lat * 1000) / 1000;
-                const lng = Math.round(selectedPilotData.track.vario.lng * 1000) / 1000;
+                const lat = Math.round(selectedPilotData.track.vario.lat * 100000) / 100000;
+                const lng = Math.round(selectedPilotData.track.vario.lng * 100000) / 100000;
 
                 // Next point - if we haven't started or we have finished use the startline
 
                 // If we are user selected or we don't have a valid next point don't change anything
-                const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol) : 0;
+                const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
 
                 const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
 
@@ -282,41 +277,52 @@ export default function MApp(props: {
                     pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
                     Math.round(fbearing) >> 2 != Math.round(props.viewport.bearing) >> 2
                 ) {
+                    mapRef?.current?.flyTo({
+                        center: [lng, lat],
+                        bearing: Math.round(fbearing)
+                        //                        ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
+                    });
+                    /*
                     if (!map2d) {
                         const map = mapRef?.current?.getMap();
                         if (map) {
                             const camera = map.getFreeCameraOptions();
 
                             // Position the camera 5km behind the aircraft
-                            const cameraPosition: LngLatLike = destination([lng, lat], 5, ((fbearing + 360) % 360) - 180, {units: 'kilometers'}).geometry.coordinates as LngLatLike;
+                            const cameraPosition: LngLatLike = destination([lng, lat], 2, bearing(npol, [lng, lat]), {units: 'kilometers'}).geometry.coordinates as LngLatLike;
+                            //                            console.log('destination', destination([lng, lat], 5, ((fbearing + 360) % 360) - 180, {units: 'kilometers'}).geometry.coordinates);
+
                             // 200m below
-                            camera.position = MercatorCoordinate.fromLngLat(cameraPosition, (selectedPilotData.track?.vario?.altitude ?? 20000) - 200);
+                            camera.position = MercatorCoordinate.fromLngLat(cameraPosition, 1000); //(selectedPilotData.track?.vario?.altitude ?? 200) + 2);
 
                             // Looking at the turnpoint
-                            camera.lookAtPoint([lng, lat]);
+                            camera.lookAtPoint(npol); //{lng, lat});
+                            //                            camera.setPitchBearing(60, fbearing);
+
+                            console.log(fbearing, npol, [lng, lat]);
 
                             // Apply camera changes
                             map.setFreeCameraOptions(camera);
                         }
                     } else {
-                        //                        mapRef?.current?.easeTo({
-                        //                          center: [lng, lat],
-                        //                        bearing: Math.round(fbearing)
-                        //                            zoom: props.viewport.zoom
-                        //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
-                        //                  });
-                    }
+                        mapRef?.current?.easeTo({
+                            center: [lng, lat],
+                            bearing: Math.round(fbearing)
+                            //                            zoom: props.viewport.zoom
+                            //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
+                        });
+                    } */
                 }
             }
         },
         follow && props.options.follow //
-            ? [selectedCompno, selectedPilotData?.track?.vario?.lat, npol, props.options, isMoving]
+            ? [selectedCompno, props.t >> 2, npol, props.options, isMoving]
             : [null, null, null, null, null]
     );
 
     useEffect(() => {
-        if (Math.trunc(props.viewport.pitch) == 0 && !map2d) {
-            mapRef?.current?.getMap().setMaxPitch(85);
+        if (!isMoving && Math.trunc(props.viewport.pitch) == 0 && !map2d) {
+            mapRef?.current?.getMap().setMaxPitch(80);
             mapRef?.current?.easeTo({
                 pitch: 75
             });
@@ -327,8 +333,7 @@ export default function MApp(props: {
                 })
                 .once('moveend', () => mapRef?.current?.getMap().setMaxPitch(0));
         }
-        //        console.log( mapRef?.current?.getMap().
-    }, [map2d]);
+    }, [map2d, mapRef.current, props.viewport.pitch, isMoving]);
 
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
@@ -466,7 +471,7 @@ export default function MApp(props: {
     );
 
     // Initial options depending on if we are on 2d or 3d
-    const viewOptions = map2d ? {minPitch: 0, maxPitch: 0, pitch: 0} : {minPitch: 0, maxPitch: 85, pitch: 70};
+    const viewOptions = map2d ? {minPitch: 0, maxPitch: 0, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
 
     // We keep our saved viewstate up to date in case of re-render
     const onViewStateChange = useCallback(({viewState}) => {
@@ -483,7 +488,7 @@ export default function MApp(props: {
             mapRef?.current?.getMap()?.setLayoutProperty('satellite', 'visibility', !mapStreet ? 'none' : 'visible');
             mapRef?.current?.getMap()?.setLayoutProperty('background', 'visibility', !mapStreet ? 'none' : 'visible');
         } catch (e) {}
-    }, [mapStreet]);
+    }, [mapStreet, mapRef?.current]);
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
