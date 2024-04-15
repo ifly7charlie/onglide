@@ -31,8 +31,8 @@ export function deckTooltip({
     }
     if (object) {
         let response = '';
-        const compno = layer.props.compno ?? object.compno;
-        const time = object.t[1];
+        const compno = layer?.props?.compno ?? object.compno;
+        const time = Array.isArray(object.t) ? object.t[1] : object.t;
 
         if (time) {
             if (compno && pilotScores[compno]?.stats?.segments) {
