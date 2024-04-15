@@ -8,6 +8,8 @@ import {TripsLayer} from '@deck.gl/geo-layers';
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
 //import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
 
+import {deckTooltip} from './decktooltip';
+
 import {useTaskGeoJSON} from './loaders';
 
 import {offlineTime, recentTrackLength} from '../constants';
@@ -253,7 +255,6 @@ export default function MApp(props: {
                 props.options.follow &&
                 follow &&
                 selectedPilotData?.track?.vario?.lat && //
-                //                selectedPilotData.score?.currentLeg !== undefined &&
                 taskGeoJSON?.track?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
@@ -295,6 +296,7 @@ export default function MApp(props: {
     // ====== PITCH RESTRICTION FOR 2D/3D =======
     useEffect(() => {
         const map = mapRef?.current;
+        console.log('pitch check', isMoving, !!map);
         if (!isMoving && map) {
             // If we are 3d and not locked pitch then correct
             if (!map2d && map.getMap().getMaxPitch() != 80) {
@@ -371,71 +373,12 @@ export default function MApp(props: {
         }
     };
 
+    //
+    // Link up to a tooltip
     const toolTip = useCallback(
-        ({object, picked, layer, coordinate}: {object?: any; picked: boolean; layer: any; coordinate?: number[]}) => {
-            if (!picked) {
-                if (process.env.NODE_ENV == 'development' && coordinate) {
-                    const map = mapRef?.current; // ?.getMap();
-                    return `[${coordinate.map((x) => x.toFixed(4))}, ${map?.queryTerrainElevation({lat: coordinate[1], lng: coordinate[0]}, {exaggerated: false})?.toFixed(0)}]`;
-                }
-                return null;
-            }
-            if (object) {
-                let response = '';
-                const compno = layer.props.compno ?? object.compno;
-                const time = object.t[1];
-
-                if (time) {
-                    if (compno && pilotScores[compno]?.stats) {
-                        const segment = _find(props.pilots[compno].stats, (c) => c.start <= time && time <= c.end);
-                        if (segment) {
-                            object.stats = segment;
-                        }
-                    }
-
-                    // Figure out what the local language is for international date strings
-                    const dt = new Date(time * 1000);
-                    response += `${compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: props.tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
-                }
-
-                if (process.env.NODE_ENV == 'development') {
-                    response += `[${time}]<br/>`;
-                }
-                const a = object.a ?? object.p[1][2] ?? NaN;
-                if (!isNaN(a)) {
-                    response += `${displayHeight(a, props.options.units)} QNH `;
-                }
-                if (object.g && !isNaN(object.g)) {
-                    response += `(${displayHeight(object.g, props.options.units)} AGL) `;
-                }
-                if (object.v) {
-                    response += ` ↕️  ${displayClimb(object.v, props.options.units)}`;
-                }
-                if (object.stats) {
-                    const stats = object.stats;
-                    const elapsed = stats.end - stats.start;
-
-                    if (elapsed > 30) {
-                        response += `<br/> ${stats.state} for ${elapsed} seconds<br/>`;
-
-                        if (stats.state == 'thermal') {
-                            response += `average: ${displayClimb(stats.avgDelta, props.options.units)}`;
-                        } else if (stats.state == 'straight') {
-                            response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
-                        }
-                        if (stats.wind.direction) {
-                            response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
-                        }
-                    }
-                }
-                return {html: response};
-            } else if (layer && layer.props.tt == true) {
-                return layer.id;
-            } else {
-                return null;
-            }
-        },
-        [vc, props.options.units, mapRef, mapRef?.current]
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units}),
+        //
+        [vc, props.options.units, props.tz, mapRef?.current]
     );
 
     const attribution = useMemo(
