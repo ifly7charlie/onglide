@@ -240,12 +240,15 @@ export default function MApp(props: {
         ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
         : selectedPilotData.score.minDistancePoints.slice(4, 6);
 
+    // =========== FOLLOW EFFECT ===============
+    //
     // We will calculate the nearest point every 60 seconds or when the TP changes or selected pilot changes
     useEffect(
         () => {
             const map = mapRef?.current?.getMap();
 
             if (
+                map &&
                 !map?.isMoving() &&
                 props.options.follow &&
                 follow &&
@@ -280,38 +283,7 @@ export default function MApp(props: {
                     mapRef?.current?.flyTo({
                         center: [lng, lat],
                         bearing: Math.round(fbearing)
-                        //                        ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
                     });
-                    /*
-                    if (!map2d) {
-                        const map = mapRef?.current?.getMap();
-                        if (map) {
-                            const camera = map.getFreeCameraOptions();
-
-                            // Position the camera 5km behind the aircraft
-                            const cameraPosition: LngLatLike = destination([lng, lat], 2, bearing(npol, [lng, lat]), {units: 'kilometers'}).geometry.coordinates as LngLatLike;
-                            //                            console.log('destination', destination([lng, lat], 5, ((fbearing + 360) % 360) - 180, {units: 'kilometers'}).geometry.coordinates);
-
-                            // 200m below
-                            camera.position = MercatorCoordinate.fromLngLat(cameraPosition, 1000); //(selectedPilotData.track?.vario?.altitude ?? 200) + 2);
-
-                            // Looking at the turnpoint
-                            camera.lookAtPoint(npol); //{lng, lat});
-                            //                            camera.setPitchBearing(60, fbearing);
-
-                            console.log(fbearing, npol, [lng, lat]);
-
-                            // Apply camera changes
-                            map.setFreeCameraOptions(camera);
-                        }
-                    } else {
-                        mapRef?.current?.easeTo({
-                            center: [lng, lat],
-                            bearing: Math.round(fbearing)
-                            //                            zoom: props.viewport.zoom
-                            //                    ...(map2d ? {zoom: 10} : {zoom: 12, pitch: 80})
-                        });
-                    } */
                 }
             }
         },
@@ -320,21 +292,27 @@ export default function MApp(props: {
             : [null, null, null, null, null]
     );
 
+    // ====== PITCH RESTRICTION FOR 2D/3D =======
     useEffect(() => {
-        if (!isMoving && !map2d && mapRef?.current?.getMap()?.getMaxPitch() != 80) {
-            mapRef?.current?.getMap().setMaxPitch(80);
-            mapRef?.current?.easeTo({
-                pitch: 75
-            });
-        } else if (map2d) {
-            mapRef?.current
-                ?.easeTo({
+        const map = mapRef?.current;
+        if (!isMoving && map) {
+            // If we are 3d and not locked pitch then correct
+            if (!map2d && map.getMap().getMaxPitch() != 80) {
+                map.getMap().setMaxPitch(80);
+                map.easeTo({
+                    pitch: 75
+                });
+            }
+            // Likewise for 2d
+            if (map2d && map.getMap()?.getMaxPitch() != 0) {
+                map.easeTo({
                     pitch: 0
-                })
-                .once('moveend', () => mapRef?.current?.getMap().setMaxPitch(0));
+                }).once('moveend', () => map.getMap().setMaxPitch(0));
+            }
         }
     }, [map2d, mapRef.current, props.viewport.pitch, isMoving]);
 
+    // ======= ZOOM TO TASK EFFECT =========
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
         if (options.zoomTask && taskGeoJSONtp && viewport) {
@@ -359,6 +337,7 @@ export default function MApp(props: {
         }
     }, [options.zoomTask, taskGeoJSONtp, viewport]);
 
+    // ====== LOCK NORTH UP ===========
     // If we are north up then reset north on bearing change
     // NOOP for others
     useEffect(() => {
@@ -507,6 +486,7 @@ export default function MApp(props: {
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
             reuseMaps={false}
+            ref={mapRef}
             attributionControl={false}
         >
             <DeckGLOverlay
