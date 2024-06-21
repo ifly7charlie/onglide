@@ -1,12 +1,11 @@
 FROM node:18-slim as ognbase
 RUN apt-get update 
 RUN apt-get install -y gnupg wget lsb-release
-RUN wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.28-1_all.deb
+RUN wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.30-1_all.deb
 ENV DEBIAN_FRONTEND=noninteractive
-RUN dpkg -i mysql-apt-config_0.8.28-1_all.deb
+RUN dpkg -i mysql-apt-config_0.8.30-1_all.deb
 RUN apt-get update
 RUN apt-get install -y mysql-community-client
-RUN apt-get clean all
 WORKDIR /onglide
 COPY ./package.json ./
 COPY ./yarn.lock ./
@@ -16,6 +15,8 @@ RUN yarn install --frozen-lockfile
 
 FROM buildbase AS nextbuildimage
 WORKDIR /onglide
+ARG NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
+ARG NEXT_PUBLIC_SITEURL
 COPY ./next.config.js ./next.config.js
 COPY ./tsconfig.json ./tsconfig.json
 COPY ./.babelrc ./.babelrc

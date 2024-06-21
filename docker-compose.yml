@@ -19,6 +19,11 @@ services:
             target: next
             args:
                 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
+                NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
+                MYSQL_PASSWORD: $MYSQL_PASSWORD
+                MYSQL_HOST: mysql
+                MYSQL_USER: root
+                MYSQL_DATABASE: ogn
         command: yarn next start
         platform: 'linux/amd64'
         depends_on:
@@ -81,8 +86,8 @@ services:
             - next
             - ogn
         ports:
-            - 8080:80
-            - 8443:443
+            - 8080:8080
+            - 8443:8443
         environment:
             NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL?URL for the site is not set}
             SERVER_ADMIN: $SERVER_ADMIN
