@@ -1032,7 +1032,7 @@ async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<voi
                                               ORDER BY t ASC`)) ?? [];
 
     // Make sure the flarm ID is valid for this data so we can exclude dodgy trackers more easily
-    const points = rawpoints.filter((row) => glider.flarmIdRegex.test(row.x));
+    const points = !glider.flarmIdRegex ? rawpoints : rawpoints.filter((row) => glider.flarmIdRegex.test(row.x));
 
     initialiseDeck(glider.compno as Compno, glider, randomBytes(4).readUInt32BE(0));
 
