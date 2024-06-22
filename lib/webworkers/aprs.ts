@@ -15,6 +15,8 @@
 import {ISSocket} from 'js-aprs-is';
 import {aprsParser, aprsPacket} from 'js-aprs-fap';
 
+import {version} from '../../package.json';
+
 // Correction factors
 import {altitudeOffsetAdjust} from '../offsets.js';
 import {getElevationOffset} from '../getelevationoffset';
@@ -224,7 +226,7 @@ function startAprsListener(config: AprsListenerConfig) {
     getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
 
     // Connect to the APRS server
-    connection = new ISSocket('OG', APRSSERVER, PORTNUMBER, 'OG', PASSCODE, false, FILTER);
+    connection = new ISSocket(`onglide ${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
     let parser = new aprsParser();
 
     // Handle a connect
