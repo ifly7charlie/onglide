@@ -122,20 +122,8 @@ export const OgnFeed = memo(
             reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
             retryOnError: true,
             onOpen: (a) => setWsStatus({...wsStatus, state: 'open', retry: 0}),
-            onError: (a) => {
-                console.warn(a, wsStatus);
-                wsStatus.state != 'closed' ? setWsStatus({...wsStatus, state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
-            },
-            onReconnectStop: (numAttempts) => setWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
-        });
-
-        // Do we have a loaded set of details?
-        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
-
-        // Have we had a websocket message, if it hasn't changed then ignore it!
-        if (lastMessage) {
-            if (wsStatus.timeStamp != lastMessage.timeStamp) {
-                wsStatus.timeStamp = lastMessage.timeStamp;
+            filter: (message) => false,
+            onMessage: (lastMessage) => {
                 if (lastMessage.data === 'reload') {
                     // Force a page reload
                     const currentReloadCount = parseInt((router.query?.reloaded as string) ?? '0');
@@ -147,8 +135,17 @@ export const OgnFeed = memo(
                 } else {
                     decodeWebsocketMessage(vc, datecode, lastMessage.data, trackData, setTrackData, pilotScores, setPilotScores, wsStatus, setWsStatus);
                 }
-            }
-        }
+            },
+
+            onError: (a) => {
+                console.warn(a, wsStatus);
+                wsStatus.state != 'closed' ? setWsStatus({...wsStatus, state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
+            },
+            onReconnectStop: (numAttempts) => setWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
+        });
+
+        // Do we have a loaded set of details?
+        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
