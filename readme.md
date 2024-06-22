@@ -57,10 +57,14 @@ This will launch the following:
 Your website will be available on port 80, and if it is actually reachable at that URL
 then an LetsEncrypt SSL certificate should be issued and it will also be available on port 443
 
-You can also link to robocontrol (soaringspot only) to fetch the official flarm ids
+You can also link to robocontrol (soaringspot only) to fetch the official flarm ids. The url is the host name you use to login to robocontrol
+plus `/api/flarm`
+
+eg:
+`https://dunstable.robocontrol.com/api/flarm`
 
 ```
-ROBOCONTROL_URL=
+ROBOCONTROL_URL=https://dunstable.robocontrol.com/api/flarm
 ```
 
 ### RST
