@@ -359,7 +359,6 @@ export default function MApp(props: {
 
     const skyLayer: any = {
         id: 'sky',
-        key: 'sky',
         type: 'sky',
         paint: {
             'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1],
@@ -393,7 +392,7 @@ export default function MApp(props: {
     );
 
     // Initial options depending on if we are on 2d or 3d
-    const viewOptions = map2d ? {minPitch: 0, maxPitch: 0, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
+    const viewOptions = map2d ? {minPitch: 0, maxPitch: 80, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
 
     // We keep our saved viewstate up to date in case of re-render
     const onViewStateChange = useCallback(({viewState}) => {
@@ -423,17 +422,15 @@ export default function MApp(props: {
     return (
         <Map //
             initialViewState={{...props.viewport, ...viewOptions}}
-            id={'map' + (map2d ? '2d' : '3d')}
             onMove={onViewStateChange}
             onLoad={fixupMap}
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
-            reuseMaps={false}
+            reuseMaps={true}
             ref={mapRef}
             attributionControl={false}
         >
             <DeckGLOverlay
-                id={'new' + (map2d ? '2d' : '3d')}
                 getTooltip={toolTip}
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
@@ -477,7 +474,7 @@ export default function MApp(props: {
             ) : null}
             <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
             <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
-            {!map2d && <Layer {...skyLayer} />}
+            {!map2d && <Layer key="skylayer" {...skyLayer} />}
             {attribution}
             {radarOverlay.layer}
             <ScaleControl position="bottom-left" />
