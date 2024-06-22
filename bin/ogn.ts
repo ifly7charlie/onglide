@@ -60,7 +60,7 @@ import {createHash, randomBytes, createHmac} from 'crypto';
 
 // Communication with the workers
 import {BroadcastChannel, Worker} from 'node:worker_threads';
-let unknownChannel: BroadcastChannel;
+let unknownChannel: BroadcastChannel | undefined;
 let aprsListener: Worker;
 
 // Data sources
@@ -347,12 +347,14 @@ async function main() {
         for (const channelName in channels) {
             const channel = channels[channelName];
 
-            if (channel.toSend.length) {
-                channel.mostRecentPosition = now;
-            }
-
             channel.statistics.activeListeners += channel.clients.length;
             channel.statistics.listenerCycles++;
+
+            if (!channel.toSend.length) {
+                continue;
+            }
+
+            channel.mostRecentPosition = now;
 
             if (channel.clients.length) {
                 // Send if we have an update or if it's been 30 seconds since we last sent one
@@ -413,6 +415,8 @@ async function main() {
                 channel.statistics.totalViewingTime += now - client.connectedAt;
                 client.terminate();
             });
+
+            await sendKeepalive(channel);
         }
 
         //
@@ -517,7 +521,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
             // Hook it up to the position messages so we can update our
             // displayed track we wrap the function with the class and
             // channel to simplify things
-            channel.broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => processAprsMessage(c.class, channel, ev.data);
+            channel.broadcastChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => processAprsMessage(c.class, channel, ev.data)) as any;
         }
 
         // Prep for scoring
@@ -535,10 +539,10 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     if (Object.keys(channels).length) {
         console.log('closing channels: ', Object.keys(channels).join(','));
         Object.values(channels).forEach((channel) => {
-            channel.broadcastChannel.close();
+            channel.broadcastChannel?.close();
             channel.scoring?.shutdown();
         });
-        unknownChannel.close();
+        unknownChannel?.close();
         unknownChannel = undefined;
     }
 
@@ -546,7 +550,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     // Any unknown gliders get sent to this for identification
     if (!unknownChannel) {
         unknownChannel = new BroadcastChannel('Unknown_' + internalName);
-        unknownChannel.onmessage = (ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(ev.data, datecode);
+        unknownChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(ev.data, datecode)) as any;
     }
 
     // replace (do we need to close the old ones?)
@@ -586,11 +590,6 @@ async function updateTasks(): Promise<void> {
             console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
             return null;
         }
-
-        // These are invalid
-        delete taskdetails.hdistance;
-        delete taskdetails.distance;
-        delete taskdetails.maxmarkingdistance;
 
         let task = {
             rules: {
@@ -792,8 +791,12 @@ async function sendCurrentState(client: WebSocket) {
         return;
     }
 
+    // If there has already been a keepalive then we will resend it to the client
+    const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
+
     // Make sure we send the pilots ASAP
     if (channels[client.ognChannel]?.allScores) {
+        console.log('sending allScores', channels[client.ognChannel].allScores.length);
         client.send(channels[client.ognChannel].allScores, {binary: true});
     } else {
         console.log('no current scores', client.ognChannel);
@@ -802,9 +805,8 @@ async function sendCurrentState(client: WebSocket) {
     // Send them the GeoJSONs, they need to keep this up to date
     sendRecentPilotTracks(channels[client.ognChannel], client);
 
-    // If there has already been a keepalive then we will resend it to the client
-    const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
     if (lastKeepAliveMsg) {
+        console.log('keepalive2');
         client.send(lastKeepAliveMsg, {binary: true});
     }
 }
@@ -928,10 +930,43 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
 // We need to fetch and repeat the scores for each class, enriched with vario information
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
-async function sendScores(channel: any, allScores: Buffer, recentScores: Buffer, recentStarts: Record<Compno, Epoch>) {
-    const now = getNow();
+async function sendScores(channel: Channel, allScores: Buffer, recentScores: Buffer, recentStarts: Record<Compno, Epoch>) {
+    console.log('Sending score update', allScores?.length, recentScores?.length);
 
-    console.log('Sending Scores', allScores?.length, recentScores?.length);
+    // We don't know how many scores we have without decoding the protobuf message :(
+    trackMetric(channel.className + '.scoring.bytesSent', recentScores.byteLength * channel.clients.length);
+
+    // Protobuf encode the scores message
+    channel.recentScores = recentScores;
+    channel.allScores = allScores;
+
+    // Send to each client and if they don't respond they will be cleaned up next time around
+    channel.clients.forEach((client: any) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(recentScores, {binary: true});
+        }
+    });
+
+    // Prune startline
+    for (const compno in recentStarts) {
+        const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
+        if (glider) {
+            const deck = glider.deck;
+            if (deck) {
+                console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}/${timeToText(recentStarts[compno])}`);
+                pruneStartline(deck, recentStarts[compno]);
+            }
+
+            // Reset the glider starting point, but also the channel so we don't use invalid
+            // mix of the two
+            glider.webPathEndPosition = 0;
+            channel.webPathBaseTime = 0 as Epoch;
+        }
+    }
+}
+
+async function sendKeepalive(channel: Channel) {
+    const now = getNow();
 
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 
@@ -952,13 +987,6 @@ async function sendScores(channel: any, allScores: Buffer, recentScores: Buffer,
         }
     }).finish();
 
-    // We don't know how many scores we have without decoding the protobuf message :(
-    trackMetric(channel.className + '.scoring.bytesSent', recentScores.byteLength * channel.clients.length);
-
-    // Protobuf encode the scores message
-    channel.recentScores = recentScores;
-    channel.allScores = allScores;
-
     // Reset for next iteration
     channel.activeGliders.clear();
 
@@ -966,28 +994,10 @@ async function sendScores(channel: any, allScores: Buffer, recentScores: Buffer,
     channel.clients.forEach((client: any) => {
         if (client.readyState === WebSocket.OPEN) {
             client.send(channel.lastKeepAliveMsg, {binary: true});
-            client.send(recentScores, {binary: true});
         }
         client.isAlive = false;
         client.ping(function () {});
     });
-
-    // Prune startline
-    for (const compno in recentStarts) {
-        const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
-        if (glider) {
-            const deck = glider.deck;
-            if (deck) {
-                console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}/${timeToText(recentStarts[compno])}`);
-                pruneStartline(deck, recentStarts[compno]);
-            }
-
-            // Reset the glider starting point, but also the channel so we don't use invalid
-            // mix of the two
-            glider.webPathEndPosition = 0;
-            channel.webPathBaseTime = 0;
-        }
-    }
 }
 
 async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {

@@ -307,9 +307,7 @@ export interface TasksTableRow {
     flown: string;
     description: string;
     type: 'S' | 'A' | 'D' | 'E' | 'G';
-    distance: DistanceKM;
-    //    hdistance: number,
-    //    maxmarkingdistance: number,
+    //    distance: DistanceKM;
     duration: Duration;
     nostart: StartTime;
     hash: string;
