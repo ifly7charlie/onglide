@@ -7,7 +7,7 @@
 
 import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator} from '../types';
 
-import {Point, Feature, point as turfPoint} from '@turf/helpers';
+import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
 
 import {cloneDeep as _clonedeep} from 'lodash';

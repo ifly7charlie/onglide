@@ -1,4 +1,5 @@
-import {point, lineString, featureCollection, Feature, Geometry, FeatureCollection} from '@turf/helpers';
+import {point, lineString, featureCollection} from '@turf/helpers';
+import type {Feature} from 'geojson';
 import length from '@turf/length';
 
 import {cloneDeep as _cloneDeep} from 'lodash';

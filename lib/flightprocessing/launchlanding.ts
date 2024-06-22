@@ -1,7 +1,8 @@
 // Helper functions for geometry
 import length from '@turf/length';
 import distance from '@turf/distance';
-import {point, lineString, Position} from '@turf/helpers';
+import {point, lineString} from '@turf/helpers';
+import type {Position} from 'geojson';
 
 // Database
 import escape from 'sql-template-strings';

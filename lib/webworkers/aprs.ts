@@ -224,7 +224,7 @@ function startAprsListener(config: AprsListenerConfig) {
     getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
 
     // Connect to the APRS server
-    connection = new ISSocket(APRSSERVER, PORTNUMBER, 'OG', PASSCODE, FILTER);
+    connection = new ISSocket('OG', APRSSERVER, PORTNUMBER, 'OG', PASSCODE, false, FILTER);
     let parser = new aprsParser();
 
     // Handle a connect
@@ -238,7 +238,7 @@ function startAprsListener(config: AprsListenerConfig) {
         connection.valid = true;
         if (data.charAt(0) != '#' && !data.startsWith('user')) {
             const packet = parser.parseaprs(data);
-            if ('latitude' in packet && 'longitude' in packet && 'comment' in packet && packet.comment?.startsWith('id')) {
+            if (packet && 'latitude' in packet && 'longitude' in packet && 'comment' in packet && packet.comment?.startsWith('id')) {
                 processPacket(packet);
             }
         } else {

@@ -45,7 +45,7 @@ export interface TimeStampType {
     t: Epoch;
 }
 
-import {Point, Feature} from '@turf/helpers';
+import type {Point, Feature} from 'geojson';
 
 // Where is the airfield
 export interface AirfieldLocation {

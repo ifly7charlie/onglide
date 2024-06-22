@@ -1,6 +1,7 @@
 import {LayerProps} from 'react-map-gl';
 
-import {lineString, LineString, featureCollection, Feature} from '@turf/helpers';
+import type {LineString, Feature} from 'geojson';
+import {lineString, featureCollection} from '@turf/helpers';
 
 import {chunk as _chunk} from 'lodash';
 

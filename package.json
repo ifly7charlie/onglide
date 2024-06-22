@@ -44,7 +44,7 @@
         "country-iso-3-to-2": "^1.1.0",
         "deck.gl": "^9.0",
         "dotenv": ">=8.2.0",
-        "eslint-config-next": "14",
+        "eslint-config-next": "^13",
         "js-aprs-fap": ">=1.0.0",
         "js-aprs-is": ">=1.0.1",
         "kalmanjs": "^1.1.0",
@@ -75,7 +75,7 @@
         "lru-cache": ">=10.0.0",
         "mapbox-gl": "^3.3.0",
         "ndarray": ">=1.0.19",
-        "next": "^14",
+        "next": "^13",
         "node-cache": "^5.1.2",
         "node-fetch": "^3.2.10",
         "pm2": "^5.3.0",
@@ -96,6 +96,7 @@
         "ws": ">=7.3"
     },
     "devDependencies": {
+        "@types/geojson": "^7946.0.14",
         "@types/lodash": "^4.14.182",
         "@types/lodash.keyby": "^4.6.7",
         "@types/lodash.reduce": "^4.6.7",

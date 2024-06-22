@@ -6,7 +6,8 @@ import nearestPointOnLine from '@turf/nearest-point-on-line';
 import along from '@turf/along';
 import distance from '@turf/distance';
 
-import {featureCollection, lineString, point as turfPoint, Feature, LineString, Position} from '@turf/helpers';
+//import type {Feature, LineString, Position} from 'geojson';
+import {lineString, point as turfPoint} from '@turf/helpers';
 import lineChunk from '@turf/line-chunk';
 import {coordReduce} from '@turf/meta';
 import {uniqWith as _uniqWith} from 'lodash';

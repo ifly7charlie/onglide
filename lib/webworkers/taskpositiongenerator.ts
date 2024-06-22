@@ -7,7 +7,7 @@
 
 import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, AltitudeAMSL} from '../types';
 
-import {Point, Feature, lineString, point as turfPoint} from '@turf/helpers';
+import {lineString} from '@turf/helpers';
 import length from '@turf/length';
 import distance from '@turf/distance';
 import lineIntersect from '@turf/line-intersect';
