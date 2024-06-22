@@ -231,7 +231,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // Handle a connect
     connection.on('connect', () => {
-        connection.sendLine(connection.userLogin);
+        connection.sendLogin()
         connection.sendLine(`# onglide ${config.competition}`);
     });
 
