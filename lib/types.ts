@@ -249,7 +249,7 @@ export interface DeckData {
     indices?: Uint32Array;
     agl: Int16Array;
     t: Uint32Array;
-    tr: Uint32Array;
+    tr?: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
     segmentIndex?: number;
@@ -347,4 +347,19 @@ export interface ClassesTableRow {
     handicapped: 'Y' | 'N';
     grandprixstart: 'Y' | 'N';
     Dm: number | null;
+}
+
+export interface Options {
+    //
+    rainRadar: 0 | 1;
+    rainRadarAdvance: 0 | 1 | 2 | 3;
+    units: 0 | 1;
+    mapType: 0 | 1;
+    map2d: boolean;
+    taskUp: 0 | 1 | 2;
+    follow: boolean;
+    zoomTask: boolean;
+    sortOrder: string;
+    options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
+    options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
 }

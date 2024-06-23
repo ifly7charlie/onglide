@@ -127,7 +127,7 @@ export default function CombinePage(props) {
         bearing: 0,
         minPitch: 0,
         maxPitch: 85,
-        pitch: !props.options.map2d ? 70 : 0
+        pitch: !props?.options?.map2d ? 70 : 0
     });
 
     //

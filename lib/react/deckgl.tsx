@@ -446,7 +446,7 @@ export default function MApp(props: {
         getElevation: (i) => (!nextTp || i.properties.leg == nextTp ? 10000 : 0),
         updateTriggers: {
             getElevation: nextTp,
-            getFillColor: nextTp
+            getFillColor: nextTp + (mapLight ? 100 : 0)
         }
     });
 
