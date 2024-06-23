@@ -33,7 +33,7 @@ body {
 }
 
 // These are tweaks for small screens
-@include media-breakpoint-down(md) {
+@include media-breakpoint-down(lg) {
     body {
         padding-top: 0px !important;
     }
@@ -152,7 +152,7 @@ body {
     }
 }
 
-@include media-breakpoint-down(xs) {
+@include media-breakpoint-down(lg) {
     .resultsOverlay {
         height: 118px;
         margin-top: 16px;

@@ -57,32 +57,39 @@ const Menu = memo(
             comp.competition.name
                 .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
                 .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
-                //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/v, 'u'))?.[1]
+                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
                 ?.trim() || comp.competition.name.substring(0, 25) + '...';
 
         return (
             <>
-                <Navbar bg="light" fixed="top">
-                    <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
-                        {classes}
+                <Navbar bg="light" expand="md" fixed="top">
+                    <Navbar.Brand className="d-lg-none">
+                        <FontAwesomeIcon icon={faLink} />
+                        <Nbsp />
+                        {shortName}
+                        <span className="d-md-none">{classes ? ' - ' + comp.classes.find((c) => c.class == props.vc)?.classname.replace(/\s+(meter|metre)/, 'm') : null}</span>
+                    </Navbar.Brand>
+                    <Navbar.Brand className="d-name d-xl-block">
+                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
+                            {comp.competition.name}
+                            <div style={{fontSize: '70%'}}>
+                                {comp.competition.start} to {comp.competition.end}
+                                <FontAwesomeIcon icon={faLink} />{' '}
+                            </div>
+                        </Nav.Link>
+                    </Navbar.Brand>
+                    <Navbar.Toggle aria-controls="responsive-nav-bar" />
+                    <Navbar.Collapse id="responsive-nav-bar">
+                        <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
+                            {classes}
+                        </Nav>
                         <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                            <Nav.Link href={comp.competition.mainwebsite} className="d-xs-block d-sm-block d-lg-none">
-                                {shortName}
-                                <Nbsp />
-                                <FontAwesomeIcon icon={faLink} />
-                            </Nav.Link>
-                            <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
-                                {comp.competition.name}
-                                <div style={{fontSize: '70%'}}>
-                                    {comp.competition.start} to {comp.competition.end}
-                                    <FontAwesomeIcon icon={faLink} />{' '}
-                                </div>
-                            </Nav.Link>
+                            <Nav.Link href={comp.competition.mainwebsite} className="d-xs-block d-sm-block d-lg-none" style={{overflow: 'none'}}></Nav.Link>
                         </Nav.Item>
                         <Nav.Item key="settings">
                             <Options {...props} />
                         </Nav.Item>
-                    </Nav>
+                    </Navbar.Collapse>
                 </Navbar>
                 <br style={{clear: 'both'}} />
             </>
