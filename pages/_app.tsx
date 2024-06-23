@@ -30,7 +30,13 @@ export function useOptions() {
     useEffect(() => {
         const saved = window?.localStorage.getItem('options');
         if (saved) {
-            set(JSON.parse(saved));
+            try {
+                set(JSON.parse(saved));
+            } catch (e) {
+                set(defaultOptions);
+            }
+        } else {
+            set(defaultOptions);
         }
     }, [set]);
     const setOptions = useCallback(
