@@ -54,11 +54,13 @@ const Menu = memo(
 
         // Try and extract a short form of the name, only letters and spaces stop at first number
         const shortName =
-            comp.competition.name
-                .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
-                .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
-                //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
-                ?.trim() || comp.competition.name.substring(0, 15) + '...';
+            (
+                comp.competition.name
+                    .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
+                    .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
+                    //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
+                    ?.trim() || comp.competition.name
+            ).substring(0, 15) + '...';
 
         return (
             <>
