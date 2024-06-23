@@ -4,7 +4,7 @@ import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 import {TextLayer} from '@deck.gl/layers';
 import {TripsLayer} from '@deck.gl/geo-layers';
-import {PathLayer} from '@deck.gl/layers';
+import {GeoJsonLayer, PathLayer} from '@deck.gl/layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
 //import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
@@ -417,6 +417,39 @@ export default function MApp(props: {
     const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
     const getCursor = useCallback(() => 'crosshair', []);
 
+    const nextTp = selectedPilotData?.score?.currentLeg || 0;
+
+    const tpLayer = new GeoJsonLayer({
+        id: 'turnpoints' + map2d ? '2d' : '3d',
+        data: taskGeoJSONtp,
+        stroked: true,
+        filled: true,
+        extruded: !map2d,
+        material: false,
+        getLineColor: (i) => [255, 255, 0, 255],
+        getFillColor: (i) => {
+            return nextTp
+                ? i.properties.leg < nextTp
+                    ? mapLight
+                        ? [0, 128, 0, 96] // green
+                        : [0x7c, 0xff, 0, 128]
+                    : //
+                    i.properties.leg >= nextTp
+                    ? [255, 165, 0, mapLight ? 64 : 96]
+                    : mapLight
+                    ? [128, 128, 128, 64]
+                    : [255, 255, 255, 96]
+                : mapLight
+                ? [128, 128, 128, 64]
+                : [255, 255, 255, 96];
+        },
+        getElevation: (i) => (!nextTp || i.properties.leg == nextTp ? 10000 : 0),
+        updateTriggers: {
+            getElevation: nextTp,
+            getFillColor: nextTp
+        }
+    });
+
     // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
     // much quicker than changing the style.
     const fixupMap = useCallback(() => {
@@ -450,7 +483,7 @@ export default function MApp(props: {
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
-                layers={layers} //
+                layers={[...layers, tpLayer]} //
                 interleaved={!map2d}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (
@@ -461,12 +494,6 @@ export default function MApp(props: {
             {valid ? (
                 <Source type="geojson" data={taskGeoJSON.track}>
                     <Layer {...trackLineStyle} key="tls" />
-                </Source>
-            ) : null}
-            {valid ? (
-                <Source type="geojson" id="x" data={taskGeoJSONtp}>
-                    <Layer {...turnpointStyleFlat} key="tps" />
-                    <Layer {...turnpointStyle} key="tgjp" />
                 </Source>
             ) : null}
             {selectedPilotData && options.constructionLines && selectedPilotData.score?.minGeoJSON ? (
