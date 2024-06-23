@@ -4,6 +4,7 @@ import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 import {TextLayer} from '@deck.gl/layers';
 import {TripsLayer} from '@deck.gl/geo-layers';
+import {PathLayer} from '@deck.gl/layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
 //import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
@@ -89,7 +90,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             const selected = compno == props.selectedCompno;
 
             const p = track.deck;
-            if (!p || !p.getData) {
+            if (!p) {
                 console.log(`deck missing from ${compno}`, track);
                 return result;
             }
@@ -108,12 +109,26 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 new TripsLayer({
                     id: compno + p.trackVersion,
                     compno: compno,
-                    data: p.getData,
-                    getWidth: selected ? 8 : 5,
-                    getPath: (d) => d.p,
-                    getTimestamps: (d) => {
-                        return [d.t[0] - referenceDate, d.t[1] - referenceDate];
+                    data: {
+                        length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
+                        startIndices: p.indices,
+                        timing: p.t,
+                        climbRate: p.climbRate,
+                        agl: p.agl,
+                        attributes: {
+                            getPath: {value: p.positions, size: 3}, // , size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0},
+                            getTimestamps: {value: p.tr, size: 1}
+                        }
                     },
+                    _pathType: 'open',
+                    getWidth: selected ? 8 : 5,
+                    //                    getPath: (d) => d.p,
+                    //                    getTimestamps: (a, b, c) => {
+                    //                        console.log('getTimestamps', p.compno, a, b, c);
+                    //                        return p.t.map((t) => t - referenceDate);
+                    //                    },
+                    //                        return [d.t[0] - referenceDate, d.t[1] - referenceDate];
+                    //                    },
                     positionFormat: 'XYZ',
                     getColor: colour as any,
                     jointRounded: true,
@@ -124,6 +139,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                         props.setSelectedCompno(compno);
                     },
                     updateTriggers: {
+                        getPath: p.posIndex,
                         getColor: sortKeyColour + mapLight + (selected ? 's' : '') + (props.selectedCompno ? 'y' : '')
                     },
                     pickable: true,
@@ -153,7 +169,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             g: p?.agl[p.posIndex - 1],
             a: p.positions[(p.posIndex - 1) * 3 + 2],
             t: p.t[p.posIndex - 1],
-            coordinates: p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)
+            coordinates: [...p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)]
         };
     });
 
@@ -296,7 +312,6 @@ export default function MApp(props: {
     // ====== PITCH RESTRICTION FOR 2D/3D =======
     useEffect(() => {
         const map = mapRef?.current;
-        console.log('pitch check', isMoving, !!map);
         if (!isMoving && map) {
             // If we are 3d and not locked pitch then correct
             if (!map2d && map.getMap().getMaxPitch() != 80) {

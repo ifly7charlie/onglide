@@ -38,10 +38,10 @@ export interface PilotTrack {
   t: Uint8Array;
   /** Three tuple of [lat,lng,alt] repeated length times (actually float) (and the height above ground) */
   positions: Uint8Array;
-  /** Segments in the track line, for broken track drawing (actually uint32) */
-  agl: Uint8Array;
   /** For colouring, all Uint8 arrays one for each point all optional */
   climbRate: Uint8Array;
+  /** int16 */
+  agl: Uint8Array;
   /** This changes if we need to replace the pilot track */
   trackVersion: number;
 }
@@ -524,8 +524,8 @@ function createBasePilotTrack(): PilotTrack {
     posIndex: 0,
     t: new Uint8Array(0),
     positions: new Uint8Array(0),
-    agl: new Uint8Array(0),
     climbRate: new Uint8Array(0),
+    agl: new Uint8Array(0),
     trackVersion: 0,
   };
 }
@@ -544,11 +544,11 @@ export const PilotTrack = {
     if (message.positions.length !== 0) {
       writer.uint32(34).bytes(message.positions);
     }
-    if (message.agl.length !== 0) {
-      writer.uint32(98).bytes(message.agl);
-    }
     if (message.climbRate.length !== 0) {
       writer.uint32(66).bytes(message.climbRate);
+    }
+    if (message.agl.length !== 0) {
+      writer.uint32(98).bytes(message.agl);
     }
     if (message.trackVersion !== 0) {
       writer.uint32(104).uint32(message.trackVersion);
@@ -591,19 +591,19 @@ export const PilotTrack = {
 
           message.positions = reader.bytes();
           continue;
-        case 12:
-          if (tag !== 98) {
-            break;
-          }
-
-          message.agl = reader.bytes();
-          continue;
         case 8:
           if (tag !== 66) {
             break;
           }
 
           message.climbRate = reader.bytes();
+          continue;
+        case 12:
+          if (tag !== 98) {
+            break;
+          }
+
+          message.agl = reader.bytes();
           continue;
         case 13:
           if (tag !== 104) {
@@ -627,8 +627,8 @@ export const PilotTrack = {
       posIndex: isSet(object.posIndex) ? globalThis.Number(object.posIndex) : 0,
       t: isSet(object.t) ? bytesFromBase64(object.t) : new Uint8Array(0),
       positions: isSet(object.positions) ? bytesFromBase64(object.positions) : new Uint8Array(0),
-      agl: isSet(object.agl) ? bytesFromBase64(object.agl) : new Uint8Array(0),
       climbRate: isSet(object.climbRate) ? bytesFromBase64(object.climbRate) : new Uint8Array(0),
+      agl: isSet(object.agl) ? bytesFromBase64(object.agl) : new Uint8Array(0),
       trackVersion: isSet(object.trackVersion) ? globalThis.Number(object.trackVersion) : 0,
     };
   },
@@ -647,11 +647,11 @@ export const PilotTrack = {
     if (message.positions.length !== 0) {
       obj.positions = base64FromBytes(message.positions);
     }
-    if (message.agl.length !== 0) {
-      obj.agl = base64FromBytes(message.agl);
-    }
     if (message.climbRate.length !== 0) {
       obj.climbRate = base64FromBytes(message.climbRate);
+    }
+    if (message.agl.length !== 0) {
+      obj.agl = base64FromBytes(message.agl);
     }
     if (message.trackVersion !== 0) {
       obj.trackVersion = Math.round(message.trackVersion);
@@ -668,8 +668,8 @@ export const PilotTrack = {
     message.posIndex = object.posIndex ?? 0;
     message.t = object.t ?? new Uint8Array(0);
     message.positions = object.positions ?? new Uint8Array(0);
-    message.agl = object.agl ?? new Uint8Array(0);
     message.climbRate = object.climbRate ?? new Uint8Array(0);
+    message.agl = object.agl ?? new Uint8Array(0);
     message.trackVersion = object.trackVersion ?? 0;
     return message;
   },

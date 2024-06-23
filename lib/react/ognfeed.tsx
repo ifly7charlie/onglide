@@ -9,30 +9,26 @@
 import {useState, useMemo, useCallback, useEffect, memo} from 'react';
 import {useRouter} from 'next/router';
 
-import {usePilots, Spinner} from './loaders';
+import {usePilots} from './loaders';
 
-import {Nbsp, TooltipIcon} from './htmlhelper';
+import {Nbsp} from './htmlhelper';
 
 import useWebSocket, {ReadyState} from 'react-use-websocket';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
 import {Epoch, TZ, Compno, ClassName, Datecode, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
-import {mergePoint, pruneStartline, updateVarioFromDeck} from '../flightprocessing/incremental';
+import {mergePoint, pruneStartline, updateVarioFromDeck, generateIndices} from '../flightprocessing/incremental';
 import {assembleLabeledLine} from './distanceLine';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 //import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 
-import Alert from 'react-bootstrap/Alert';
-import Button from 'react-bootstrap/Button';
-
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
 import {OptionalDurationMM} from './optional';
 
-import {gapLength} from '../constants';
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
 import {UseMeasure} from './measure';
@@ -117,12 +113,12 @@ export const OgnFeed = memo(
         //        const [online] = useState(navigator.onLine);
 
         // We are using a webSocket to update our data here
-        const {lastMessage, readyState, sendMessage} = useWebSocket(socketUrl, {
+        const {sendMessage} = useWebSocket(socketUrl, {
             reconnectAttempts: 15,
             reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
             retryOnError: true,
             onOpen: (a) => setWsStatus({...wsStatus, state: 'open', retry: 0}),
-            filter: (message) => false,
+            filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
                 if (lastMessage.data === 'reload') {
                     // Force a page reload
@@ -141,7 +137,7 @@ export const OgnFeed = memo(
                 console.warn(a, wsStatus);
                 wsStatus.state != 'closed' ? setWsStatus({...wsStatus, state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
             },
-            onReconnectStop: (numAttempts) => setWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
+            onReconnectStop: (_numAttempts) => setWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
         });
 
         // Do we have a loaded set of details?
@@ -216,9 +212,9 @@ export const OgnFeed = memo(
         // Send the options to the server so we can keep an eye on what settings are
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
-        const sendOptions = useMemo(() => {
+        useEffect(() => {
             sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', options}));
-        }, [options, selectedCompno]);
+        }, [options, selectedCompno, sendMessage]);
 
         return (
             <>
@@ -400,15 +396,14 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     deck = combined;
                 }
 
+                generateIndices(deck);
+
                 if (pilotScores[compno]?.utcStart) {
                     pruneStartline(deck, pilotScores[compno].utcStart);
                 }
 
                 // Save the version
                 deck.trackVersion = p.trackVersion;
-
-                // Create new iterators
-                deck.getData = getData(compno as Compno, deck);
 
                 // Store away and update the vario
                 result[compno].deck = deck;
@@ -503,7 +498,7 @@ async function decodeWebsocketMessage(
                         if (trackData[compno]?.deck && result[compno] && result[compno].utcStart < p.utcStart) {
                             if (pruneStartline(trackData[compno].deck, pilotScores[compno].utcStart)) {
                                 //                                console.log('re create iterator (prune on new start time):', compno);
-                                trackData[compno].getData = getData(compno as Compno, trackData[compno].deck);
+                                //                                trackData[compno].getData = getData(compno as Compno, trackData[compno].deck);
                             }
                         }
 
@@ -533,56 +528,4 @@ async function decodeWebsocketMessage(
             setWsStatus(wsStatus);
         }
     });
-}
-
-// Create an async iterable
-async function* getData(compno: Compno, deck: DeckData) {
-    let current = 1;
-    //    console.log('starting iterator', compno, deck.posIndex);
-
-    if (deck.dataPromiseResolve) {
-        console.log('existing iterator found, closing');
-        deck.dataPromiseResolve(true);
-    }
-
-    let abort: boolean | undefined = false;
-    while (!abort) {
-        // Wait for data
-
-        // And send a segment or some
-        const newData = [];
-        while (current < deck.posIndex) {
-            const previous = current - 1;
-
-            // No gap, use previous point
-            if (deck.t[current] - deck.t[previous] < gapLength) {
-                newData.push({
-                    p: [[...deck.positions.subarray(previous * 3, previous * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
-                    t: [deck.t[previous], deck.t[current]],
-                    v: deck.climbRate[current],
-                    g: deck.agl[current]
-                });
-            }
-            // gap, use current point twice
-            else {
-                newData.push({
-                    p: [[...deck.positions.subarray(current * 3, current * 3 + 3)], [...deck.positions.subarray(current * 3, current * 3 + 3)]],
-                    t: [deck.t[current], deck.t[current]],
-                    v: deck.climbRate[current],
-                    g: deck.agl[current]
-                });
-            }
-            current++;
-        }
-
-        // Send to deck
-        if (newData.length) {
-            yield newData;
-        }
-
-        // And wait for more data
-        abort = await new Promise<undefined | boolean>((resolve) => {
-            deck.dataPromiseResolve = resolve;
-        });
-    }
 }
