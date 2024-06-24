@@ -250,13 +250,17 @@ export default function MApp(props: {
         [props.viewport]
     );
 
+    const nextTp = selectedPilotData?.score?.utcFinish
+        ? 99
+        : selectedPilotData?.score?.currentLeg + (selectedPilotData?.score?.inSector ? 1 : 0) || 0;
+
     const npol = !taskGeoJSON?.track?.features?.[0]
         ? null
         : !selectedPilotData?.score?.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) // still start
         ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[0]
         : selectedPilotData.score.utcFinish // if we are done then take last one
         ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
-        : selectedPilotData.score.minDistancePoints.slice(-6, -2);
+        : selectedPilotData.score.minDistancePoints.slice(nextTp * 4, nextTp * 4 + 2);
 
     // =========== FOLLOW EFFECT ===============
     //
@@ -426,10 +430,6 @@ export default function MApp(props: {
     const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, mapLight, map2d, props.t) : null;
 
     // And the turnpoints
-    console.log(selectedPilotData?.score);
-    const nextTp = selectedPilotData?.score?.utcFinish
-        ? 99
-        : selectedPilotData?.score?.currentLeg + (selectedPilotData?.score?.inSector ? 1 : 0) || 0;
     const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
     // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
