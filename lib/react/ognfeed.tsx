@@ -110,9 +110,7 @@ export const OgnFeed = memo(
             reconnectAttempts: 15,
             reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
             retryOnError: true,
-            onOpen: (a) => {
-                setTimeout(() => setWsStatus({...wsStatus, state: 'open', retry: 0}), 100);
-            },
+            onOpen: (_a) => setWsStatus({...wsStatus, state: 'open', retry: 0}),
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
                 if (lastMessage.data === 'reload') {

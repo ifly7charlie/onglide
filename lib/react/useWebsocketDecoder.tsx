@@ -18,7 +18,7 @@ export function useWebsocketDecoder({setWsStatus}: {setWsStatus?: Function}) {
     const [otherPilots, setOtherPilots] = useState<OtherPilotData>({});
     const [identifiers, setIdentifiers] = useState<Identifiers>({class: '', datecode: '', competition: ''});
 
-    const decoder = async (data: Buffer, wsStatus?: any): Promise<void> => {
+    const decoder = async (data: Buffer, wsStatus: any): Promise<void> => {
         return new Response(data).arrayBuffer().then(async (ab) => {
             const decoded = OnglideWebSocketMessage.decode(new Uint8Array(ab));
             if (!decoded) {
@@ -74,7 +74,7 @@ export function useWebsocketDecoder({setWsStatus}: {setWsStatus?: Function}) {
                     // We get the initial URL and then decode it the same as if it is from the websocket as it is the same format (recursive)
                     await fetch(oldTracksUrl(identifiers.class as ClassName, identifiers.datecode as Datecode, decoded.tracks.baseTime.toString())) //
                         .then((res) => res.arrayBuffer())
-                        .then(async (ab) => decoder(Buffer.from(ab)))
+                        .then(async (ab) => decoder(Buffer.from(ab), wsStatus))
                         .then(() => {
                             console.log('updating track remainders (wss)');
                             updateTracks(decoded, trackData, setTrackData, pilotScores);
