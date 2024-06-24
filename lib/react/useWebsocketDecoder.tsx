@@ -78,6 +78,7 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
                         .then(() => {
                             console.log('updating track remainders (wss)');
                             updateTracks(decoded, trackData, setTrackData, pilotScores);
+                            mergeWsStatus({state: 'open', retry: 0});
                         });
                 } else {
                     console.log('updating track starts', !decoded.tracks.baseTime ? 'https' : 'wss only');
