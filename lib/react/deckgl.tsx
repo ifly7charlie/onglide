@@ -44,6 +44,7 @@ import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} 
 
 import {OgnTripsLayer} from './ogntripslayer';
 import {otherPilotsLayer} from './otherpilotslayer';
+import {pilotsLayer} from './pilotslayer';
 import {turnpointLayer} from './turnpointlayer';
 
 // Figure out the baseline date
@@ -113,6 +114,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                         t: p.t,
                         v: p.climbRate,
                         g: p.agl,
+                        p: p.positions,
                         attributes: {
                             getPath: {value: p.positions, size: 3}, // , size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0},
                             getTimestamps: {value: p.tr, size: 1}
@@ -143,55 +145,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
         []
     );
 
-    //
-    // Generate the labels data, this is fairly simple and is extracted from the positions
-    // data set rather than pilots so that the marker always aligns with the tracking points
-    // we are adding more data so we get a nice tool tip, text colour is determined by how old
-    // the point is
-    const data = _map(props.trackData, (track) => {
-        const p = track.deck;
-        if (!p) {
-            return {};
-        }
-        return {
-            name: track.compno,
-            compno: track.compno,
-            v: p.climbRate[p.posIndex - 1], //
-            g: p?.agl[p.posIndex - 1],
-            a: p.positions[(p.posIndex - 1) * 3 + 2],
-            t: p.t[p.posIndex - 1],
-            coordinates: [...p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)]
-        };
-    });
-
-    if (data.length) {
-        layers.push(
-            new TextLayer({
-                id: 'labels', //+ (map2d ? '2d' : '3d'),
-                data: data,
-                getPosition: (d) => d.coordinates, // map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
-                getText: (d) => d.name,
-                getColor: (d) => (props.t - d.t > offlineTime ? [100, 80, 80, 96] : [0, 100, 0, 255]),
-                getTextAnchor: 'middle',
-                getAlignmentBaseline: 'bottom',
-                getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
-                pickage: true,
-                background: true,
-                fontSettings: {sdf: true},
-                backgroundPadding: [2, 1, 2, 0],
-                onClick: (i) => {
-                    props.setSelectedCompno(i.object?.name || '');
-                },
-                outlineWidth: 2,
-                outlineColor: [255, 255, 255, 255],
-                getBackgroundColor: [255, 255, 255, 255],
-                getBorderColor: (d) => (d.name === props.selectedCompno ? [255, 0, 255, 192] : [40, 40, 40, 255]),
-                getBorderWidth: 1,
-                pickable: true
-            })
-        );
-    }
-
     return layers;
 }
 
@@ -204,7 +157,7 @@ export default function MApp(props: {
     setFollow: Function;
     vc: ClassName;
     selectedCompno: Compno;
-    setSelectedCompno: Function;
+    setSelectedCompno: (compno: Compno) => void;
     tz: string;
     viewport: any;
     setViewport: Function;
@@ -410,6 +363,8 @@ export default function MApp(props: {
     const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
     const getCursor = useCallback(() => 'crosshair', []);
 
+    const pilotLayer = pilotsLayer(props.trackData, selectedCompno, props.setSelectedCompno, props.t);
+
     // If we are displaying other pilots
     const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, mapLight, map2d, props.t) : null;
 
@@ -449,7 +404,7 @@ export default function MApp(props: {
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
-                layers={[...layers, otherPilotLayer, tpLayer]} //
+                layers={[tpLayer, ...layers, pilotLayer, otherPilotLayer]} //
                 interleaved={!map2d}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (
