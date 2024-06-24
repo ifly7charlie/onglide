@@ -12,11 +12,18 @@ export const protobufPackage = "";
 /** import "google/protobuf/any.proto"; */
 
 export interface OnglideWebSocketMessage {
+  identifiers?: Identifiers | undefined;
   tracks?: PilotTracks | undefined;
   scores?: Scores | undefined;
-  positions?: Positions | undefined;
+  positions?: ClassPositions | undefined;
   ka?: KeepAlive | undefined;
   t?: number | undefined;
+}
+
+export interface Identifiers {
+  class: string;
+  datecode: string;
+  competition: string;
 }
 
 export interface PilotTracks {
@@ -216,6 +223,15 @@ export interface Positions {
   positions: PilotPosition[];
 }
 
+export interface ClassPositions {
+  class: { [key: string]: Positions };
+}
+
+export interface ClassPositions_ClassEntry {
+  key: string;
+  value: Positions | undefined;
+}
+
 /** Are we connected? */
 export interface KeepAlive {
   keepalive: boolean;
@@ -225,11 +241,21 @@ export interface KeepAlive {
 }
 
 function createBaseOnglideWebSocketMessage(): OnglideWebSocketMessage {
-  return { tracks: undefined, scores: undefined, positions: undefined, ka: undefined, t: undefined };
+  return {
+    identifiers: undefined,
+    tracks: undefined,
+    scores: undefined,
+    positions: undefined,
+    ka: undefined,
+    t: undefined,
+  };
 }
 
 export const OnglideWebSocketMessage = {
   encode(message: OnglideWebSocketMessage, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.identifiers !== undefined) {
+      Identifiers.encode(message.identifiers, writer.uint32(58).fork()).ldelim();
+    }
     if (message.tracks !== undefined) {
       PilotTracks.encode(message.tracks, writer.uint32(10).fork()).ldelim();
     }
@@ -237,7 +263,7 @@ export const OnglideWebSocketMessage = {
       Scores.encode(message.scores, writer.uint32(18).fork()).ldelim();
     }
     if (message.positions !== undefined) {
-      Positions.encode(message.positions, writer.uint32(26).fork()).ldelim();
+      ClassPositions.encode(message.positions, writer.uint32(50).fork()).ldelim();
     }
     if (message.ka !== undefined) {
       KeepAlive.encode(message.ka, writer.uint32(34).fork()).ldelim();
@@ -255,6 +281,13 @@ export const OnglideWebSocketMessage = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 7:
+          if (tag !== 58) {
+            break;
+          }
+
+          message.identifiers = Identifiers.decode(reader, reader.uint32());
+          continue;
         case 1:
           if (tag !== 10) {
             break;
@@ -269,12 +302,12 @@ export const OnglideWebSocketMessage = {
 
           message.scores = Scores.decode(reader, reader.uint32());
           continue;
-        case 3:
-          if (tag !== 26) {
+        case 6:
+          if (tag !== 50) {
             break;
           }
 
-          message.positions = Positions.decode(reader, reader.uint32());
+          message.positions = ClassPositions.decode(reader, reader.uint32());
           continue;
         case 4:
           if (tag !== 34) {
@@ -301,9 +334,10 @@ export const OnglideWebSocketMessage = {
 
   fromJSON(object: any): OnglideWebSocketMessage {
     return {
+      identifiers: isSet(object.identifiers) ? Identifiers.fromJSON(object.identifiers) : undefined,
       tracks: isSet(object.tracks) ? PilotTracks.fromJSON(object.tracks) : undefined,
       scores: isSet(object.scores) ? Scores.fromJSON(object.scores) : undefined,
-      positions: isSet(object.positions) ? Positions.fromJSON(object.positions) : undefined,
+      positions: isSet(object.positions) ? ClassPositions.fromJSON(object.positions) : undefined,
       ka: isSet(object.ka) ? KeepAlive.fromJSON(object.ka) : undefined,
       t: isSet(object.t) ? globalThis.Number(object.t) : undefined,
     };
@@ -311,6 +345,9 @@ export const OnglideWebSocketMessage = {
 
   toJSON(message: OnglideWebSocketMessage): unknown {
     const obj: any = {};
+    if (message.identifiers !== undefined) {
+      obj.identifiers = Identifiers.toJSON(message.identifiers);
+    }
     if (message.tracks !== undefined) {
       obj.tracks = PilotTracks.toJSON(message.tracks);
     }
@@ -318,7 +355,7 @@ export const OnglideWebSocketMessage = {
       obj.scores = Scores.toJSON(message.scores);
     }
     if (message.positions !== undefined) {
-      obj.positions = Positions.toJSON(message.positions);
+      obj.positions = ClassPositions.toJSON(message.positions);
     }
     if (message.ka !== undefined) {
       obj.ka = KeepAlive.toJSON(message.ka);
@@ -334,6 +371,9 @@ export const OnglideWebSocketMessage = {
   },
   fromPartial<I extends Exact<DeepPartial<OnglideWebSocketMessage>, I>>(object: I): OnglideWebSocketMessage {
     const message = createBaseOnglideWebSocketMessage();
+    message.identifiers = (object.identifiers !== undefined && object.identifiers !== null)
+      ? Identifiers.fromPartial(object.identifiers)
+      : undefined;
     message.tracks = (object.tracks !== undefined && object.tracks !== null)
       ? PilotTracks.fromPartial(object.tracks)
       : undefined;
@@ -341,10 +381,99 @@ export const OnglideWebSocketMessage = {
       ? Scores.fromPartial(object.scores)
       : undefined;
     message.positions = (object.positions !== undefined && object.positions !== null)
-      ? Positions.fromPartial(object.positions)
+      ? ClassPositions.fromPartial(object.positions)
       : undefined;
     message.ka = (object.ka !== undefined && object.ka !== null) ? KeepAlive.fromPartial(object.ka) : undefined;
     message.t = object.t ?? undefined;
+    return message;
+  },
+};
+
+function createBaseIdentifiers(): Identifiers {
+  return { class: "", datecode: "", competition: "" };
+}
+
+export const Identifiers = {
+  encode(message: Identifiers, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.class !== "") {
+      writer.uint32(10).string(message.class);
+    }
+    if (message.datecode !== "") {
+      writer.uint32(18).string(message.datecode);
+    }
+    if (message.competition !== "") {
+      writer.uint32(26).string(message.competition);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): Identifiers {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseIdentifiers();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.class = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.datecode = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.competition = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Identifiers {
+    return {
+      class: isSet(object.class) ? globalThis.String(object.class) : "",
+      datecode: isSet(object.datecode) ? globalThis.String(object.datecode) : "",
+      competition: isSet(object.competition) ? globalThis.String(object.competition) : "",
+    };
+  },
+
+  toJSON(message: Identifiers): unknown {
+    const obj: any = {};
+    if (message.class !== "") {
+      obj.class = message.class;
+    }
+    if (message.datecode !== "") {
+      obj.datecode = message.datecode;
+    }
+    if (message.competition !== "") {
+      obj.competition = message.competition;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Identifiers>, I>>(base?: I): Identifiers {
+    return Identifiers.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Identifiers>, I>>(object: I): Identifiers {
+    const message = createBaseIdentifiers();
+    message.class = object.class ?? "";
+    message.datecode = object.datecode ?? "";
+    message.competition = object.competition ?? "";
     return message;
   },
 };
@@ -2448,6 +2577,160 @@ export const Positions = {
   fromPartial<I extends Exact<DeepPartial<Positions>, I>>(object: I): Positions {
     const message = createBasePositions();
     message.positions = object.positions?.map((e) => PilotPosition.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseClassPositions(): ClassPositions {
+  return { class: {} };
+}
+
+export const ClassPositions = {
+  encode(message: ClassPositions, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    Object.entries(message.class).forEach(([key, value]) => {
+      ClassPositions_ClassEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).ldelim();
+    });
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ClassPositions {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClassPositions();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          const entry1 = ClassPositions_ClassEntry.decode(reader, reader.uint32());
+          if (entry1.value !== undefined) {
+            message.class[entry1.key] = entry1.value;
+          }
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ClassPositions {
+    return {
+      class: isObject(object.class)
+        ? Object.entries(object.class).reduce<{ [key: string]: Positions }>((acc, [key, value]) => {
+          acc[key] = Positions.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: ClassPositions): unknown {
+    const obj: any = {};
+    if (message.class) {
+      const entries = Object.entries(message.class);
+      if (entries.length > 0) {
+        obj.class = {};
+        entries.forEach(([k, v]) => {
+          obj.class[k] = Positions.toJSON(v);
+        });
+      }
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ClassPositions>, I>>(base?: I): ClassPositions {
+    return ClassPositions.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ClassPositions>, I>>(object: I): ClassPositions {
+    const message = createBaseClassPositions();
+    message.class = Object.entries(object.class ?? {}).reduce<{ [key: string]: Positions }>((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = Positions.fromPartial(value);
+      }
+      return acc;
+    }, {});
+    return message;
+  },
+};
+
+function createBaseClassPositions_ClassEntry(): ClassPositions_ClassEntry {
+  return { key: "", value: undefined };
+}
+
+export const ClassPositions_ClassEntry = {
+  encode(message: ClassPositions_ClassEntry, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== undefined) {
+      Positions.encode(message.value, writer.uint32(18).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ClassPositions_ClassEntry {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClassPositions_ClassEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = Positions.decode(reader, reader.uint32());
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ClassPositions_ClassEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? Positions.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: ClassPositions_ClassEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== undefined) {
+      obj.value = Positions.toJSON(message.value);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ClassPositions_ClassEntry>, I>>(base?: I): ClassPositions_ClassEntry {
+    return ClassPositions_ClassEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ClassPositions_ClassEntry>, I>>(object: I): ClassPositions_ClassEntry {
+    const message = createBaseClassPositions_ClassEntry();
+    message.key = object.key ?? "";
+    message.value = (object.value !== undefined && object.value !== null)
+      ? Positions.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };

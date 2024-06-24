@@ -2,12 +2,19 @@ syntax = "proto3";
 //import "google/protobuf/any.proto";
 
 message OnglideWebSocketMessage {
+	optional Identifiers identifiers = 7;
     optional PilotTracks tracks = 1;
     optional Scores scores = 2;
-    optional Positions positions = 3;
+	optional ClassPositions positions = 6;
     optional KeepAlive ka = 4;
     optional uint32 t = 5;
 }
+
+message Identifiers {
+	string class = 1;
+	string datecode = 2;
+	string competition = 3;
+}		
 
 message PilotTracks {
     map<string, PilotTrack> pilots = 1;
@@ -172,7 +179,11 @@ message PilotPosition {
 }
 
 message Positions {
-    repeated PilotPosition positions = 1;
+	repeated PilotPosition positions=1;
+}
+
+message ClassPositions {
+	map<string,Positions> class=1;
 }
 
 //

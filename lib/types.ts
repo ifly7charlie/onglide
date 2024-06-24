@@ -287,6 +287,8 @@ import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 export type TrackData = Record<Compno, PilotTrackData>;
 export type ScoreData = Record<Compno, PilotScore>;
 
+export type OtherPilotData = Record<ClassName_Compno, PositionMessage>;
+
 export interface PilotScoreDisplay extends PilotScore {
     scoredGeoJSON?: any;
     minGeoJSON?: any;
@@ -360,6 +362,10 @@ export interface Options {
     follow: boolean;
     zoomTask: boolean;
     sortOrder: string;
+    showOthers: boolean;
+    constructionLines?: boolean;
+    fullPaths?: boolean;
+
     options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
     options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
 }

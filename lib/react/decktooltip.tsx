@@ -32,7 +32,14 @@ export function deckTooltip({
     if (object) {
         let response = '';
         const compno = layer?.props?.compno ?? object.compno;
+        const className = layer?.props?.className ?? object.className;
         const time = Array.isArray(object.t) ? object.t[1] : object.t;
+
+        if (className) {
+            response += `<strong>${compno}</strong>: ${className}<br/>`;
+        } else if (compno) {
+            response += `<strong>${compno}</strong><br/>`;
+        }
 
         if (time) {
             if (compno && pilotScores[compno]?.stats?.segments) {
@@ -43,7 +50,7 @@ export function deckTooltip({
             }
             // Figure out what the local language is for international date strings
             const dt = new Date(time * 1000);
-            response += `${compno}: ✈️ ${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
+            response += `✈️ ${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
         }
 
         if (process.env.NODE_ENV == 'development') {
@@ -57,8 +64,17 @@ export function deckTooltip({
             response += `(${displayHeight(object.g, units)} AGL) `;
         }
         if (object.v) {
-            response += ` ↕️  ${displayClimb(object.v, units)}`;
+            if (typeof object.v !== 'number') {
+                const average = object.v.split(',').map((a) => parseFloat(a))?.[3];
+                response += ` ↕️  ${displayClimb(average, units)}`;
+            } else {
+                response += ` ↕️  ${displayClimb(object.v, units)}`;
+            }
         }
+        if (object.b) {
+            response += `${object.b} °`;
+        }
+
         if (object.stats) {
             const stats = object.stats;
             const elapsed = stats.end - stats.start;
@@ -78,7 +94,8 @@ export function deckTooltip({
         }
         return {html: response};
     } else if (layer && layer.props.tt == true) {
-        return layer.id;
+        console.log(object, picked, layer);
+        return layer.compno ?? layer.id;
     } else {
         return null;
     }

@@ -6,7 +6,6 @@ import {TextLayer} from '@deck.gl/layers';
 import {GeoJsonLayer} from '@deck.gl/layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
-//import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
 
 import {deckTooltip} from './decktooltip';
 
@@ -14,10 +13,7 @@ import {useTaskGeoJSON} from './loaders';
 
 import {offlineTime, recentTrackLength} from '../constants';
 
-// Height/Climb helpers
-import {displayHeight, displayClimb} from './displayunits';
-
-import {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
+import type {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, OtherPilotData, PilotScore} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
@@ -42,13 +38,14 @@ import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
 
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
-import destination from '@turf/destination';
 
 import {SortKey} from './pilot-sorting';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
 import {OgnTripsLayer} from './ogntripslayer';
+import {otherPilotsLayer} from './otherpilotslayer';
+
 // Figure out the baseline date
 const oneHalfYearIsh = 3600 * 24 * 180;
 const referenceDate =
@@ -63,6 +60,8 @@ const referenceDate =
 //const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
 
 import {colourise} from './colourise';
+
+import {useWebsocketDecoder} from './useWebsocketDecoder';
 
 const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any) => number[]) | number[]> = {
     auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]),
@@ -201,7 +200,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
 export default function MApp(props: {
     options: any;
     setOptions: Function; //
-    pilots: any;
     pilotScores: ScoreData;
     selectedPilotData: SelectedPilotDetails | null;
     follow: boolean;
@@ -213,6 +211,7 @@ export default function MApp(props: {
     viewport: any;
     setViewport: Function;
     trackData: TrackData;
+    otherPilots: OtherPilotData;
     measureFeatures: UseMeasure;
     status: string; // status line
     t: Epoch;
@@ -221,7 +220,7 @@ export default function MApp(props: {
     const mapRef = useRef(null);
 
     // So we get some type info
-    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
+    const {options, setOptions, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
 
     const isMoving = mapRef?.current?.isMoving() ?? true;
 
@@ -384,8 +383,7 @@ export default function MApp(props: {
     //
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units}),
-        //
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units}), //
         [vc, props.options.units, props.tz, mapRef?.current]
     );
 
@@ -413,6 +411,10 @@ export default function MApp(props: {
 
     const nextTp = selectedPilotData?.score?.currentLeg || 0;
 
+    //raw.githubusercontent.com/visgl/deck.gl-data/master/website/icon-atlas.png
+
+    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, mapLight, map2d, props.t) : null;
+
     const tpLayer = new GeoJsonLayer({
         id: 'turnpoints' + map2d ? '2d' : '3d',
         data: taskGeoJSONtp,
@@ -435,7 +437,7 @@ export default function MApp(props: {
                     : [255, 255, 255, 96]
                 : mapLight
                 ? [128, 128, 128, 64]
-                : [255, 255, 255, 96];
+                : [192, 192, 192, 96];
         },
         getElevation: (i) => (!nextTp || i.properties.leg == nextTp ? 10000 : 0),
         updateTriggers: {
@@ -477,7 +479,7 @@ export default function MApp(props: {
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
-                layers={[...layers, tpLayer]} //
+                layers={[...layers, otherPilotLayer, tpLayer]} //
                 interleaved={!map2d}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (

@@ -18,7 +18,7 @@ import {point} from '@turf/helpers';
 // And the Websocket
 import {WebSocket, WebSocketServer} from 'ws';
 
-import {OnglideWebSocketMessage} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
@@ -338,11 +338,18 @@ async function main() {
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
-    // time we run the callback (every second), as we only update the screen once a second it should
+    // time we run the callback (every second), as we only update the screen on data it should
     // be sufficient to bundle them even though we are receiving as a stream
     setInterval(function () {
         // For each channel (aka class)
         const now = getNow();
+
+        const positions = Object.values(channels).reduce((a, c: Channel) => {
+            a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+            return a;
+        }, {} as Record<string, Positions>);
+
+        const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
         for (const channelName in channels) {
             const channel = channels[channelName];
@@ -350,18 +357,16 @@ async function main() {
             channel.statistics.activeListeners += channel.clients.length;
             channel.statistics.listenerCycles++;
 
-            if (!channel.toSend.length) {
-                continue;
-            }
-
-            channel.mostRecentPosition = now;
-
             if (channel.clients.length) {
+                if (!channel.toSend.length) {
+                    continue;
+                }
+                channel.mostRecentPosition = now;
+
                 // Send if we have an update or if it's been 30 seconds since we last sent one
                 //                if (channel.toSend.length || (now - channel.lastSentPositions ?? 0) > 30) {
                 // Encode all the changes, we only keep latest per glider if multiple received
                 // there shouldn't be multiple!
-                const msg = OnglideWebSocketMessage.encode({positions: {positions: channel.toSend}, t: Math.trunc(now)}).finish();
                 //
                 // Metrics are helpful
                 channel.statistics.positionsSent += channel.toSend.length;
@@ -790,6 +795,16 @@ async function sendCurrentState(client: WebSocket) {
         console.log('unable to sendCurrentState not yet open or ! isAlive');
         return;
     }
+
+    console.log(client.ognChannel);
+    const channel = channels[client.ognChannel];
+
+    client.send(
+        OnglideWebSocketMessage.encode(
+            {identifiers: {class: channel.className, datecode: channel.datecode, competition: '1'}} //
+        ).finish(),
+        {binary: true}
+    );
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;

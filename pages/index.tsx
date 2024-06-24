@@ -89,7 +89,7 @@ const Menu = memo(
                             <Nav.Link href={comp.competition.mainwebsite} className="d-xs-block d-sm-block d-lg-none" style={{overflow: 'none'}}></Nav.Link>
                         </Nav.Item>
                         <Nav.Item key="settings">
-                            <Options {...props} />
+                            <Options {...props} multipleClasses={comp.classes.length > 1} />
                         </Nav.Item>
                     </Navbar.Collapse>
                 </Navbar>
