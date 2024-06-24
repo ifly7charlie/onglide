@@ -3,8 +3,7 @@
 import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 import {TextLayer} from '@deck.gl/layers';
-import {TripsLayer} from '@deck.gl/geo-layers';
-import {GeoJsonLayer, PathLayer} from '@deck.gl/layers';
+import {GeoJsonLayer} from '@deck.gl/layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
 //import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
@@ -49,6 +48,7 @@ import {SortKey} from './pilot-sorting';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
+import {OgnTripsLayer} from './ogntripslayer';
 // Figure out the baseline date
 const oneHalfYearIsh = 3600 * 24 * 180;
 const referenceDate =
@@ -106,15 +106,16 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
             const colour = colours[!props.selectedCompno || selected ? sortKeyColour : 'auto'](mapLight, selected);
 
             result.push(
-                new TripsLayer({
+                new OgnTripsLayer({
                     id: compno + p.trackVersion,
                     compno: compno,
                     data: {
                         length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
+                        numberOfPoints: p.posIndex,
                         startIndices: p.indices,
-                        timing: p.t,
-                        climbRate: p.climbRate,
-                        agl: p.agl,
+                        t: p.t,
+                        v: p.climbRate,
+                        g: p.agl,
                         attributes: {
                             getPath: {value: p.positions, size: 3}, // , size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0},
                             getTimestamps: {value: p.tr, size: 1}
@@ -122,13 +123,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                     },
                     _pathType: 'open',
                     getWidth: selected ? 8 : 5,
-                    //                    getPath: (d) => d.p,
-                    //                    getTimestamps: (a, b, c) => {
-                    //                        console.log('getTimestamps', p.compno, a, b, c);
-                    //                        return p.t.map((t) => t - referenceDate);
-                    //                    },
-                    //                        return [d.t[0] - referenceDate, d.t[1] - referenceDate];
-                    //                    },
                     positionFormat: 'XYZ',
                     getColor: colour as any,
                     jointRounded: true,
