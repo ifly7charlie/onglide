@@ -25,11 +25,19 @@ export function deckTooltip({
 }) {
     if (!picked) {
         if (process.env.NODE_ENV == 'development' && coordinate) {
-            return `[${coordinate.map((x) => x.toFixed(4))}, ${map?.queryTerrainElevation({lat: coordinate[1], lng: coordinate[0]}, {exaggerated: false})?.toFixed(0)}]`;
+            return `[${coordinate.map((x) => x.toFixed(4))}, ${map
+                ?.queryTerrainElevation({lat: coordinate[1], lng: coordinate[0]}, {exaggerated: false})
+                ?.toFixed(0)}]`;
         }
         return null;
     }
     if (object) {
+        // Turnpoint
+        if (object.type == 'Feature' && object.properties) {
+            const tp = object.properties;
+            return {html: `<strong>${tp.leg} ${tp.trigraph}</strong>: ${tp.name} 📏 ${tp.r1}km<br/>`};
+        }
+
         let response = '';
         const compno = layer?.props?.compno ?? object.compno;
         const className = layer?.props?.className ?? object.className;
@@ -56,7 +64,7 @@ export function deckTooltip({
         if (process.env.NODE_ENV == 'development') {
             response += `[${time}]<br/>`;
         }
-        const a = object.a ?? object.p[1][2] ?? NaN;
+        const a = object.a ?? object.p?.[1]?.[2] ?? NaN;
         if (!isNaN(a)) {
             response += `${displayHeight(a, units)} QNH `;
         }
@@ -85,7 +93,9 @@ export function deckTooltip({
                 if (stats.state == 'thermal') {
                     response += `average: ${displayClimb(stats.avgDelta, units)}`;
                 } else if (stats.state == 'straight') {
-                    response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
+                    response +=
+                        `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` +
+                        `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
                 }
                 if (stats.wind.direction) {
                     response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
@@ -94,7 +104,6 @@ export function deckTooltip({
         }
         return {html: response};
     } else if (layer && layer.props.tt == true) {
-        console.log(object, picked, layer);
         return layer.compno ?? layer.id;
     } else {
         return null;

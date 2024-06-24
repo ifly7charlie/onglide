@@ -3,7 +3,6 @@
 import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 import {TextLayer} from '@deck.gl/layers';
-import {GeoJsonLayer} from '@deck.gl/layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
 
@@ -45,6 +44,7 @@ import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} 
 
 import {OgnTripsLayer} from './ogntripslayer';
 import {otherPilotsLayer} from './otherpilotslayer';
+import {turnpointLayer} from './turnpointlayer';
 
 // Figure out the baseline date
 const oneHalfYearIsh = 3600 * 24 * 180;
@@ -73,7 +73,13 @@ const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, sortKey: SortKey, map2d: boolean, mapLight: boolean, fullPaths: boolean) {
+function makeLayers(
+    props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch},
+    sortKey: SortKey,
+    map2d: boolean,
+    mapLight: boolean,
+    fullPaths: boolean
+) {
     if (!props.trackData) {
         console.log('missing layers');
         return [];
@@ -239,15 +245,18 @@ export default function MApp(props: {
     const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
 
     // Get coordinates on the screen for center point of view
-    const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
+    const screenPoint = useMemo(
+        () => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0},
+        [props.viewport]
+    );
 
     const npol = !taskGeoJSON?.track?.features?.[0]
         ? null
-        : !selectedPilotData?.score?.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) //
+        : !selectedPilotData?.score?.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) // still start
         ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[0]
-        : selectedPilotData.score.utcFinish
+        : selectedPilotData.score.utcFinish // if we are done then take last one
         ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
-        : selectedPilotData.score.minDistancePoints.slice(4, 6);
+        : selectedPilotData.score.minDistancePoints.slice(-6, -2);
 
     // =========== FOLLOW EFFECT ===============
     //
@@ -271,7 +280,12 @@ export default function MApp(props: {
                 // Next point - if we haven't started or we have finished use the startline
 
                 // If we are user selected or we don't have a valid next point don't change anything
-                const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
+                const fbearing =
+                    props.options.taskUp == 2 || !npol
+                        ? props.viewport.bearing
+                        : props.options.taskUp == 1
+                        ? bearing([lng, lat], npol, {final: false})
+                        : 0;
 
                 const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
 
@@ -408,42 +422,15 @@ export default function MApp(props: {
     const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
     const getCursor = useCallback(() => 'crosshair', []);
 
-    const nextTp = selectedPilotData?.score?.currentLeg || 0;
-
-    //raw.githubusercontent.com/visgl/deck.gl-data/master/website/icon-atlas.png
-
+    // If we are displaying other pilots
     const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, mapLight, map2d, props.t) : null;
 
-    const tpLayer = new GeoJsonLayer({
-        id: 'turnpoints' + map2d ? '2d' : '3d',
-        data: taskGeoJSONtp,
-        stroked: true,
-        filled: true,
-        extruded: !map2d,
-        material: false,
-        getLineColor: (i) => [255, 255, 0, 255],
-        getFillColor: (i) => {
-            return nextTp
-                ? i.properties.leg < nextTp
-                    ? mapLight
-                        ? [0, 128, 0, 96] // green
-                        : [0x7c, 0xff, 0, 128]
-                    : //
-                    i.properties.leg >= nextTp
-                    ? [255, 165, 0, mapLight ? 64 : 96]
-                    : mapLight
-                    ? [128, 128, 128, 64]
-                    : [255, 255, 255, 96]
-                : mapLight
-                ? [128, 128, 128, 64]
-                : [192, 192, 192, 96];
-        },
-        getElevation: (i) => (!nextTp || i.properties.leg == nextTp ? 10000 : 0),
-        updateTriggers: {
-            getElevation: nextTp,
-            getFillColor: nextTp + (mapLight ? 100 : 0)
-        }
-    });
+    // And the turnpoints
+    console.log(selectedPilotData?.score);
+    const nextTp = selectedPilotData?.score?.utcFinish
+        ? 99
+        : selectedPilotData?.score?.currentLeg + (selectedPilotData?.score?.inSector ? 1 : 0) || 0;
+    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
     // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
     // much quicker than changing the style.
@@ -669,8 +656,26 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
                     mapLight ? 'darkgrey' : 'white'
                 ],
                 'fill-extrusion-opacity': 0.5,
-                'fill-extrusion-base': ['case', ['==', !selectedPilot, true], 10, ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], 5, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 10, 0],
-                'fill-extrusion-height': ['case', ['==', !selectedPilot, true], 100, ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], 9, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 5000, 2]
+                'fill-extrusion-base': [
+                    'case',
+                    ['==', !selectedPilot, true],
+                    10,
+                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0],
+                    5,
+                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
+                    10,
+                    0
+                ],
+                'fill-extrusion-height': [
+                    'case',
+                    ['==', !selectedPilot, true],
+                    100,
+                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0],
+                    9,
+                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
+                    5000,
+                    2
+                ]
             }
         }
     ];

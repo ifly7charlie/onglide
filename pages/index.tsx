@@ -69,7 +69,7 @@ const Menu = memo(
                         <FontAwesomeIcon icon={faLink} />
                         <Nbsp />
                         {shortName}
-                        <span className="d-md-none">{classes ? ' - ' + comp.classes.find((c) => c.class == props.vc)?.classname.replace(/\s+(meter|metre)/, 'm') : null}</span>
+                        <span className="d-lg-none">{classes ? ' - ' + comp.classes.find((c) => c.class == props.vc)?.classname.replace(/\s+(meter|metre)/, 'm') : null}</span>
                     </Navbar.Brand>
                     <Navbar.Brand className="d-name d-xl-block">
                         <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
