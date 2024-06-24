@@ -61,8 +61,6 @@ const referenceDate =
 
 import {colourise} from './colourise';
 
-import {useWebsocketDecoder} from './useWebsocketDecoder';
-
 const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any) => number[]) | number[]> = {
     auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]),
     climb:
@@ -326,6 +324,7 @@ export default function MApp(props: {
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
         if (options.zoomTask && taskGeoJSONtp && viewport) {
+            console.log('zoom to task', viewport);
             try {
                 const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
                 setOptions({...options, zoomTask: false});
@@ -335,9 +334,9 @@ export default function MApp(props: {
                         [maxLng, maxLat]
                     ],
                     {
-                        pitch: map2d ? 0 : 50,
+                        pitch: map2d ? 0 : 70,
                         padding: 20,
-                        offset: [-140, 0],
+                        offset: [(mapRef.current?.getContainer()?.clientWidth ?? 0) < 992 ? 0 : -140, 0],
                         bearing: 0
                     }
                 );
@@ -345,7 +344,7 @@ export default function MApp(props: {
                 console.error(e);
             }
         }
-    }, [options.zoomTask, taskGeoJSONtp, viewport]);
+    }, [options.zoomTask, taskGeoJSONtp, viewport, mapRef.current]);
 
     // ====== LOCK NORTH UP ===========
     // If we are north up then reset north on bearing change

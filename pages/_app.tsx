@@ -32,7 +32,7 @@ export function useOptions() {
         const saved = window?.localStorage.getItem('options');
         if (saved) {
             try {
-                set(JSON.parse(saved));
+                set({...JSON.parse(saved), zoomTask: true});
             } catch (e) {
                 set(defaultOptions);
             }
