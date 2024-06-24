@@ -60,12 +60,23 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     }
 
     let scoredStatus: CalculatedTaskStatus;
-
+    let flightStatus: PositionStatus | undefined = PositionStatus.Unknown;
+	
     for await (const current of taskStatusGenerator) {
         try {
             const taskStatus = (scoredStatus = current);
             log(current);
 
+            // Wait for the start
+            if( ! current.startConfirmed && ! current.startFound ) {
+                if (flightStatus != taskStatus.flightStatus) {
+                    flightStatus = taskStatus.flightStatus;
+                    yield taskStatus;
+                }
+				continue;
+			}
+
+			
             // If we have a new fingerprint then rescore required
             //        if( taskStatus.pointsProcessed! _some( taskStatus.legs, (l,i) => legFingerPrint(l) != aatLegStatus[i].fingerPrint )) {
             //            yield scores;

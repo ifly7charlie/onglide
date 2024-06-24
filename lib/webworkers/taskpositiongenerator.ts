@@ -156,14 +156,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // If there is a specific start time and we are before it then
                 // do nothing,
                 if (point.t < task.rules.nostartutc - 10) {
-                    //if (point._) yield status;
                     continue;
                 }
 
                 // If the pilot has a specific utcStart time already then
                 // ignore before - this can happen if scored into soaringspot
                 if (status.utcStart && point.t < status.utcStart) {
-                    //                    if (point._) yield status;
                     continue;
                 }
 

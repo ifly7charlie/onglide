@@ -34,7 +34,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             const taskStatus: CalculatedTaskStatus = current;
 
             // Wait for the start
-            if (!taskStatus.utcStart) {
+            if (!current.startConfirmed && !current.startFound) {
                 if (flightStatus != taskStatus.flightStatus) {
                     flightStatus = taskStatus.flightStatus;
                     yield taskStatus;
