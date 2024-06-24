@@ -32,7 +32,7 @@ export function otherPilotsLayer(others: OtherPilotData, mapLight: boolean, map2
             position: [pos.lng, pos.lat, pos.a]
         };
     }).filter((p) => p.t > timeCutoff);
-    return new IconLayer<(typeof data)[0]>({
+    return new IconLayer<typeof data[0]>({
         id: 'other_pilots',
         data,
         getSize: map2d ? 14 : 12,

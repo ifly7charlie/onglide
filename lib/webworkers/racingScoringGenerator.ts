@@ -123,7 +123,11 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 const minLegStart = taskStatus.currentLeg;
                 let previousMinPoints = [taskStatus.lastProcessedPoint];
                 const finishLeg = task.legs.length - 1;
-                const finishPoint: BasePositionMessage = {t: finishLeg as Epoch, lat: task.legs[task.legs.length - 1].nlat, lng: task.legs[task.legs.length - 1].nlng} as BasePositionMessage;
+                const finishPoint: BasePositionMessage = {
+                    t: finishLeg as Epoch,
+                    lat: task.legs[task.legs.length - 1].nlat,
+                    lng: task.legs[task.legs.length - 1].nlng
+                } as BasePositionMessage;
 
                 for (let legno = taskStatus.currentLeg; legno <= finishLeg; legno++) {
                     // Points depend on the leg

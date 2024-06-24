@@ -93,7 +93,12 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
             console.log(`[${id}/${taskId}] Startline update: ${className} :${Object.keys(startsToSend).join(',')}`);
         }
         console.log(`[${id}/${taskId}] Score update: ${className} : ${Object.keys(mostRecentScores).join(',')} => ${changedScores.byteLength} bytes`);
-        console.log(`[${id}/${taskId}] Period: ${className} : [${new Date(oldestUpdate * 1000).toUTCString()}-${new Date(newestUpdate * 1000).toUTCString()}] ${oldestUpdate}-${newestUpdate} : ${Math.max(now - newestUpdate, now - oldestUpdate)}`);
+        console.log(
+            `[${id}/${taskId}] Period: ${className} : [${new Date(oldestUpdate * 1000).toUTCString()}-${new Date(newestUpdate * 1000).toUTCString()}] ${oldestUpdate}-${newestUpdate} : ${Math.max(
+                now - newestUpdate,
+                now - oldestUpdate
+            )}`
+        );
 
         oldestUpdate = Infinity;
         newestUpdate = 0;

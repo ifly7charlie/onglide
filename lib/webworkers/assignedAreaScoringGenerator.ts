@@ -1,6 +1,8 @@
 import Graph from '../flightprocessing/dijkstras';
 
-import {Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, EstimatedTurnType, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
+import type {Epoch, DistanceKM, AltitudeAMSL, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
+
+import {PositionStatus} from '../types';
 
 import {cloneDeep as _clonedeep, keyBy as _keyby, sortBy as _sortby} from 'lodash';
 
@@ -56,27 +58,26 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
     // Used to track if leg has changed since last calculation
     function legFingerPrint(leg: TaskLegStatus): string {
-        return String(leg.entryTimeStamp || '-') + ',' + (leg.exitTimeStamp || '-') + ',' + (leg.points?.length * 10000 + leg.penaltyPoints?.length || 'np');
+        return String(leg.entryTimeStamp || '-') + ',' + (leg.exitTimeStamp || '-') + ',' + ((leg?.points?.length ?? 0) * 10000 + leg.penaltyPoints?.length || 'np');
     }
 
     let scoredStatus: CalculatedTaskStatus;
     let flightStatus: PositionStatus | undefined = PositionStatus.Unknown;
-	
+
     for await (const current of taskStatusGenerator) {
         try {
             const taskStatus = (scoredStatus = current);
             log(current);
 
             // Wait for the start
-            if( ! current.startConfirmed && ! current.startFound ) {
+            if (!current.startConfirmed && !current.startFound) {
                 if (flightStatus != taskStatus.flightStatus) {
                     flightStatus = taskStatus.flightStatus;
                     yield taskStatus;
                 }
-				continue;
-			}
+                continue;
+            }
 
-			
             // If we have a new fingerprint then rescore required
             //        if( taskStatus.pointsProcessed! _some( taskStatus.legs, (l,i) => legFingerPrint(l) != aatLegStatus[i].fingerPrint )) {
             //            yield scores;

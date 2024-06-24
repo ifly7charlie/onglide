@@ -45,17 +45,7 @@ console.log('dev mode', dev);
 let db: ReturnType<typeof mysql>;
 
 // lodash
-import {
-    forEach,
-    reduce,
-    keyBy,
-    filter as _filter,
-    pick as _pick,
-    map as _map,
-    flatMap as _flatmap,
-    remove as _remove,
-    sortedIndex as _sortedIndex
-} from 'lodash';
+import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex} from 'lodash';
 
 //import _remove from 'lodash.remove';
 //import _groupby from 'lodash.groupby';
@@ -86,19 +76,7 @@ import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlandin
 
 import {setSiteTz, getSiteTz} from '../lib/flightprocessing/timehelper.js';
 
-import {
-    Epoch,
-    Datecode,
-    Compno,
-    FlarmID,
-    ClassName,
-    ClassName_Compno,
-    makeClassname_Compno,
-    ChannelName,
-    Task,
-    DeckData,
-    AirfieldLocation
-} from '../lib/types';
+import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
 // Where is the comp based
@@ -232,9 +210,7 @@ if (process.env.REPLAY) {
     };
 }
 
-console.log(
-    `Competition delay: ${compDelay} seconds, competition time: ${getNow()} = ${new Date(getNow() * 1000).toISOString()}, replay: ${replayBase > 0}`
-);
+console.log(`Competition delay: ${compDelay} seconds, competition time: ${getNow()} = ${new Date(getNow() * 1000).toISOString()}, replay: ${replayBase > 0}`);
 
 async function main() {
     if (error) {
@@ -461,28 +437,20 @@ async function main() {
         for (const channelName in channels) {
             const channel = channels[channelName];
 
-            channel.statistics.peakListeners = Math.max(
-                channel.statistics.peakListeners,
-                channel.statistics.activeListeners / channel.statistics.listenerCycles
-            );
+            channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, channel.statistics.activeListeners / channel.statistics.listenerCycles);
 
             console.log(
                 `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
             );
             console.log(
-                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(
-                    channel.statistics.totalViewingTime / 60
-                )}m total viewing time, peak ${channel.statistics.peakListeners}`
+                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${
+                    channel.statistics.peakListeners
+                }`
             );
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
-            trackAggregatedMetric(
-                channel.className,
-                'activeListeners',
-                channel.statistics.activeListeners / channel.statistics.listenerCycles,
-                channel.statistics.listenerCycles
-            );
+            trackAggregatedMetric(channel.className, 'activeListeners', channel.statistics.activeListeners / channel.statistics.listenerCycles, channel.statistics.listenerCycles);
 
             trackAggregatedMetric(channel.className, 'ogn.outOfOrderPackets', channel.statistics.outOfOrderPackets);
             trackAggregatedMetric(channel.className, 'ogn.insertedPackets', channel.statistics.insertedPackets);
@@ -671,13 +639,11 @@ async function updateTasks(): Promise<void> {
 
         if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
             console.log(
-                `new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${
-                    updatedTask?.details?.taskid || 'none'
-                } [${channel.datecode}] ${updatedTask?.legs?.reduce((a, l) => a + l.length, 0).toFixed(1)}km`
+                `new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs
+                    ?.reduce((a, l) => a + l.length, 0)
+                    .toFixed(1)}km`
             );
-            console.log(
-                `${channel.className}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`
-            );
+            console.log(`${channel.className}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
 
             // If it has a task stop it scoring and start the new task
             if (channel.task) {
@@ -807,19 +773,13 @@ async function updateTrackers(datecode: Datecode) {
 
     const newGlidersCount = Object.keys(gliders).length;
     if (removedGliders.length || updatedGliderCount || newGlidersCount != initialGliderCount) {
-        console.log(
-            `updatedTrackers: ${removedGliders.length} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${
-                newGlidersCount - initialGliderCount
-            } new`
-        );
+        console.log(`updatedTrackers: ${removedGliders.length} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
         console.log(`${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
     }
 
     // identify any competition numbers that may be duplicates and mark them.  This
     // will affect how we match from the DDB
-    const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>(
-        'SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1'
-    );
+    const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
     duplicates.forEach((d: {compno: string; count: number; classes: string}) => {
         d.classes.split(',').forEach((c) => {
             gliders[c + '_' + d.compno].duplicate = 1;
@@ -999,9 +959,7 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
     const trackMessage = OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish();
 
     console.log(
-        `${channel.className}/${glider.compno}: sending full track over websocket v${p.trackVersion} ${trackMessage.length} bytes, ${
-            channel.clients.length
-        } clients = ${trackMessage.length * channel.clients.length} bytes`
+        `${channel.className}/${glider.compno}: sending full track over websocket v${p.trackVersion} ${trackMessage.length} bytes, ${channel.clients.length} clients = ${trackMessage.length * channel.clients.length} bytes`
     );
 
     // Send the client the current version of the tracks, we don't care how long it takes (don't wait)
@@ -1059,11 +1017,7 @@ async function sendKeepalive(channel: Channel) {
     if (!channel.clients.length) {
         console.log(`${channel.className}: no clients subscribed`);
     } else {
-        console.log(
-            `${channel.className}: ${channel.clients.length} subscribed ${
-                Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2
-            }m avg time, ${channel.activeGliders.size} gliders airborne`
-        );
+        console.log(`${channel.className}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
     }
 
     // For sending the keepalive
@@ -1146,11 +1100,9 @@ async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<voi
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
     console.log(
-        `${channel.className}  ${firstTime ? 'first load' : 'reload'} all points for ${glider.compno} glider [${
-            rawpoints.length - points.length
-        } removed, ${points.length} loaded] ${glider.flarmIdRegex} ${timeToText(points[0]?.t)} to ${timeToText(
-            points[points.length - 1]?.t
-        )} @ ${timeToText(now)} - v${glider.deck.trackVersion.toString(16)}`
+        `${channel.className}  ${firstTime ? 'first load' : 'reload'} all points for ${glider.compno} glider [${rawpoints.length - points.length} removed, ${points.length} loaded] ${glider.flarmIdRegex} ${timeToText(
+            points[0]?.t
+        )} to ${timeToText(points[points.length - 1]?.t)} @ ${timeToText(now)} - v${glider.deck.trackVersion.toString(16)}`
     );
 
     // If it's not the first time then we need to update the channel with the track
@@ -1266,9 +1218,7 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
 
         // If it's another match for somebody we have matched then ignore it
         if (match.dbTrackerId != flarmId && match.dbTrackerId != 'unknown') {
-            unknownTrackers[
-                flarmId
-            ].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
+            unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
             console.log(unknownTrackers[flarmId].message);
             match.duplicate = 1;
             return;
@@ -1297,9 +1247,7 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
                     escape`UPDATE tracker SET trackerid = ${flarmId} WHERE
                                       compno = ${match.compno} AND class = ${match.className} AND trackerid="unknown" limit 1`
                 )
-                .query(
-                    escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), ${flarmId}, now(), "ognddb" )`
-                )
+                .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), ${flarmId}, now(), "ognddb" )`)
                 .commit();
         }
     }

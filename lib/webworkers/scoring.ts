@@ -85,7 +85,15 @@ export class ScoringController {
 
     // Load these points into scoring
     setInitialTrack(compno: Compno, handicap: number, utcStart: Epoch, points: PositionMessage[]) {
-        this.worker.postMessage({action: ScoringCommandEnum.initialTrack, className: this.className, datecode: this.datecode, compno, points, handicap, utcStart});
+        this.worker.postMessage({
+            action: ScoringCommandEnum.initialTrack,
+            className: this.className,
+            datecode: this.datecode,
+            compno,
+            points,
+            handicap,
+            utcStart
+        });
     }
 
     // This actually starts scoring for the task
@@ -98,7 +106,14 @@ export class ScoringController {
     }
 
     rescoreGlider(compno: Compno, handicap: number, utcStart: Epoch) {
-        this.worker.postMessage({action: ScoringCommandEnum.rescoreGlider, className: this.className, datecode: this.datecode, compno, handicap, utcStart});
+        this.worker.postMessage({
+            action: ScoringCommandEnum.rescoreGlider,
+            className: this.className,
+            datecode: this.datecode,
+            compno,
+            handicap,
+            utcStart
+        });
     }
 
     clearGlider(compno: Compno) {
@@ -315,7 +330,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) {
     const log =
-        glider.compno == '--'
+        glider.compno == '630'
             ? console.log
             : () => {
                   /*noop*/

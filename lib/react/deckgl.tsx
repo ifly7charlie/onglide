@@ -73,13 +73,7 @@ const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any
 //
 // Responsible for generating the deckGL layers
 //
-function makeLayers(
-    props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch},
-    sortKey: SortKey,
-    map2d: boolean,
-    mapLight: boolean,
-    fullPaths: boolean
-) {
+function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, sortKey: SortKey, map2d: boolean, mapLight: boolean, fullPaths: boolean) {
     if (!props.trackData) {
         console.log('missing layers');
         return [];
@@ -245,14 +239,9 @@ export default function MApp(props: {
     const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
 
     // Get coordinates on the screen for center point of view
-    const screenPoint = useMemo(
-        () => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0},
-        [props.viewport]
-    );
+    const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
 
-    const nextTp = selectedPilotData?.score?.utcFinish
-        ? 99
-        : selectedPilotData?.score?.currentLeg + (selectedPilotData?.score?.inSector ? 1 : 0) || 0;
+    const nextTp = selectedPilotData?.score?.utcFinish ? 99 : selectedPilotData?.score?.currentLeg + (selectedPilotData?.score?.inSector ? 1 : 0) || 0;
 
     const npol = !taskGeoJSON?.track?.features?.[0]
         ? null
@@ -284,12 +273,7 @@ export default function MApp(props: {
                 // Next point - if we haven't started or we have finished use the startline
 
                 // If we are user selected or we don't have a valid next point don't change anything
-                const fbearing =
-                    props.options.taskUp == 2 || !npol
-                        ? props.viewport.bearing
-                        : props.options.taskUp == 1
-                        ? bearing([lng, lat], npol, {final: false})
-                        : 0;
+                const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
 
                 const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
 

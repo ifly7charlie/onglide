@@ -492,7 +492,21 @@ function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
 
 //
 // Render the pilot
-const Pilot = memo(function Pilot({pilot, displayAs, displayUnits, displayIcon, selected, onClick}: {pilot: API_ClassName_Pilots_PilotDetail; displayAs: string; displayUnits: string; displayIcon: any; selected: boolean; onClick: any}) {
+const Pilot = memo(function Pilot({
+    pilot,
+    displayAs,
+    displayUnits,
+    displayIcon,
+    selected,
+    onClick
+}: {
+    pilot: API_ClassName_Pilots_PilotDetail;
+    displayAs: string;
+    displayUnits: string;
+    displayIcon: any;
+    selected: boolean;
+    onClick: any;
+}) {
     const className = selected ? 'small-pic pilot pilothovercapture selected' : 'small-pic pilot pilothovercapture';
 
     // Render the normal pilot icon

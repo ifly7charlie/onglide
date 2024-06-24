@@ -21,7 +21,26 @@ export interface ShortDisplayKeys {
     icon: string | any;
 }
 
-export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'delay' | 'ald' | 'ld' | 'done' | 'auto' | 'times';
+export type SortKey =
+    | 'speed'
+    | 'aspeed'
+    | 'fspeed'
+    | 'climb'
+    | 'remaining'
+    | 'aremaining'
+    | 'distance'
+    | 'adistance'
+    | 'height'
+    | 'aheight'
+    | 'start'
+    | 'finish'
+    | 'duration'
+    | 'delay'
+    | 'ald'
+    | 'ld'
+    | 'done'
+    | 'auto'
+    | 'times';
 
 export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreData, trackData: TrackData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ) {
     //
