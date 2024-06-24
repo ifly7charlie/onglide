@@ -64,7 +64,7 @@ const Menu = memo(
 
         return (
             <>
-                <Navbar bg="light" expand="md" fixed="top">
+                <Navbar bg="light" expand="lg" fixed="top">
                     <Navbar.Brand className="d-lg-none">
                         <FontAwesomeIcon icon={faLink} />
                         <Nbsp />
@@ -81,13 +81,10 @@ const Menu = memo(
                         </Nav.Link>
                     </Navbar.Brand>
                     <Navbar.Toggle aria-controls="responsive-nav-bar" />
-                    <Navbar.Collapse id="responsive-nav-bar">
-                        <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
+                    <Navbar.Collapse id="responsive-nav-bar" className="justify-content-end">
+                        <Nav fill variant="underline" defaultActiveKey={props.vc} style={{width: '40vw'}}>
                             {classes}
                         </Nav>
-                        <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                            <Nav.Link href={comp.competition.mainwebsite} className="d-xs-block d-sm-block d-lg-none" style={{overflow: 'none'}}></Nav.Link>
-                        </Nav.Item>
                         <Nav.Item key="settings">
                             <Options {...props} multipleClasses={comp.classes.length > 1} />
                         </Nav.Item>
@@ -159,7 +156,14 @@ export default function CombinePage(props) {
                 <Head>
                     <title>{comp.competition.name}</title>
                 </Head>
-                <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
+                <Menu //
+                    comp={comp}
+                    vc={className}
+                    setSelectedPilot={setSelectedCompno}
+                    measureFeatures={measureFeatures}
+                    options={props.options}
+                    setOptions={props.setOptions}
+                />
                 <h1>Please choose a class from the menu bar</h1>
             </>
         );
