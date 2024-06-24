@@ -466,7 +466,7 @@ export default function MApp(props: {
         <Map //
             initialViewState={{...props.viewport, ...viewOptions}}
             onMove={onViewStateChange}
-            onLoad={fixupMap}
+            onStyleData={fixupMap}
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
             reuseMaps={true}
