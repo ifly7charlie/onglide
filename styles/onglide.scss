@@ -184,6 +184,7 @@ body {
         overflow-y: auto;
         overflow-x: clip;
         max-height: 40vh;
+        z-index: 20;
     }
     .navbar {
         --bs-navbar-padding-y: 0.15rem;
