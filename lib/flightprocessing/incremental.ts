@@ -2,7 +2,7 @@ import {sortedIndex as _sortedIndex} from 'lodash';
 
 import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants';
 
-import {Compno, PositionMessage, PilotTrackData, Epoch, DeckData, VarioData} from '../types';
+import {Compno, PositionMessage, PilotTrackData, DisplayPilotTrackData, Epoch, DeckData, VarioData} from '../types';
 import {PilotPosition} from '../protobuf/onglide';
 
 /*
@@ -16,14 +16,8 @@ export function checkGrey(pilotsGeoJSON, timestamp) {
 }
 */
 
-const oneHalfYearIsh = 3600 * 24 * 180;
-const referenceDate =
-    (process.env.NEXT_PUBLIC_REPLAY //
-        ? parseInt(process.env.NEXT_PUBLIC_REPLAY) - (parseInt(process.env.NEXT_PUBLIC_REPLAY) % oneHalfYearIsh)
-        : new Date(Date.now() - (Date.now() % (oneHalfYearIsh * 1000))).getTime() / 1000) - oneHalfYearIsh;
-
 // Helper fro resizing TypedArrays so we don't end up with them being huge
-function resize<T extends Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
+export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
     let c = new allocator(b);
     c.set(a);
     return c;
@@ -36,7 +30,6 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
         indices: new Uint32Array(deckSegmentIncrement),
         agl: new Int16Array(deckPointIncrement),
         t: new Uint32Array(deckPointIncrement),
-        tr: new Uint32Array(deckPointIncrement),
         climbRate: new Int8Array(deckPointIncrement),
         posIndex: 0,
         trackVersion
@@ -57,7 +50,6 @@ export function generateIndices(deck?: DeckData) {
     }
     deck.indices[0] = 0;
     deck.segmentIndex = 1;
-    deck.tr[0] = deck.t[0] - referenceDate;
     for (let i = 1; i < deck.posIndex; i++) {
         if (deck.t[i] - lastTime > gapLength) {
             deck.indices[deck.segmentIndex++] = i;
@@ -68,11 +60,10 @@ export function generateIndices(deck?: DeckData) {
         if (deck.segmentIndex + 2 >= deck.indices.length) {
             deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
         }
-        deck.tr[i] = deck.t[i] - referenceDate;
     }
 }
 
-export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true, now = Date.now() / 1000): boolean {
+export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true, now = Date.now() / 1000): false | {start: number; end: number} {
     // Ignore if before start
     let lastTime: number | null = null;
 
@@ -94,13 +85,13 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
 
     // Now we will work with this data
     const deck = glider.deck;
+    const start = deck.posIndex;
 
     // Resize required
     if (deck.posIndex >= deck.t.length) {
         const newLength = deck.posIndex + deckPointIncrement;
         deck.positions = resize(Float32Array, deck.positions, newLength * 3);
         deck.t = resize(Uint32Array, deck.t, newLength);
-        deck.tr = resize(Uint32Array, deck.tr, newLength);
         deck.agl = resize(Int16Array, deck.agl, newLength);
         deck.climbRate = resize(Int8Array, deck.climbRate, newLength);
     }
@@ -112,7 +103,6 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     function pushPoint(positions: Float32Array | number[], g: number, t: number) {
         deck.positions.set(positions, deck.posIndex * 3);
         deck.t[deck.posIndex] = t;
-        deck.tr[deck.posIndex] = t - referenceDate;
         deck.agl[deck.posIndex] = g;
         //		deck.colours.set( [ 64, 64, 64 ], deck.posIndex*3 );
         deck.posIndex++;
@@ -144,15 +134,6 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     // Push the new point into the data array
     pushPoint([point.lng, point.lat, point.a], point.g, point.t);
 
-    // Generate the recent track for the glider
-    /*    let recentOldest = deck.recentIndices[0];
-    while (point.t - deck.t[recentOldest] > gapLength && recentOldest < deck.posIndex) {
-        recentOldest++;
-    }
-    deck.recentIndices[0] = recentOldest;
-    deck.recentIndices[1] = deck.posIndex;
-*/
-
     // Update the altitude and height AGL for the pilot
     // Mutate the vario and altitude back into SWR
     const cp: any = glider.vario || {min: Infinity, max: 0};
@@ -177,24 +158,24 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         console.log(_e);
     }
 
-    return true;
+    return {start, end: deck.posIndex};
 }
 
 //
 // If the pilot has started we can prune before the startline
-export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
+export function pruneStartline(deck: DeckData, startTime: Epoch): number | undefined {
     //    console.log('pruneStartline', deck.compno, startTime);
     // Keep 30 seconds before start
     if (!deck || deck.t[0] >= startTime) {
         //        console.log(`can't prune startline for ${deck?.compno} first point later than startTime ${startTime}`);
-        return false;
+        return undefined;
     }
 
     // Find the point in the array of times
     let indexRemove = _sortedIndex(deck.t.subarray(0, deck.posIndex - 1), startTime);
     if (!indexRemove || indexRemove == deck.posIndex - 1) {
         console.log(`can't prune startline for ${deck.compno} no enough points yet ${indexRemove} == ${deck.posIndex}-1 [${deck.t[deck.posIndex - 1]} <= ${startTime}`);
-        return false;
+        return undefined;
     }
 
     // Find the index into the segments that is the index or above
@@ -238,10 +219,9 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): boolean {
     deck.positions = deck.positions.slice(indexRemove * 3);
     deck.agl = deck.agl.slice(indexRemove);
     deck.t = deck.t.slice(indexRemove);
-    deck.tr = deck.tr.slice(indexRemove);
     deck.climbRate = deck.climbRate.slice(indexRemove);
 
-    return true;
+    return indexRemove;
 }
 
 export function updateVarioFromDeck(deck: DeckData, vario: VarioData): [Epoch, VarioData] {

@@ -273,6 +273,35 @@ export interface VarioData {
     delay: number;
 }
 
+export type SortKey =
+    | 'speed'
+    | 'aspeed'
+    | 'fspeed'
+    | 'climb'
+    | 'remaining'
+    | 'aremaining'
+    | 'distance'
+    | 'adistance'
+    | 'height'
+    | 'aheight'
+    | 'start'
+    | 'finish'
+    | 'duration'
+    | 'delay'
+    | 'ald'
+    | 'ld'
+    | 'done'
+    | 'auto'
+    | 'times';
+
+export interface DisplayPilotTrackData extends PilotTrackData {
+    deckAdditional: {
+        tr: Uint32Array;
+        colours: Uint8Array | null;
+        sortKey: SortKey;
+    };
+}
+
 export interface PilotTrackData {
     compno: Compno;
     deck?: DeckData;
@@ -284,7 +313,7 @@ export {PilotScore, PilotScoreLeg} from './protobuf/onglide';
 import {PilotScore} from './protobuf/onglide';
 import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 
-export type TrackData = Record<Compno, PilotTrackData>;
+export type TrackData = Record<Compno, DisplayPilotTrackData>;
 export type ScoreData = Record<Compno, PilotScore>;
 
 export type OtherPilotData = Record<ClassName_Compno, PositionMessage>;
@@ -361,7 +390,7 @@ export interface Options {
     taskUp: 0 | 1 | 2;
     follow: boolean;
     zoomTask: boolean;
-    sortOrder: string;
+    sortKey: SortKey;
     showOthers: boolean;
     constructionLines?: boolean;
     fullPaths?: boolean;

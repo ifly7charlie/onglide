@@ -4,7 +4,7 @@ import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus} from '../types';
+import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus, Options, SortKey} from '../types';
 
 import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
@@ -20,7 +20,7 @@ import {delayToText} from './timehelper.js';
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map, cloneDeep as _cloneDeep} from 'lodash';
 
 // Helpers for sorting pilot list
-import {updateSortKeys, nextSortOrder, getValidSortOrder, isValidSortOrder, ShortDisplayKeys, SortKey} from './pilot-sorting';
+import {updateSortKeys, nextSortOrder, getValidSortOrder} from './pilot-sorting';
 import {displayHeight, convertHeight, convertClimb} from './displayunits';
 
 function isoCountryCodeToFlagEmoji(country: string) {
@@ -551,7 +551,7 @@ export function PilotList({
     trackData: TrackData;
     selectedPilot: Compno;
     setSelectedCompno: Function;
-    options: any;
+    options: Options;
     setOptions: Function;
     handicapped: boolean;
     now: Epoch;

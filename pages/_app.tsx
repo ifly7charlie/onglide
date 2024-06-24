@@ -20,7 +20,7 @@ const defaultOptions: Options = {
     taskUp: 0,
     follow: true,
     zoomTask: true,
-    sortOrder: 'auto',
+    sortKey: 'auto',
     showOthers: true,
     options2d: {taskUp: 0, mapType: 0, follow: true},
     options3d: {taskUp: 1, mapType: 1, follow: true}

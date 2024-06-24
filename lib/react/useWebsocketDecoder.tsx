@@ -1,4 +1,16 @@
-import type {ClassName, ClassName_Compno, PositionMessage, Datecode, TrackData, ScoreData, OtherPilotData, PilotScoreDisplay, DeckData, Compno} from '../types';
+import type {
+    ClassName,
+    SortKey,
+    PositionMessage,
+    Datecode,
+    TrackData, //
+    DisplayPilotTrackData,
+    ScoreData,
+    OtherPilotData,
+    PilotScoreDisplay,
+    DeckData,
+    Compno
+} from '../types';
 import {makeClassname_Compno} from '../types';
 
 import {useState} from 'react';
@@ -11,12 +23,26 @@ import {assembleLabeledLine} from './distanceLine';
 import {mergePoint, pruneStartline, updateVarioFromDeck, generateIndices} from '../flightprocessing/incremental';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
+import {mergeVHPoint, initaliseVH, pruneVHStartline} from './deckvh';
 
 export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function}) {
     const [trackData, setTrackData] = useState<TrackData>({});
     const [pilotScores, setPilotScores] = useState<ScoreData>({});
     const [otherPilots, setOtherPilots] = useState<OtherPilotData>({});
     const [identifiers, setIdentifiers] = useState<Identifiers>({class: '', datecode: '', competition: ''});
+
+    const updateSortKey = (sortKey: SortKey) => {
+        setTrackData(
+            _reduce(
+                trackData ?? {},
+                (result, p) => {
+                    initaliseVH(p, sortKey);
+                    return result;
+                },
+                trackData ?? {}
+            )
+        );
+    };
 
     const decoder = async (data: Buffer): Promise<void> => {
         return new Response(data).arrayBuffer().then(async (ab) => {
@@ -113,7 +139,10 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
 
                             // If they have a more recent start then we need to prune and re-do the iterator
                             if (trackData[compno]?.deck && result[compno] && result[compno].utcStart < p.utcStart) {
-                                pruneStartline(trackData[compno].deck, pilotScores[compno].utcStart);
+                                const pruneTo = pruneStartline(trackData[compno].deck, pilotScores[compno].utcStart);
+                                if (pruneTo) {
+                                    pruneVHStartline(trackData[compno], pruneTo);
+                                }
                             }
 
                             // Save into the pilot structure
@@ -156,7 +185,7 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
         });
     };
 
-    return {trackData, pilotScores, otherPilots, decoder};
+    return {trackData, pilotScores, otherPilots, decoder, updateSortKey};
 }
 
 function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, setTrackData: (a: TrackData) => void, pilotScores: ScoreData) {
@@ -245,6 +274,7 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                 // Store away and update the vario
                 result[compno].deck = deck;
                 [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
+                initaliseVH(result[compno], 'unknown' as SortKey);
                 Object.assign(trackData[compno], result[compno]);
                 return result;
             },
@@ -259,7 +289,7 @@ function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
     }
     // We need to do a deep clone for the change detection to work
     const compno = point.c;
-    let cp = trackData?.[compno];
+    const cp: DisplayPilotTrackData | undefined = trackData[compno];
 
     // If we don't no the pilot we'll discard - this could mean we miss a point or
     // two when connecting but eliminates ghosts when changing channel
@@ -267,7 +297,12 @@ function mergePointToPilot(point: PilotPosition, trackData: TrackData) {
         return;
     }
 
-    // Merge into the geoJSON objects as needed
-    mergePoint(point, cp, false);
-    cp.deck?.dataPromiseResolve?.();
+    // Merge into the deck objects
+    const result = mergePoint(point, cp, false);
+    if (result !== false) {
+        mergeVHPoint(point, cp, result.start);
+        if (result.start + 1 != result.end) {
+            mergeVHPoint(point, cp, result.start + 1);
+        }
+    }
 }

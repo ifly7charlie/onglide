@@ -38,14 +38,14 @@ import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
 
-import {SortKey} from './pilot-sorting';
+import {SortKey} from '../types';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
 import {OgnTripsLayer} from './ogntripslayer';
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
-import {turnpointLayer} from './turnpointlayer';
+//import {turnpointLayer} from './turnpointlayer';
 
 // Figure out the baseline date
 const oneHalfYearIsh = 3600 * 24 * 180;
@@ -60,17 +60,21 @@ const referenceDate =
 // helps with touch scroll on laptops (undocumented)
 //const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
 
-import {colourise} from './colourise';
+//import {colourise} from './colourise';
 
-const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any) => number[]) | number[]> = {
-    auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]),
-    climb:
+const selectedColour = (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]);
+const complexColours = {height: true, aheight: true, climb: true};
+
+//const colours: Record<string, (mapLight: boolean, selected: boolean) => ((_d: never, oi: any) => number[][]) | ((d: any) => number[]) | number[]> = {
+//    auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224])
+/*    climb:
         (_mapLight: boolean, _selected: boolean) =>
-        (d): number[] =>
-            colourise(Math.min(255, Math.max(0, d.v * -12.5 + 128))),
+        (_d, oi): number[][] => {
+            return oi.data.v.map((v) => colourise(Math.min(255, Math.max(0, 0 * -12.5 + 128))));
+        },
     height: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.p[1][2] >> 5) * 35)),
-    aheight: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.g >> 5) * 35))
-};
+    aheight: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.g >> 5) * 35))*/
+
 //
 // Responsible for generating the deckGL layers
 //
@@ -100,8 +104,7 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 trailLength: recentTrackLength
             };
 
-            const sortKeyColour = colours[sortKey] ? sortKey : 'auto';
-            const colour = colours[!props.selectedCompno || selected ? sortKeyColour : 'auto'](mapLight, selected);
+            //            console.log(track.deckAdditional);
 
             result.push(
                 new OgnTripsLayer({
@@ -117,23 +120,27 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                         p: p.positions,
                         attributes: {
                             getPath: {value: p.positions, size: 3}, // , size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0},
-                            getTimestamps: {value: p.tr, size: 1}
+                            getTimestamps: {value: track.deckAdditional.tr, size: 1},
+                            getColor: complexColours[sortKey] ? {value: track.deckAdditional.colours, size: 3} : undefined
                         }
                     },
                     _pathType: 'open',
                     getWidth: selected ? 8 : 5,
                     positionFormat: 'XYZ',
-                    getColor: colour as any,
                     jointRounded: true,
                     fp64: false,
                     billboard: map2d ? false : true,
                     widthMinPixels: selected ? 3 : 2,
+                    getColor: complexColours[sortKey] ? undefined : selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224],
+                    dataComparator: (newData: any, oldData: any) => newData.numberOfPoints == oldData.numberOfPoints,
+                    _dataDiff: (newData: any, oldData: any) => [{startRow: oldData.length - 1, endRow: newData.length}],
                     onClick: (i) => {
                         props.setSelectedCompno(compno);
                     },
                     updateTriggers: {
                         getPath: p.posIndex,
-                        getColor: sortKeyColour + mapLight + (selected ? 's' : '') + (props.selectedCompno ? 'y' : '')
+                        getColor: [track.deckAdditional.sortKey, mapLight, selected],
+                        getWidth: selected
                     },
                     pickable: true,
                     tt: true,

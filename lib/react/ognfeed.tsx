@@ -17,7 +17,7 @@ import useWebSocket from 'react-use-websocket';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-import {Epoch, TZ, Compno, ClassName, Datecode, SelectedPilotDetails} from '../types';
+import {SortKey, Options, Epoch, TZ, Compno, ClassName, Datecode, SelectedPilotDetails} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
@@ -80,7 +80,7 @@ export const OgnFeed = memo(
         viewport: any;
         setViewport: Function;
         measureFeatures: UseMeasure;
-        options: any;
+        options: Options;
         setOptions: Function;
         handicapped: any;
         notes: string;
@@ -93,7 +93,7 @@ export const OgnFeed = memo(
 
         const mergeWsStatus = useCallback((state: any) => setWsStatus({...wsStatus, ...state}), [wsStatus, setWsStatus]);
 
-        const {trackData, pilotScores, otherPilots, decoder} = useWebsocketDecoder({mergeWsStatus});
+        const {trackData, pilotScores, otherPilots, decoder, updateSortKey} = useWebsocketDecoder({mergeWsStatus});
 
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
@@ -103,6 +103,11 @@ export const OgnFeed = memo(
                 setSocketUrl(proposedUrl(vc, datecode));
             }
         }, [vc, datecode, socketUrl]);
+
+        // Make sure we have colouring if our sort key requires it
+        useEffect(() => {
+            updateSortKey(options.sortKey);
+        }, [options.sortKey, Object.keys(trackData).length]);
 
         // We are using a webSocket to update our data here
         const {sendMessage} = useWebSocket(socketUrl, {

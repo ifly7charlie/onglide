@@ -13,9 +13,7 @@
 // joining or smoothing which is less than ideal
 //
 
-import type {LayerData} from '@deck.gl/core';
 import {TripsLayer} from '@deck.gl/geo-layers';
-import GL from '@luma.gl/constants';
 
 interface OgnTripsData {
     length: number;

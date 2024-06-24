@@ -59,8 +59,6 @@ export function pilotsLayer(trackData: TrackData, selectedCompno: Compno, setSel
         };
     });
 
-    console.log(data);
-
     if (data.length) {
         return new IconLayer<(typeof data)[0]>({
             id: 'labels',
