@@ -313,7 +313,7 @@ export default function MApp(props: {
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
-        return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle3d(selectedPilotData?.score, mapLight);
+        return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle2d(selectedPilotData?.score, mapLight);
     }, [selectedCompno, selectedPilotData?.score?.currentLeg, selectedPilotData?.score?.utcFinish, mapLight, map2d]);
 
     // Do we have a loaded set of details?
@@ -369,7 +369,7 @@ export default function MApp(props: {
     const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, mapLight, map2d, props.t) : null;
 
     // And the turnpoints
-    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
+    //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
     // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
     // much quicker than changing the style.
@@ -404,12 +404,18 @@ export default function MApp(props: {
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
-                layers={[tpLayer, ...layers, pilotLayer, otherPilotLayer]} //
+                layers={[...layers, pilotLayer, otherPilotLayer]} //
                 interleaved={!map2d}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (
                 <Source type="geojson" data={taskGeoJSON.Dm} key="y">
                     <Layer {...DmPointStyle} />
+                </Source>
+            ) : null}
+            {valid ? (
+                <Source type="geojson" id="x" data={taskGeoJSONtp}>
+                    <Layer {...turnpointStyleFlat} key="tps" />
+                    <Layer {...turnpointStyle} key="tgjp" />
                 </Source>
             ) : null}
             {valid ? (
