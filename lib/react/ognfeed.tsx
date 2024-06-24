@@ -40,7 +40,7 @@ const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     loading: () => (
         <div style={{width: '100vw', marginTop: '20vh', position: 'absolute'}}>
             <div style={{display: 'block', margin: 'auto', width: '100px'}}>
-                <img width="100" height="100" src="http://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />
+                <img width="100" height="100" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />
             </div>
         </div>
     )
@@ -85,8 +85,6 @@ export const OgnFeed = memo(
         handicapped: any;
         notes: string;
     }) {
-        //        const [trackData, setTrackData] = useState<TrackData>({});
-        //        const [pilotScores, setPilotScores] = useState<ScoreData>({});
         const {pilots, isPLoading} = usePilots(vc);
         const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
