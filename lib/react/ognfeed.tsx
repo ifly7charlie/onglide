@@ -13,21 +13,20 @@ import {usePilots} from './loaders';
 
 import {Nbsp} from './htmlhelper';
 
-import useWebSocket, {ReadyState} from 'react-use-websocket';
+import useWebSocket from 'react-use-websocket';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-import {Epoch, TZ, Compno, ClassName, Datecode, TrackData, ScoreData, SelectedPilotDetails, PilotScoreDisplay, DeckData} from '../types';
+import {Epoch, TZ, Compno, ClassName, Datecode, SelectedPilotDetails} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
+import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
 //import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
 import {OptionalDurationMM} from './optional';
 
-import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import Sponsors from './sponsors';
 import {UseMeasure} from './measure';
 
@@ -94,7 +93,9 @@ export const OgnFeed = memo(
         const [follow, setFollow] = useState(false);
         const router = useRouter();
 
-        const {trackData, pilotScores, otherPilots, decoder} = useWebsocketDecoder({setWsStatus});
+        const mergeWsStatus = useCallback((state: any) => setWsStatus({...wsStatus, ...state}), [wsStatus, setWsStatus]);
+
+        const {trackData, pilotScores, otherPilots, decoder} = useWebsocketDecoder({mergeWsStatus});
 
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
@@ -110,7 +111,7 @@ export const OgnFeed = memo(
             reconnectAttempts: 15,
             reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
             retryOnError: true,
-            onOpen: (_a) => setWsStatus({...wsStatus, state: 'open', retry: 0}),
+            onOpen: (_a) => mergeWsStatus({state: 'open', retry: 0}),
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
                 if (lastMessage.data === 'reload') {
@@ -122,15 +123,15 @@ export const OgnFeed = memo(
                     };
                     setTimeout(() => router.replace(newParams), (1 << currentReloadCount) * 1000);
                 } else {
-                    decoder(lastMessage.data, wsStatus);
+                    decoder(lastMessage.data);
                 }
             },
 
             onError: (a) => {
                 console.warn(a, wsStatus);
-                wsStatus.state != 'closed' ? setWsStatus({...wsStatus, state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
+                wsStatus.state != 'closed' ? mergeWsStatus({state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
             },
-            onReconnectStop: (_numAttempts) => setWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
+            onReconnectStop: (_numAttempts) => mergeWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
         });
 
         // Do we have a loaded set of details?

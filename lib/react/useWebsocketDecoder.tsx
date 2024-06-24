@@ -12,13 +12,13 @@ import {mergePoint, pruneStartline, updateVarioFromDeck, generateIndices} from '
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-export function useWebsocketDecoder({setWsStatus}: {setWsStatus?: Function}) {
+export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function}) {
     const [trackData, setTrackData] = useState<TrackData>({});
     const [pilotScores, setPilotScores] = useState<ScoreData>({});
     const [otherPilots, setOtherPilots] = useState<OtherPilotData>({});
     const [identifiers, setIdentifiers] = useState<Identifiers>({class: '', datecode: '', competition: ''});
 
-    const decoder = async (data: Buffer, wsStatus: any): Promise<void> => {
+    const decoder = async (data: Buffer): Promise<void> => {
         return new Response(data).arrayBuffer().then(async (ab) => {
             const decoded = OnglideWebSocketMessage.decode(new Uint8Array(ab));
             if (!decoded) {
@@ -74,7 +74,7 @@ export function useWebsocketDecoder({setWsStatus}: {setWsStatus?: Function}) {
                     // We get the initial URL and then decode it the same as if it is from the websocket as it is the same format (recursive)
                     await fetch(oldTracksUrl(identifiers.class as ClassName, identifiers.datecode as Datecode, decoded.tracks.baseTime.toString())) //
                         .then((res) => res.arrayBuffer())
-                        .then(async (ab) => decoder(Buffer.from(ab), wsStatus))
+                        .then(async (ab) => decoder(Buffer.from(ab)))
                         .then(() => {
                             console.log('updating track remainders (wss)');
                             updateTracks(decoded, trackData, setTrackData, pilotScores);
@@ -145,17 +145,17 @@ export function useWebsocketDecoder({setWsStatus}: {setWsStatus?: Function}) {
                 setOtherPilots(otherPilots);
             }
 
-            if (decoded.ka && setWsStatus) {
-                setWsStatus({...wsStatus, ...decoded.ka});
+            if (decoded.ka) {
+                mergeWsStatus(decoded.ka);
             }
 
-            if (decoded.t && setWsStatus) {
-                setWsStatus({...wsStatus, at: decoded.t});
+            if (decoded.t) {
+                mergeWsStatus({at: decoded.t});
             }
         });
     };
 
-    return {trackData, pilotScores, otherPilots, ...(setWsStatus ? {decoder} : {})};
+    return {trackData, pilotScores, otherPilots, decoder};
 }
 
 function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, setTrackData: (a: TrackData) => void, pilotScores: ScoreData) {
