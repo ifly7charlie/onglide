@@ -175,9 +175,6 @@ export default function CombinePage(props) {
                 <title>
                     {comp.competition.name} - {className}
                 </title>
-                <meta name="viewport" content="width=device-width, minimal-ui" />
-                <link rel="manifest" href="/manifest.json" />
-                <link href="//api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
             </Head>
             <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
             <div className="resizingContainer">
@@ -208,7 +205,13 @@ export async function getServerSideProps(context) {
         const classes = await query(escape`SELECT class FROM classes ORDER BY class`);
 
         return {
-            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : ''}
+            props: {
+                lat: location?.lt || 51,
+                lng: location?.lg || 0,
+                tzoffset: location?.tzoffset || 0,
+                tz: location?.tz || 'Etc/UTC',
+                defaultClass: classes && classes.length > 0 ? classes[0].class : ''
+            }
         };
     } catch (e) {
         console.log(e);
