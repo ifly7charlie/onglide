@@ -26,7 +26,7 @@ interface OgnTripsData {
     g: Int16Array;
 }
 
-export class OgnTripsLayer extends TripsLayer<LayerData<OgnTripsData>> {
+export class OgnTripsLayer extends TripsLayer {
     constructor(a) {
         super(a);
     }
@@ -47,11 +47,12 @@ export class OgnTripsLayer extends TripsLayer<LayerData<OgnTripsData>> {
     // colour is then used to figure out what has been picked. We use the index
     // from the start of the timing array to determine the picking colour
     calculatePickingColors(attribute) {
+        const data = this.props.data as OgnTripsData;
         if (!attribute.state.needsUpdate) {
             return;
         }
         const {value} = attribute;
-        for (let i = 0; i < this.props.data.numberOfPoints; i++) {
+        for (let i = 0; i < data.numberOfPoints; i++) {
             const pickingColor = super.encodePickingColor(i);
             value[i * 3] = pickingColor[0];
             value[i * 3 + 1] = pickingColor[1];
