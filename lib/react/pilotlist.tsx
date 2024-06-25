@@ -85,7 +85,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
             {data2?.value !== undefined && data2.value !== null ? (
                 <div className="summarycomponent">
                     <div className="data-text">{data2.value}</div>
-                    <div className="units">{data2.units ?? ' '}</div>
+                    {data2.units ? <div className="units">{data2.units}</div> : null}
                     {data2.icon ? (
                         <div className="data-icon">
                             <a href="#" title={data2.description} className="tooltipicon">
