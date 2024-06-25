@@ -43,15 +43,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; meas
     const toggleShowOthers = () => {
         props.setOptions(_cloneDeep({...props.options, showOthers: !props.options.showOthers}));
     };
-
-    return (
-        <div className="options">
-            <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
-                <FontAwesomeIcon icon={solid('umbrella')} />
-                &nbsp;
-                <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
-            </button>
-            &nbsp;
+    /*
             {!isMeasuring(props.measureFeatures) ? (
                 <button title="Click to measure" onClick={toggleMeasure(props.measureFeatures)}>
                     <FontAwesomeIcon icon={solid('ruler')} />
@@ -63,7 +55,15 @@ export function Options(props: {options: OptionsType; setOptions: Function; meas
                         <FontAwesomeIcon icon={solid('ruler')} />
                     </span>
                 </button>
-            )}
+            )}*/
+
+    return (
+        <div className="options">
+            <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
+                <FontAwesomeIcon icon={solid('umbrella')} />
+                &nbsp;
+                <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
+            </button>
             &nbsp;
             {props.options.constructionLines ? (
                 <button title="Click to hide Construction Lines" onClick={constructionLines}>
