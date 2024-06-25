@@ -58,7 +58,6 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
                     identifiers.datecode = decoded.identifiers.datecode as Datecode;
                     Object.keys(trackData).forEach((key) => delete trackData[key]);
                     Object.keys(pilotScores).forEach((key) => delete pilotScores[key]);
-                    Object.keys(otherPilots).forEach((key) => delete otherPilots[key]);
                     setTrackData({});
                     setPilotScores({});
                     setIdentifiers(decoded.identifiers);
@@ -159,19 +158,13 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
                 // Update the current class
                 decoded.positions.class[identifiers.class]?.positions?.forEach((p) => mergePointToPilot(p, trackData));
 
-                // And now generate the extras
-                for (const classname of Object.keys(decoded.positions.class).filter((n) => n != identifiers.class) as ClassName[]) {
-                    //                    setOtherPilots(
-                    _reduce(
-                        decoded.positions.class[classname].positions,
-                        (all, pos) => {
-                            all[makeClassname_Compno(classname, pos.c as Compno)] = pos as PositionMessage;
-                            return all;
-                        },
-                        otherPilots
-                    );
-                    //                    );
-                }
+                // And now update our other pilots list
+                Object.entries(decoded.positions.class).forEach(
+                    (
+                        [className, {positions}] //
+                    ) => positions.forEach((pos) => (otherPilots[makeClassname_Compno(className as ClassName, pos.c as Compno)] = pos as PositionMessage))
+                );
+
                 setOtherPilots(otherPilots);
             }
 

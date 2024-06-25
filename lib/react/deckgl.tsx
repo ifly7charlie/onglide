@@ -104,8 +104,6 @@ function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSel
                 trailLength: recentTrackLength
             };
 
-            //            console.log(track.deckAdditional);
-
             result.push(
                 new OgnTripsLayer({
                     id: compno + p.trackVersion,
@@ -373,7 +371,7 @@ export default function MApp(props: {
     const pilotLayer = pilotsLayer(props.trackData, selectedCompno, props.setSelectedCompno, props.t);
 
     // If we are displaying other pilots
-    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, mapLight, map2d, props.t) : null;
+    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, vc, mapLight, map2d, props.t) : null;
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);

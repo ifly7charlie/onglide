@@ -1,4 +1,4 @@
-import type {Epoch, OtherPilotData} from '../types';
+import type {Epoch, OtherPilotData, ClassName} from '../types';
 
 import {IconLayer} from '@deck.gl/layers';
 
@@ -22,7 +22,7 @@ function faToData(f: any) {
 
 const otherUrl = () => faToData(faCircleUser);
 
-export function otherPilotsLayer(others: OtherPilotData, mapLight: boolean, map2d: boolean, now: Epoch) {
+export function otherPilotsLayer(others: OtherPilotData, vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch) {
     const timeCutoff = (now - 180) as Epoch;
     const data = _map(others, (pos, key) => {
         return {
@@ -31,8 +31,9 @@ export function otherPilotsLayer(others: OtherPilotData, mapLight: boolean, map2
             ...pos,
             position: [pos.lng, pos.lat, pos.a]
         };
-    }).filter((p) => p.t > timeCutoff);
-    return new IconLayer<typeof data[0]>({
+    }).filter((p) => p.t > timeCutoff && p.className != vc);
+
+    return new IconLayer<(typeof data)[0]>({
         id: 'other_pilots',
         data,
         getSize: map2d ? 14 : 12,
