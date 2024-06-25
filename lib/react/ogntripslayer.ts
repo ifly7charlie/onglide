@@ -19,12 +19,12 @@ interface OgnTripsData {
     length: number;
     numberOfPoints: number;
     startIndices: Uint32Array;
-    timing: Uint32Array;
-    climbRate: Uint8Array;
+    t: Uint32Array;
+    v: Uint8Array;
     g: Int16Array;
 }
 
-export class OgnTripsLayer extends TripsLayer {
+export class OgnTripsLayer extends TripsLayer<OgnTripsData> {
     constructor(a) {
         super(a);
     }
@@ -44,7 +44,7 @@ export class OgnTripsLayer extends TripsLayer {
     // Deckgl generates an offscreen pixmap that it renders z-order into and the
     // colour is then used to figure out what has been picked. We use the index
     // from the start of the timing array to determine the picking colour
-    calculatePickingColors(attribute, {data, startRow, endRow}) {
+    calculatePickingColors(attribute, {data, startRow, endRow}: {data: OgnTripsData; startRow: number; endRow: number}) {
         if (!attribute.needsUpdate) {
             return;
         }
