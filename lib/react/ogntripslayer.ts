@@ -44,19 +44,16 @@ export class OgnTripsLayer extends TripsLayer {
     // Deckgl generates an offscreen pixmap that it renders z-order into and the
     // colour is then used to figure out what has been picked. We use the index
     // from the start of the timing array to determine the picking colour
-    calculatePickingColors(attribute) {
-        const data = this.props.data as OgnTripsData;
-        if (!attribute.state.needsUpdate) {
+    calculatePickingColors(attribute, {data, startRow, endRow}) {
+        if (!attribute.needsUpdate) {
             return;
         }
         const {value} = attribute;
-        for (let i = 0; i < data.numberOfPoints; i++) {
-            const pickingColor = super.encodePickingColor(i);
-            value[i * 3] = pickingColor[0];
-            value[i * 3 + 1] = pickingColor[1];
-            value[i * 3 + 2] = pickingColor[2];
+        const firstPoint = data.startIndices[startRow || 0];
+        const lastPoint = Math.min(data.numberOfPoints - 1, data.startIndices[Math.min(endRow, data.length)] ?? data.numberOfPoints - 1);
+        for (let i = firstPoint, j = firstPoint * 3; i <= lastPoint; i++, j += 3) {
+            super.encodePickingColor(i, value.subarray(j, j + 3));
         }
-        //        console.log(this.props.compno, this.props.data.length, attribute);
     }
 
     // This function is called to convert from colour back into specific data

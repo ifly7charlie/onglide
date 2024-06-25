@@ -48,6 +48,11 @@ export function pilotsLayer(trackData: TrackData, selectedCompno: Compno, setSel
         if (!p) {
             return {};
         }
+        if (!track.icon) {
+            track.icon = faToData(faLocationPin, track.compno, false);
+            track.iconSelected = faToData(faLocationPin, track.compno, true);
+        }
+
         return {
             name: track.compno,
             compno: track.compno,
@@ -65,13 +70,16 @@ export function pilotsLayer(trackData: TrackData, selectedCompno: Compno, setSel
             data: data,
             getColor: (d) => (now - d.t > offlineTime ? [0, 0, 0, 96] : [0, 0, 0, 255]),
             getSize: (d) => 35, //(d.compno == selectedCompno ? 35 : 30),
-            getIcon: (i) => ({
-                url: faToData(faLocationPin, i.compno, i.compno == selectedCompno),
-                width: 128,
-                height: 128,
-                anchorY: 128,
-                mask: false
-            }),
+            getIcon: (i) => {
+                return {
+                    id: i.compno == selectedCompno ? 'S' + i.compno : i.compno,
+                    url: i.compno == selectedCompno ? trackData[i.compno].iconSelected : trackData[i.compno].icon,
+                    width: 128,
+                    height: 128,
+                    anchorY: 128,
+                    mask: false
+                };
+            },
             onClick: (i) => {
                 setSelectedCompno(i.object?.name || '');
             },

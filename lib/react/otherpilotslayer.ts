@@ -20,7 +20,7 @@ function faToData(f: any) {
 </svg>`);
 }
 
-const otherUrl = () => faToData(faCircleUser);
+const otherUrl = faToData(faCircleUser);
 
 export function otherPilotsLayer(others: OtherPilotData, vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch) {
     const timeCutoff = (now - 180) as Epoch;
@@ -46,8 +46,9 @@ export function otherPilotsLayer(others: OtherPilotData, vc: ClassName, mapLight
 
         getColor: mapLight ? [64, 64, 192, 255] : [255, 255, 255, 255],
 
-        getIcon: (i) => ({
-            url: otherUrl(),
+        getIcon: () => ({
+            id: 'other',
+            url: otherUrl,
             width: 64,
             height: 64,
             mask: true

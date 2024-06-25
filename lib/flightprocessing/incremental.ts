@@ -115,10 +115,10 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         deck.indices[deck.segmentIndex++] = 0;
         pushPoint([point.lng, point.lat, point.a], point.g, point.t); // always have two points ;)
     } else {
+        const previousSegmentStart = deck.indices[deck.segmentIndex - 1];
         // If the gap is too long then we need to start the next segment as well
         if (point.t - lastTime > gapLength) {
             // If we have only one point in the previous segment then we should duplicate it
-            const previousSegmentStart = deck.indices[deck.segmentIndex - 1];
             if (previousSegmentStart == deck.posIndex) {
                 // add it to the previous segment so there are two points in it, it's not a line
                 // without two points
@@ -128,6 +128,11 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
             // Start a new segment, on the next point (which has not yet been pushed)
             deck.segmentIndex++;
         } else {
+            if (deck.posIndex - previousSegmentStart > 100) {
+                console.log(point.c, 'splitting segment', deck.segmentIndex, deck.posIndex);
+                pushPoint([point.lng, point.lat, point.a], point.g, point.t);
+                deck.segmentIndex++;
+            }
             deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
         }
     }

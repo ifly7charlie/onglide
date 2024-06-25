@@ -300,6 +300,8 @@ export interface DisplayPilotTrackData extends PilotTrackData {
         colours: Uint8Array | null;
         sortKey: SortKey;
     };
+    icon?: string;
+    iconSelected?: string;
 }
 
 export interface PilotTrackData {

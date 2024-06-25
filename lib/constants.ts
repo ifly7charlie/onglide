@@ -7,8 +7,8 @@ export const offlineTime = 600;
 export const recentTrackLength = 240; // seconds of recent track to show
 
 // How many points to start/increase array allocation by
-export const deckPointIncrement = 5000;
-export const deckSegmentIncrement = 2500;
+export const deckPointIncrement = 2000;
+export const deckSegmentIncrement = 100;
 
 // How long to delay track to ensure we aren't missing packets
 export const inOrderDelay = 10;
