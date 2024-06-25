@@ -53,7 +53,6 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
 
             if (decoded.identifiers) {
                 console.log('identifiers', decoded.identifiers, decoded.t);
-                mergeWsStatus({at: decoded.t});
                 if (decoded.identifiers.datecode != identifiers.datecode || decoded.identifiers.class != identifiers.class) {
                     identifiers.class = decoded.identifiers.class as ClassName;
                     identifiers.datecode = decoded.identifiers.datecode as Datecode;
@@ -67,7 +66,7 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
             }
 
             if (!identifiers.class || !identifiers.datecode) {
-                console.error('protocol ordering problem');
+                console.error('protocol ordering problem', decoded);
                 return;
             }
 
@@ -104,7 +103,6 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
                         .then(() => {
                             console.log('updating track remainders (wss)');
                             updateTracks(decoded, trackData, setTrackData, pilotScores);
-                            mergeWsStatus({state: 'open', retry: 0});
                         });
                 } else {
                     console.log('updating track starts', !decoded.tracks.baseTime ? 'https' : 'wss only');
@@ -170,7 +168,7 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
             }
 
             if (decoded.ka) {
-                mergeWsStatus(decoded.ka);
+                mergeWsStatus({state: 'open', retry: 0, ...decoded.ka});
             }
 
             if (decoded.t) {
