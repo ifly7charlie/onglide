@@ -5,7 +5,7 @@ import {map as _map} from 'lodash';
 import {Units, convertHeight, convertClimb} from './displayunits';
 import {delayToText, formatTime} from './timehelper.js';
 
-import {Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData, PositionStatus} from '../types';
+import {SortKey, Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData, PositionStatus} from '../types';
 import {API_ClassName_Pilots} from '../rest-api-types';
 
 import {sortBy as _sortBy} from 'lodash';
