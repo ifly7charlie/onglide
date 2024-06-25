@@ -113,6 +113,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     // Start the first segment
     if (deck.posIndex == 0) {
         deck.indices[deck.segmentIndex++] = 0;
+        pushPoint([point.lng, point.lat, point.a], point.g, point.t); // always have two points ;)
     } else {
         // If the gap is too long then we need to start the next segment as well
         if (point.t - lastTime > gapLength) {
@@ -227,7 +228,7 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): number | undef
 export function updateVarioFromDeck(deck: DeckData, vario: VarioData): [Epoch, VarioData] {
     const cp: any = vario || {min: Infinity, max: 0};
     try {
-        const lastPos = deck.t.length - 1;
+        const lastPos = deck.posIndex - 1;
         cp.agl = deck.agl[lastPos];
         [cp.lng, cp.lat, cp.altitude] = [].concat(...deck.positions.subarray(lastPos * 3));
         cp.lossXsecond = cp.gainXsecond = cp.total = cp.average = cp.Xperiod = 0;
@@ -236,5 +237,5 @@ export function updateVarioFromDeck(deck: DeckData, vario: VarioData): [Epoch, V
     } catch (_e) {
         console.log(_e);
     }
-    return [deck.t[deck.t.length - 1] as Epoch, cp];
+    return [deck.t[deck.posIndex - 1] as Epoch, cp];
 }

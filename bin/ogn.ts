@@ -827,7 +827,7 @@ async function sendCurrentState(client: OgnWebSocket) {
 
     client.send(
         OnglideWebSocketMessage.encode(
-            {identifiers: {class: channel.className, datecode: channel.datecode, competition: '1'}} //
+            {identifiers: {class: channel.className, datecode: channel.datecode, competition: '1'}, t: getNow()} //
         ).finish(),
         {binary: true}
     );
