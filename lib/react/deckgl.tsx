@@ -2,15 +2,12 @@
 
 import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
-import {TextLayer} from '@deck.gl/layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
 
 import {deckTooltip} from './decktooltip';
 
 import {useTaskGeoJSON} from './loaders';
-
-import {offlineTime, recentTrackLength} from '../constants';
 
 import type {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, OtherPilotData, PilotScore} from '../types';
 
@@ -42,116 +39,10 @@ import {SortKey} from '../types';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
-import {OgnTripsLayer} from './ogntripslayer';
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
+import {pilotsTrackLayer} from './pilotstracklayer';
 //import {turnpointLayer} from './turnpointlayer';
-
-// Figure out the baseline date
-const oneHalfYearIsh = 3600 * 24 * 180;
-const referenceDate =
-    (process.env.NEXT_PUBLIC_REPLAY //
-        ? parseInt(process.env.NEXT_PUBLIC_REPLAY) - (parseInt(process.env.NEXT_PUBLIC_REPLAY) % oneHalfYearIsh)
-        : new Date(Date.now() - (Date.now() % (oneHalfYearIsh * 1000))).getTime() / 1000) - oneHalfYearIsh;
-
-// Import our layer override so we can distinguish which point on a
-// line has been clicked or hovered
-//import {StopFollowController} from './deckglcontroller';
-// helps with touch scroll on laptops (undocumented)
-//const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
-
-//import {colourise} from './colourise';
-
-const selectedColour = (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]);
-const complexColours = {height: true, aheight: true, climb: true};
-
-//const colours: Record<string, (mapLight: boolean, selected: boolean) => ((_d: never, oi: any) => number[][]) | ((d: any) => number[]) | number[]> = {
-//    auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224])
-/*    climb:
-        (_mapLight: boolean, _selected: boolean) =>
-        (_d, oi): number[][] => {
-            return oi.data.v.map((v) => colourise(Math.min(255, Math.max(0, 0 * -12.5 + 128))));
-        },
-    height: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.p[1][2] >> 5) * 35)),
-    aheight: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.g >> 5) * 35))*/
-
-//
-// Responsible for generating the deckGL layers
-//
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, sortKey: SortKey, map2d: boolean, mapLight: boolean, fullPaths: boolean) {
-    if (!props.trackData) {
-        console.log('missing layers');
-        return [];
-    }
-
-    // Add a layer for the recent points for each pilot
-    let layers = _reduce(
-        props.trackData,
-        (result, track, compno) => {
-            // Don't include current pilot in list of all
-            const selected = compno == props.selectedCompno;
-
-            const p = track.deck;
-            if (!p) {
-                console.log(`deck missing from ${compno}`, track);
-                return result;
-            }
-
-            // For all but selected gliders just show most recent track
-            const tripsFiltering = {
-                currentTime: props.t - referenceDate,
-                fadeTrail: !fullPaths && !selected,
-                trailLength: recentTrackLength
-            };
-
-            result.push(
-                new OgnTripsLayer({
-                    id: compno + p.trackVersion,
-                    compno: compno,
-                    data: {
-                        length: p.segmentIndex, // note this is not -1 (segmentIndex is one we are in, there should be a terminator one after)
-                        numberOfPoints: p.posIndex,
-                        startIndices: p.indices,
-                        t: p.t,
-                        v: p.climbRate,
-                        g: p.agl,
-                        p: p.positions,
-                        attributes: {
-                            getPath: {value: p.positions, size: 3}, // , size: map2d ? 2 : 3, stride: map2d ? 4 * 3 : 0},
-                            getTimestamps: {value: track.deckAdditional.tr, size: 1},
-                            getColor: complexColours[sortKey] ? {value: track.deckAdditional.colours, size: 3} : undefined
-                        }
-                    },
-                    _pathType: 'open',
-                    getWidth: selected ? 8 : 5,
-                    positionFormat: 'XYZ',
-                    jointRounded: true,
-                    fp64: false,
-                    billboard: map2d ? false : true,
-                    widthMinPixels: selected ? 3 : 2,
-                    getColor: complexColours[sortKey] ? undefined : selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224],
-                    dataComparator: (newData: any, oldData: any) => newData.numberOfPoints == oldData.numberOfPoints,
-                    _dataDiff: (newData: any, oldData: any) => [{startRow: oldData.length - 1, endRow: newData.length}],
-                    onClick: (i) => {
-                        props.setSelectedCompno(compno);
-                    },
-                    updateTriggers: {
-                        getPath: p.posIndex,
-                        getColor: [track.deckAdditional.sortKey, mapLight, selected],
-                        getWidth: selected
-                    },
-                    pickable: true,
-                    tt: true,
-                    ...tripsFiltering
-                })
-            );
-            return result;
-        },
-        []
-    );
-
-    return layers;
-}
 
 export default function MApp(props: {
     options: any;
@@ -187,7 +78,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = makeLayers(props, options.sortKey as SortKey, map2d, mapLight, options.fullPaths);
+    const pilotTrackLayer = pilotsTrackLayer(props, options.sortKey as SortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
@@ -409,7 +300,7 @@ export default function MApp(props: {
                 {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
-                layers={[...layers, pilotLayer, otherPilotLayer]} //
+                layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
                 interleaved={!map2d}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (
