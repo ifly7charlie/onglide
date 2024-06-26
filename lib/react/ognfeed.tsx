@@ -17,7 +17,7 @@ import useWebSocket from 'react-use-websocket';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-import {SortKey, Options, Epoch, TZ, Compno, ClassName, Datecode, SelectedPilotDetails} from '../types';
+import type {Options, Epoch, TZ, Compno, ClassName, Datecode, SelectedPilotDetails} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
@@ -28,7 +28,6 @@ import {TaskDetails} from './taskdetails';
 import {OptionalDurationMM} from './optional';
 
 import Sponsors from './sponsors';
-import {UseMeasure} from './measure';
 
 import {proposedUrl} from './fixupUrls';
 
@@ -67,7 +66,6 @@ export const OgnFeed = memo(
         setViewport,
         options,
         setOptions,
-        measureFeatures,
         handicapped,
         notes
     }: //
@@ -79,7 +77,6 @@ export const OgnFeed = memo(
         setSelectedCompno: Function;
         viewport: any;
         setViewport: Function;
-        measureFeatures: UseMeasure;
         options: Options;
         setOptions: Function;
         handicapped: any;
@@ -165,6 +162,7 @@ export const OgnFeed = memo(
             (cn) => {
                 setSelectedCompno(cn);
                 if (cn && pilots && pilots[cn]) {
+                    console.log('setFollow,setCompno');
                     setFollow(true);
                 }
             },
@@ -224,7 +222,6 @@ export const OgnFeed = memo(
                         trackData={trackData}
                         otherPilots={otherPilots}
                         selectedCompno={selectedCompno}
-                        measureFeatures={measureFeatures}
                         status={status}
                     />
                 </div>
@@ -270,7 +267,6 @@ export const OgnFeed = memo(
         o.vc === n.vc &&
         o.datecode == n.datecode &&
         _isEqual(o.viewport, n.viewport) &&
-        _isEqual(o.measureFeatures[0], n.measureFeatures[0]) &&
         _isEqual(o.options, n.options) &&
         o.notes === n.notes &&
         o.handicapped === n.handicapped

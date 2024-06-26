@@ -30,7 +30,7 @@ import SunCalc from 'suncalc';
 import {AttributionControl} from 'react-map-gl';
 import {RadarOverlay} from './rainradar';
 
-import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
+import {MeasureLayers, useMeasure} from './measure';
 
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
@@ -59,12 +59,12 @@ export default function MApp(props: {
     setViewport: Function;
     trackData: TrackData;
     otherPilots: OtherPilotData;
-    measureFeatures: UseMeasure;
     status: string; // status line
     t: Epoch;
 }) {
     // For remote updating of the map
     const mapRef = useRef(null);
+    const measure = useMeasure();
 
     // So we get some type info
     const {options, setOptions, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
@@ -256,8 +256,7 @@ export default function MApp(props: {
         props.setViewport(viewState);
     }, []);
 
-    const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
-    const getCursor = useCallback(() => 'crosshair', []);
+    const onClick = useCallback((a, _b) => measure.click(a), [measure.enabled]);
 
     const pilotLayer = pilotsLayer(props.trackData, selectedCompno, props.setSelectedCompno, props.t);
 
@@ -279,6 +278,7 @@ export default function MApp(props: {
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
+        console.log('onDragStart');
         if (follow) {
             setFollow(false);
         }
@@ -290,6 +290,7 @@ export default function MApp(props: {
             onMove={onViewStateChange}
             onStyleData={fixupMap}
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+            cursor={measure.enabled ? 'crosshair' : 'auto'}
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
             reuseMaps={true}
             ref={mapRef}
@@ -297,7 +298,6 @@ export default function MApp(props: {
         >
             <DeckGLOverlay
                 getTooltip={toolTip}
-                {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
                 layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
@@ -337,7 +337,7 @@ export default function MApp(props: {
                     <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                 </Source>
             ) : null}
-            <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
+            <MeasureLayers key="measure" />
             <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
             {!map2d && <Layer key="skylayer" {...skyLayer} />}
             {attribution}

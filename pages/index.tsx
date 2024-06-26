@@ -25,13 +25,13 @@ import {query} from '../lib/react/db';
 import escape from 'sql-template-strings';
 import {Options} from '../lib/react/options';
 
-import {UseMeasure, useMeasure} from '../lib/react/measure';
+import {MeasureContext, useMeasure} from '../lib/react/measure';
 import {ClassName} from '../lib/types';
 
 import {find as _find, isEqual as _isEqual} from 'lodash';
 
 const Menu = memo(
-    function Menu(props: {comp: any; setSelectedPilot: Function; measureFeatures: UseMeasure; options: any; setOptions: Function; vc: string}) {
+    function Menu(props: {comp: any; setSelectedPilot: Function; options: any; setOptions: Function; vc: string}) {
         const comp = props.comp;
         const classes =
             comp.classes.length > 1
@@ -95,7 +95,7 @@ const Menu = memo(
         );
     },
     // Memo comparison, skip all the functions
-    (o, n) => o.vc === n.vc && o.comp === n.comp && _isEqual(o.measureFeatures[0], n.measureFeatures[0]) && _isEqual(o.options, n.options)
+    (o, n) => o.vc === n.vc && o.comp === n.comp && _isEqual(o.options, n.options)
 );
 
 //
@@ -116,8 +116,6 @@ export default function CombinePage(props) {
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
     const {comp, isLoading, isError} = useContest();
-    //    console.log(props);
-    //    console.log(comp);
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
@@ -160,7 +158,6 @@ export default function CombinePage(props) {
                     comp={comp}
                     vc={className}
                     setSelectedPilot={setSelectedCompno}
-                    measureFeatures={measureFeatures}
                     options={props.options}
                     setOptions={props.setOptions}
                 />
@@ -171,28 +168,35 @@ export default function CombinePage(props) {
 
     return (
         <>
-            <Head>
-                <title>
-                    {comp.competition.name} - {className}
-                </title>
-            </Head>
-            <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
-            <div className="resizingContainer">
-                <OgnFeed
-                    vc={className as ClassName} //
-                    tz={props.tz}
-                    datecode={selectedClass ? selectedClass.datecode : '07C'}
-                    selectedCompno={selectedCompno}
-                    setSelectedCompno={setSelectedCompno}
-                    viewport={viewport}
-                    setViewport={setViewport}
+            <MeasureContext>
+                <Head>
+                    <title>
+                        {comp.competition.name} - {className}
+                    </title>
+                </Head>
+                <Menu
+                    comp={comp}
+                    vc={className} //
+                    setSelectedPilot={setSelectedCompno}
                     options={props.options}
                     setOptions={props.setOptions}
-                    measureFeatures={measureFeatures}
-                    handicapped={selectedClass?.handicapped == 'Y'}
-                    notes={selectedClass?.notes}
                 />
-            </div>
+                <div className="resizingContainer">
+                    <OgnFeed
+                        vc={className as ClassName} //
+                        tz={props.tz}
+                        datecode={selectedClass ? selectedClass.datecode : '07C'}
+                        selectedCompno={selectedCompno}
+                        setSelectedCompno={setSelectedCompno}
+                        viewport={viewport}
+                        setViewport={setViewport}
+                        options={props.options}
+                        setOptions={props.setOptions}
+                        handicapped={selectedClass?.handicapped == 'Y'}
+                        notes={selectedClass?.notes}
+                    />
+                </div>
+            </MeasureContext>
         </>
     );
 }

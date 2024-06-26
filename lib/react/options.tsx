@@ -1,11 +1,13 @@
-import {UseMeasure, toggleMeasure, isMeasuring} from './measure';
+import {useMeasure} from './measure';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 import {cloneDeep as _cloneDeep} from 'lodash';
 
 import type {Options as OptionsType} from '../types';
 
-export function Options(props: {options: OptionsType; setOptions: Function; measureFeatures: UseMeasure; multipleClasses: boolean}) {
+export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean}) {
+    const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
+
     const radarFunction = () => {
         const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
         props.setOptions(_cloneDeep({...props.options, rainRadarAdvance: nextRadar}));
@@ -43,22 +45,21 @@ export function Options(props: {options: OptionsType; setOptions: Function; meas
     const toggleShowOthers = () => {
         props.setOptions(_cloneDeep({...props.options, showOthers: !props.options.showOthers}));
     };
-    /*
-            {!isMeasuring(props.measureFeatures) ? (
-                <button title="Click to measure" onClick={toggleMeasure(props.measureFeatures)}>
+
+    return (
+        <div className="options">
+            {measureEnabled ? (
+                <button title="Click to measure" onClick={toggleMeasure}>
                     <FontAwesomeIcon icon={solid('ruler')} />
                 </button>
             ) : (
-                <button title="Click to stop measuring" onClick={toggleMeasure(props.measureFeatures)}>
+                <button title="Click to stop measuring" onClick={toggleMeasure}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={solid('slash')} />
                         <FontAwesomeIcon icon={solid('ruler')} />
                     </span>
                 </button>
-            )}*/
-
-    return (
-        <div className="options">
+            )}
             <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
                 <FontAwesomeIcon icon={solid('umbrella')} />
                 &nbsp;

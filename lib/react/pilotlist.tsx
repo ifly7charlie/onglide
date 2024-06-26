@@ -110,7 +110,7 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
 
     const convertedClimb = convertClimb(vario?.average ?? 0, units);
 
-    return (
+    return vario ? (
         <SummaryComponent
             id="climb"
             title="vario" //
@@ -118,7 +118,7 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
             data1={{value: convertHeight(vario.gainXsecond + vario.lossXsecond, units)[0], units: units ? 'ft' : 'm', icon: solid('cloud-upload')}}
             data2={{value: vario.Xperiod, units: 'sec', icon: solid('hourglass-half')}}
         />
-    );
+    ) : null;
 }
 
 const StartComponent = memo(function StartComponent({
