@@ -33,7 +33,7 @@ body {
 }
 
 // These are tweaks for small screens
-@include media-breakpoint-down(md) {
+@include media-breakpoint-down(lg) {
     body {
         padding-top: 0px !important;
     }
@@ -95,9 +95,10 @@ body {
     }
 
     .details {
-        left: 0px;
+        left: 0;
         bottom: 0px;
         padding: 2px;
+        padding-left: 50px;
         width: 100vw;
         position: absolute;
         color: black !important;
@@ -105,6 +106,7 @@ body {
         overflow-y: auto;
         overflow-x: clip;
         max-height: 20vh;
+        z-index: 20;
     }
 
     ul.pilots {
@@ -152,7 +154,7 @@ body {
     }
 }
 
-@include media-breakpoint-down(xs) {
+@include media-breakpoint-down(lg) {
     .resultsOverlay {
         height: 118px;
         margin-top: 16px;
@@ -182,6 +184,7 @@ body {
         overflow-y: auto;
         overflow-x: clip;
         max-height: 40vh;
+        z-index: 20;
     }
     .navbar {
         --bs-navbar-padding-y: 0.15rem;
@@ -250,6 +253,7 @@ body {
         max-height: 40vh;
         overflow-y: auto;
         overflow-x: clip;
+        z-index: 20;
     }
     html {
         height: -webkit-fill-available;
@@ -502,74 +506,77 @@ td.small img {
     filter: progid:DXImageTransform.Microsoft.BasicImage(rotation=3);
 }
 
-.status li .units {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    font-size: 10px;
-    //    margin-left: 5px;
-    //    transform-origin: 64% 95% 0;
-
-    /* Safari 
-    -webkit-transform: rotate(-90deg);
-    -webkit-transform-origin: 64% 95% 0;
-
-
-    -moz-transform: rotate(-90deg);
-
-
-    -ms-transform: rotate(-90deg);
-
-
-    -o-transform: rotate(-90deg);
-
- 
-    filter: progid:DXImageTransform.Microsoft.BasicImage(rotation=3);
-   */
-    transform: rotate(-90deg) translate(-1ex, -2px);
+.summarycomponent {
+    display: flex;
+    flex-direction: row;
+    justify-content: right;
 }
 
-.status .main-text {
+.summarycomponent .main-text {
     text-align: right;
     font-size: 18px;
     height: 22px;
     font-weight: bold;
+    margin: 0px;
+    left: 0px;
     line-height: 130%;
+    overflow-x: clip;
+    overflow-y: clip;
+    flex-grow: 1.5;
+    align-self: center;
 }
 
 .status .data-text {
     text-align: right;
+    margin: 0px;
+    left: 0px;
+    overflow-x: clip;
+    overflow-y: clip;
+    flex-grow: 1.5;
+    align-self: center;
 }
 
-.status .data-icon,
-.status .main-icon {
-    width: 20px;
-    font-size: 15px;
-    padding-left: 2px;
+.summarycomponent .data-icon,
+.summarycomponent .main-icon {
+    flex-grow: 0;
+    width: 16px;
+    align-self: center;
     text-align: center;
-    float: right;
 }
 
 .status .data-icon a {
     color: grey;
 }
 
-.status .main-text .units {
+.summarycomponent .units {
+    flex-grow: 0;
     font-size: 9px;
-    height: 22px;
-    text-align: center;
+    line-height: 10px;
+    width: 1rem;
     margin: 0px;
     padding: 0px;
+    align-self: center;
+    text-align: center;
     transform: rotate(-90deg) translate(0px, 0px);
 }
 
-.status .data-text .units {
-    font-size: 8px;
-    height: 17px;
-    text-align: center;
-    margin: 0px;
-    padding: 0px;
-    transform: rotate(-90deg) translate(3.5px, 2px);
+@media (max-width: 575.98px) {
+    .units {
+        display: none !important;
+    }
+    .main-icon {
+        display: none;
+    }
+    .data-icon {
+        font-size: 10px !important;
+    }
+    .data-text {
+        font-size: 10px;
+    }
+    .status .main-text {
+        font-size: 14px;
+        width: 100%;
+    }
 }
 
 .pilot .details {
@@ -644,8 +651,6 @@ td.small img {
 ul.pilots li,
 ul.status li {
     display: block;
-    //    float: left;
-    //flex: 1.1;
 }
 .pilots {
     font-size: 13px;
@@ -699,7 +704,7 @@ a.selectimage:hover {
     height: 90vh;
     background: white;
 }
-.loadinginner {
+.loadingspinner {
     background: url('/outline.gif');
     background-position: center;
     background-repeat: no-repeat;

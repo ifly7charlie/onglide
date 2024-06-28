@@ -5,7 +5,7 @@ import {map as _map} from 'lodash';
 import {Units, convertHeight, convertClimb} from './displayunits';
 import {delayToText, formatTime} from './timehelper.js';
 
-import {Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData, PositionStatus} from '../types';
+import {SortKey, Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, TrackData, PositionStatus} from '../types';
 import {API_ClassName_Pilots} from '../rest-api-types';
 
 import {sortBy as _sortBy} from 'lodash';
@@ -20,8 +20,6 @@ export interface ShortDisplayKeys {
     units: string;
     icon: string | any;
 }
-
-export type SortKey = 'speed' | 'aspeed' | 'fspeed' | 'climb' | 'remaining' | 'aremaining' | 'distance' | 'adistance' | 'height' | 'aheight' | 'start' | 'finish' | 'duration' | 'delay' | 'ald' | 'ld' | 'done' | 'auto' | 'times';
 
 export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreData, trackData: TrackData, sortKey: SortKey, units: Units, now: Epoch, tz: TZ) {
     //
@@ -39,7 +37,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
         // Update delay numbers
         const delay = now - (t || 0);
         if (vario) {
-            vario.delay = delay;
+            vario.delay = delay as Epoch;
         }
 
         let icon = faCircleQuestion;

@@ -4,60 +4,55 @@ import length from '@turf/length';
 
 import {cloneDeep as _cloneDeep} from 'lodash';
 
-import {useState, Dispatch, SetStateAction, MouseEventHandler} from 'react';
+import {useState, createContext, useContext} from 'react';
 
 import {Source, Layer, LayerProps} from 'react-map-gl';
 
 export interface MeasureOptions {
     features: Feature[];
     enabled: boolean;
+    click?: React.MouseEventHandler<HTMLButtonElement>;
+    toggle?: () => void;
 }
 
-export type UseMeasure = [MeasureOptions, Dispatch<SetStateAction<MeasureOptions>>];
+const measureContext = createContext<MeasureOptions>({enabled: false, features: []});
 
-export function useMeasure(): UseMeasure {
-    return useState<MeasureOptions>({features: [], enabled: false});
-}
+export function MeasureContext({children}) {
+    const [enabled, setEnabled] = useState(false);
+    const [features, setFeatures] = useState<Feature[]>([]);
 
-export function measureClick(useMeasure: UseMeasure): Function {
-    const [measureFeatures, setMeasureFeatures] = useMeasure;
-    if (!measureFeatures?.enabled) {
-        return () => {
-            /**/
-        };
-    }
-    return (info, event) => {
-        if (measureFeatures.features.length > 1) {
-            measureFeatures.features.pop();
+    const click = (info) => {
+        if (!enabled) {
+            return;
         }
-        measureFeatures.features.push(point(info.coordinate));
-        if (measureFeatures.features.length > 1) {
-            const line = lineString(measureFeatures.features.map((point: any) => point?.geometry?.coordinates));
-
+        if (features.length > 1) {
+            features.pop();
+        }
+        features.push(point(info.coordinate));
+        if (features.length > 1) {
+            const line = lineString(features.map((point: any) => point?.geometry?.coordinates));
             line.properties['distance'] = Math.round(length(line) * 10) / 10 + ' km';
-            measureFeatures.features.push(line);
+            features.push(line);
         }
-        setMeasureFeatures(_cloneDeep(measureFeatures));
+        setFeatures(_cloneDeep(features));
     };
-}
 
-export function isMeasuring(useMeasure: UseMeasure): boolean {
-    return useMeasure?.[0]?.enabled || false;
-}
-
-export function toggleMeasure(useMeasure: UseMeasure): MouseEventHandler<HTMLButtonElement> {
-    return () => {
-        const [measureFeatures, setMeasureFeatures] = useMeasure;
-        measureFeatures.enabled = !measureFeatures.enabled;
-        measureFeatures.features = [];
-        setMeasureFeatures(_cloneDeep(measureFeatures));
+    const toggle = () => {
+        setEnabled(!enabled);
+        setFeatures([]);
     };
+
+    return <measureContext.Provider value={{enabled, features, click, toggle}}>{children}</measureContext.Provider>;
 }
 
-export function MeasureLayers(props: {useMeasure: UseMeasure}) {
-    const [measureFeatures] = props.useMeasure;
-    return isMeasuring(props.useMeasure) && measureFeatures?.features?.length ? (
-        <Source type="geojson" data={featureCollection(measureFeatures.features) as any} key={'measure' + measureFeatures.features.length} id={'measure'}>
+export function useMeasure() {
+    return useContext(measureContext);
+}
+
+export function MeasureLayers() {
+    const {enabled, features} = useMeasure();
+    return enabled && features?.length ? (
+        <Source type="geojson" data={featureCollection(features) as any} key={'measure' + features.length} id={'measure'}>
             <Layer {...measurePointsStyle} />
             <Layer {...measureLineStyle} />
             <Layer {...measureLineLabelStyle(measureLineStyle)} />

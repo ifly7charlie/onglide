@@ -17,8 +17,9 @@ import {point} from '@turf/helpers';
 
 // And the Websocket
 import {WebSocket, WebSocketServer} from 'ws';
+import type {IncomingMessage} from 'http';
 
-import {OnglideWebSocketMessage} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
@@ -179,6 +180,13 @@ interface DDBEntry {
 }
 let ddb: Record<string, DDBEntry> = {};
 
+interface OgnWebSocket extends WebSocket {
+    ognChannel: ChannelName;
+    ognPeer: string;
+    isAlive: boolean;
+    connectedAt: Epoch;
+}
+
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
 let readOnly = process.env.OGN_READ_ONLY == undefined ? false : !!parseInt(process.env.OGN_READ_ONLY);
@@ -338,11 +346,18 @@ async function main() {
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
-    // time we run the callback (every second), as we only update the screen once a second it should
+    // time we run the callback (every second), as we only update the screen on data it should
     // be sufficient to bundle them even though we are receiving as a stream
     setInterval(function () {
         // For each channel (aka class)
         const now = getNow();
+
+        const positions = Object.values(channels).reduce((a, c: Channel) => {
+            a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+            return a;
+        }, {} as Record<string, Positions>);
+
+        const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
         for (const channelName in channels) {
             const channel = channels[channelName];
@@ -350,18 +365,16 @@ async function main() {
             channel.statistics.activeListeners += channel.clients.length;
             channel.statistics.listenerCycles++;
 
-            if (!channel.toSend.length) {
-                continue;
-            }
-
-            channel.mostRecentPosition = now;
-
             if (channel.clients.length) {
+                if (!channel.toSend.length) {
+                    continue;
+                }
+                channel.mostRecentPosition = now;
+
                 // Send if we have an update or if it's been 30 seconds since we last sent one
                 //                if (channel.toSend.length || (now - channel.lastSentPositions ?? 0) > 30) {
                 // Encode all the changes, we only keep latest per glider if multiple received
                 // there shouldn't be multiple!
-                const msg = OnglideWebSocketMessage.encode({positions: {positions: channel.toSend}, t: Math.trunc(now)}).finish();
                 //
                 // Metrics are helpful
                 channel.statistics.positionsSent += channel.toSend.length;
@@ -426,8 +439,14 @@ async function main() {
 
             channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, channel.statistics.activeListeners / channel.statistics.listenerCycles);
 
-            console.log(`${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`);
-            console.log(`${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${channel.statistics.peakListeners}`);
+            console.log(
+                `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
+            );
+            console.log(
+                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${
+                    channel.statistics.peakListeners
+                }`
+            );
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
@@ -437,7 +456,15 @@ async function main() {
             trackAggregatedMetric(channel.className, 'ogn.insertedPackets', channel.statistics.insertedPackets);
             trackAggregatedMetric(channel.className, 'ogn.totalPackets', channel.statistics.totalPackets);
 
-            channel.statistics.positionsSent = channel.statistics.positionsSentCycles = channel.statistics.bytesSent = channel.statistics.activeListeners = channel.statistics.listenerCycles = channel.statistics.outOfOrderPackets = channel.statistics.insertedPackets = channel.statistics.totalPackets = 0;
+            channel.statistics.positionsSent =
+                channel.statistics.positionsSentCycles =
+                channel.statistics.bytesSent =
+                channel.statistics.activeListeners =
+                channel.statistics.listenerCycles =
+                channel.statistics.outOfOrderPackets =
+                channel.statistics.insertedPackets =
+                channel.statistics.totalPackets =
+                    0;
         }
     }, 60 * 1000);
 
@@ -611,7 +638,11 @@ async function updateTasks(): Promise<void> {
         const updatedTask = await getTask(channel.className, channel.datecode);
 
         if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
-            console.log(`new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs?.reduce((a, l) => a + l.length, 0).toFixed(1)}km`);
+            console.log(
+                `new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs
+                    ?.reduce((a, l) => a + l.length, 0)
+                    .toFixed(1)}km`
+            );
             console.log(`${channel.className}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
 
             // If it has a task stop it scoring and start the new task
@@ -785,11 +816,21 @@ async function updateDDB() {
 
 //
 // New connection, send it a packet for each glider we are tracking
-async function sendCurrentState(client: WebSocket) {
+async function sendCurrentState(client: OgnWebSocket) {
     if (client.readyState !== WebSocket.OPEN || !client.isAlive || !channels[client.ognChannel]) {
         console.log('unable to sendCurrentState not yet open or ! isAlive');
         return;
     }
+
+    console.log(client.ognChannel);
+    const channel = channels[client.ognChannel];
+
+    client.send(
+        OnglideWebSocketMessage.encode(
+            {identifiers: {class: channel.className, datecode: channel.datecode, competition: '1'}, t: getNow()} //
+        ).finish(),
+        {binary: true}
+    );
 
     // If there has already been a keepalive then we will resend it to the client
     const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
@@ -917,7 +958,9 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
     // Generate the protobuf message for the full track
     const trackMessage = OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish();
 
-    console.log(`${channel.className}/${glider.compno}: sending full track over websocket v${p.trackVersion} ${trackMessage.length} bytes, ${channel.clients.length} clients = ${trackMessage.length * channel.clients.length} bytes`);
+    console.log(
+        `${channel.className}/${glider.compno}: sending full track over websocket v${p.trackVersion} ${trackMessage.length} bytes, ${channel.clients.length} clients = ${trackMessage.length * channel.clients.length} bytes`
+    );
 
     // Send the client the current version of the tracks, we don't care how long it takes (don't wait)
     channel.clients.forEach(async (client) => {
@@ -1056,7 +1099,11 @@ async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<voi
     glider.scoringConfigured = true;
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
-    console.log(`${channel.className}  ${firstTime ? 'first load' : 'reload'} all points for ${glider.compno} glider [${rawpoints.length - points.length} removed, ${points.length} loaded] ${glider.flarmIdRegex} ${timeToText(points[0]?.t)} to ${timeToText(points[points.length - 1]?.t)} @ ${timeToText(now)} - v${glider.deck.trackVersion.toString(16)}`);
+    console.log(
+        `${channel.className}  ${firstTime ? 'first load' : 'reload'} all points for ${glider.compno} glider [${rawpoints.length - points.length} removed, ${points.length} loaded] ${glider.flarmIdRegex} ${timeToText(
+            points[0]?.t
+        )} to ${timeToText(points[points.length - 1]?.t)} @ ${timeToText(now)} - v${glider.deck.trackVersion.toString(16)}`
+    );
 
     // If it's not the first time then we need to update the channel with the track
     if (!firstTime) {
@@ -1222,12 +1269,17 @@ function setupWebSocketServer(server) {
     const wss = new WebSocketServer({server});
 
     // What to do when a client connects
-    wss.on('connection', (ws, req) => {
+    wss.on('connection', (ws: OgnWebSocket, req: IncomingMessage) => {
+        if (!req.url?.length) {
+            ws.isAlive = false;
+            return;
+        }
+
         // Strip leading /
-        const channel = req.url.substring(1, req.url.length);
+        const channel = req.url.substring(1, req.url.length) as ChannelName;
 
         ws.ognChannel = channel;
-        ws.ognPeer = req.headers['x-forwarded-for'] ?? req.connection.remoteAddress;
+        ws.ognPeer = req.headers['x-forwarded-for']?.toString() ?? req.connection.remoteAddress ?? 'unknown';
         console.log(`connection received for ${channel} from ${ws.ognPeer} on ${address}`);
 
         ws.isAlive = true;

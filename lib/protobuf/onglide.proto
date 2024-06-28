@@ -2,18 +2,33 @@ syntax = "proto3";
 //import "google/protobuf/any.proto";
 
 message OnglideWebSocketMessage {
+	optional Identifiers identifiers = 7;
     optional PilotTracks tracks = 1;
     optional Scores scores = 2;
-    optional Positions positions = 3;
+	optional ClassPositions positions = 6;
     optional KeepAlive ka = 4;
     optional uint32 t = 5;
 }
+
+message Identifiers {
+	string class = 1;
+	string datecode = 2;
+	string competition = 3;
+}		
 
 message PilotTracks {
     map<string, PilotTrack> pilots = 1;
 	uint32	baseTime = 2;
 };
 
+
+message ScoreHistory {
+	string class = 1;
+	string datecode = 2;
+
+	repeated PilotScore scores = 3; // partial of the PilotScore object in time order
+}
+	
 
 message PilotTrack {
     // what pilot
@@ -27,16 +42,15 @@ message PilotTrack {
 
     // Three tuple of [lat,lng,alt] repeated length times (actually float) (and the height above ground)
     bytes positions = 4;
-
-    // Segments in the track line, for broken track drawing (actually uint32)
-    bytes agl = 12; // int16
-
+		
     // For colouring, all Uint8 arrays one for each point all optional
 	bytes climbRate = 8;
 	//    bytes airSpeed = 9;
 	//    bytes altitudeBand = 10;
 	//    bytes leg = 11;
 
+    bytes agl = 12; // int16
+	
 	// This changes if we need to replace the pilot track
 	uint32 trackVersion = 13;
 };
@@ -77,8 +91,6 @@ message PilotScoreLeg {
 	// Scores
     optional SpeedDist handicapped = 11;
     optional SpeedDist actual = 12;
-
-	
 }
 
 message Wind {
@@ -169,11 +181,14 @@ message PilotPosition {
     uint32 t = 6;
     uint32 b = 7;
     uint32 s = 8;
-    string v = 9;
 }
 
 message Positions {
-    repeated PilotPosition positions = 1;
+	repeated PilotPosition positions=1;
+}
+
+message ClassPositions {
+	map<string,Positions> class=1;
 }
 
 //

@@ -2,7 +2,8 @@ import {memo} from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {getSortOrderType, getSortDescription, SortKey} from './pilot-sorting';
+import {getSortOrderType, getSortDescription} from './pilot-sorting';
+import {SortKey} from '../types';
 
 export const Sorting = memo(function Sorting(props: {setSort: Function; sortOrder: SortKey; toggleVisible: Function; visible: boolean; handicapped: boolean}) {
     return (

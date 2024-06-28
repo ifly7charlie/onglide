@@ -1,9 +1,13 @@
-import {UseMeasure, toggleMeasure, isMeasuring} from './measure';
+import {useMeasure} from './measure';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 import {cloneDeep as _cloneDeep} from 'lodash';
 
-export function Options(props: {options: any; setOptions: Function; measureFeatures: UseMeasure}) {
+import type {Options as OptionsType} from '../types';
+
+export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean}) {
+    const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
+
     const radarFunction = () => {
         const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
         props.setOptions(_cloneDeep({...props.options, rainRadarAdvance: nextRadar}));
@@ -38,27 +42,29 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
     const toggleFullPaths = () => {
         props.setOptions(_cloneDeep({...props.options, fullPaths: !props.options.fullPaths}));
     };
+    const toggleShowOthers = () => {
+        props.setOptions(_cloneDeep({...props.options, showOthers: !props.options.showOthers}));
+    };
 
     return (
         <div className="options">
-            <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
-                <FontAwesomeIcon icon={solid('umbrella')} />
-                &nbsp;
-                <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
-            </button>
-            &nbsp;
-            {!isMeasuring(props.measureFeatures) ? (
-                <button title="Click to measure" onClick={toggleMeasure(props.measureFeatures)}>
+            {measureEnabled ? (
+                <button title="Click to measure" onClick={toggleMeasure}>
                     <FontAwesomeIcon icon={solid('ruler')} />
                 </button>
             ) : (
-                <button title="Click to stop measuring" onClick={toggleMeasure(props.measureFeatures)}>
+                <button title="Click to stop measuring" onClick={toggleMeasure}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={solid('slash')} />
                         <FontAwesomeIcon icon={solid('ruler')} />
                     </span>
                 </button>
             )}
+            <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
+                <FontAwesomeIcon icon={solid('umbrella')} />
+                &nbsp;
+                <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
+            </button>
             &nbsp;
             {props.options.constructionLines ? (
                 <button title="Click to hide Construction Lines" onClick={constructionLines}>
@@ -92,7 +98,6 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
                     <FontAwesomeIcon icon={solid('satellite')} />
                 </button>
             )}
-            &nbsp;
             {
                 [
                     <button title="Map orientation is currently locked to North Up, Change to Task Track Up when following" onClick={toggleTaskUp}>
@@ -129,6 +134,21 @@ export function Options(props: {options: any; setOptions: Function; measureFeatu
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={solid('slash')} />
                         <FontAwesomeIcon icon={solid('route')} />
+                    </span>
+                </button>
+            )}
+            &nbsp;
+            {!props.multipleClasses ? null : props.options.showOthers ? (
+                <button title="Showing gliders from other classes, click to only show current class" onClick={toggleShowOthers}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={solid('users')} />
+                    </span>
+                </button>
+            ) : (
+                <button title="Show selected class only, click to show other classes as well" onClick={toggleShowOthers}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={solid('slash')} />
+                        <FontAwesomeIcon icon={solid('users')} />
                     </span>
                 </button>
             )}

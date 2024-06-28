@@ -156,14 +156,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // If there is a specific start time and we are before it then
                 // do nothing,
                 if (point.t < task.rules.nostartutc - 10) {
-                    //if (point._) yield status;
                     continue;
                 }
 
                 // If the pilot has a specific utcStart time already then
                 // ignore before - this can happen if scored into soaringspot
                 if (status.utcStart && point.t < status.utcStart) {
-                    //                    if (point._) yield status;
                     continue;
                 }
 
@@ -261,7 +259,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 status.closestToNextSectorPoint = simplifyPoint(point);
                 nearestSectorPoint.properties.t = point.t;
                 closestSectorPoint = _clonedeep(nearestSectorPoint);
-                status.closestSectorPoint = {t: -status.currentLeg as Epoch, a: 0, lat: closestSectorPoint.geometry.coordinates[1], lng: closestSectorPoint.geometry.coordinates[0]};
+                status.closestSectorPoint = {
+                    t: -status.currentLeg as Epoch,
+                    a: 0,
+                    lat: closestSectorPoint.geometry.coordinates[1],
+                    lng: closestSectorPoint.geometry.coordinates[0]
+                };
             }
 
             // Check for the finish, if it is then only one point counts and we can stop tracking
@@ -397,7 +400,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                 const estimatedTime = Math.round(intersectionDistance * speedKps + previousPoint.t);
                                 const estimatedAlt = Math.round(intersectionDistance * altPs + previousPoint.a);
 
-                                sectorPoints.push({t: estimatedTime as Epoch, a: estimatedAlt as AltitudeAMSL, lat: intersection.geometry.coordinates[1], lng: intersection.geometry.coordinates[0]});
+                                sectorPoints.push({
+                                    t: estimatedTime as Epoch,
+                                    a: estimatedAlt as AltitudeAMSL,
+                                    lat: intersection.geometry.coordinates[1],
+                                    lng: intersection.geometry.coordinates[0]
+                                });
 
                                 if (!task.rules.aat) {
                                     // If we are not an AAT then we only take the first point
@@ -433,7 +441,10 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                             // Make sure we meet the constrants
                             if (neededSpeed < possibleSpeed) {
-                                log(`* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` + ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`);
+                                log(
+                                    `* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` +
+                                        ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`
+                                );
                                 const possibleT = Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch;
                                 possibleAdvances.push({
                                     possiblePoints: [
@@ -461,7 +472,9 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (possibleAdvances.length && distanceRemaining > status.closestToNext + Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, 2)) {
                     // We pick the advance based on - lowest ld
                     const advanceChosen = possibleAdvances.sort((paA, paB) => paA.ld - paB.ld)[0];
-                    log(`* using previously identified ${advanceChosen.estimatedTurnType} advance for sector, estimating turn @ ${advanceChosen.possiblePoints[0].t} [1 of ${possibleAdvances.length} candidates] and backtracking`);
+                    log(
+                        `* using previously identified ${advanceChosen.estimatedTurnType} advance for sector, estimating turn @ ${advanceChosen.possiblePoints[0].t} [1 of ${possibleAdvances.length} candidates] and backtracking`
+                    );
                     //
                     // backtrack to immediately after the dogleg so we don't miss new sectors if the gap finishes inside the sector or
                     // there is only one point between them, we can ignore the point it will be dealt with on next pass of for loop
