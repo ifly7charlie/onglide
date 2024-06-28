@@ -22,6 +22,14 @@ message PilotTracks {
 };
 
 
+message ScoreHistory {
+	string class = 1;
+	string datecode = 2;
+
+	repeated PilotScore scores = 3; // partial of the PilotScore object in time order
+}
+	
+
 message PilotTrack {
     // what pilot
     string compno = 1;
@@ -83,8 +91,6 @@ message PilotScoreLeg {
 	// Scores
     optional SpeedDist handicapped = 11;
     optional SpeedDist actual = 12;
-
-	
 }
 
 message Wind {
@@ -175,7 +181,6 @@ message PilotPosition {
     uint32 t = 6;
     uint32 b = 7;
     uint32 s = 8;
-    string v = 9;
 }
 
 message Positions {

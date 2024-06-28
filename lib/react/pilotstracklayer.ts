@@ -91,7 +91,8 @@ export function pilotsTrackLayer(
                     _dataDiff: (newData: any, oldData: any) => [{startRow: oldData.length - 1, endRow: newData.length}],
                     updateTriggers: {
                         getPath: p.posIndex,
-                        getColor: [track.deckAdditional.sortKey, mapLight, selected],
+                        getColor: [complexColours[sortKey], sortKey, mapLight, selected],
+                        getTimestamps: [track.deckAdditional?.tr?.length],
                         getWidth: selected
                     },
 

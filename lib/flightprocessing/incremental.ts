@@ -5,17 +5,6 @@ import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants'
 import {Compno, PositionMessage, PilotTrackData, DisplayPilotTrackData, Epoch, DeckData, VarioData} from '../types';
 import {PilotPosition} from '../protobuf/onglide';
 
-/*
-//
-// This goes through all the pilots in data and marks the ones that are overdue as 'grey'
-export function checkGrey(pilotsGeoJSON, timestamp) {
-    for (const f of pilotsGeoJSON.locations.features) {
-        f.properties.v = timestamp - f.properties.t > gapLength ? 'grey' : 'black';
-        console.log(f.properties.c, f.properties.v);
-    }
-}
-*/
-
 // Helper fro resizing TypedArrays so we don't end up with them being huge
 export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
     let c = new allocator(b);
@@ -32,16 +21,21 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
         t: new Uint32Array(deckPointIncrement),
         climbRate: new Int8Array(deckPointIncrement),
         posIndex: 0,
-        trackVersion
+        trackVersion,
+        oldestVarioIndex: 0
     };
+    glider.vario = {min: Infinity, max: 0} as VarioData;
 }
 
 //
 // Go through all the points and update the segments - this is needed when we merge two files
-export function generateIndices(deck?: DeckData) {
+export function generateIndices(deck: DeckData, glider: PilotTrackData) {
     if (!deck) {
         return;
     }
+
+    console.log(deck.compno, 'generateIndices');
+    glider.vario = {min: Infinity, max: 0} as VarioData;
 
     let lastTime = deck.t[0];
     if (!deck.indices) {
@@ -63,7 +57,7 @@ export function generateIndices(deck?: DeckData) {
     }
 }
 
-export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true, now = Date.now() / 1000): false | {start: number; end: number} {
+export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true): false | {start: number; end: number} {
     // Ignore if before start
     let lastTime: number | null = null;
 
@@ -140,31 +134,52 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     // Push the new point into the data array
     pushPoint([point.lng, point.lat, point.a], point.g, point.t);
 
-    // Update the altitude and height AGL for the pilot
-    // Mutate the vario and altitude back into SWR
-    const cp: any = glider.vario || {min: Infinity, max: 0};
-    try {
-        cp.altitude = point.a;
-        cp.agl = point.g;
-        cp.lat = point.lat;
-        cp.lng = point.lng;
-
-        var min: number, max: number;
-
-        if (point.v) {
-            [cp.lossXsecond, cp.gainXsecond, cp.total, cp.average, cp.Xperiod, min, max] = point.v.split(',').map((a) => parseFloat(a));
-        }
-
-        cp.min = Math.min(min || point.a, cp.min);
-        cp.max = Math.max(max || point.a, cp.max);
-        if (!glider.vario) {
-            glider.vario = cp;
-        }
-    } catch (_e) {
-        console.log(_e);
-    }
+    // And update the vario numbers
+    calculateVario(glider.deck, glider.vario);
 
     return {start, end: deck.posIndex};
+}
+
+export function calculateVario(deck: DeckData, v: VarioData) {
+    const li = deck.posIndex - 1;
+    const t = deck.t[li];
+
+    // Find 40 seconds, skipping ahead points
+    while (deck.oldestVarioIndex < li && t - deck.t[deck.oldestVarioIndex] > 40) {
+        deck.oldestVarioIndex++;
+
+        // We need to make sure we have min/max - note min is meaningless till after start
+        v.min = Math.min(v.min, deck.agl[li]);
+        v.max = Math.max(v.max, deck.agl[li]);
+    }
+
+    // Helper for saving current
+    v.altitude = deck.positions[li * 3 + 2];
+    v.agl = deck.agl[li];
+    v.gainXsecond = v.lossXsecond = 0;
+
+    // Add them up
+    let previousAlt = deck.positions[deck.oldestVarioIndex * 3 + 2];
+    let initialAlt = previousAlt;
+    for (let c = deck.oldestVarioIndex; c < li; c++) {
+        const altitude = deck.positions[c * 3 + 2];
+        if (previousAlt !== undefined) {
+            let diff = altitude - previousAlt;
+            if (diff > 0) v.gainXsecond += diff;
+            if (diff < 0) v.lossXsecond -= diff;
+        }
+        previousAlt = altitude;
+    }
+
+    // The total and the average, along with misc status values
+    v.total = previousAlt - initialAlt;
+    v.Xperiod = (t - deck.t[deck.oldestVarioIndex]) as Epoch;
+    v.average = Math.round((v.total * 10) / v.Xperiod) / 10;
+    v.lng = deck.positions[li * 3];
+    v.lat = deck.positions[li * 3 + 1];
+    v.agl = deck.agl[li];
+    v.altitude = previousAlt;
+    v.t = t as Epoch;
 }
 
 //
@@ -186,10 +201,6 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): number | undef
 
     // Find the index into the segments that is the index or above
     let segmentPos = _sortedIndex(deck.indices.subarray(0, deck.segmentIndex), indexRemove);
-
-    //    for (let c = 0; c <= deck.segmentIndex; c++) {
-    //        console.log(`${deck.compno}: --> ${c > 0 ? deck.t[deck.indices[c] - 1] : '0'} [${c}-1/${deck.indices[c] - 1}] ... [${c}/${deck.indices[c]}] ${deck.t[deck.indices[c]]} -->`);
-    //    }
 
     // A segment starts on this position - we can remove all before
     if (deck.indices[segmentPos] == indexRemove) {
@@ -227,20 +238,8 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): number | undef
     deck.t = deck.t.slice(indexRemove);
     deck.climbRate = deck.climbRate.slice(indexRemove);
 
-    return indexRemove;
-}
+    // this will reset all the vario calculations
+    deck.oldestVarioIndex = 0;
 
-export function updateVarioFromDeck(deck: DeckData, vario: VarioData): [Epoch, VarioData] {
-    const cp: any = vario || {min: Infinity, max: 0};
-    try {
-        const lastPos = deck.posIndex - 1;
-        cp.agl = deck.agl[lastPos];
-        [cp.lng, cp.lat, cp.altitude] = [].concat(...deck.positions.subarray(lastPos * 3));
-        cp.lossXsecond = cp.gainXsecond = cp.total = cp.average = cp.Xperiod = 0;
-        cp.min = Math.min(cp.altitude || cp.min, cp.min);
-        cp.max = Math.max(cp.altitude || cp.max, cp.max);
-    } catch (_e) {
-        console.log(_e);
-    }
-    return [deck.t[deck.posIndex - 1] as Epoch, cp];
+    return indexRemove;
 }

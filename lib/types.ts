@@ -254,23 +254,27 @@ export interface DeckData {
     posIndex: number;
     segmentIndex?: number;
     trackVersion: number;
+    oldestVarioIndex: number; //
 }
 
 export interface VarioData {
-    altitude: AltitudeAMSL;
+    altitude: AltitudeAMSL; // current
     agl: AltitudeAgl;
+
     lat: number;
     lng: number;
-    min: AltitudeAgl;
+
+    min: AltitudeAgl; // after start min/max
     max: AltitudeAgl;
 
-    lossXsecond: number;
-    gainXsecond: number;
-    total: number;
-    average: number;
-    Xperiod: number;
+    lossXsecond: number; // loss in period
+    gainXsecond: number; // gain in period
+    total: number; // total loss / gain
+    average: number; // average of total/Xperiod
+    Xperiod: Epoch; // period
 
-    delay: number;
+    delay: Epoch; // how late is packet
+    t: Epoch; // when was this updated
 }
 
 export type SortKey =

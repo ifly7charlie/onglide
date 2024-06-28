@@ -37,7 +37,7 @@ export function updateSortKeys(pilots: API_ClassName_Pilots, pilotScores: ScoreD
         // Update delay numbers
         const delay = now - (t || 0);
         if (vario) {
-            vario.delay = delay;
+            vario.delay = delay as Epoch;
         }
 
         let icon = faCircleQuestion;

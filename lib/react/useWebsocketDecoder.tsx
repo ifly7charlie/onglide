@@ -20,7 +20,7 @@ import {oldTracksUrl} from './fixupUrls';
 import {PilotPosition, OnglideWebSocketMessage, Identifiers} from '../protobuf/onglide';
 
 import {assembleLabeledLine} from './distanceLine';
-import {mergePoint, pruneStartline, updateVarioFromDeck, generateIndices} from '../flightprocessing/incremental';
+import {mergePoint, pruneStartline, calculateVario, generateIndices} from '../flightprocessing/incremental';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 import {mergeVHPoint, initaliseVH, pruneVHStartline} from './deckvh';
@@ -53,6 +53,7 @@ export function useWebsocketDecoder({mergeWsStatus}: {mergeWsStatus?: Function})
 
             if (decoded.identifiers) {
                 console.log('identifiers', decoded.identifiers, decoded.t);
+
                 if (decoded.identifiers.datecode != identifiers.datecode || decoded.identifiers.class != identifiers.class) {
                     identifiers.class = decoded.identifiers.class as ClassName;
                     identifiers.datecode = decoded.identifiers.datecode as Datecode;
@@ -219,7 +220,8 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     climbRate: new Int8Array(p.climbRate.slice(indexOfOverlap * Int8Array.BYTES_PER_ELEMENT).buffer),
                     agl: new Int16Array(p.agl.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer),
                     posIndex: p.posIndex - indexOfOverlap,
-                    trackVersion: p.trackVersion
+                    trackVersion: p.trackVersion,
+                    oldestVarioIndex: 0
                 };
 
                 if (existing) {
@@ -231,7 +233,8 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                         climbRate: new Int8Array(deck.climbRate.length + existing?.climbRate.length || 0),
                         agl: new Int16Array(deck.agl.length + existing?.agl.length || 0),
                         posIndex: deck.posIndex + existing?.posIndex,
-                        trackVersion: p.trackVersion
+                        trackVersion: p.trackVersion,
+                        oldestVarioIndex: 0
                     };
 
                     // Figure out which order to put them in
@@ -254,19 +257,22 @@ function updateTracks(decoded: OnglideWebSocketMessage, trackData: TrackData, se
                     deck = combined;
                 }
 
-                generateIndices(deck);
+                generateIndices(deck, result[compno]);
 
                 if (pilotScores[compno]?.utcStart) {
                     pruneStartline(deck, pilotScores[compno].utcStart);
                 }
 
+                // Build full vario history (after startline is pruned)
+                calculateVario(deck, result[compno].vario);
+
                 // Save the version
                 deck.trackVersion = p.trackVersion;
 
-                // Store away and update the vario
+                // Store away and update timestamps
                 result[compno].deck = deck;
-                [result[compno].t, result[compno].vario] = updateVarioFromDeck(deck, result[compno].vario);
-                initaliseVH(result[compno], 'unknown' as SortKey);
+                result[compno].t = deck.t[deck.posIndex - 1];
+                initaliseVH(result[compno], 'auto');
                 Object.assign(trackData[compno], result[compno]);
                 return result;
             },
