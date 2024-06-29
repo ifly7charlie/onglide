@@ -339,7 +339,7 @@ function processPacket(packet: aprsPacket) {
         return;
     }
 
-    if (!packet.latitude || !packet.longitude || !flarmId || !packet.timestamp) {
+    if (!packet.latitude || !packet.longitude || !flarmId || !packet.timestamp || ! packet.altitude) {
         return;
     }
 
@@ -420,7 +420,15 @@ function processPacket(packet: aprsPacket) {
         }
     }
     if (speedBetweenKph > 450 /*kph*/) {
+<<<<<<< Updated upstream
         console.log(`IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph.toFixed(1)}kph ${packet.timestamp - aircraft.lastMoved}s`);
+=======
+        console.log(
+            `IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${
+                packet.speed
+            }, ${distanceFromLast}km ${speedBetweenKph.toFixed(1)}kph ${packet.timestamp - aircraft.lastMoved}s`
+        );
+>>>>>>> Stashed changes
         statistics.jumps++;
         return;
     }
@@ -429,7 +437,15 @@ function processPacket(packet: aprsPacket) {
     aircraft.lastMoved = packet.timestamp;
 
     if (altitude > 10000) {
+<<<<<<< Updated upstream
         console.log(`IGNORING ALTITUDE JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph}kph`);
+=======
+        console.log(
+            `IGNORING ALTITUDE JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${
+                packet.speed
+            }, ${distanceFromLast}km ${speedBetweenKph}kph`
+        );
+>>>>>>> Stashed changes
         statistics.jumps++;
         return;
     }
