@@ -100,6 +100,7 @@ async function SGP(deep = false) {
                 return res.json();
             }
             console.log(`Unable to fetch task ${res.statusText}`);
+            update_class();
             return null;
         })
         .then((res) => {
@@ -239,11 +240,11 @@ async function download_picture(url, compno, classid, mysql) {
     fetch(url, {headers: {Referer: 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/'}})
         .then((res) => {
             if (res.status != 200) {
-                console.log(` ${classid}:${compno}: FAI website returns ${res.status}: ${res.statusText}`);
+                console.log(` ${classid}:${compno}: image website '${url}' returns ${res.status}: ${res.statusText}`);
                 if (res.status == 404 || res.status == 403) {
                     return undefined;
                 }
-                throw `FAI website returns ${res.status}: ${res.statusText}`;
+                throw `image website ${url} returns ${res.status}: ${res.statusText}`;
             } else {
                 return res.arrayBuffer();
             }
@@ -261,13 +262,21 @@ async function download_picture(url, compno, classid, mysql) {
 //
 // Store the task in the MYSQL
 async function update_task(task) {
+    console.log(task);
     let rows = 0;
-    let [date] = typeof task.startOpenTs == 'string' ? task.startOpenTs.match(/^[0-9-]{10}/) : [new Date(task.startOpenTs).toISOString()];
+    let [date] = typeof task.compDate == 'string' ? task.compDate.match(/^[0-9-]{10}/) : [new Date(task.compDate).toISOString()];
+    let startOpen = task.startOpenTs ? `${Math.trunc(parseInt(task.startOpenTs) / 3600)}:${Math.trunc(((parseInt(task.startOpenTs)) % 3600)/60)%60}:00` : '00:00:00';
+        
+    if( parseInt(startOpen) < 10 || parseInt(startOpen) > 17 ) {
+        startOpen = '00:00:00'
+    }
 
     if (!date) {
-        console.warn('no date found in task', task.startOpenTs);
+        console.warn('no date found in task', date, task.startOpenTs);
         return;
     }
+
+    console.log('DATE:', date, startOpen, task.startOpenTs);
 
     const classid = 'sgp';
     let tasktype = 'S';
@@ -281,7 +290,7 @@ async function update_task(task) {
         console.log(hash, dbhashrow[0]);
         return;
     } else {
-        console.log(`${classid} - ${date}: task changed`);
+        console.log(`${classid} - ${date}: task changed start:${startOpen}`);
     }
 
     // Do this as one block so we don't end up with broken tasks
