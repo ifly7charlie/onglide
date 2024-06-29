@@ -98,7 +98,10 @@ export default function MApp(props: {
         ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[0]
         : selectedPilotData.score.utcFinish // if we are done then take last one
         ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
-        : selectedPilotData.score.minDistancePoints.slice(nextTp * 4, nextTp * 4 + 2);
+        : selectedPilotData.score.minDistancePoints.slice(4, 6); // mindistance is from us so this is the next point
+
+    //    console.log(selectedPilotData?.score);
+    //    console.log(npol, selectedPilotData?.score?.utcFinish, nextTp, selectedPilotData?.score?.minDistancePoints, taskGeoJSON?.track?.features?.length);
 
     // =========== FOLLOW EFFECT ===============
     //
@@ -122,7 +125,7 @@ export default function MApp(props: {
                 // Next point - if we haven't started or we have finished use the startline
 
                 // If we are user selected or we don't have a valid next point don't change anything
-                const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
+                const fbearing = props.options.taskUp == 2 || !npol?.length ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
 
                 const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
 
