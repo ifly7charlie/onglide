@@ -36,6 +36,13 @@ export interface PilotTracks_PilotsEntry {
   value: PilotTrack | undefined;
 }
 
+export interface ScoreHistory {
+  class: string;
+  datecode: string;
+  /** partial of the PilotScore object in time order */
+  scores: PilotScore[];
+}
+
 export interface PilotTrack {
   /** what pilot */
   compno: string;
@@ -642,6 +649,95 @@ export const PilotTracks_PilotsEntry = {
     message.value = (object.value !== undefined && object.value !== null)
       ? PilotTrack.fromPartial(object.value)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseScoreHistory(): ScoreHistory {
+  return { class: "", datecode: "", scores: [] };
+}
+
+export const ScoreHistory = {
+  encode(message: ScoreHistory, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.class !== "") {
+      writer.uint32(10).string(message.class);
+    }
+    if (message.datecode !== "") {
+      writer.uint32(18).string(message.datecode);
+    }
+    for (const v of message.scores) {
+      PilotScore.encode(v!, writer.uint32(26).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ScoreHistory {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseScoreHistory();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.class = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.datecode = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.scores.push(PilotScore.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ScoreHistory {
+    return {
+      class: isSet(object.class) ? globalThis.String(object.class) : "",
+      datecode: isSet(object.datecode) ? globalThis.String(object.datecode) : "",
+      scores: globalThis.Array.isArray(object?.scores) ? object.scores.map((e: any) => PilotScore.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: ScoreHistory): unknown {
+    const obj: any = {};
+    if (message.class !== "") {
+      obj.class = message.class;
+    }
+    if (message.datecode !== "") {
+      obj.datecode = message.datecode;
+    }
+    if (message.scores?.length) {
+      obj.scores = message.scores.map((e) => PilotScore.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ScoreHistory>, I>>(base?: I): ScoreHistory {
+    return ScoreHistory.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ScoreHistory>, I>>(object: I): ScoreHistory {
+    const message = createBaseScoreHistory();
+    message.class = object.class ?? "";
+    message.datecode = object.datecode ?? "";
+    message.scores = object.scores?.map((e) => PilotScore.fromPartial(e)) || [];
     return message;
   },
 };
