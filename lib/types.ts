@@ -246,30 +246,66 @@ export type ProtobufGenerator = AsyncGenerator<Uint8Array, void, void>;
 export interface DeckData {
     compno: Compno;
     positions: Float32Array;
+    indices?: Uint32Array;
     agl: Int16Array;
     t: Uint32Array;
+    tr?: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
+    segmentIndex?: number;
     trackVersion: number;
-    dataPromiseResolve?: (a?: boolean) => void;
-    getData?: AsyncGenerator<any, void, void>;
+    oldestVarioIndex: number; //
 }
 
 export interface VarioData {
-    altitude: AltitudeAMSL;
+    altitude: AltitudeAMSL; // current
     agl: AltitudeAgl;
+
     lat: number;
     lng: number;
-    min: AltitudeAgl;
+
+    min: AltitudeAgl; // after start min/max
     max: AltitudeAgl;
 
-    lossXsecond: number;
-    gainXsecond: number;
-    total: number;
-    average: number;
-    Xperiod: number;
+    lossXsecond: number; // loss in period
+    gainXsecond: number; // gain in period
+    total: number; // total loss / gain
+    average: number; // average of total/Xperiod
+    Xperiod: Epoch; // period
 
-    delay: number;
+    delay: Epoch; // how late is packet
+    t: Epoch; // when was this updated
+}
+
+export type SortKey =
+    | 'speed'
+    | 'aspeed'
+    | 'fspeed'
+    | 'climb'
+    | 'remaining'
+    | 'aremaining'
+    | 'distance'
+    | 'adistance'
+    | 'height'
+    | 'aheight'
+    | 'start'
+    | 'finish'
+    | 'duration'
+    | 'delay'
+    | 'ald'
+    | 'ld'
+    | 'done'
+    | 'auto'
+    | 'times';
+
+export interface DisplayPilotTrackData extends PilotTrackData {
+    deckAdditional: {
+        tr: Uint32Array;
+        colours: Uint8Array | null;
+        sortKey: SortKey;
+    };
+    icon?: string;
+    iconSelected?: string;
 }
 
 export interface PilotTrackData {
@@ -283,8 +319,10 @@ export {PilotScore, PilotScoreLeg} from './protobuf/onglide';
 import {PilotScore} from './protobuf/onglide';
 import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 
-export type TrackData = Record<Compno, PilotTrackData>;
+export type TrackData = Record<Compno, DisplayPilotTrackData>;
 export type ScoreData = Record<Compno, PilotScore>;
+
+export type OtherPilotData = Record<ClassName_Compno, PositionMessage>;
 
 export interface PilotScoreDisplay extends PilotScore {
     scoredGeoJSON?: any;
@@ -346,4 +384,23 @@ export interface ClassesTableRow {
     handicapped: 'Y' | 'N';
     grandprixstart: 'Y' | 'N';
     Dm: number | null;
+}
+
+export interface Options {
+    //
+    rainRadar: 0 | 1;
+    rainRadarAdvance: 0 | 1 | 2 | 3;
+    units: 0 | 1;
+    mapType: 0 | 1;
+    map2d: boolean;
+    taskUp: 0 | 1 | 2;
+    follow: boolean;
+    zoomTask: boolean;
+    sortKey: SortKey;
+    showOthers: boolean;
+    constructionLines?: boolean;
+    fullPaths?: boolean;
+
+    options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
+    options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
 }

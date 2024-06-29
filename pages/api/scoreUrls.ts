@@ -14,7 +14,7 @@ export default async function taskHandler(req, res) {
 
     // Generate the correct URL
     classes.forEach((c) => {
-        c.scoresUrl = (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX?.replace('ws', 'http')??'') + process.env.NEXT_PUBLIC_WEBSOCKET_HOST + '/scores/' + `${c.class}${c.datecode}`.toUpperCase() + '.json';
+        c.scoresUrl = (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX?.replace('ws', 'http') ?? '') + process.env.NEXT_PUBLIC_WEBSOCKET_HOST + '/scores/' + `${c.class}${c.datecode}`.toUpperCase() + '.json';
     });
 
     // How long should it be cached - 5 minutes is ok

@@ -231,7 +231,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // Handle a connect
     connection.on('connect', () => {
-        connection.sendLogin()
+        connection.sendLogin();
         connection.sendLine(`# onglide ${config.competition}`);
     });
 
@@ -277,7 +277,11 @@ function startAprsListener(config: AprsListenerConfig) {
         // Into insights
         if (statistics.periodStart) {
             console.log(period);
-            console.log(`APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(1)}s, ignored ${statistics.jumps} jumps, unstableCount: ${unstableCount}`);
+            console.log(
+                `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(
+                    1
+                )}s, ignored ${statistics.jumps} jumps, unstableCount: ${unstableCount}`
+            );
             trackMetric('aprs.msgsReceived', statistics.msgsReceived);
             trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
             trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
@@ -420,15 +424,11 @@ function processPacket(packet: aprsPacket) {
         }
     }
     if (speedBetweenKph > 450 /*kph*/) {
-<<<<<<< Updated upstream
-        console.log(`IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph.toFixed(1)}kph ${packet.timestamp - aircraft.lastMoved}s`);
-=======
         console.log(
             `IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${
                 packet.speed
             }, ${distanceFromLast}km ${speedBetweenKph.toFixed(1)}kph ${packet.timestamp - aircraft.lastMoved}s`
         );
->>>>>>> Stashed changes
         statistics.jumps++;
         return;
     }
@@ -437,15 +437,11 @@ function processPacket(packet: aprsPacket) {
     aircraft.lastMoved = packet.timestamp;
 
     if (altitude > 10000) {
-<<<<<<< Updated upstream
-        console.log(`IGNORING ALTITUDE JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}, ${distanceFromLast}km ${speedBetweenKph}kph`);
-=======
         console.log(
             `IGNORING ALTITUDE JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${
                 packet.speed
             }, ${distanceFromLast}km ${speedBetweenKph}kph`
         );
->>>>>>> Stashed changes
         statistics.jumps++;
         return;
     }

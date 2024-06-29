@@ -2,22 +2,14 @@
 
 import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
-import {TextLayer} from '@deck.gl/layers';
-import {TripsLayer} from '@deck.gl/geo-layers';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
-//import {LngLatLike, MercatorCoordinate} from 'mapbox-gl';
 
 import {deckTooltip} from './decktooltip';
 
 import {useTaskGeoJSON} from './loaders';
 
-import {offlineTime, recentTrackLength} from '../constants';
-
-// Height/Climb helpers
-import {displayHeight, displayClimb} from './displayunits';
-
-import {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, PilotScore} from '../types';
+import type {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, OtherPilotData, PilotScore} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
@@ -38,180 +30,44 @@ import SunCalc from 'suncalc';
 import {AttributionControl} from 'react-map-gl';
 import {RadarOverlay} from './rainradar';
 
-import {UseMeasure, measureClick, isMeasuring, MeasureLayers} from './measure';
+import {MeasureLayers, useMeasure} from './measure';
 
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
-import destination from '@turf/destination';
 
-import {SortKey} from './pilot-sorting';
+import {SortKey} from '../types';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
-// Figure out the baseline date
-const oneHalfYearIsh = 3600 * 24 * 180;
-const referenceDate =
-    (process.env.NEXT_PUBLIC_REPLAY //
-        ? parseInt(process.env.NEXT_PUBLIC_REPLAY) - (parseInt(process.env.NEXT_PUBLIC_REPLAY) % oneHalfYearIsh)
-        : new Date(Date.now() - (Date.now() % (oneHalfYearIsh * 1000))).getTime() / 1000) - oneHalfYearIsh;
-
-// Import our layer override so we can distinguish which point on a
-// line has been clicked or hovered
-//import {StopFollowController} from './deckglcontroller';
-// helps with touch scroll on laptops (undocumented)
-//const controller: {type: any; setFollow?: Function; inertia: true; transitionDuration: 0} = {type: StopFollowController, inertia: true, transitionDuration: 0};
-
-import {colourise} from './colourise';
-
-const colours: Record<string, (mapLight: boolean, selected: boolean) => ((d: any) => number[]) | number[]> = {
-    auto: (mapLight: boolean, selected: boolean) => (selected ? [255, 0, 255, 192] : mapLight ? [0, 0, 0, 127] : [224, 224, 224, 224]),
-    climb:
-        (_mapLight: boolean, _selected: boolean) =>
-        (d): number[] =>
-            colourise(Math.min(255, Math.max(0, d.v * -12.5 + 128))),
-    height: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.p[1][2] >> 5) * 35)),
-    aheight: (_mapLight: boolean, _selected: boolean) => (d) => colourise(Math.min(255, Math.log2(d.g >> 5) * 35))
-};
-//
-// Responsible for generating the deckGL layers
-//
-function makeLayers(props: {trackData: TrackData; selectedCompno: Compno; setSelectedCompno: Function; t: Epoch}, sortKey: SortKey, map2d: boolean, mapLight: boolean, fullPaths: boolean) {
-    if (!props.trackData) {
-        console.log('missing layers');
-        return [];
-    }
-
-    // Add a layer for the recent points for each pilot
-    let layers = _reduce(
-        props.trackData,
-        (result, track, compno) => {
-            // Don't include current pilot in list of all
-            const selected = compno == props.selectedCompno;
-
-            const p = track.deck;
-            if (!p || !p.getData) {
-                console.log(`deck missing from ${compno}`, track);
-                return result;
-            }
-
-            // For all but selected gliders just show most recent track
-            const tripsFiltering = {
-                currentTime: props.t - referenceDate,
-                fadeTrail: !fullPaths && !selected,
-                trailLength: recentTrackLength
-            };
-
-            const sortKeyColour = colours[sortKey] ? sortKey : 'auto';
-            const colour = colours[!props.selectedCompno || selected ? sortKeyColour : 'auto'](mapLight, selected);
-
-            result.push(
-                new TripsLayer({
-                    id: compno + p.trackVersion,
-                    compno: compno,
-                    data: p.getData,
-                    getWidth: selected ? 8 : 5,
-                    getPath: (d) => d.p,
-                    getTimestamps: (d) => {
-                        return [d.t[0] - referenceDate, d.t[1] - referenceDate];
-                    },
-                    positionFormat: 'XYZ',
-                    getColor: colour as any,
-                    jointRounded: true,
-                    fp64: false,
-                    billboard: map2d ? false : true,
-                    widthMinPixels: selected ? 3 : 2,
-                    onClick: (i) => {
-                        props.setSelectedCompno(compno);
-                    },
-                    updateTriggers: {
-                        getColor: sortKeyColour + mapLight + (selected ? 's' : '') + (props.selectedCompno ? 'y' : '')
-                    },
-                    pickable: true,
-                    tt: true,
-                    ...tripsFiltering
-                })
-            );
-            return result;
-        },
-        []
-    );
-
-    //
-    // Generate the labels data, this is fairly simple and is extracted from the positions
-    // data set rather than pilots so that the marker always aligns with the tracking points
-    // we are adding more data so we get a nice tool tip, text colour is determined by how old
-    // the point is
-    const data = _map(props.trackData, (track) => {
-        const p = track.deck;
-        if (!p) {
-            return {};
-        }
-        return {
-            name: track.compno,
-            compno: track.compno,
-            v: p.climbRate[p.posIndex - 1], //
-            g: p?.agl[p.posIndex - 1],
-            a: p.positions[(p.posIndex - 1) * 3 + 2],
-            t: p.t[p.posIndex - 1],
-            coordinates: p.positions.subarray((p.posIndex - 1) * 3, p.posIndex * 3)
-        };
-    });
-
-    if (data.length) {
-        layers.push(
-            new TextLayer({
-                id: 'labels', //+ (map2d ? '2d' : '3d'),
-                data: data,
-                getPosition: (d) => d.coordinates, // map2d ? (d) => [...d.coordinates.slice(0, 2), props.selectedCompno == d.name ? 200 : d.alt / 50] : (d) => d.coordinates,
-                getText: (d) => d.name,
-                getColor: (d) => (props.t - d.t > offlineTime ? [100, 80, 80, 96] : [0, 100, 0, 255]),
-                getTextAnchor: 'middle',
-                getAlignmentBaseline: 'bottom',
-                getSize: (d) => (d.name == props.selectedCompno ? 20 : 16),
-                pickage: true,
-                background: true,
-                fontSettings: {sdf: true},
-                backgroundPadding: [2, 1, 2, 0],
-                onClick: (i) => {
-                    props.setSelectedCompno(i.object?.name || '');
-                },
-                outlineWidth: 2,
-                outlineColor: [255, 255, 255, 255],
-                getBackgroundColor: [255, 255, 255, 255],
-                getBorderColor: (d) => (d.name === props.selectedCompno ? [255, 0, 255, 192] : [40, 40, 40, 255]),
-                getBorderWidth: 1,
-                pickable: true
-            })
-        );
-    }
-
-    return layers;
-}
+import {otherPilotsLayer} from './otherpilotslayer';
+import {pilotsLayer} from './pilotslayer';
+import {pilotsTrackLayer} from './pilotstracklayer';
+//import {turnpointLayer} from './turnpointlayer';
 
 export default function MApp(props: {
     options: any;
     setOptions: Function; //
-    pilots: any;
     pilotScores: ScoreData;
     selectedPilotData: SelectedPilotDetails | null;
     follow: boolean;
     setFollow: Function;
     vc: ClassName;
     selectedCompno: Compno;
-    setSelectedCompno: Function;
+    setSelectedCompno: (compno: Compno) => void;
     tz: string;
     viewport: any;
     setViewport: Function;
     trackData: TrackData;
-    measureFeatures: UseMeasure;
+    otherPilots: OtherPilotData;
     status: string; // status line
     t: Epoch;
 }) {
     // For remote updating of the map
     const mapRef = useRef(null);
+    const measure = useMeasure();
 
     // So we get some type info
-    const {options, setOptions, pilots, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
+    const {options, setOptions, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
 
     const isMoving = mapRef?.current?.isMoving() ?? true;
 
@@ -222,7 +78,7 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const layers = makeLayers(props, options.sortKey as SortKey, map2d, mapLight, options.fullPaths);
+    const pilotTrackLayer = pilotsTrackLayer(props, options.sortKey as SortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
@@ -234,13 +90,18 @@ export default function MApp(props: {
     // Get coordinates on the screen for center point of view
     const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
 
+    const nextTp = selectedPilotData?.score?.utcFinish ? 99 : selectedPilotData?.score?.currentLeg + (selectedPilotData?.score?.inSector ? 1 : 0) || 0;
+
     const npol = !taskGeoJSON?.track?.features?.[0]
         ? null
-        : !selectedPilotData?.score?.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) //
+        : !selectedPilotData?.score?.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) // still start
         ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[0]
-        : selectedPilotData.score.utcFinish
+        : selectedPilotData.score.utcFinish // if we are done then take last one
         ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
-        : selectedPilotData.score.minDistancePoints.slice(4, 6);
+        : selectedPilotData.score.minDistancePoints.slice(4, 6); // mindistance is from us so this is the next point
+
+    //    console.log(selectedPilotData?.score);
+    //    console.log(npol, selectedPilotData?.score?.utcFinish, nextTp, selectedPilotData?.score?.minDistancePoints, taskGeoJSON?.track?.features?.length);
 
     // =========== FOLLOW EFFECT ===============
     //
@@ -264,7 +125,7 @@ export default function MApp(props: {
                 // Next point - if we haven't started or we have finished use the startline
 
                 // If we are user selected or we don't have a valid next point don't change anything
-                const fbearing = props.options.taskUp == 2 || !npol ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
+                const fbearing = props.options.taskUp == 2 || !npol?.length ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
 
                 const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
 
@@ -296,7 +157,6 @@ export default function MApp(props: {
     // ====== PITCH RESTRICTION FOR 2D/3D =======
     useEffect(() => {
         const map = mapRef?.current;
-        console.log('pitch check', isMoving, !!map);
         if (!isMoving && map) {
             // If we are 3d and not locked pitch then correct
             if (!map2d && map.getMap().getMaxPitch() != 80) {
@@ -318,6 +178,7 @@ export default function MApp(props: {
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
         if (options.zoomTask && taskGeoJSONtp && viewport) {
+            console.log('zoom to task', viewport);
             try {
                 const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
                 setOptions({...options, zoomTask: false});
@@ -327,9 +188,9 @@ export default function MApp(props: {
                         [maxLng, maxLat]
                     ],
                     {
-                        pitch: map2d ? 0 : 50,
+                        pitch: map2d ? 0 : 70,
                         padding: 20,
-                        offset: [-140, 0],
+                        offset: [(mapRef.current?.getContainer()?.clientWidth ?? 0) < 992 ? 0 : -140, 0],
                         bearing: 0
                     }
                 );
@@ -337,7 +198,7 @@ export default function MApp(props: {
                 console.error(e);
             }
         }
-    }, [options.zoomTask, taskGeoJSONtp, viewport]);
+    }, [options.zoomTask, taskGeoJSONtp, viewport, mapRef.current]);
 
     // ====== LOCK NORTH UP ===========
     // If we are north up then reset north on bearing change
@@ -351,7 +212,7 @@ export default function MApp(props: {
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
-        return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle3d(selectedPilotData?.score, mapLight);
+        return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle2d(selectedPilotData?.score, mapLight);
     }, [selectedCompno, selectedPilotData?.score?.currentLeg, selectedPilotData?.score?.utcFinish, mapLight, map2d]);
 
     // Do we have a loaded set of details?
@@ -375,8 +236,7 @@ export default function MApp(props: {
     //
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units}),
-        //
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units}), //
         [vc, props.options.units, props.tz, mapRef?.current]
     );
 
@@ -399,8 +259,15 @@ export default function MApp(props: {
         props.setViewport(viewState);
     }, []);
 
-    const onClick = useCallback(() => measureClick(props.measureFeatures), [props.measureFeatures]);
-    const getCursor = useCallback(() => 'crosshair', []);
+    const onClick = useCallback((a, _b) => measure.click(a), [measure.enabled]);
+
+    const pilotLayer = pilotsLayer(props.trackData, selectedCompno, props.setSelectedCompno, props.t);
+
+    // If we are displaying other pilots
+    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, vc, mapLight, map2d, props.t) : null;
+
+    // And the turnpoints
+    //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
     // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
     // much quicker than changing the style.
@@ -414,6 +281,7 @@ export default function MApp(props: {
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
+        console.log('onDragStart');
         if (follow) {
             setFollow(false);
         }
@@ -423,8 +291,9 @@ export default function MApp(props: {
         <Map //
             initialViewState={{...props.viewport, ...viewOptions}}
             onMove={onViewStateChange}
-            onLoad={fixupMap}
+            onStyleData={fixupMap}
             mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+            cursor={measure.enabled ? 'crosshair' : 'auto'}
             mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
             reuseMaps={true}
             ref={mapRef}
@@ -432,10 +301,9 @@ export default function MApp(props: {
         >
             <DeckGLOverlay
                 getTooltip={toolTip}
-                {...(isMeasuring(props.measureFeatures) ? {getCursor: getCursor} : {})}
                 onClick={onClick}
                 onDragStart={onDragStart}
-                layers={layers} //
+                layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
                 interleaved={!map2d}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (
@@ -444,14 +312,14 @@ export default function MApp(props: {
                 </Source>
             ) : null}
             {valid ? (
-                <Source type="geojson" data={taskGeoJSON.track}>
-                    <Layer {...trackLineStyle} key="tls" />
-                </Source>
-            ) : null}
-            {valid ? (
                 <Source type="geojson" id="x" data={taskGeoJSONtp}>
                     <Layer {...turnpointStyleFlat} key="tps" />
                     <Layer {...turnpointStyle} key="tgjp" />
+                </Source>
+            ) : null}
+            {valid ? (
+                <Source type="geojson" data={taskGeoJSON.track}>
+                    <Layer {...trackLineStyle} key="tls" />
                 </Source>
             ) : null}
             {selectedPilotData && options.constructionLines && selectedPilotData.score?.minGeoJSON ? (
@@ -472,7 +340,7 @@ export default function MApp(props: {
                     <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                 </Source>
             ) : null}
-            <MeasureLayers useMeasure={props.measureFeatures} key="measure" />
+            <MeasureLayers key="measure" />
             <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
             {!map2d && <Layer key="skylayer" {...skyLayer} />}
             {attribution}
@@ -632,8 +500,26 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
                     mapLight ? 'darkgrey' : 'white'
                 ],
                 'fill-extrusion-opacity': 0.5,
-                'fill-extrusion-base': ['case', ['==', !selectedPilot, true], 10, ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], 5, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 10, 0],
-                'fill-extrusion-height': ['case', ['==', !selectedPilot, true], 100, ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], 9, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 5000, 2]
+                'fill-extrusion-base': [
+                    'case',
+                    ['==', !selectedPilot, true],
+                    10,
+                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0],
+                    5,
+                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
+                    10,
+                    0
+                ],
+                'fill-extrusion-height': [
+                    'case',
+                    ['==', !selectedPilot, true],
+                    100,
+                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0],
+                    9,
+                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
+                    5000,
+                    2
+                ]
             }
         }
     ];

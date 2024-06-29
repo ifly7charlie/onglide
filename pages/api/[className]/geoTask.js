@@ -105,7 +105,13 @@ export default async function taskHandler(req, res) {
     };
 
     tasklegs.forEach((leg) => {
-        geoJSON.features = [].concat(geoJSON.features, [{type: 'Feature', properties: {leg: leg.legno}, geometry: leg.geoJSON}]);
+        geoJSON.features = [].concat(geoJSON.features, [
+            {
+                type: 'Feature',
+                properties: {leg: leg.legno, trigraph: leg.ntrigraph, name: leg.nname, altitude: leg.altitude, r1: leg.r1},
+                geometry: leg.geoJSON
+            }
+        ]);
     });
 
     let trackLineGeoJSON = {
@@ -119,7 +125,7 @@ export default async function taskHandler(req, res) {
             if (index + 1 < tasklegs.length) {
                 accumulate.push({
                     type: 'Feature',
-                    properties: {leg: leg.legno + 1},
+                    properties: {leg: leg.legno + 1, length: leg.length},
                     geometry: {
                         type: 'LineString',
                         coordinates: [

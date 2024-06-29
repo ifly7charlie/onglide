@@ -422,7 +422,26 @@ async function process_class_task(classid, className, date, day_number, day_info
 
                     query = query + "( ?, todcode(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
 
-                    values = values.concat([classid, date, taskid, point_index, leglength, bearingDeg, toDeg(tp.Latitud), toDeg(tp.Longitud), hi, trigraph, tpname, point_index > 0 ? 'symmetrical' : 'np', parseFloat(tp.Radie), tp.Typ == 'Line' ? 90 : 0, 0, 0, 0, tp.altitude]);
+                    values = values.concat([
+                        classid,
+                        date,
+                        taskid,
+                        point_index,
+                        leglength,
+                        bearingDeg,
+                        toDeg(tp.Latitud),
+                        toDeg(tp.Longitud),
+                        hi,
+                        trigraph,
+                        tpname,
+                        point_index > 0 ? 'symmetrical' : 'np',
+                        parseFloat(tp.Radie),
+                        tp.Typ == 'Line' ? 90 : 0,
+                        0,
+                        0,
+                        0,
+                        tp.altitude
+                    ]);
 
                     point_index++;
                 }

@@ -4,7 +4,7 @@ import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus} from '../types';
+import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus, Options, SortKey} from '../types';
 
 import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
@@ -20,7 +20,7 @@ import {delayToText} from './timehelper.js';
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map, cloneDeep as _cloneDeep} from 'lodash';
 
 // Helpers for sorting pilot list
-import {updateSortKeys, nextSortOrder, getValidSortOrder, isValidSortOrder, ShortDisplayKeys, SortKey} from './pilot-sorting';
+import {updateSortKeys, nextSortOrder, getValidSortOrder} from './pilot-sorting';
 import {displayHeight, convertHeight, convertClimb} from './displayunits';
 
 function isoCountryCodeToFlagEmoji(country: string) {
@@ -61,33 +61,31 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
                 </div>
             </a>
             <hr />
-            <div>
+            <div className="summarycomponent">
+                <div className="main-text">{main.value}</div>
+                {main.units ? <div className="units">{main.units}</div> : null}
                 <div className="main-icon">
                     <a href="#" title={main.description} className="tooltipicon">
                         <FontAwesomeIcon icon={main.icon} />
                     </a>
                 </div>
-                <div className="main-text">
-                    {main.value}
-                    {main.units ? <div className="units">{main.units}</div> : null}
-                </div>
             </div>
             <hr />
             {data1?.value != undefined ? (
-                <div>
+                <div className="summarycomponent">
+                    <div className="data-text">{data1.value}</div>
+                    {data1.units ? <div className="units">{data1.units}</div> : null}
                     <div className="data-icon">
                         <a href="#" title={data1.description} className="tooltipicon">
                             <FontAwesomeIcon icon={data1.icon} />
                         </a>
                     </div>
-                    <div className="data-text">
-                        {data1.value}
-                        {data1.units ? <div className="units">{data1.units}</div> : null}
-                    </div>
                 </div>
             ) : null}
             {data2?.value !== undefined && data2.value !== null ? (
-                <div>
+                <div className="summarycomponent">
+                    <div className="data-text">{data2.value}</div>
+                    {data2.units ? <div className="units">{data2.units}</div> : null}
                     {data2.icon ? (
                         <div className="data-icon">
                             <a href="#" title={data2.description} className="tooltipicon">
@@ -95,10 +93,6 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
                             </a>
                         </div>
                     ) : null}
-                    <div className="data-text">
-                        {data2.value}
-                        {data2.units ? <div className="units">{data2.units}</div> : null}
-                    </div>
                 </div>
             ) : null}
         </li>
@@ -116,7 +110,7 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
 
     const convertedClimb = convertClimb(vario?.average ?? 0, units);
 
-    return (
+    return vario ? (
         <SummaryComponent
             id="climb"
             title="vario" //
@@ -124,7 +118,7 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
             data1={{value: convertHeight(vario.gainXsecond + vario.lossXsecond, units)[0], units: units ? 'ft' : 'm', icon: solid('cloud-upload')}}
             data2={{value: vario.Xperiod, units: 'sec', icon: solid('hourglass-half')}}
         />
-    );
+    ) : null;
 }
 
 const StartComponent = memo(function StartComponent({
@@ -153,7 +147,7 @@ const StartComponent = memo(function StartComponent({
         <SummaryComponent
             id="times"
             title="times" //
-            width="110px"
+            width="130px"
             main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: solid('stopwatch'), description: 'elapsed time'}}
             data1={{value: OptionalTime('', utcStart, tz), icon: solid('hourglass-start'), description: 'start time'}}
             data2={{value: endTime, icon, description: description}}
@@ -492,7 +486,21 @@ function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
 
 //
 // Render the pilot
-const Pilot = memo(function Pilot({pilot, displayAs, displayUnits, displayIcon, selected, onClick}: {pilot: API_ClassName_Pilots_PilotDetail; displayAs: string; displayUnits: string; displayIcon: any; selected: boolean; onClick: any}) {
+const Pilot = memo(function Pilot({
+    pilot,
+    displayAs,
+    displayUnits,
+    displayIcon,
+    selected,
+    onClick
+}: {
+    pilot: API_ClassName_Pilots_PilotDetail;
+    displayAs: string;
+    displayUnits: string;
+    displayIcon: any;
+    selected: boolean;
+    onClick: any;
+}) {
     const className = selected ? 'small-pic pilot pilothovercapture selected' : 'small-pic pilot pilothovercapture';
 
     // Render the normal pilot icon
@@ -537,7 +545,7 @@ export function PilotList({
     trackData: TrackData;
     selectedPilot: Compno;
     setSelectedCompno: Function;
-    options: any;
+    options: Options;
     setOptions: Function;
     handicapped: boolean;
     now: Epoch;

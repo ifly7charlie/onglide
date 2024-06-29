@@ -86,7 +86,9 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             }
         }
 
-        console.log(`${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue[position]?.t ?? 0) * 1000).toISOString()}`);
+        console.log(
+            `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue[position]?.t ?? 0) * 1000).toISOString()}`
+        );
 
         // Loop till we are told to stop (an exception on yield)
         while (true) {

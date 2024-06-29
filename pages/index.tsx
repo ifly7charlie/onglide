@@ -25,13 +25,13 @@ import {query} from '../lib/react/db';
 import escape from 'sql-template-strings';
 import {Options} from '../lib/react/options';
 
-import {UseMeasure, useMeasure} from '../lib/react/measure';
+import {MeasureContext, useMeasure} from '../lib/react/measure';
 import {ClassName} from '../lib/types';
 
 import {find as _find, isEqual as _isEqual} from 'lodash';
 
 const Menu = memo(
-    function Menu(props: {comp: any; setSelectedPilot: Function; measureFeatures: UseMeasure; options: any; setOptions: Function; vc: string}) {
+    function Menu(props: {comp: any; setSelectedPilot: Function; options: any; setOptions: Function; vc: string}) {
         const comp = props.comp;
         const classes =
             comp.classes.length > 1
@@ -54,42 +54,48 @@ const Menu = memo(
 
         // Try and extract a short form of the name, only letters and spaces stop at first number
         const shortName =
-            comp.competition.name
-                .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
-                .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
-                //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/v, 'u'))?.[1]
-                ?.trim() || comp.competition.name.substring(0, 25) + '...';
+            (
+                comp.competition.name
+                    .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
+                    .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
+                    //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
+                    ?.trim() || comp.competition.name
+            ).substring(0, 15) + '...';
 
         return (
             <>
-                <Navbar bg="light" fixed="top">
-                    <Nav fill variant="tabs" defaultActiveKey={props.vc} style={{width: '100%'}}>
-                        {classes}
-                        <Nav.Item key="sspot" style={{paddingTop: 0, paddingBottom: 0}}>
-                            <Nav.Link href={comp.competition.mainwebsite} className="d-xs-block d-sm-block d-lg-none">
-                                {shortName}
-                                <Nbsp />
-                                <FontAwesomeIcon icon={faLink} />
-                            </Nav.Link>
-                            <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
-                                {comp.competition.name}
-                                <div style={{fontSize: '70%'}}>
-                                    {comp.competition.start} to {comp.competition.end}
-                                    <FontAwesomeIcon icon={faLink} />{' '}
-                                </div>
-                            </Nav.Link>
-                        </Nav.Item>
+                <Navbar bg="light" expand="lg" fixed="top">
+                    <Navbar.Brand className="d-lg-none">
+                        <FontAwesomeIcon icon={faLink} />
+                        <Nbsp />
+                        {shortName}
+                        <span className="d-lg-none">{classes ? ' - ' + comp.classes.find((c) => c.class == props.vc)?.classname.replace(/\s+(meter|metre)/, 'm') : null}</span>
+                    </Navbar.Brand>
+                    <Navbar.Brand className="d-name d-xl-block">
+                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
+                            {comp.competition.name}
+                            <div style={{fontSize: '70%'}}>
+                                {comp.competition.start} to {comp.competition.end}
+                                <FontAwesomeIcon icon={faLink} />{' '}
+                            </div>
+                        </Nav.Link>
+                    </Navbar.Brand>
+                    <Navbar.Toggle aria-controls="responsive-nav-bar" />
+                    <Navbar.Collapse id="responsive-nav-bar" className="justify-content-end">
+                        <Nav fill variant="underline" defaultActiveKey={props.vc} style={{width: '40vw'}}>
+                            {classes}
+                        </Nav>
                         <Nav.Item key="settings">
-                            <Options {...props} />
+                            <Options {...props} multipleClasses={comp.classes.length > 1} />
                         </Nav.Item>
-                    </Nav>
+                    </Navbar.Collapse>
                 </Navbar>
                 <br style={{clear: 'both'}} />
             </>
         );
     },
     // Memo comparison, skip all the functions
-    (o, n) => o.vc === n.vc && o.comp === n.comp && _isEqual(o.measureFeatures[0], n.measureFeatures[0]) && _isEqual(o.options, n.options)
+    (o, n) => o.vc === n.vc && o.comp === n.comp && _isEqual(o.options, n.options)
 );
 
 //
@@ -110,8 +116,6 @@ export default function CombinePage(props) {
     // Next up load the contest and the pilots, we can use defaults for pilots
     // if the className matches
     const {comp, isLoading, isError} = useContest();
-    //    console.log(props);
-    //    console.log(comp);
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
@@ -127,12 +131,12 @@ export default function CombinePage(props) {
         bearing: 0,
         minPitch: 0,
         maxPitch: 85,
-        pitch: !props.options.map2d ? 70 : 0
+        pitch: !props?.options?.map2d ? 70 : 0
     });
 
     //
     // And display in progress until they are loaded
-    if (isLoading)
+    if (isLoading || !props.options)
         return (
             <div className="loading">
                 <div className="loadinginner" />
@@ -150,7 +154,13 @@ export default function CombinePage(props) {
                 <Head>
                     <title>{comp.competition.name}</title>
                 </Head>
-                <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
+                <Menu //
+                    comp={comp}
+                    vc={className}
+                    setSelectedPilot={setSelectedCompno}
+                    options={props.options}
+                    setOptions={props.setOptions}
+                />
                 <h1>Please choose a class from the menu bar</h1>
             </>
         );
@@ -158,18 +168,35 @@ export default function CombinePage(props) {
 
     return (
         <>
-            <Head>
-                <title>
-                    {comp.competition.name} - {className}
-                </title>
-                <meta name="viewport" content="width=device-width, minimal-ui" />
-                <link rel="manifest" href="/manifest.json" />
-                <link href="//api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
-            </Head>
-            <Menu comp={comp} vc={className} setSelectedPilot={setSelectedCompno} measureFeatures={measureFeatures} options={props.options} setOptions={props.setOptions} />
-            <div className="resizingContainer">
-                <OgnFeed vc={className as ClassName} tz={props.tz} datecode={selectedClass ? selectedClass.datecode : '07C'} selectedCompno={selectedCompno} setSelectedCompno={setSelectedCompno} viewport={viewport} setViewport={setViewport} options={props.options} setOptions={props.setOptions} measureFeatures={measureFeatures} handicapped={selectedClass?.handicapped == 'Y'} notes={selectedClass?.notes} />
-            </div>
+            <MeasureContext>
+                <Head>
+                    <title>
+                        {comp.competition.name} - {className}
+                    </title>
+                </Head>
+                <Menu
+                    comp={comp}
+                    vc={className} //
+                    setSelectedPilot={setSelectedCompno}
+                    options={props.options}
+                    setOptions={props.setOptions}
+                />
+                <div className="resizingContainer">
+                    <OgnFeed
+                        vc={className as ClassName} //
+                        tz={props.tz}
+                        datecode={selectedClass ? selectedClass.datecode : '07C'}
+                        selectedCompno={selectedCompno}
+                        setSelectedCompno={setSelectedCompno}
+                        viewport={viewport}
+                        setViewport={setViewport}
+                        options={props.options}
+                        setOptions={props.setOptions}
+                        handicapped={selectedClass?.handicapped == 'Y'}
+                        notes={selectedClass?.notes}
+                    />
+                </div>
+            </MeasureContext>
         </>
     );
 }
@@ -182,7 +209,13 @@ export async function getServerSideProps(context) {
         const classes = await query(escape`SELECT class FROM classes ORDER BY class`);
 
         return {
-            props: {lat: location?.lt || 51, lng: location?.lg || 0, tzoffset: location?.tzoffset || 0, tz: location?.tz || 'Etc/UTC', defaultClass: classes && classes.length > 0 ? classes[0].class : ''}
+            props: {
+                lat: location?.lt || 51,
+                lng: location?.lg || 0,
+                tzoffset: location?.tzoffset || 0,
+                tz: location?.tz || 'Etc/UTC',
+                defaultClass: classes && classes.length > 0 ? classes[0].class : ''
+            }
         };
     } catch (e) {
         console.log(e);
