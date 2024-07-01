@@ -64,6 +64,13 @@ type ComparableCompareFunction<T> = (a: T, b: T) => number;
 export interface Comparable<T> {
     compare: ComparableCompareFunction<T>;
 }
+
+export interface TickMessage extends TimeStampType {
+    c: Compno | FlarmID; // compno
+    tick: true;
+    _: true;
+}
+
 export interface BasePositionMessage extends TimeStampType {
     lat: number;
     lng: number;
@@ -80,6 +87,10 @@ export interface PositionMessage extends BasePositionMessage {
     v?: string; // vario string
     l?: boolean | null; // is late
     _?: boolean; // live
+}
+
+export function isTick(m: any): m is TickMessage {
+    return 'tick' in m;
 }
 
 export enum PositionStatus {
@@ -225,11 +236,11 @@ export interface CalculatedTaskStatus extends TaskStatus {
 // points re-ordered if necessary
 export type SoftenGenerator<Type extends TimeStampType> = AsyncGenerator<Type, Type | void, void>;
 
-export type InOrderGenerator = AsyncGenerator<PositionMessage, void, Epoch | void>;
-export type InOrderGeneratorFunction = (getNow: Function | null) => InOrderGenerator;
+export type InOrderGenerator = AsyncGenerator<PositionMessage | TickMessage, void, Epoch | void>;
+export type InOrderGeneratorFunction = (getNow: () => Epoch) => InOrderGenerator;
 
 // Figure out what is happening in the flight
-export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition, void, Epoch | void>;
+export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition | TickMessage, void, Epoch | void>;
 
 // Figure out where in a task somebody is
 export type TaskStatusGenerator = AsyncGenerator<TaskStatus, void, void>;
@@ -313,6 +324,14 @@ export interface PilotTrackData {
     deck?: DeckData;
     vario?: VarioData;
     t?: Epoch;
+}
+
+// How close did we get to current turnpoint
+export interface NearestSectorPoint {
+    geometry?: {
+        coordinates: any;
+    };
+    properties?: {t: Epoch; dist: DistanceKM; p?: EnrichedPosition};
 }
 
 export {PilotScore, PilotScoreLeg} from './protobuf/onglide';

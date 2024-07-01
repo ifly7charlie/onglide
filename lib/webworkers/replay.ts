@@ -14,7 +14,7 @@
 // Import the APRS server
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, AltitudeAMSL, ClassName_Compno, makeClassname_Compno, ClassName, Datecode, Compno, InOrderGenerator} from '../types';
+import {Epoch, AltitudeAMSL, ClassName_Compno, makeClassname_Compno, ClassName, Datecode, Compno, InOrderGenerator, TickMessage} from '../types';
 
 import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:worker_threads';
 
@@ -156,7 +156,7 @@ if (!isMainThread) {
 
             let start = Math.trunc(Date.now() / 1000);
             let multiplier = parseInt(process.env.REPLAY_MULTIPLIER || '1');
-            const replayBase = parseInt(process.env.REPLAY);
+            const replayBase = parseInt(process.env.REPLAY ?? '0');
 
             // base + time elapsed * multiplier
 
@@ -207,13 +207,11 @@ async function startReplay(config: ReplayConfig) {
                 // Loop till we are told to stop
                 try {
                     for await (const value of input) {
-                        delete value._;
-                        delete value.l;
-                        value.v = calculateVario(glider, value.a, value.t).join(',');
-                        glider.channel.postMessage(value);
-                        //                        if (value.c === '88') {
-                        //                            console.log('send ->', glider.channelName, value.c);
-                        //                        }
+                        if (!('tick' in value)) {
+                            delete value._;
+                            delete value.l;
+                            glider.channel.postMessage(value);
+                        }
                     }
                 } catch (e) {
                     console.log(`replay for ${glider.compno} failed, error:`, e);
@@ -231,7 +229,7 @@ async function startReplay(config: ReplayConfig) {
 
     console.log('Done all replay');
 }
-
+/*
 function calculateVario(aircraft: GliderState, altitude: AltitudeAMSL, timestamp: Epoch) {
     altitude = Math.floor(altitude);
 
@@ -283,3 +281,4 @@ function calculateVario(aircraft: GliderState, altitude: AltitudeAMSL, timestamp
 
     return (aircraft.lastVario = [loss, gain, total, Math.floor((total * 10) / elapsed) / 10, elapsed, minmax.m, minmax.x]);
 }
+*/

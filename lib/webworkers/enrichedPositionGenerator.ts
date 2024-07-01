@@ -5,7 +5,7 @@
  *
  */
 
-import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator} from '../types';
+import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator, isTick} from '../types';
 
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
@@ -30,7 +30,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
     let stationary: boolean | null = null;
     let airborneFound: boolean = false;
 
-    let nextArg: Epoch | void; // we may be asked to rewind and if we are then we should do so by passing this into iterator.next
+    let nextArg: Epoch | void = void false; // we may be asked to rewind and if we are then we should do so by passing this into iterator.next
 
     //
     // Loop reading the next point - this will block until a point
@@ -44,6 +44,14 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             break;
         }
         try {
+            //  If we get a tick and it's been long enough then we will send it on as a tick
+            if (isTick(current.value)) {
+                if (previousPoint && current.value.t - previousPoint.t > 120) {
+                    nextArg = yield current.value;
+                }
+                continue;
+            }
+
             // Keep track of where we are
             point = current.value as EnrichedPosition;
             stationary = false;
@@ -76,12 +84,12 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             // Close to the ground 50m and we think we were flying
             if (point.g < 50) {
                 // Check for movements
-                const distanceFromLast = distance(point.geoJSON, previousPoint.geoJSON);
+                const distanceFromLast = distance(point.geoJSON, previousPoint.geoJSON!);
                 if (distanceFromLast < 0.012) {
                     // And enough elapsed time
                     if (point.t - previousPoint.t > 60) {
                         // And if it's at home or somewhere else
-                        if (distance(point.geoJSON, airfield.point) < 2) {
+                        if (distance(point.geoJSON, airfield.point!) < 2) {
                             point.ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
                         } else {
                             point.ps = PositionStatus.Landed;

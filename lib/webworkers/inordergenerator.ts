@@ -4,9 +4,6 @@ import {inOrderDelay} from '../constants';
 import {sortedLastIndexBy as _sortedLastIndexBy} from 'lodash';
 import {BroadcastChannel} from 'node:worker_threads';
 
-// Helper in case we are overriding current time
-const defaultEpochNow = (): Epoch => Math.trunc(Date.now() / 1000) as Epoch;
-
 //
 // This subscribes to broadcast channel and ensures that the messages
 // are returned in order, if it is unable to comply then it flags
@@ -57,13 +54,23 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
     };
 
     // We may want to check regularily for replay
-    if (tick) {
-        setInterval(() => {
+    const tickFastInterval = tick
+        ? setInterval(() => {
+              const toNotify = resolveNotifications.slice();
+              resolveNotifications.length = 0;
+              toNotify.forEach((resolveFunction) => resolveFunction(messageQueue.length + 1));
+          }, 1000)
+        : null;
+
+    // And slower for when we are not getting coordinates
+    const tickSlowInterval = setInterval(() => {
+        // only tick if we have had some messages
+        if (messageQueue.length) {
             const toNotify = resolveNotifications.slice();
             resolveNotifications.length = 0;
-            toNotify.forEach((resolveFunction) => resolveFunction(messageQueue.length + 1));
-        }, 1000);
-    }
+            toNotify.forEach((resolveFunction) => resolveFunction(0));
+        }
+    }, 60_000);
 
     // Generate the next item in the sequence this will block until
     // values are ready and have been waiting for 30 seconds
@@ -94,13 +101,13 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         while (true) {
             // Check to see if there is an eligible message in the queue
             // we won't forward it on until it's been there long enough
-            const now: Epoch = getNow();
+            const nowCutoff: Epoch = (getNow() - inOrderDelay) as Epoch;
 
-            if (position < messageQueue.length && messageQueue[position]?.t < now - inOrderDelay) {
+            if (position < messageQueue.length && messageQueue[position]?.t < nowCutoff) {
                 const message = messageQueue[position++];
-                const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
+                const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= nowCutoff};
 
-                // If we need to go backwards then do so
+                // If we need to go backwards then do so (the iterator returns the time it wants to rewind to)
                 if (nextPoint) {
                     for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
                 }
@@ -116,13 +123,27 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
                 // As we do out of order if it's inserted before us then
                 // we just skip forward
                 const insertIndex = await new Promise<number>((resolve) => resolveNotifications.push(resolve));
-                if (insertIndex < position && position < messageQueue.length) {
+                if (insertIndex && insertIndex < position && position < messageQueue.length) {
                     position++;
+                }
+
+                // If we were woken without a message (ie a tick) then we need to just call with no data
+                if (!insertIndex && position == messageQueue.length) {
+                    const nextPoint = yield {c: compno, _: true, tick: true, t: getNow()};
+
+                    // If we need to go backwards then do so (the iterator returns the time it wants to rewind to)
+                    if (nextPoint) {
+                        for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+                    }
                 }
             }
         }
 
         console.log(`Closing message loop for ${className}:${compno}`);
+        if (tickFastInterval) {
+            clearInterval(tickFastInterval);
+        }
+        clearInterval(tickSlowInterval);
     };
 
     return inOrderGenerator;
