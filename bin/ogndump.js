@@ -22,7 +22,6 @@ let location = {};
 
 // Load the current file & Get the parsed version of the configuration
 dotenv.config({path: '.env.local'});
-let readOnly = process.env.OGN_READ_ONLY == undefined ? false : !!parseInt(process.env.OGN_READ_ONLY);
 
 // Set up background fetching of the competition
 async function main() {
@@ -61,12 +60,12 @@ async function main() {
     let count = 0;
 
     // Connect to the APRS server
-    let connection = new ISSocket(APRSSERVER, PORTNUMBER, 'OTest', '', FILTER);
+  let connection = new ISSocket(`onglidedump v1`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
     //    let parser = new aprsParser();
 
     // Handle a connect
     connection.on('connect', () => {
-        connection.sendLine(connection.userLogin);
+connection.sendLogin();
         connection.sendLine(`# onglide ${CALLSIGN} testing`);
     });
 
