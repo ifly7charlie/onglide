@@ -21,9 +21,11 @@ export interface OnglideWebSocketMessage {
 }
 
 export interface Identifiers {
-  class: string;
+  className: string;
   datecode: string;
   competition: string;
+  earliestScore?: number | undefined;
+  latestScore?: number | undefined;
 }
 
 export interface PilotTracks {
@@ -37,10 +39,21 @@ export interface PilotTracks_PilotsEntry {
 }
 
 export interface ScoreHistory {
+  /** epoch time it was output */
+  t: number;
+  /** epoch time it's the same as - if it hasn't changed, must refer to previous time */
+  sameAsT?:
+    | number
+    | undefined;
+  /** message that was sent */
+  scoreMessage?: Uint8Array | undefined;
+}
+
+export interface ClassScoreHistory {
   class: string;
   datecode: string;
-  /** partial of the PilotScore object in time order */
-  scores: PilotScore[];
+  /**  */
+  history: ScoreHistory[];
 }
 
 export interface PilotTrack {
@@ -396,19 +409,25 @@ export const OnglideWebSocketMessage = {
 };
 
 function createBaseIdentifiers(): Identifiers {
-  return { class: "", datecode: "", competition: "" };
+  return { className: "", datecode: "", competition: "", earliestScore: undefined, latestScore: undefined };
 }
 
 export const Identifiers = {
   encode(message: Identifiers, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.class !== "") {
-      writer.uint32(10).string(message.class);
+    if (message.className !== "") {
+      writer.uint32(10).string(message.className);
     }
     if (message.datecode !== "") {
       writer.uint32(18).string(message.datecode);
     }
     if (message.competition !== "") {
       writer.uint32(26).string(message.competition);
+    }
+    if (message.earliestScore !== undefined) {
+      writer.uint32(32).uint32(message.earliestScore);
+    }
+    if (message.latestScore !== undefined) {
+      writer.uint32(40).uint32(message.latestScore);
     }
     return writer;
   },
@@ -425,7 +444,7 @@ export const Identifiers = {
             break;
           }
 
-          message.class = reader.string();
+          message.className = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -441,6 +460,20 @@ export const Identifiers = {
 
           message.competition = reader.string();
           continue;
+        case 4:
+          if (tag !== 32) {
+            break;
+          }
+
+          message.earliestScore = reader.uint32();
+          continue;
+        case 5:
+          if (tag !== 40) {
+            break;
+          }
+
+          message.latestScore = reader.uint32();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -452,22 +485,30 @@ export const Identifiers = {
 
   fromJSON(object: any): Identifiers {
     return {
-      class: isSet(object.class) ? globalThis.String(object.class) : "",
+      className: isSet(object.className) ? globalThis.String(object.className) : "",
       datecode: isSet(object.datecode) ? globalThis.String(object.datecode) : "",
       competition: isSet(object.competition) ? globalThis.String(object.competition) : "",
+      earliestScore: isSet(object.earliestScore) ? globalThis.Number(object.earliestScore) : undefined,
+      latestScore: isSet(object.latestScore) ? globalThis.Number(object.latestScore) : undefined,
     };
   },
 
   toJSON(message: Identifiers): unknown {
     const obj: any = {};
-    if (message.class !== "") {
-      obj.class = message.class;
+    if (message.className !== "") {
+      obj.className = message.className;
     }
     if (message.datecode !== "") {
       obj.datecode = message.datecode;
     }
     if (message.competition !== "") {
       obj.competition = message.competition;
+    }
+    if (message.earliestScore !== undefined) {
+      obj.earliestScore = Math.round(message.earliestScore);
+    }
+    if (message.latestScore !== undefined) {
+      obj.latestScore = Math.round(message.latestScore);
     }
     return obj;
   },
@@ -477,9 +518,11 @@ export const Identifiers = {
   },
   fromPartial<I extends Exact<DeepPartial<Identifiers>, I>>(object: I): Identifiers {
     const message = createBaseIdentifiers();
-    message.class = object.class ?? "";
+    message.className = object.className ?? "";
     message.datecode = object.datecode ?? "";
     message.competition = object.competition ?? "";
+    message.earliestScore = object.earliestScore ?? undefined;
+    message.latestScore = object.latestScore ?? undefined;
     return message;
   },
 };
@@ -654,19 +697,19 @@ export const PilotTracks_PilotsEntry = {
 };
 
 function createBaseScoreHistory(): ScoreHistory {
-  return { class: "", datecode: "", scores: [] };
+  return { t: 0, sameAsT: undefined, scoreMessage: undefined };
 }
 
 export const ScoreHistory = {
   encode(message: ScoreHistory, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.class !== "") {
-      writer.uint32(10).string(message.class);
+    if (message.t !== 0) {
+      writer.uint32(8).uint32(message.t);
     }
-    if (message.datecode !== "") {
-      writer.uint32(18).string(message.datecode);
+    if (message.sameAsT !== undefined) {
+      writer.uint32(16).uint32(message.sameAsT);
     }
-    for (const v of message.scores) {
-      PilotScore.encode(v!, writer.uint32(26).fork()).ldelim();
+    if (message.scoreMessage !== undefined) {
+      writer.uint32(26).bytes(message.scoreMessage);
     }
     return writer;
   },
@@ -675,6 +718,95 @@ export const ScoreHistory = {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseScoreHistory();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 8) {
+            break;
+          }
+
+          message.t = reader.uint32();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.sameAsT = reader.uint32();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.scoreMessage = reader.bytes();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ScoreHistory {
+    return {
+      t: isSet(object.t) ? globalThis.Number(object.t) : 0,
+      sameAsT: isSet(object.sameAsT) ? globalThis.Number(object.sameAsT) : undefined,
+      scoreMessage: isSet(object.scoreMessage) ? bytesFromBase64(object.scoreMessage) : undefined,
+    };
+  },
+
+  toJSON(message: ScoreHistory): unknown {
+    const obj: any = {};
+    if (message.t !== 0) {
+      obj.t = Math.round(message.t);
+    }
+    if (message.sameAsT !== undefined) {
+      obj.sameAsT = Math.round(message.sameAsT);
+    }
+    if (message.scoreMessage !== undefined) {
+      obj.scoreMessage = base64FromBytes(message.scoreMessage);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ScoreHistory>, I>>(base?: I): ScoreHistory {
+    return ScoreHistory.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ScoreHistory>, I>>(object: I): ScoreHistory {
+    const message = createBaseScoreHistory();
+    message.t = object.t ?? 0;
+    message.sameAsT = object.sameAsT ?? undefined;
+    message.scoreMessage = object.scoreMessage ?? undefined;
+    return message;
+  },
+};
+
+function createBaseClassScoreHistory(): ClassScoreHistory {
+  return { class: "", datecode: "", history: [] };
+}
+
+export const ClassScoreHistory = {
+  encode(message: ClassScoreHistory, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.class !== "") {
+      writer.uint32(10).string(message.class);
+    }
+    if (message.datecode !== "") {
+      writer.uint32(18).string(message.datecode);
+    }
+    for (const v of message.history) {
+      ScoreHistory.encode(v!, writer.uint32(26).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ClassScoreHistory {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClassScoreHistory();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -697,7 +829,7 @@ export const ScoreHistory = {
             break;
           }
 
-          message.scores.push(PilotScore.decode(reader, reader.uint32()));
+          message.history.push(ScoreHistory.decode(reader, reader.uint32()));
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -708,15 +840,17 @@ export const ScoreHistory = {
     return message;
   },
 
-  fromJSON(object: any): ScoreHistory {
+  fromJSON(object: any): ClassScoreHistory {
     return {
       class: isSet(object.class) ? globalThis.String(object.class) : "",
       datecode: isSet(object.datecode) ? globalThis.String(object.datecode) : "",
-      scores: globalThis.Array.isArray(object?.scores) ? object.scores.map((e: any) => PilotScore.fromJSON(e)) : [],
+      history: globalThis.Array.isArray(object?.history)
+        ? object.history.map((e: any) => ScoreHistory.fromJSON(e))
+        : [],
     };
   },
 
-  toJSON(message: ScoreHistory): unknown {
+  toJSON(message: ClassScoreHistory): unknown {
     const obj: any = {};
     if (message.class !== "") {
       obj.class = message.class;
@@ -724,20 +858,20 @@ export const ScoreHistory = {
     if (message.datecode !== "") {
       obj.datecode = message.datecode;
     }
-    if (message.scores?.length) {
-      obj.scores = message.scores.map((e) => PilotScore.toJSON(e));
+    if (message.history?.length) {
+      obj.history = message.history.map((e) => ScoreHistory.toJSON(e));
     }
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ScoreHistory>, I>>(base?: I): ScoreHistory {
-    return ScoreHistory.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<ClassScoreHistory>, I>>(base?: I): ClassScoreHistory {
+    return ClassScoreHistory.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<ScoreHistory>, I>>(object: I): ScoreHistory {
-    const message = createBaseScoreHistory();
+  fromPartial<I extends Exact<DeepPartial<ClassScoreHistory>, I>>(object: I): ClassScoreHistory {
+    const message = createBaseClassScoreHistory();
     message.class = object.class ?? "";
     message.datecode = object.datecode ?? "";
-    message.scores = object.scores?.map((e) => PilotScore.fromPartial(e)) || [];
+    message.history = object.history?.map((e) => ScoreHistory.fromPartial(e)) || [];
     return message;
   },
 };

@@ -18,7 +18,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         return Math.round((1000.0 * dist) / handicap) / 10;
     }
 
-    const doSpeedCalc = (sd: SpeedDist, legDuration: number, taskDuration: number) => {
+    const doSpeedCalc = (sd: SpeedDist | undefined, legDuration: number, taskDuration: number) => {
         if (!sd) {
             return;
         }
@@ -30,9 +30,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         }
     };
 
-    const doGrCalc = (sd: SpeedDist | null, agl: AltitudeAgl) => {
+    const doGrCalc = (sd: SpeedDist | null | undefined, agl: AltitudeAgl) => {
         if (sd && agl) {
-            sd.grRemaining = Math.round((sd.distanceRemaining || sd.minPossible) / (agl / 1000));
+            sd.grRemaining = Math.round((sd.distanceRemaining || sd.minPossible || 0) / (agl / 1000));
         }
     };
 
@@ -221,6 +221,12 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 doGrCalc(score.actual, item.lastProcessedPoint.a - finishAlt);
                 doGrCalc(score.handicapped, item.lastProcessedPoint.a - finishAlt);
             }
+        }
+
+        // If we are done then force the status to be finished - it's not really important if upstream
+        // is aware as this is the last item in the chain
+        if (item.utcFinish) {
+            item.flightStatus = PositionStatus.Finished;
         }
 
         if (!process.env.REPLAY && Date.now() / 1000 - score.t > 930) {

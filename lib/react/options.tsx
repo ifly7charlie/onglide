@@ -9,8 +9,17 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
     const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
 
     const radarFunction = () => {
-        const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
-        props.setOptions(_cloneDeep({...props.options, rainRadarAdvance: nextRadar}));
+        let nextRadar = props.options.rainRadarAdvance + 1;
+        let rainRadar = props.options.rainRadar;
+        if (!rainRadar) {
+            rainRadar = true;
+            nextRadar = 0;
+        }
+        if (nextRadar >= 4) {
+            nextRadar = 0;
+            rainRadar = false;
+        }
+        props.setOptions(_cloneDeep({...props.options, rainRadarAdvance: nextRadar, rainRadar}));
     };
     const constructionLines = () => {
         props.setOptions(_cloneDeep({...props.options, constructionLines: !props.options.constructionLines}));
@@ -60,11 +69,22 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
-                <FontAwesomeIcon icon={solid('umbrella')} />
-                &nbsp;
-                <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
-            </button>
+            {props.options.rainRadar ? (
+                <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance] + ', click to change timing or disable'} onClick={radarFunction}>
+                    <FontAwesomeIcon icon={solid('umbrella')} />
+                    &nbsp;
+                    <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
+                </button>
+            ) : (
+                <button title={'Click to enable rain radar'} onClick={radarFunction}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={solid('slash')} />
+                        <FontAwesomeIcon icon={solid('umbrella')} />
+                    </span>
+                    &nbsp;
+                    <span style={{fontSize: '9px'}}>{['off', 'now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
+                </button>
+            )}
             &nbsp;
             {props.options.constructionLines ? (
                 <button title="Click to hide Construction Lines" onClick={constructionLines}>

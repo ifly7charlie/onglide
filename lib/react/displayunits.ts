@@ -1,7 +1,4 @@
-export enum Units {
-    metric = 0,
-    british = 1
-}
+import {Units} from '../types';
 
 export function convertClimb(c: number, units: boolean | Units): [number, string] {
     return [Math.round(c * (units ? 19.43844 : 10)) / 10, units ? 'kt' : 'm/s'];

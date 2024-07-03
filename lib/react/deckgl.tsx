@@ -9,9 +9,13 @@ import {deckTooltip} from './decktooltip';
 
 import {useTaskGeoJSON} from './loaders';
 
-import type {Epoch, ClassName, Compno, TrackData, ScoreData, SelectedPilotDetails, OtherPilotData, PilotScore} from '../types';
+import type {Epoch, ClassName, Compno, OtherPilotData, PilotScore} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
+
+import {selectPilotScore} from '../redux/scoresSlice';
+import {selectPilotVario, selectLatestUpdate} from '../redux/tracksSlice';
+import {useSelector} from '../redux';
 
 function DeckGLOverlay(
     props: MapboxOverlayProps & {
@@ -47,8 +51,6 @@ import {pilotsTrackLayer} from './pilotstracklayer';
 export default function MApp(props: {
     options: any;
     setOptions: Function; //
-    pilotScores: ScoreData;
-    selectedPilotData: SelectedPilotDetails | null;
     follow: boolean;
     setFollow: Function;
     vc: ClassName;
@@ -57,17 +59,21 @@ export default function MApp(props: {
     tz: string;
     viewport: any;
     setViewport: Function;
-    trackData: TrackData;
     otherPilots: OtherPilotData;
     status: string; // status line
-    t: Epoch;
+    replayTime: Epoch;
 }) {
     // For remote updating of the map
     const mapRef = useRef(null);
     const measure = useMeasure();
 
     // So we get some type info
-    const {options, setOptions, pilotScores, selectedPilotData, follow, setFollow, vc, selectedCompno, tz, viewport, setViewport} = props;
+    const {options, setOptions, follow, setFollow, vc, selectedCompno, tz, viewport} = props;
+
+    // Score details for selected pilot
+    const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
+    const latestUpdate = useSelector(selectLatestUpdate);
+    const selectedVario = useSelector((state) => (selectedCompno ? selectPilotVario(state, selectedCompno, props.replayTime) : undefined));
 
     const isMoving = mapRef?.current?.isMoving() ?? true;
 
@@ -78,30 +84,26 @@ export default function MApp(props: {
 
     // Track and Task Overlays
     const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
-    const pilotTrackLayer = pilotsTrackLayer(props, options.sortKey as SortKey, map2d, mapLight, options.fullPaths);
+
+    const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
     const radarOverlay = RadarOverlay({options, setOptions, tz});
 
     // What task are we using on display
-    const taskGeoJSONtp = selectedPilotData?.score?.taskGeoJSON || taskGeoJSON?.tp;
+    const taskGeoJSONtp = selectedScore?.taskGeoJSON || taskGeoJSON?.tp;
 
     // Get coordinates on the screen for center point of view
     const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
 
-    const nextTp = selectedPilotData?.score?.utcFinish ? 99 : selectedPilotData?.score?.currentLeg + (selectedPilotData?.score?.inSector ? 1 : 0) || 0;
-
     const npol = !taskGeoJSON?.track?.features?.[0]
         ? null
-        : !selectedPilotData?.score?.utcStart || !(selectedPilotData.score.minDistancePoints.length > 6) // still start
+        : !selectedScore?.utcStart || !(selectedScore.minDistancePoints.length > 6) // still start
         ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[0]
-        : selectedPilotData.score.utcFinish // if we are done then take last one
+        : selectedScore.utcFinish // if we are done then take last one
         ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
-        : selectedPilotData.score.minDistancePoints.slice(4, 6); // mindistance is from us so this is the next point
-
-    //    console.log(selectedPilotData?.score);
-    //    console.log(npol, selectedPilotData?.score?.utcFinish, nextTp, selectedPilotData?.score?.minDistancePoints, taskGeoJSON?.track?.features?.length);
+        : selectedScore.minDistancePoints.slice(4, 6); // mindistance is from us so this is the next point
 
     // =========== FOLLOW EFFECT ===============
     //
@@ -111,16 +113,17 @@ export default function MApp(props: {
             const map = mapRef?.current?.getMap();
 
             if (
-                map &&
                 !map?.isMoving() &&
                 props.options.follow &&
                 follow &&
-                selectedPilotData?.track?.vario?.lat && //
-                taskGeoJSON?.track?.features
+                selectedVario?.lat && //
+                taskGeoJSON?.track?.features &&
+                !selectedScore?.inSector && // don't jump around in sector
+                selectedScore?.legs[selectedScore.currentLeg]?.actual?.distanceRemaining > 3 // or if we are close
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
-                const lat = Math.round(selectedPilotData.track.vario.lat * 100000) / 100000;
-                const lng = Math.round(selectedPilotData.track.vario.lng * 100000) / 100000;
+                const lat = Math.round(selectedVario.lat * 100000) / 100000;
+                const lng = Math.round(selectedVario.lng * 100000) / 100000;
 
                 // Next point - if we haven't started or we have finished use the startline
 
@@ -131,7 +134,7 @@ export default function MApp(props: {
 
                 // In 2d we need more movement before we adjust the map
                 const pointCheck = (a: number, b: number, s: number): boolean => {
-                    return Math.abs(a - b) / s > (map2d ? 0.25 /*25% of screen in either direction*/ : 0.1); /*10% of screen in either direction*/
+                    return Math.abs(a - b) / s > (map2d ? 0.25 : 0.1); //magic numbers are % of screen in either direction
                 };
 
                 const screenSizeX = mapRef?.current?.getMap()?._containerWidth ?? 1300,
@@ -140,7 +143,7 @@ export default function MApp(props: {
                 if (
                     pointCheck(newScreenPoint.x, screenPoint.x, screenSizeX) ||
                     pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
-                    Math.round(fbearing) >> 2 != Math.round(props.viewport.bearing) >> 2
+                    Math.round(fbearing) >> 3 != Math.round(props.viewport.bearing) >> 3
                 ) {
                     mapRef?.current?.flyTo({
                         center: [lng, lat],
@@ -150,7 +153,7 @@ export default function MApp(props: {
             }
         },
         follow && props.options.follow //
-            ? [selectedCompno, props.t >> 2, npol, props.options, isMoving]
+            ? [selectedCompno, (props.replayTime ?? latestUpdate) >> 2, npol, props.options, isMoving]
             : [null, null, null, null, null]
     );
 
@@ -212,8 +215,8 @@ export default function MApp(props: {
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
-        return map2d ? turnpointStyle2d(selectedPilotData?.score, mapLight) : turnpointStyle2d(selectedPilotData?.score, mapLight);
-    }, [selectedCompno, selectedPilotData?.score?.currentLeg, selectedPilotData?.score?.utcFinish, mapLight, map2d]);
+        return map2d ? turnpointStyle2d(selectedScore, mapLight) : turnpointStyle3d(selectedScore, mapLight);
+    }, [selectedCompno, selectedScore?.currentLeg, selectedScore?.utcFinish, mapLight, map2d]);
 
     // Do we have a loaded set of details?
     const valid = !(isTLoading || isTError) && taskGeoJSON?.tp && taskGeoJSON?.track;
@@ -236,7 +239,7 @@ export default function MApp(props: {
     //
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units}), //
+        (input) => deckTooltip({...input, map: mapRef?.current, lang, tz: props?.tz, units: props?.options?.units}), //
         [vc, props.options.units, props.tz, mapRef?.current]
     );
 
@@ -261,10 +264,10 @@ export default function MApp(props: {
 
     const onClick = useCallback((a, _b) => measure.click(a), [measure.enabled]);
 
-    const pilotLayer = pilotsLayer(props.trackData, selectedCompno, props.setSelectedCompno, props.t);
+    const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime);
 
     // If we are displaying other pilots
-    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, vc, mapLight, map2d, props.t) : null;
+    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, vc, mapLight, map2d, props.replayTime) : null;
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
@@ -304,7 +307,7 @@ export default function MApp(props: {
                 onClick={onClick}
                 onDragStart={onDragStart}
                 layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
-                interleaved={!map2d}
+                interleaved={true}
             />
             {options.constructionLines && taskGeoJSON?.Dm ? (
                 <Source type="geojson" data={taskGeoJSON.Dm} key="y">
@@ -312,7 +315,7 @@ export default function MApp(props: {
                 </Source>
             ) : null}
             {valid ? (
-                <Source type="geojson" id="x" data={taskGeoJSONtp}>
+                <Source type="geojson" id="task" key="task" data={taskGeoJSONtp}>
                     <Layer {...turnpointStyleFlat} key="tps" />
                     <Layer {...turnpointStyle} key="tgjp" />
                 </Source>
@@ -322,20 +325,20 @@ export default function MApp(props: {
                     <Layer {...trackLineStyle} key="tls" />
                 </Source>
             ) : null}
-            {selectedPilotData && options.constructionLines && selectedPilotData.score?.minGeoJSON ? (
-                <Source type="geojson" data={selectedPilotData.score?.minGeoJSON} key={'min_'}>
+            {selectedScore && options.constructionLines && selectedScore?.minGeoJSON ? (
+                <Source type="geojson" data={selectedScore?.minGeoJSON} key={'min_'}>
                     <Layer {...minLineStyle} />
                     <Layer {...distanceLineLabelStyle(minLineStyle)} />
                 </Source>
             ) : null}
-            {selectedPilotData && options.constructionLines && selectedPilotData.score?.maxGeoJSON ? (
-                <Source type="geojson" data={selectedPilotData.score?.maxGeoJSON} key={'max_'}>
+            {selectedScore && options.constructionLines && selectedScore?.maxGeoJSON ? (
+                <Source type="geojson" data={selectedScore?.maxGeoJSON} key={'max_'}>
                     <Layer {...maxLineStyle} />
                     <Layer {...distanceLineLabelStyle(maxLineStyle)} />
                 </Source>
             ) : null}
-            {selectedPilotData && selectedPilotData?.score?.scoredGeoJSON ? (
-                <Source type="geojson" data={selectedPilotData.score.scoredGeoJSON} key={'scored_'}>
+            {selectedScore && selectedScore?.scoredGeoJSON ? (
+                <Source type="geojson" data={selectedScore.scoredGeoJSON} key={'scored_'}>
                     <Layer key="scoredLine" {...scoredLineStyle} />
                     <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
                 </Source>
@@ -499,7 +502,7 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
                     'orange',
                     mapLight ? 'darkgrey' : 'white'
                 ],
-                'fill-extrusion-opacity': 0.5,
+                'fill-extrusion-opacity': 0.6,
                 'fill-extrusion-base': [
                     'case',
                     ['==', !selectedPilot, true],
@@ -513,9 +516,9 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
                 'fill-extrusion-height': [
                     'case',
                     ['==', !selectedPilot, true],
-                    100,
+                    5000,
                     ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0],
-                    9,
+                    900,
                     ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
                     5000,
                     2
@@ -532,7 +535,7 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): 
             id: 'track',
             type: 'line',
             paint: {
-                'line-color': mapLight ? 'darkgrey' : 'white',
+                'line-color': mapLight ? 'black' : 'pink',
                 'line-width': ['case', ['==', !selectedPilot, true], 20, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 20, 10],
                 'line-opacity': 1,
                 'line-pattern': mapLight ? 'oneway-large' : 'oneway-white-large'
@@ -543,11 +546,11 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): 
             id: 'tp',
             type: 'fill',
             paint: {
-                'fill-opacity': 0.5,
+                'fill-opacity': 0.6,
                 'fill-color': [
                     'case',
                     ['==', !selectedPilot, true],
-                    mapLight ? 'darkgrey' : 'white',
+                    mapLight ? 'black' : 'white',
                     ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
                     mapLight ? 'green' : 'lawngreen',
                     ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],

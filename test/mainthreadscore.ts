@@ -82,7 +82,7 @@ async function runScore(datecode, className, compno: Compno, handicap) {
     const rbase = 1660924503 - 3600;
     //    let getNow = () => Math.trunc((Date.now() - start) / 1000) * 45 + rbase;
     const iterative = false;
-    let getNow = () => Math.trunc(Date.now() / 1000);
+    let getNow = () => Math.trunc(Date.now() / 1000) as Epoch;
 
     const groupedPoints: Record<Compno, PositionMessage[]> = _groupby(rawpoints, 'c');
 

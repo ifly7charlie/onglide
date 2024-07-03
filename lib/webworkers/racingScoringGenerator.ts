@@ -24,6 +24,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
 
     let compno = '';
     let lastClosestToNext: DistanceKM | undefined = Infinity as DistanceKM;
+    let lastTime: Epoch | undefined = undefined;
 
     let flightStatus: PositionStatus | undefined = PositionStatus.Unknown;
 
@@ -34,7 +35,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             const taskStatus: CalculatedTaskStatus = current;
 
             // Wait for the start
-            if (!current.startConfirmed && !current.startFound) {
+            if ((!current.startConfirmed && !current.startFound) || !taskStatus.utcStart) {
                 if (flightStatus != taskStatus.flightStatus) {
                     flightStatus = taskStatus.flightStatus;
                     yield taskStatus;
@@ -48,11 +49,12 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
 
             compno = taskStatus.compno;
 
-            // Make sure the task position has changed
-            if (lastClosestToNext === taskStatus.closestToNext) {
+            // Make sure the task position or time has changed
+            if (lastClosestToNext === taskStatus.closestToNext && lastTime === taskStatus.t) {
                 continue;
             }
             lastClosestToNext = taskStatus.closestToNext;
+            lastTime = taskStatus.t;
 
             taskStatus.distance = 0 as DistanceKM;
 

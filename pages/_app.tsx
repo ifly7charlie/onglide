@@ -12,7 +12,7 @@ import type {Options} from '../lib/types';
 
 const defaultOptions: Options = {
     //
-    rainRadar: 1,
+    rainRadar: true,
     rainRadarAdvance: 0,
     units: 0,
     mapType: 1,

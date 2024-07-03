@@ -15,3 +15,6 @@ export const inOrderDelay = 10;
 
 // How often to refresh the 'static download' (seconds)
 export const webPathBaseTime = 5 * 60;
+
+// How many minutes of scores are we batching together
+export const scoreChunkSize = 30 * 60;

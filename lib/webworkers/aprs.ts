@@ -374,7 +374,6 @@ function processPacket(packet: aprsPacket) {
             b: packet.course as Bearing,
             s: (Math.round((packet.speed ?? 0) * 10) / 10) as Speed,
             f: flarmId + ',' + sender,
-            v: vario,
             l: islate
         };
 
@@ -402,6 +401,11 @@ function processPacket(packet: aprsPacket) {
 
     // Generate log function as it's quite slow to read environment all the time
     if (!aircraft.log) {
+    }
+
+    if (!packet.altitude) {
+        console.log('unknown altitude in decoded packet', aircraft.compno, packet);
+        return;
     }
 
     statistics.knownReceived++;
@@ -469,7 +473,7 @@ function processPacket(packet: aprsPacket) {
 
     // Logging if requested
     aircraft.log(packet.origpacket);
-    aircraft.log(`${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
+    aircraft.log(`${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
 
     // Calculate the vario for the aircraft
     vario = (!islate ? calculateVario(aircraft, altitude, packet.timestamp) : aircraft.lastVario || []).join(',');

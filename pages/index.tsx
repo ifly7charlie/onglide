@@ -30,6 +30,9 @@ import {ClassName} from '../lib/types';
 
 import {find as _find, isEqual as _isEqual} from 'lodash';
 
+import {Provider} from 'react-redux';
+import store from '../lib/redux/store';
+
 const Menu = memo(
     function Menu(props: {comp: any; setSelectedPilot: Function; options: any; setOptions: Function; vc: string}) {
         const comp = props.comp;
@@ -119,7 +122,6 @@ export default function CombinePage(props) {
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
-    const measureFeatures = useMeasure();
 
     // What the map is looking at
     const [viewport, setViewport] = useState({
@@ -127,10 +129,10 @@ export default function CombinePage(props) {
         longitude: props.lng,
         zoom: 8.5,
         minZoom: 6.5,
-        maxZoom: 12,
+        maxZoom: 14.5,
         bearing: 0,
         minPitch: 0,
-        maxPitch: 85,
+        maxPitch: 80,
         pitch: !props?.options?.map2d ? 70 : 0
     });
 
@@ -182,19 +184,21 @@ export default function CombinePage(props) {
                     setOptions={props.setOptions}
                 />
                 <div className="resizingContainer">
-                    <OgnFeed
-                        vc={className as ClassName} //
-                        tz={props.tz}
-                        datecode={selectedClass ? selectedClass.datecode : '07C'}
-                        selectedCompno={selectedCompno}
-                        setSelectedCompno={setSelectedCompno}
-                        viewport={viewport}
-                        setViewport={setViewport}
-                        options={props.options}
-                        setOptions={props.setOptions}
-                        handicapped={selectedClass?.handicapped == 'Y'}
-                        notes={selectedClass?.notes}
-                    />
+                    <Provider store={store}>
+                        <OgnFeed
+                            vc={className as ClassName} //
+                            tz={props.tz}
+                            datecode={selectedClass ? selectedClass.datecode : '07C'}
+                            selectedCompno={selectedCompno}
+                            setSelectedCompno={setSelectedCompno}
+                            viewport={viewport}
+                            setViewport={setViewport}
+                            options={props.options}
+                            setOptions={props.setOptions}
+                            handicapped={selectedClass?.handicapped == 'Y'}
+                            notes={selectedClass?.notes}
+                        />
+                    </Provider>
                 </div>
             </MeasureContext>
         </>

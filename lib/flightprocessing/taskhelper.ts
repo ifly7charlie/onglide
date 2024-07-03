@@ -14,7 +14,7 @@ import {uniqWith as _uniqWith} from 'lodash';
 
 import {} from '@turf/helpers';
 
-import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage} from '../types';
+import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage, NearestSectorPoint, EnrichedPosition} from '../types';
 
 let hit = 0;
 let miss = 0;
@@ -283,7 +283,7 @@ function addArc(startAngle: Radian, endAngle: Radian, ltlg: LatLong, radius: Dis
 // returns: - is distance to run in km, any + is inside
 // nearestPoint will be updated with closest point on sector boundary
 //   if it is specified.
-export function checkIsInTP(turnpoint: TaskLeg, p, nearestPoint = undefined): [boolean, boolean, DistanceKM] {
+export function checkIsInTP(turnpoint: TaskLeg, p: EnrichedPosition, nearestPoint: NearestSectorPoint = undefined): [boolean, boolean, DistanceKM] {
     // Quick check to see if it is plausible
     let distanceRemaining = distance(p.geoJSON, turnpoint.point) as DistanceKM;
 

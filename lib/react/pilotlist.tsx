@@ -4,7 +4,7 @@ import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
-import {TZ, Compno, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus, Options, SortKey} from '../types';
+import {TZ, Compno, Units, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus, Options, SortKey} from '../types';
 
 import {API_ClassName_Pilots_PilotDetail, API_ClassName_Pilots} from '../rest-api-types';
 
@@ -19,13 +19,32 @@ import {delayToText} from './timehelper.js';
 
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map, cloneDeep as _cloneDeep} from 'lodash';
 
+import {useSelector} from '../redux';
+import {selectPilotScore, selectAllStatus} from '../redux/scoresSlice';
+import {selectPilotVario} from '../redux/tracksSlice';
+import {selectLatestUpdate} from '../redux/tracksSlice';
+import {valueEqualityCheck, sortOrders, type AllNormalDisplayKeys} from '../redux/selectPilotResult';
+
 // Helpers for sorting pilot list
-import {updateSortKeys, nextSortOrder, getValidSortOrder} from './pilot-sorting';
+import {nextSortOrder, getValidSortOrder} from './pilot-sorting';
 import {displayHeight, convertHeight, convertClimb} from './displayunits';
 
 function isoCountryCodeToFlagEmoji(country: string) {
     return String.fromCodePoint(...[...country].map((c) => c.charCodeAt(0) + 0x1f1a5));
 }
+
+import {faCloudArrowUp, faCow, faHouse, faCirclePause, faPaperPlane, faSignal, faClock, faTrophy, IconDefinition} from '@fortawesome/free-solid-svg-icons';
+
+const icons: IconDefinition[] = [
+    faSignal, // Unknown = 0,
+    faCirclePause, // Stationary = 1,
+    faClock, // Grid = 2,
+    faPaperPlane, // Low
+    faPaperPlane, // Airborne
+    faHouse, // Home
+    faCow, // Landed
+    faTrophy // Finished
+];
 
 // Figure out what image to display for the pilot. If they have an image then display the thumbnail for it,
 // if they have a country then overlay that on the corner.
@@ -33,18 +52,18 @@ function PilotImage(props) {
     if (props.image && props.image == 'Y') {
         return (
             <div className="ih" style={{backgroundImage: `url(/api/${props.class}/image?compno=${props.compno})`}}>
-                {props.country !== '' && <div className="icountry">{isoCountryCodeToFlagEmoji(props.country)}</div>}
+                {props.country ? <div className="icountry">{isoCountryCodeToFlagEmoji(props.country)}</div> : null}
             </div>
         );
     }
     if (props.image) {
         return (
             <div className="ih" style={{backgroundImage: `url(//www.gravatar.com/avatar/${props.image}?d=robohash)`}}>
-                {props.country !== '' && <div className="icountry">{isoCountryCodeToFlagEmoji(props.country)}</div>}
+                {props.country ? <div className="icountry">{isoCountryCodeToFlagEmoji(props.country)}</div> : null}
             </div>
         );
     }
-    if (props.country !== '') {
+    if (props.country) {
         return <div className="ihi">{isoCountryCodeToFlagEmoji(props.country)}</div>;
     }
 
@@ -253,10 +272,15 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {
     );
 });
 
-export function Details({units, pilot, score, vario, tz}: {score: PilotScore | null; vario: VarioData | null; tz: TZ; units: number; pilot: API_ClassName_Pilots_PilotDetail}) {
+export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) {
     if (!pilot) {
         return null;
     }
+
+    // Get vario for specific time
+    const vario = useSelector((state) => selectPilotVario(state, compno, replayTime));
+    const score = useSelector((state) => selectPilotScore(state, compno, replayTime));
+    const latestUpdate = useSelector(selectLatestUpdate);
 
     // Simplify displaying units
     const altitude = vario?.altitude ? (
@@ -361,26 +385,34 @@ export function Details({units, pilot, score, vario, tz}: {score: PilotScore | n
 
     // Check at render if we are up to date or not, delay calculated in sorting which
     // gets updated regularily
-    const uptodate = (vario?.delay || Infinity) < 45;
+    const delay = latestUpdate - vario?.t || Infinity;
+    const uptodate = delay < 45;
 
     // Are we in coverage or not, keyed off uptodate
     const ognCoverage = score?.utcFinish ? (
         'Finished' //
+    ) : replayTime ? (
+        <span>
+            &nbsp;
+            <FontAwesomeIcon icon={solid('backward')} />
+            &nbsp;
+            {OptionalTime('', replayTime, tz)}
+        </span>
     ) : uptodate ? (
         <span>
             &nbsp;
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
-                <FontAwesomeIcon icon={regular('square-check')} /> {Math.round(vario?.delay)}s delay
+                <FontAwesomeIcon icon={regular('square-check')} /> {Math.round(delay)}s delay
             </a>
         </span>
     ) : (
         <span>
             &nbsp;
             <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage" className="tooltipicon">
-                {(vario?.delay || Infinity) < 3600 ? (
+                {(delay || Infinity) < 3600 ? (
                     <>
                         <FontAwesomeIcon icon={solid('spinner')} spin />
-                        &nbsp; Last point {delayToText(vario.delay)} ago
+                        &nbsp; Last point {delayToText(delay)} ago
                     </>
                 ) : (
                     <>
@@ -467,6 +499,9 @@ function PilotHeightBar({pilot}) {
 //
 // Figure out what status the pilot is in and choose the correct icon
 function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
+    if (!displayIcon) {
+        return null;
+    }
     // If it's very delayed and we have had a point and
     // we are in the right mode then display a spinner
     if (displayIcon == 'nosignal') {
@@ -488,16 +523,19 @@ function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
 // Render the pilot
 const Pilot = memo(function Pilot({
     pilot,
-    displayAs,
-    displayUnits,
-    displayIcon,
+    compno,
+    value,
+    suffix,
+    icon,
     selected,
     onClick
-}: {
+}: //
+{
     pilot: API_ClassName_Pilots_PilotDetail;
-    displayAs: string;
-    displayUnits: string;
-    displayIcon: any;
+    compno: Compno;
+    value: string | number;
+    suffix?: string;
+    icon: any;
     selected: boolean;
     onClick: any;
 }) {
@@ -505,32 +543,27 @@ const Pilot = memo(function Pilot({
 
     // Render the normal pilot icon
     return (
-        <li className={className} id={pilot.compno}>
-            <a href="#" title={pilot.compno + ': ' + pilot.name} onClick={onClick}>
-                <PilotImage image={pilot.image} country={pilot.country} compno={pilot.compno} class={pilot.class} />
+        <li className={className} key={compno}>
+            <a href="#" title={compno + ': ' + pilot?.name} onClick={() => onClick(compno)}>
+                <PilotImage image={pilot?.image} country={pilot?.country} compno={compno} class={pilot?.class} />
                 <div>
-                    <PilotHeightBar pilot={pilot} />
-
                     <div className="caption">
-                        {pilot.compno}
-                        <PilotStatusIcon displayIcon={displayIcon} />
+                        {compno}
+                        <PilotStatusIcon displayIcon={icon} />
                     </div>
                     <div>
-                        <div className="data">{displayAs}</div>
-                        <div className="units">{displayUnits}</div>
+                        <div className="data">{(value || '-').toString()}</div>
+                        <div className="units">{suffix ?? null}</div>
                     </div>
                 </div>
             </a>
         </li>
     );
 });
-
 //
 // Render the list of pilots
-export function PilotList({
+export const PilotList = memo(function PilotList({
     pilots,
-    pilotScores,
-    trackData,
     selectedPilot,
     setSelectedCompno,
     options,
@@ -541,38 +574,47 @@ export function PilotList({
 }: //
 {
     pilots: API_ClassName_Pilots;
-    pilotScores: ScoreData;
-    trackData: TrackData;
     selectedPilot: Compno;
     setSelectedCompno: Function;
     options: Options;
     setOptions: Function;
     handicapped: boolean;
-    now: Epoch;
+    now: Epoch | undefined;
     tz: TZ;
 }) {
     // These are the rendering options
     const [visible, setVisible] = useState(true);
+
     const order = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
 
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
     // this can be done with a clone and reoder
-    let mutatedPilotList = updateSortKeys(pilots, pilotScores, trackData, order as SortKey, options.units, now, tz);
+    const pilotList: AllNormalDisplayKeys = useSelector(
+        (state) =>
+            (sortOrders[order] ?? sortOrders['auto'])(state, now)
+                .map((r) => (r.converter ? r.converter(r, options.units, tz) : r))
+                .sort((a, b) => b.sortKey - a.sortKey),
+        valueEqualityCheck
+    );
+
+    const pilotStatus = useSelector((state) => selectAllStatus(state, now));
+
+    const onClick = useCallback(
+        (compno: Compno) => {
+            selectedPilot === compno ? setSelectedCompno(null) : setSelectedCompno(compno);
+        },
+        [selectedPilot]
+    );
 
     // Generate the pilot list, sorted by the correct key
-    const pilotList = mutatedPilotList.reverse().map((pilot) => {
-        const onClick = () => {
-            selectedPilot === pilot.compno ? setSelectedCompno(null) : setSelectedCompno(pilot.compno);
-        };
-
+    const pilotComponents = pilotList.map((pilot) => {
         return (
             <Pilot //
                 key={pilot.compno}
+                {...pilot}
                 pilot={pilots[pilot.compno]}
-                displayUnits={pilot.units}
-                displayIcon={pilot.icon}
-                displayAs={pilot.displayAs.toString()}
+                icon={icons[pilotStatus?.[pilot.compno]?.status ?? 0]}
                 selected={selectedPilot === pilot.compno}
                 onClick={onClick}
             />
@@ -595,8 +637,10 @@ export function PilotList({
         <>
             <Sorting setSort={setSort} sortOrder={order} visible={visible} toggleVisible={toggleVisible} handicapped={handicapped || false} />
             <Collapse in={visible}>
-                <ul className="pilots">{pilotList}</ul>
+                <ul className="pilots" style={{height: '300px', overflowY: 'auto'}}>
+                    {pilotComponents}
+                </ul>
             </Collapse>
         </>
     );
-}
+});

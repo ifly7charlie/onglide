@@ -5,7 +5,22 @@
  *
  */
 
-import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, AltitudeAMSL} from '../types';
+import {
+    Compno,
+    Epoch,
+    DistanceKM,
+    BasePositionMessage,
+    PositionMessage,
+    TaskStatus,
+    EstimatedTurnType,
+    Task,
+    PositionStatus,
+    EnrichedPositionGenerator,
+    EnrichedPosition,
+    AltitudeAMSL,
+    isTick,
+    NearestSectorPoint
+} from '../types';
 
 import {lineString} from '@turf/helpers';
 import length from '@turf/length';
@@ -18,7 +33,7 @@ import {cloneDeep as _clonedeep} from 'lodash';
 
 import {checkIsInTP, checkIsInStartSector, stripPoints} from '../flightprocessing/taskhelper';
 
-const sleepInterval = 10 * 1000;
+const sleepInterval = parseInt(process.env.MIN_SCORING_EMIT_TIME_MS ?? '10000') || 10000;
 
 //export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
@@ -69,13 +84,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     let wasInStartSector = false;
     let landedBack = false;
 
-    // How close did we get to current turnpoint
-    interface NearestSectorPoint {
-        geometry?: {
-            coordinates: any;
-        };
-        properties?: {t: Epoch; dist: DistanceKM};
-    }
     let closestSectorPoint: NearestSectorPoint;
 
     interface PossibleAdvance {
@@ -113,15 +121,22 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             break;
         }
         try {
+            // What time have we scored to
+            status.t = current.value.t;
+            status.compno = current.value.c as Compno;
+
+            // We pass ticks through and then do nothing more
+            if (isTick(current.value)) {
+                yield status;
+                continue;
+            }
+
             // Keep track of where we are
             previousPoint = point;
             point = current.value;
 
-            // What time have we scored to
-            status.t = point.t;
             status.pointsProcessed++;
             status.lastProcessedPoint = simplifyPoint(point);
-            status.compno = point.c as Compno;
 
             if (status.flightStatus != point.ps) {
                 status.flightStatus = point.ps;

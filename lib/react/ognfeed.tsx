@@ -17,7 +17,7 @@ import useWebSocket from 'react-use-websocket';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-import type {Options, Epoch, TZ, Compno, ClassName, Datecode, SelectedPilotDetails} from '../types';
+import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
@@ -33,7 +33,12 @@ import {proposedUrl} from './fixupUrls';
 
 import {useWebsocketDecoder} from './useWebsocketDecoder';
 
+import PlaybackControls from './playbackcontrols';
+
 import dynamic from 'next/dynamic';
+import {selectNow, selectAvailableScoreTimes} from '../redux/nowSlice';
+import {useSelector} from '../redux';
+
 const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     ssr: false,
     loading: () => (
@@ -85,27 +90,27 @@ export const OgnFeed = memo(
         const {pilots, isPLoading} = usePilots(vc);
         const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
+        const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
         const [follow, setFollow] = useState(false);
         const router = useRouter();
 
         const mergeWsStatus = useCallback((state: any) => setWsStatus({...wsStatus, ...state}), [wsStatus, setWsStatus]);
 
-        const {trackData, pilotScores, otherPilots, decoder, updateSortKey} = useWebsocketDecoder({mergeWsStatus});
+        const {otherPilots, decoder} = useWebsocketDecoder({mergeWsStatus, className: vc, datecode});
+
+        //        const now = useSelector(selectNow);
+        const availableScores = useSelector(selectAvailableScoreTimes);
 
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
 
-        useEffect(() => {
+        /*        useEffect(() => {
+            console.log('VC URL EFFECT', socketUrl, vc, datecode);
             if (socketUrl != proposedUrl(vc, datecode)) {
                 setSocketUrl(proposedUrl(vc, datecode));
             }
-        }, [vc, datecode, socketUrl]);
-
-        // Make sure we have colouring if our sort key requires it
-        useEffect(() => {
-            updateSortKey(options.sortKey);
-        }, [options.sortKey, Object.keys(trackData).length]);
-
+        }, [vc, datecode, !!socketUrl]);
+*/
         // We are using a webSocket to update our data here
         const {sendMessage} = useWebSocket(socketUrl, {
             reconnectAttempts: 15,
@@ -169,19 +174,6 @@ export const OgnFeed = memo(
             [setSelectedCompno, pilots]
         );
 
-        // And the pilot object
-        const selectedPilotData: SelectedPilotDetails | null = useMemo(
-            () =>
-                pilots
-                    ? {
-                          pilot: pilots[selectedCompno],
-                          score: pilotScores[selectedCompno],
-                          track: trackData[selectedCompno]
-                      }
-                    : null,
-            [pilotScores[selectedCompno], trackData[selectedCompno]?.vario, pilots?.[selectedCompno], selectedCompno]
-        );
-
         // Cache the calculated times and only refresh every 60 seconds
         const status = useMemo(() => {
             return (
@@ -210,16 +202,13 @@ export const OgnFeed = memo(
                         vc={vc}
                         follow={follow}
                         setFollow={setFollow}
-                        selectedPilotData={selectedPilotData}
                         setSelectedCompno={setCompno}
-                        pilotScores={pilotScores}
                         options={options}
                         setOptions={setOptions}
                         tz={tz}
-                        t={wsStatus.at as Epoch}
+                        replayTime={replayTime}
                         viewport={viewport}
                         setViewport={setViewport}
-                        trackData={trackData}
                         otherPilots={otherPilots}
                         selectedCompno={selectedCompno}
                         status={status}
@@ -236,25 +225,33 @@ export const OgnFeed = memo(
                             </>
                         )}
                         <TaskDetails vc={vc} fitBounds={fitBounds} />
-                        {valid && (
+                        {valid ? (
                             <PilotList
                                 key="pilotList"
                                 pilots={pilots}
-                                pilotScores={pilotScores} //
-                                trackData={trackData}
                                 selectedPilot={selectedCompno}
                                 setSelectedCompno={setCompno}
-                                now={wsStatus.at as Epoch}
+                                now={replayTime}
                                 tz={tz}
                                 options={options}
                                 setOptions={setOptions}
                                 handicapped={handicapped}
                             />
-                        )}
+                        ) : null}
+                        {valid ? (
+                            <PlaybackControls //
+                                className={vc}
+                                datecode={datecode}
+                                firstStart={availableScores.earliestScore}
+                                replayTime={replayTime}
+                                setReplayTime={setReplayTime}
+                                tz={tz}
+                            />
+                        ) : null}
                     </div>
                 </div>
-                {selectedPilotData?.pilot ? ( //
-                    <Details pilot={selectedPilotData?.pilot} score={selectedPilotData?.score} vario={selectedPilotData?.track?.vario} units={options.units} tz={tz} />
+                {selectedCompno ? ( //
+                    <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
                 ) : (
                     <Sponsors at={wsStatus.at} />
                 )}
