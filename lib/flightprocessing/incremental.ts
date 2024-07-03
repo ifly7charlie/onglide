@@ -33,7 +33,6 @@ export function generateIndices(deck: DeckData, glider: PilotTrackData) {
     if (!deck) {
         return;
     }
-
     console.log(deck.compno, 'generateIndices');
     glider.vario = {min: Infinity, max: 0} as VarioData;
 
@@ -55,6 +54,7 @@ export function generateIndices(deck: DeckData, glider: PilotTrackData) {
             deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
         }
     }
+    deck.indices[deck.segmentIndex] = deck.posIndex;
 }
 
 export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true): false | {start: number; end: number} {
