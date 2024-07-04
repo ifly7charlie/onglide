@@ -287,6 +287,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (inSector) {
                     log('* found a finish @ ' + point.t);
                     status.utcFinish = point.t;
+                    status.flightStatus = PositionStatus.Finished;
                     legStatus.entryTimeStamp = point.t;
                     //                legStatus.altitude = point.a;
                     //                legStatus.points.push(simplifyPoint(point));

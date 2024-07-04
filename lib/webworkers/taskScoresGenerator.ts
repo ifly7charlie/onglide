@@ -223,12 +223,6 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             }
         }
 
-        // If we are done then force the status to be finished - it's not really important if upstream
-        // is aware as this is the last item in the chain
-        if (item.utcFinish) {
-            item.flightStatus = PositionStatus.Finished;
-        }
-
         if (!process.env.REPLAY && Date.now() / 1000 - score.t > 930) {
             console.log(score.compno, 'scored delay:', (Date.now() / 1000 - score.t).toFixed(0));
         }
