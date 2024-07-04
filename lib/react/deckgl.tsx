@@ -192,9 +192,7 @@ export default function MApp(props: {
                     ],
                     {
                         pitch: map2d ? 0 : 70,
-                        padding: 20,
-                        offset: [(mapRef.current?.getContainer()?.clientWidth ?? 0) < 992 ? 0 : -140, 0],
-                        bearing: 0
+                        bearing: 0 // north up
                     }
                 );
             } catch (e) {
