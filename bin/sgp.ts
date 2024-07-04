@@ -265,10 +265,10 @@ async function update_task(task) {
     console.log(task);
     let rows = 0;
     let [date] = typeof task.compDate == 'string' ? task.compDate.match(/^[0-9-]{10}/) : [new Date(task.compDate).toISOString()];
-    let startOpen = task.startOpenTs ? `${Math.trunc(parseInt(task.startOpenTs) / 3600)}:${Math.trunc(((parseInt(task.startOpenTs)) % 3600)/60)%60}:00` : '00:00:00';
-        
-    if( parseInt(startOpen) < 10 || parseInt(startOpen) > 17 ) {
-        startOpen = '00:00:00'
+    let startOpen = task.startOpenTs ? `${Math.trunc(parseInt(task.startOpenTs) / 3600)}:${Math.trunc((parseInt(task.startOpenTs) % 3600) / 60) % 60}:00` : '00:00:00';
+
+    if (parseInt(startOpen) < 10 || parseInt(startOpen) > 17) {
+        startOpen = '00:00:00';
     }
 
     if (!date) {
@@ -291,6 +291,11 @@ async function update_task(task) {
         return;
     } else {
         console.log(`${classid} - ${date}: task changed start:${startOpen}`);
+    }
+
+    const tpElevations: Record<string, number> = {};
+    for (const tp of task.turnpoints) {
+        tpElevations[tp.name] = await new Promise((r) => getElevationOffset(tp.latitude, tp.longitude, r));
     }
 
     // Do this as one block so we don't end up with broken tasks
@@ -329,7 +334,7 @@ async function update_task(task) {
             let values = [];
             let query =
                 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + //
-                'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) ' +
+                'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12, altitude ) ' +
                 'VALUES ';
 
             let previousPoint = null;
@@ -357,7 +362,7 @@ async function update_task(task) {
                 query =
                     query +
                     '( ?, todcode(?), ?, ?, ' + //
-                    " ?,?, ?, ?, 0, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
+                    " ?,?, ?, ?, 0, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
 
                 values = values.concat([
                     'sgp',
@@ -375,7 +380,8 @@ async function update_task(task) {
                     tp.type != 'Turnpoint' ? 90 : 360,
                     0,
                     0,
-                    0
+                    0,
+                    tpElevations[tp.name] ?? 0
                 ]);
 
                 i++;
