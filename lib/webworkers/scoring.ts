@@ -330,7 +330,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) {
     const log =
-        glider.compno == 'NL'
+        glider.compno == '-'
             ? console.log
             : () => {
                   /*noop*/
