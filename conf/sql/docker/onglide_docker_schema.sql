@@ -312,9 +312,6 @@ CREATE TABLE `tasks` (
   `flown` enum('Y','N') DEFAULT 'N' COMMENT 'Must be set to Y to be displayed!',
   `description` text,
 
-`distance` integer,
-`hdistance` integer,
-
   `type` enum('S','A','D','E','G') DEFAULT 'S' COMMENT 'Speed, AAT, Handicapped Distance, Eglide, SGP',
   
   `duration` time DEFAULT NULL COMMENT 'AAT time',

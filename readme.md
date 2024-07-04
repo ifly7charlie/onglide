@@ -91,55 +91,84 @@ your soaring spot keys to melissa-ogn@onglide.com and I can set it up for you.
 
 -   Mysql server with a database
 -   Node and Yarn
+-   protoc (https://github.com/protocolbuffers/protobuf/releases or https://github.com/protocolbuffers/protobuf/tree/main/src or `brew install protobuf` `apt install -y protobuf-compiler`)
 -   Apache with caching modules (you can deploy the front end somewhere like vercel as well), it also works well behind cloudfront
+-   BE AWARE THAT the version of NEXT in the package file IS NOT SAFE WITHOUT A PROXY IN FRONT OF IT * Everything should work on later versions just not on *bsd.
 
 #### Steps
 
 -   create a database and a user with the following rights
 
+```
     > grant insert,update,delete,execute,select on dsample19.\* to reactuser@'xx.xx.xx.xx' identified by 'some-good-password';
+```
 
 -   load the database sql & stored procedures
 
+```
     > source conf/sql/onglide_schema.sql;
     > source conf/sql/sp_nextjs.sql
+```
 
 -   install yarn packages
 
+```
     > yarn install
+```
 
--   install pm2
+-   install pm2 (optional)
 
+```
     > yarn global add pm2
+```
 
 -   run the onglide installation script, this will require a mapbox API key, and the database to be loaded
 
+```
     > yarn setup
+```
+
+-   build protobuf and backend
+
+```
+    > yarn build
+```
 
 -   configure your webserver (there is a sample file but you'll want certificates etc)
 
 -   build the application using yarn
+
+```
     > yarn next build
+```
 
-## Running (pm2)
+## Running (pm2) - if you can use docker use docker ;)
 
+```
 > pm2 start ecosystem.config.js
 > pm2 start all
+```
 
 -   start webserver
 
 You can use this to see logs
 
+```
 > pm2 log
 > pm2 log ogn
+```
 
 See status
 
+```
 > pm2 status
+```
 
 Or to monitor processes
 
+```
 > pm2 monit
+```
 
 pm2 will automatically restart the processes if they fail
 
@@ -147,15 +176,25 @@ pm2 will automatically restart the processes if they fail
 
 -   start the OGN processor (bin/ogn.ts) this will fetch data into the database and send on websocket
 
+```
     > yarn ogn
+```
 
 -   start the soaringspot processor
 
+```
     > yarn soaringspot
+    or
+    > yarn ssscrape
+    or
+    > yarn sgp
+```
 
 -   start the application
 
+```
     > yarn next start
+```
 
 -   start webserver
 
