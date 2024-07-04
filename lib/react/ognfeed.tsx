@@ -185,7 +185,7 @@ export const OgnFeed = memo(
         // Scale map to fit the bounds
         const fitBounds = useCallback(() => {
             setOptions({...options, zoomTask: true});
-        }, [vc]);
+        }, [vc, options]);
 
         // Send the options to the server so we can keep an eye on what settings are
         // used by default, we don't record any identifiers. This is to try and work
