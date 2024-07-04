@@ -73,7 +73,7 @@ body {
 
     .resultsOverlay {
         left: 0px;
-        height: 108px;
+        height: 90px;
         width: 100vw;
         overflow-x: auto;
         overflow-y: hidden;
@@ -156,8 +156,8 @@ body {
 
 @include media-breakpoint-down(lg) {
     .resultsOverlay {
-        height: 118px;
-        margin-top: 16px;
+        height: 95px;
+        margin-top: 14px;
     }
 
     .connectionStatus {
@@ -181,7 +181,7 @@ body {
         background-color: rgba(255, 255, 255, 0.7);
         box-shadow: 7px 7px 5px rgb(0 0 0 / 30%);
         padding: 5px;
-        overflow-y: clip;
+        overflow-y: auto;
         overflow-x: clip;
         max-height: 40vh;
         z-index: 20;
