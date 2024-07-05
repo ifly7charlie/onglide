@@ -637,9 +637,7 @@ export const PilotList = memo(function PilotList({
         <>
             <Sorting setSort={setSort} sortOrder={order} visible={visible} toggleVisible={toggleVisible} handicapped={handicapped || false} />
             <Collapse in={visible}>
-                <ul className="pilots" style={{height: '300px', overflowY: 'auto'}}>
-                    {pilotComponents}
-                </ul>
+                <ul className="pilots">{pilotComponents}</ul>
             </Collapse>
         </>
     );

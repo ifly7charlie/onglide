@@ -64,7 +64,7 @@ const _selectAllVarios = createSelector(
         _reduce(
             tracks,
             (result, track, compno) => {
-                if (!track.deck?.posIndex) {
+                if (!track?.deck?.posIndex) {
                     result[compno] = null;
                 } else {
                     const posIndex = findDisplayIndex(track.deck, t);
@@ -84,7 +84,7 @@ const _selectPilotVario = createSelector(
         (state: TracksSliceState, compno: Compno, _t: Epoch | undefined) => state.tracks[compno]
     ],
     (_compno: Compno, t: Epoch | undefined, track) => {
-        if (!track.deck) {
+        if (!track?.deck) {
             return null;
         }
         const posIndex = findDisplayIndex(track.deck, t);

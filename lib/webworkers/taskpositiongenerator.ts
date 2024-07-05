@@ -127,7 +127,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
             // We pass ticks through and then do nothing more
             if (isTick(current.value)) {
-                yield status;
+                yield {...status, tick: true} as any;
                 continue;
             }
 

@@ -68,7 +68,7 @@ export interface Comparable<T> {
 export interface TickMessage extends TimeStampType {
     c: Compno | FlarmID; // compno
     tick: true;
-    _: true;
+    _?: boolean;
 }
 
 export interface BasePositionMessage extends TimeStampType {

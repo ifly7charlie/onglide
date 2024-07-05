@@ -86,7 +86,10 @@ export const selectAuto = createSelector(
 
             // If it is scored then distance or speed
             // Before they start show altitude, sort to the end of the list
-            if (!score || agl === null) {
+            if (!score || score.flightStatus == PositionStatus.Unknown) {
+                sortKey = -2;
+                value = '-';
+            } else if (score.flightStatus == PositionStatus.Grid || (!score.utcStart && score.flightStatus == PositionStatus.Home)) {
                 sortKey = -1;
                 value = '-';
             } else if (!score.utcStart) {

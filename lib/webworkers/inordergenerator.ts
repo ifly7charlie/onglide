@@ -78,11 +78,11 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         //
         // How far through are we
         let position = 0;
+        const now: Epoch = getNow();
 
         //
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
-        const now: Epoch = getNow();
         while (position < messageQueue.length && !messageQueue[position]?._ && messageQueue[position]?.t < now - inOrderDelay) {
             const message = messageQueue[position++];
             const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
@@ -92,6 +92,10 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
                 for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
             }
         }
+
+        // Make sure we always have at least one entry for the glider, this should
+        // ensure we have a placeholder for every pilot regardless of flarm messages
+        yield {t: (now - inOrderDelay) as Epoch, c: compno, tick: true, _: true};
 
         console.log(
             `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue[position]?.t ?? 0) * 1000).toISOString()}`

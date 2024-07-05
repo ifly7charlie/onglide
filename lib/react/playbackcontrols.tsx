@@ -120,6 +120,10 @@ const PlaybackControls = ({
         return `${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})}`;
     }
 
+    if (firstStart > latestUpdate) {
+        return null;
+    }
+
     return (
         <SliderContainer>
             <Widget>

@@ -22,8 +22,6 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             console.log(...a);
         };
 
-    log(JSON.stringify(airfield));
-
     let previousPoint: EnrichedPosition | null = null;
     let point: EnrichedPosition | null = null;
 
@@ -46,10 +44,18 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
         try {
             //  If we get a tick and it's been long enough then we will send it on as a tick
             if (isTick(current.value)) {
-                if (previousPoint && current.value.t - previousPoint.t > 120) {
-                    nextArg = yield current.value;
+                if (!previousPoint) {
+                    // If we have not had a point then we are unknown
+                    nextArg = yield {ps: PositionStatus.Unknown, ...current.value};
+                    continue;
+                } else if (current.value.t - previousPoint.t > 120) {
+                    // If we have had a point then we should report tick but with that status
+                    nextArg = yield {ps: previousPoint.ps, ...current.value};
+                    continue;
+                } else {
+                    // don't tick too often and don't try and process a tick as it has no coordinates
+                    continue;
                 }
-                continue;
             }
 
             // Keep track of where we are
@@ -71,7 +77,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
             // We can't do any more without a previous point
             if (!previousPoint) {
-                point.ps = point.g >= 50 ? PositionStatus.Airborne : PositionStatus.Unknown;
+                point.ps = point.g >= 70 ? PositionStatus.Airborne : PositionStatus.Grid;
                 previousPoint = point;
                 stationary = false;
                 nextArg = yield point;

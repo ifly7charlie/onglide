@@ -75,7 +75,7 @@ const Menu = memo(
                         <span className="d-lg-none">{classes ? ' - ' + comp.classes.find((c) => c.class == props.vc)?.classname.replace(/\s+(meter|metre)/, 'm') : null}</span>
                     </Navbar.Brand>
                     <Navbar.Brand className="d-name d-xl-block">
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0}}>
+                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0, paddingLeft: 5}}>
                             {comp.competition.name}
                             <div style={{fontSize: '70%'}}>
                                 {comp.competition.start} to {comp.competition.end}
@@ -84,7 +84,7 @@ const Menu = memo(
                         </Nav.Link>
                     </Navbar.Brand>
                     <Navbar.Toggle aria-controls="responsive-nav-bar" />
-                    <Navbar.Collapse id="responsive-nav-bar" className="justify-content-end">
+                    <Navbar.Collapse id="responsive-nav-bar" className="justify-content-end" style={{paddingRight: 15}}>
                         <Nav fill variant="underline" defaultActiveKey={props.vc} style={{width: '40vw'}}>
                             {classes}
                         </Nav>
