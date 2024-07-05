@@ -274,8 +274,12 @@ export default function MApp(props: {
     // much quicker than changing the style.
     const fixupMap = useCallback(() => {
         try {
-            mapRef?.current?.getMap()?.setLayoutProperty('satellite', 'visibility', !mapStreet ? 'none' : 'visible');
-            mapRef?.current?.getMap()?.setLayoutProperty('background', 'visibility', !mapStreet ? 'none' : 'visible');
+            const map = mapRef?.current?.getMap();
+            if (map) {
+                map.setLayoutProperty('satellite', 'visibility', !mapStreet ? 'none' : 'visible');
+                map.setLayoutProperty('background', 'visibility', !mapStreet ? 'none' : 'visible');
+                map.setLayoutProperty('contour-line', 'visible', !mapStreet ? 'none' : 'visible');
+            }
         } catch (e) {}
     }, [mapStreet]);
     useEffect(fixupMap, [mapStreet, mapRef?.current]);
