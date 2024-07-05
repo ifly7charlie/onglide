@@ -483,7 +483,7 @@ async function main() {
                 const lastIndex = channel.scoreHistory.length;
                 // If they have changed since we saved them then we need to store the update
                 if (channel.allScores) {
-                    const include = !lastIndex || channel.scoresUpdatedAt > channel.scoreHistory[lastIndex - 1].t;
+                    const include = !lastIndex || !channel.scoresUpdatedAt || channel.scoresUpdatedAt > channel.scoreHistory[lastIndex - 1].t;
 
                     if (include) {
                         channel.scoreHistory.push({t: channel.scoresUpdatedAt, scoreMessage: channel.allScores});
@@ -499,7 +499,7 @@ async function main() {
 ${include ? null : channel.scoresUpdatedAt}, ${include ? Buffer.from(channel.allScores) : null})`
                     )
                         .then((r: any) => {
-                            console.log(`persisting scores ${channel.className} @ ${new Date(now * 1000).toISOString()}: ${r.affectedRows ? 'saved' : 'skipped'}`);
+                            console.log(`persisting scores ${channel.className} for ${new Date(channel.scoresUpdatedAt * 1000).toISOString()} @ ${new Date(now * 1000).toISOString()}: ${r.affectedRows ? 'saved' : 'skipped'}`);
                         })
                         .catch(console.error);
                 }
@@ -864,7 +864,10 @@ async function updateScoreHistory() {
     for (const channel of Object.values(channels)) {
         await db.query<{t: Epoch; scoreMessage: Buffer}[]>(escape`select t, sameAsT, score as scoreMessage from scores where class=${channel.className} and datecode=${channel.datecode} order by t asc`).then((r) => {
             if (r.length) {
-                channel.scoreHistory = r.filter((sh) => sh.t <= now);
+                channel.scoreHistory = r.filter((sh) => sh.t <= now && sh.scoreMessage);
+
+                //                const d = (d) => new Date(d * 1000).toISOString();
+                //                console.table(channel.scoreHistory.map((e) => [d(e.t), e.sameAsT ? d(e.sameAsT) : '-', e.scoreMessage ? 'yes' : 'no']));
 
                 if (channel.scoreHistory.length) {
                     const latestValid = channel.scoreHistory.at(-1);
@@ -877,6 +880,8 @@ async function updateScoreHistory() {
                         console.log(`${channel.className}: adopted score from ${new Date(latestValid.t * 1000).toISOString()}`);
                     }
                 }
+
+                console.log(`${channel.className}: ${channel.earliestScore} -> ${channel.latestScore}`);
             }
         });
 
@@ -1435,10 +1440,12 @@ function setupOgnWebServer(req, res) {
 
                     // Form the history and make sure we have the first scoreMessage even if it's a reference
                     const history = channel.scoreHistory.filter((sh) => sh.t >= chunkStart && sh.t <= chunkEnd);
+                    console.log('filtered history length', history.length, channel.scoreHistory.length);
                     if (history.length && history[0].sameAsT) {
                         // If the first entry is a sameAs then we need to do a fixup of it and the ones that follow
                         // they will all be the same number
-                        const replacement = channel.scoreHistory.findLast((sh) => sh.t <= history[0].sameAsT)?.scoreMessage;
+                        const replacement = channel.scoreHistory.findLast((sh) => sh.t <= history[0].sameAsT && sh.scoreMessage)?.scoreMessage;
+                        console.log('replacement', replacement, ' requested', history[0].sameAsT);
 
                         for (let i = 1; i < history.length && history[i].sameAsT; i++) {
                             history[i].sameAsT = history[0].t;
@@ -1458,7 +1465,7 @@ function setupOgnWebServer(req, res) {
                     }).finish();
 
                     console.log(`sending scorehistory ${channelName} ${history.length}/${channel.scoreHistory.length} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)}`);
-                    console.table(history.map((e) => [d(e.t), e.sameAsT ? d(e.sameAsT) : '-']));
+                    console.table(history.map((e) => [d(e.t), e.sameAsT ? d(e.sameAsT) : '-', e.scoreMessage ? 'yes' : 'no']));
 
                     res.setHeader('Content-Type', 'application/octet-stream');
                     if (chunkEnd == timestamp + 1) {
