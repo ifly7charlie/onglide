@@ -25,8 +25,8 @@ const handicappedDescriptions = {
     adistance: 'Actual distance completed',
     start: 'Start time',
     finish: 'Finish time',
-    duration: 'Task duration',
-    delay: 'Tracking delay'
+    duration: 'Task duration'
+    //    delay: 'Tracking delay'
 };
 
 const handicappedSortOrders = {
@@ -37,7 +37,7 @@ const handicappedSortOrders = {
     ld: ['ld', 'ald'],
     remaining: ['remaining', 'aremaining'],
     distance: ['distance', 'adistance'],
-    times: ['start', 'duration', 'finish', 'delay']
+    times: ['start', 'duration', 'finish' /*, 'delay'*/]
 };
 
 // list of descriptions
@@ -53,8 +53,8 @@ const descriptions = {
     adistance: 'Actual distance completed',
     start: 'Start time',
     finish: 'Finish time',
-    duration: 'Task duration',
-    delay: 'Tracking delay'
+    duration: 'Task duration'
+    //    delay: 'Tracking delay'
 };
 
 const sortOrders = {
@@ -65,7 +65,7 @@ const sortOrders = {
     ld: ['ald'],
     remaining: ['aremaining'],
     distance: ['adistance'],
-    times: ['start', 'duration', 'finish', 'delay']
+    times: ['start', 'duration', 'finish' /*, 'delay'*/]
 };
 
 const whichSortOrder = {
