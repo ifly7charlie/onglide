@@ -262,7 +262,7 @@ export default function MApp(props: {
 
     const onClick = useCallback((a, _b) => measure.click(a), [measure.enabled]);
 
-    const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime);
+    const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime ?? latestUpdate);
 
     // If we are displaying other pilots
     const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, vc, mapLight, map2d, props.replayTime) : null;
