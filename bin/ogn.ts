@@ -1451,11 +1451,10 @@ function setupOgnWebServer(req, res) {
                             history[0].scoreMessage = replacement;
                         }
                     }
-
                     const msg: any = ClassScoreHistory.encode({
                         class: channel.className,
-                        datecode: '', //
-                        history
+                        datecode: '', // we need to use undefined otherwise it will die
+                        history: history.map((h) => ({...h, sameAsT: h.sameAsT ?? undefined, scoreMessage: h.scoreMessage ?? undefined}))
                     }).finish();
 
                     console.log(`sending scorehistory ${channelName} ${history.length}/${channel.scoreHistory.length} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)}`);
