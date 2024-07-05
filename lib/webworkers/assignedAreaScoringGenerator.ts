@@ -62,7 +62,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     }
 
     let scoredStatus: CalculatedTaskStatus;
-    let flightStatus: PositionStatus | undefined = PositionStatus.Unknown;
+    let flightStatus: PositionStatus | undefined = undefined;
 
     for await (const current of taskStatusGenerator) {
         try {

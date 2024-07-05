@@ -26,7 +26,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
     let lastClosestToNext: DistanceKM | undefined = Infinity as DistanceKM;
     let lastTime: Epoch | undefined = undefined;
 
-    let flightStatus: PositionStatus | undefined = PositionStatus.Unknown;
+    let flightStatus: PositionStatus | undefined = undefined;
 
     for await (const current of taskStatusGenerator) {
         try {
