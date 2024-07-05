@@ -461,7 +461,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                     `* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` +
                                         ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`
                                 );
-                                const possibleT = Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch;
+                                const possibleT = Math.round((closestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch;
                                 possibleAdvances.push({
                                     possiblePoints: [
                                         {
@@ -491,10 +491,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     log(
                         `* using previously identified ${advanceChosen.estimatedTurnType} advance for sector, estimating turn @ ${advanceChosen.possiblePoints[0].t} [1 of ${possibleAdvances.length} candidates] and backtracking`
                     );
-                    //
-                    // backtrack to immediately after the dogleg so we don't miss new sectors if the gap finishes inside the sector or
-                    // there is only one point between them, we can ignore the point it will be dealt with on next pass of for loop
-                    iterator.next(advanceChosen.rewindTo);
 
                     legStatus.points.push(...advanceChosen.possiblePoints);
 
@@ -502,11 +498,27 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     legStatus.entryTimeStamp = advanceChosen.possiblePoints[0].t;
                     legStatus.estimatedTurn = advanceChosen.estimatedTurnType;
 
+                    // Just in case we missed more than one turn we set point to be the advance and then rewind to the end of the
+                    // gap - this allows us to do several advances in a row but the timing will get messed up as it
+                    // doesn't spread the speeds over the total range well, but it does calculate the proprotion of the first
+                    // dogleg so may be good enough - don't advance past more than 2
+                    if (!status.legs[status.currentLeg - 1].estimatedTurn) {
+                        point = {...point, ...advanceChosen.possiblePoints.at(-1), g: 0} as EnrichedPosition;
+                    }
+
                     // reset for next leg
+                    status.currentLeg++;
+
+                    // It's possible this should setup the closest to next correctly based on the backtrack
                     status.closestToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
-                    status.currentLeg++;
+
                     possibleAdvances = [];
+
+                    //
+                    // backtrack to immediately after the dogleg so we don't miss new sectors if the gap finishes inside the sector or
+                    // there is only one point between them, we can ignore the point it will be dealt with on next pass of for loop
+                    iterator.next(advanceChosen.rewindTo);
                 }
             }
 
