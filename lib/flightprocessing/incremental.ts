@@ -21,6 +21,7 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
         t: new Uint32Array(deckPointIncrement),
         climbRate: new Int8Array(deckPointIncrement),
         posIndex: 0,
+        segmentIndex: 1,
         trackVersion
     };
     glider.vario = {min: Infinity, max: 0} as VarioData;
@@ -110,7 +111,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         // If the gap is too long then we need to start the next segment as well
         if (point.t - lastTime > gapLength) {
             // If we have only one point in the previous segment then we should duplicate it
-            if (previousSegmentStart == deck.posIndex) {
+            if (previousSegmentStart == deck.posIndex - 1) {
                 // add it to the previous segment so there are two points in it, it's not a line
                 // without two points
                 pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
