@@ -56,7 +56,7 @@ import {selectAllPositions, selectAllAverageClimb, selectAllAGL} from './tracksS
 export type AllDisplayKeys = DisplayKeys[];
 export type AllNormalDisplayKeys = NormalDisplayKeys[];
 
-function sortKeyEqualityCheck(a?: NormalDisplayKeys[], b?: NormalDisplayKeys[]) {
+export function sortKeyEqualityCheck(a?: NormalDisplayKeys[], b?: NormalDisplayKeys[]) {
     return b && a && a.length === b.length && !a.some((v, i) => v.sortKey !== b.at(i)?.sortKey);
 }
 

@@ -10,6 +10,7 @@ import type {PayloadAction} from '@reduxjs/toolkit';
 import {createSelector} from 'reselect';
 
 import {updatePilotStartTimeAction, updateClassAction, updateSortKeyAction} from './actions';
+import {selectNow} from './nowSlice';
 
 import {PilotPosition, OnglideWebSocketMessage, Identifiers} from '../protobuf/onglide';
 
@@ -114,9 +115,10 @@ const _selectAllAverageClimb = createSelector(
     [
         //
         (_state: TracksSliceState, t: Epoch | undefined) => t,
-        (state: TracksSliceState, _t: Epoch | undefined) => state.tracks
+        (state: TracksSliceState, _t: Epoch | undefined) => state.tracks,
+        (state: TracksSliceState) => state.latestUpdate
     ],
-    (t: Epoch | undefined, tracks: TrackData | undefined): Record<Compno, number | null> =>
+    (t: Epoch | undefined, tracks: TrackData | undefined, now: Epoch | undefined): Record<Compno, number | null> =>
         _reduce(
             tracks,
             (result, track, compno) => {
@@ -124,7 +126,7 @@ const _selectAllAverageClimb = createSelector(
                     result[compno] = null;
                 } else {
                     const posIndex = findDisplayIndex(track.deck, t);
-                    result[compno] = posIndex >= 0 && t - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, posIndex) : null;
+                    result[compno] = posIndex >= 0 && (t ?? now ?? 0) - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, posIndex) : null;
                 }
                 return result;
             },
@@ -391,7 +393,6 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
         .sort()
         .join(',');
 
-    console.log('UT+', state.trackVersion, x);
 
     //    return state;
 }

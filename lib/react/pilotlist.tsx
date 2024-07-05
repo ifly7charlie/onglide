@@ -23,7 +23,7 @@ import {useSelector} from '../redux';
 import {selectPilotScore, selectAllStatus} from '../redux/scoresSlice';
 import {selectPilotVario} from '../redux/tracksSlice';
 import {selectLatestUpdate} from '../redux/tracksSlice';
-import {valueEqualityCheck, sortOrders, type AllNormalDisplayKeys} from '../redux/selectPilotResult';
+import {sortKeyEqualityCheck, sortOrders, type AllNormalDisplayKeys} from '../redux/selectPilotResult';
 
 // Helpers for sorting pilot list
 import {nextSortOrder, getValidSortOrder} from './pilot-sorting';
@@ -595,7 +595,7 @@ export const PilotList = memo(function PilotList({
             (sortOrders[order] ?? sortOrders['auto'])(state, now)
                 .map((r) => (r.converter ? r.converter(r, options.units, tz) : r))
                 .sort((a, b) => b.sortKey - a.sortKey),
-        valueEqualityCheck
+        sortKeyEqualityCheck
     );
 
     const pilotStatus = useSelector((state) => selectAllStatus(state, now));

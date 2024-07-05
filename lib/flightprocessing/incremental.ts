@@ -187,7 +187,7 @@ export function calculateAverage(deck: DeckData, index: number) {
     }
 
     // Add them up
-    return (deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2]) / (t - deck.t[start]);
+    return Math.round((10 * (deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2])) / (t - deck.t[start])) / 10;
 }
 
 //
