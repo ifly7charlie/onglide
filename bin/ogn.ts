@@ -877,6 +877,7 @@ async function updateScoreHistory() {
                     // If we don't have a score calculated use the last saved one, this will speed up starts
                     if (!channel.allScores && latestValid) {
                         channel.allScores = latestValid.scoreMessage;
+                        channel.scoresUpdatedAt = latestValid.t;
                         console.log(`${channel.className}: adopted score from ${new Date(latestValid.t * 1000).toISOString()}`);
                     }
                 }
