@@ -121,7 +121,6 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
             deck.segmentIndex++;
         } else {
             if (deck.posIndex - previousSegmentStart > 100) {
-                console.log(point.c, 'splitting segment', deck.segmentIndex, deck.posIndex);
                 pushPoint([point.lng, point.lat, point.a], point.g, point.t);
                 deck.segmentIndex++;
             }
