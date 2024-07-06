@@ -303,6 +303,14 @@ export const selectDuration = createSelector(
     ],
     (_t: Epoch | undefined, scores: ScoreData): AllDisplayKeys =>
         Object.values(scores).map((score) => {
+            if (!score.utcStart) {
+                return {
+                    compno: score.compno as Compno,
+                    value: '-',
+                    sortKey: -1
+                };
+            }
+
             const date = new Date(0);
             date.setSeconds(score.taskDuration);
             const iso = date.toISOString();
