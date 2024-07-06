@@ -153,7 +153,7 @@ export default function MApp(props: {
             }
         },
         follow && props.options.follow //
-            ? [selectedCompno, (props.replayTime ?? latestUpdate) >> 2, npol, props.options, isMoving]
+            ? [selectedCompno, (props.replayTime ?? latestUpdate) >> 2, npol, props.options, isMoving, follow]
             : [null, null, null, null, null]
     );
 
