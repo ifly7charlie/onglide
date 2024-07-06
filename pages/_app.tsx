@@ -9,21 +9,23 @@ import '../styles/onglide.scss';
 import {useState, useCallback, useEffect} from 'react';
 
 import type {Options} from '../lib/types';
+import {PathLength, Units, MapType, TaskUp} from '../lib/types';
 
 const defaultOptions: Options = {
     //
     rainRadar: true,
     rainRadarAdvance: 0,
-    units: 0,
-    mapType: 1,
+    units: Units.metric,
+    mapType: MapType.satellite,
     map2d: true,
-    taskUp: 0,
+    taskUp: TaskUp.track,
     follow: true,
     zoomTask: true,
     sortKey: 'auto',
     showOthers: true,
-    options2d: {taskUp: 0, mapType: 0, follow: true},
-    options3d: {taskUp: 1, mapType: 1, follow: true}
+    fullPaths: PathLength.recent,
+    options2d: {taskUp: TaskUp.north, mapType: MapType.street, follow: true},
+    options3d: {taskUp: TaskUp.track, mapType: MapType.satellite, follow: true}
 };
 
 export function useOptions() {

@@ -3,6 +3,7 @@
 import {recentTrackLength} from '../constants';
 
 import type {Epoch, Compno, SortKey} from '../types';
+import {PathLength} from '../types';
 
 import {selectAllTracks} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
@@ -34,7 +35,7 @@ export function pilotsTrackLayer(
     sortKey: SortKey,
     map2d: boolean,
     mapLight: boolean,
-    fullPaths: boolean
+    fullPaths: PathLength
 ) {
     const trackData = useSelector((state) => selectAllTracks(state));
 
@@ -57,7 +58,7 @@ export function pilotsTrackLayer(
         // For all but selected gliders just show most recent track
         const tripsFiltering = {
             currentTime: (props.replayTime || latestUpdate) - referenceDate - 2,
-            fadeTrail: !fullPaths && !selected,
+            fadeTrail: fullPaths == PathLength.recent || (fullPaths == PathLength.selectedFull && !selected),
             trailLength: recentTrackLength
         };
 

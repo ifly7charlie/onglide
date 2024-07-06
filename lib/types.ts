@@ -404,20 +404,37 @@ export enum Units {
     british = 1
 }
 
+export enum PathLength {
+    recent = 0,
+    selectedFull = 1,
+    allFull = 2
+}
+
+export enum MapType {
+    street = 0,
+    satellite = 1
+}
+
+export enum TaskUp {
+    north = 0,
+    track = 1,
+    user = 2
+}
+
 export interface Options {
     //
     rainRadar: boolean;
     rainRadarAdvance: 0 | 1 | 2 | 3;
     units: Units;
-    mapType: 0 | 1;
+    mapType: MapType;
     map2d: boolean;
-    taskUp: 0 | 1 | 2;
+    taskUp: TaskUp;
     follow: boolean;
     zoomTask: boolean;
     sortKey: SortKey;
     showOthers: boolean;
     constructionLines?: boolean;
-    fullPaths?: boolean;
+    fullPaths?: PathLength;
 
     options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
     options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};

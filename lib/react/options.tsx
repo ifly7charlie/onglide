@@ -4,6 +4,7 @@ import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 import {cloneDeep as _cloneDeep} from 'lodash';
 
 import type {Options as OptionsType} from '../types';
+//import {PathLength, Units, MapType, TaskUp} from '../types';
 
 export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean}) {
     const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
@@ -49,7 +50,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
         props.setOptions(_cloneDeep({...props.options, follow: !props.options.follow}));
     };
     const toggleFullPaths = () => {
-        props.setOptions(_cloneDeep({...props.options, fullPaths: !props.options.fullPaths}));
+        props.setOptions(_cloneDeep({...props.options, fullPaths: (props.options.fullPaths + 1) % 3}));
     };
     const toggleShowOthers = () => {
         props.setOptions(_cloneDeep({...props.options, showOthers: !props.options.showOthers}));
@@ -145,18 +146,25 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                 </button>
             )}
             &nbsp;
-            {props.options.fullPaths ? (
-                <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
-                    <FontAwesomeIcon icon={solid('route')} />
-                </button>
-            ) : (
-                <button title="Show recent paths for all pilots" onClick={toggleFullPaths}>
-                    <span className="fa-layers">
-                        <FontAwesomeIcon icon={solid('slash')} />
+            {
+                [
+                    <button title="Show recent paths for all pilots" onClick={toggleFullPaths}>
+                        <span className="fa-layers">
+                            <FontAwesomeIcon icon={solid('slash')} />
+                            <FontAwesomeIcon icon={solid('route')} />
+                        </span>
+                    </button>,
+                    <button title="Show full path for selected pilot" onClick={toggleFullPaths}>
+                        <span className="fa-layers">
+                            <FontAwesomeIcon icon={solid('1')} size="xs" transform="shrink-4 left-4 up-8" />
+                            <FontAwesomeIcon icon={solid('route')} />
+                        </span>
+                    </button>,
+                    <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
                         <FontAwesomeIcon icon={solid('route')} />
-                    </span>
-                </button>
-            )}
+                    </button>
+                ][props.options.fullPaths || 0]
+            }
             &nbsp;
             {!props.multipleClasses ? null : props.options.showOthers ? (
                 <button title="Showing gliders from other classes, click to only show current class" onClick={toggleShowOthers}>
