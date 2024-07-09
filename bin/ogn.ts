@@ -120,6 +120,7 @@ interface Channel {
     allScores?: Buffer;
 
     earliestScore: Epoch;
+    earliestStart: Epoch;
     latestScore: Epoch;
 
     scoresUpdatedAt: Epoch;
@@ -908,7 +909,7 @@ async function sendCurrentState(client: OgnWebSocket) {
                     className: channel.className,
                     datecode: channel.datecode,
                     competition: '1', //
-                    earliestScore: channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
+                    earliestScore: channel.earliestStart < Infinity ? channel.earliestStart : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
                     latestScore: channel.latestScore
                 },
                 t: getNow()
@@ -1090,6 +1091,7 @@ async function sendScores(channel: Channel, allScores: Buffer, recentScores: Buf
             // mix of the two
             glider.webPathEndPosition = 0;
             channel.webPathBaseTime = 0 as Epoch;
+            channel.earliestStart = Math.min(channel.earliestStart, recentStarts[compno]) as Epoch;
         }
     }
 }
