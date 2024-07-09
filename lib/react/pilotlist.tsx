@@ -324,8 +324,8 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
     // Figure out what to show based on the db status
     let flightDetails = null;
 
-    if (!score && !vario?.lat) {
-        flightDetails = <div>No tracking yet</div>;
+    if (!score || !vario?.lat || score.flightStatus == PositionStatus.Unknown) {
+        flightDetails = <></>;
     } else if (!score?.utcStart) {
         if (score?.flightStatus == PositionStatus.Grid) {
             flightDetails = <div>Gridded, waiting to fly</div>;

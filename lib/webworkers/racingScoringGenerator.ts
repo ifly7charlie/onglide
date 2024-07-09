@@ -1,4 +1,4 @@
-import {Epoch, DistanceKM, AltitudeAMSL, AltitudeAgl, Compno, TaskStatus, EstimatedTurnType, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, PositionStatus} from '../types';
+import {Epoch, DistanceKM, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, PositionStatus, isTick} from '../types';
 
 import Graph from '../flightprocessing/dijkstras';
 
@@ -36,7 +36,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
 
             // Wait for the start
             if ((!current.startConfirmed && !current.startFound) || !taskStatus.utcStart) {
-                if (flightStatus != taskStatus.flightStatus) {
+                if (flightStatus != taskStatus.flightStatus || isTick(taskStatus)) {
                     flightStatus = taskStatus.flightStatus;
                     yield taskStatus;
                 }

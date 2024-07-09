@@ -1,4 +1,4 @@
-import {Compno, PositionStatus, AltitudeAgl, BasePositionMessage, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task} from '../types';
+import {Compno, PositionStatus, AltitudeAgl, BasePositionMessage, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task, DistanceKM, SpeedKPH} from '../types';
 
 import {PilotScore, PilotScoreLeg, SpeedDist} from '../protobuf/onglide';
 
@@ -65,8 +65,6 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             return;
         }
 
-        //        log(item);
-
         // We will get called every time a calculation is ready for final scoring.
         // Our job is to calculate & populate the structure that goes to the front end
         //
@@ -82,6 +80,11 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
             currentLeg: item.currentLeg,
 
+            actual: {
+                taskDistance: 0 as DistanceKM,
+                taskSpeed: 0 as SpeedKPH
+            },
+
             // We will fill these in as we go
             legs: {},
             scoredPoints: [],
@@ -89,7 +92,13 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             maxDistancePoints: []
         };
 
-        let previousLeg: CalculatedTaskLegStatus = null;
+        // If we have no start we may have had a tick we should just pass it through and ignore
+        if (!item.utcStart) {
+            yield score;
+            continue;
+        }
+
+        let previousLeg: CalculatedTaskLegStatus | null = null;
         for (const leg of item.legs) {
             // For the time of the leg we use:
             // 1. AAT specific turnpoint time
