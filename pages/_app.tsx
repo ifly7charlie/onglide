@@ -1,5 +1,7 @@
 'use client';
 
+import Head from 'next/head';
+
 import '@fortawesome/fontawesome-svg-core/styles.css';
 import {config} from '@fortawesome/fontawesome-svg-core';
 config.autoAddCss = false;
@@ -61,5 +63,12 @@ export function useOptions() {
 // This default export is required in a new `pages/_app.js` file.
 export default function MyApp({Component, pageProps}) {
     const [options, setOptions] = useOptions();
-    return <Component {...pageProps} options={options} setOptions={setOptions} />;
+    return (
+        <>
+            <Head>
+                <meta name="viewport" content="width=device-width, minimal-ui" />
+            </Head>
+            <Component {...pageProps} options={options} setOptions={setOptions} />
+        </>
+    );
 }
