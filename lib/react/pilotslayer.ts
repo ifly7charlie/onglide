@@ -8,6 +8,8 @@ import {IconLayer} from '@deck.gl/layers';
 
 import {faLocationPin} from '@fortawesome/free-solid-svg-icons';
 
+import {memoize} from 'lodash';
+
 function svgToDataURL(svg: string) {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
@@ -26,6 +28,20 @@ function faToData(f: any, compno: Compno, selected: boolean) {
 </svg>`);
 }
 
+let getIcon = memoize(
+    function getIcon(compno: Compno, selectedCompno: Compno | undefined) {
+        return {
+            id: compno == selectedCompno ? 'S' + compno : compno,
+            url: compno == selectedCompno ? faToData(faLocationPin, compno, true) : faToData(faLocationPin, compno, false),
+            width: 128,
+            height: 128,
+            anchorY: 128,
+            mask: false
+        };
+    },
+    (c: Compno, s: Compno | undefined) => c + (s ?? '')
+);
+
 export function pilotsLayer(selectedCompno: Compno, setSelectedCompno: (compno: Compno) => void, now: Epoch) {
     const data = useSelector((state) => selectAllPositions(state, now));
 
@@ -35,22 +51,13 @@ export function pilotsLayer(selectedCompno: Compno, setSelectedCompno: (compno: 
             beforeId: 'tpe',
             data: data,
             getColor: (d) => (now - d.t > offlineTime ? [0, 0, 0, 96] : [0, 0, 0, 255]),
-            getSize: (d) => 35, //(d.compno == selectedCompno ? 35 : 30),
-            getIcon: (i) => {
-                return {
-                    id: i.compno == selectedCompno ? 'S' + i.compno : i.compno,
-                    url: i.compno == selectedCompno ? faToData(faLocationPin, i.compno, true) : faToData(faLocationPin, i.compno, false),
-                    //                    url: i.compno == selectedCompno ? trackData[i.compno].iconSelected : trackData[i.compno].icon,
-                    width: 128,
-                    height: 128,
-                    anchorY: 128,
-                    mask: false
-                };
-            },
+            getSize: (_d) => 35,
+            getIcon: (i) => getIcon(i.compno, selectedCompno),
             onClick: (i) => {
                 setSelectedCompno(i.object?.compno || '');
             },
             updateTriggers: {
+                getIcon: [selectedCompno],
                 getPosition: [now]
             },
             pickable: true
