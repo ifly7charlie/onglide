@@ -4,6 +4,9 @@ import {IconLayer} from '@deck.gl/layers';
 
 import {map as _map} from 'lodash';
 
+import {useSelector} from '../redux';
+import {selectAllPositions} from '../redux/otherPilotsSlice';
+
 function svgToDataURL(svg: string) {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
@@ -22,16 +25,8 @@ function faToData(f: any) {
 
 const otherUrl = faToData(faCircleUser);
 
-export function otherPilotsLayer(others: OtherPilotData, vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch) {
-    const timeCutoff = (now - 180) as Epoch;
-    const data = _map(others, (pos, key) => {
-        return {
-            className: key.split('_')[0],
-            compno: pos.c,
-            ...pos,
-            position: [pos.lng, pos.lat, pos.a]
-        };
-    }).filter((p) => p.t > timeCutoff && p.className != vc);
+export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch) {
+    const data = useSelector((state) => selectAllPositions(state, vc, now));
 
     return new IconLayer<(typeof data)[0]>({
         id: 'other_pilots',
@@ -55,7 +50,6 @@ export function otherPilotsLayer(others: OtherPilotData, vc: ClassName, mapLight
         }),
         pickable: true,
         updateTriggers: {
-            getAngle: Math.random(),
             getColor: mapLight == true ? 1 : 0
         }
     });

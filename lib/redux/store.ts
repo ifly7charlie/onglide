@@ -3,6 +3,7 @@ import {configureStore} from '@reduxjs/toolkit';
 import tracksSlice from '../redux/tracksSlice';
 import nowSlice from '../redux/nowSlice';
 import scoresSlice from '../redux/scoresSlice';
+import otherPilotsSlice from '../redux/otherPilotsSlice';
 
 // ...
 
@@ -10,6 +11,7 @@ const store = configureStore({
     reducer: {
         tracks: tracksSlice,
         scores: scoresSlice,
+        otherPilots: otherPilotsSlice,
         now: nowSlice
     },
     middleware: (getDefaultMiddleware) =>

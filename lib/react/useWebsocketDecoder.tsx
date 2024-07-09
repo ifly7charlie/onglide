@@ -5,6 +5,8 @@ import {useState} from 'react';
 import {useSelector, useDispatch} from '../redux';
 import {updateTracks, updatePositions, selectTrackVersion, fetchOldTracks} from '../redux/tracksSlice';
 import {updateScores} from '../redux/scoresSlice';
+import {updateOtherPilotsPositions} from '../redux/otherPilotsSlice';
+
 import {selectClassName} from '../redux/nowSlice';
 
 import {updateNow} from '../redux/nowSlice';
@@ -58,6 +60,8 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
             if (decoded.positions) {
                 // Update the current class
                 dispatch(updatePositions({positions: decoded.positions.class[className].positions, t: decoded.t as Epoch}));
+                dispatch(updateOtherPilotsPositions({positions: decoded.positions, t: decoded.t as Epoch}));
+
                 /*
                 // And now update our other pilots list
                 Object.entries(decoded.positions.class).forEach(
