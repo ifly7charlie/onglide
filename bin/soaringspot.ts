@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Copyright 2020 (c) Melissa Jenkins
+// Copyright 2020- (c) Melissa Jenkins
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
@@ -529,11 +529,9 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
         // and add a new one
         .query(
             escape`
-          INSERT INTO tasks (datecode, class, flown, description, distance, hdistance, duration, type, task, nostart, hash )
+          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, nostart, hash )
              VALUES ( ${toDateCode(date)}, ${classid},
                       'N', ${task_details.task_type},
-                      ${task_details.task_distance / 1000},
-                      ${task_details.task_distance / 1000},
                       ${duration}, ${tasktype}, 'B', ${convert_to_mysql(task_details.no_start)}, ${hash} )`
         )
 
@@ -742,8 +740,7 @@ async function process_day_scores(day, classid, classname, keys) {
                 scoredvals.ad = actuald;
                 scoredvals.hd = hcapd;
             }
-        }
-        if (keys.actuals) {
+        } else if (keys.actuals) {
             // actuals on soaring spot (fai probably)
             scoredvals.as = row.scored_speed;
             scoredvals.ad = row.scored_distance;

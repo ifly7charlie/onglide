@@ -455,11 +455,9 @@ async function process_day_task(day, classid, classname) {
         // and add a new one
         .query(
             escape`
-          INSERT INTO tasks (datecode, class, flown, description, distance, hdistance, duration, type, task, hash )
+          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, hash )
              VALUES ( ${dateCode}, ${classid},
                       'N', ${day.task_type},
-                      ${day.task_distance / 1000},
-                      ${day.task_distance / 1000},
                       ${duration}, ${tasktype}, 'B', ${hash} )`
         )
 
