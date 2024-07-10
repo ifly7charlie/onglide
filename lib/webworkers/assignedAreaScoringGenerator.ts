@@ -53,7 +53,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     });
 
     // The point that defines the end of the task
-    const fakeFinishPoint = {t: -999999999 as Epoch, lat: task.legs[task.legs.length - 1].nlat, lng: task.legs[task.legs.length - 1].nlng, a: null};
+    const fakeFinishPoint = {t: -999999999 as Epoch, lat: task.legs[task.legs.length - 1].nlat, lng: task.legs[task.legs.length - 1].nlng, a: Infinity};
     aatLegStatus[aatLegStatus.length - 1].taskPoints = [fakeFinishPoint];
 
     // Used to track if leg has changed since last calculation
@@ -62,7 +62,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     }
 
     let scoredStatus: CalculatedTaskStatus;
-    let flightStatus: PositionStatus | undefined = PositionStatus.Unknown;
+    let flightStatus: PositionStatus | undefined = undefined;
 
     for await (const current of taskStatusGenerator) {
         try {
@@ -83,6 +83,9 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             //            yield scores;
             //            continue;
             //        }
+            if (!taskStatus.legs[0]?.points?.[0]) {
+                continue;
+            }
 
             aatLegStatus[0].convexHull = taskStatus.legs[0]?.points || [];
             scoredStatus.legs[0].point = taskStatus.legs[0]?.points[0];
@@ -94,7 +97,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             // if we haven't got a finish we need a temporary one - it's not persisted
             // so it's ok
             const startPoint = aatLegStatus[0].convexHull[0];
-            const finishPoint = taskStatus.utcFinish ? taskStatus.legs[taskStatus.currentLeg].points[0] : fakeFinishPoint;
+            const finishPoint = taskStatus.utcFinish ? taskStatus.legs[taskStatus.currentLeg].points![0] : fakeFinishPoint;
 
             for (let legno = 1; legno <= taskStatus.currentLeg; legno++) {
                 // Helpers
@@ -113,13 +116,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 // If we have points but we previously had penalty points
                 // then we need to ignore the previous scoring
                 if (leg.points && aatLeg.penaltyPoints) {
-                    aatLeg.convexHull = null;
+                    aatLeg.convexHull = [];
                     aatLeg.penaltyPoints = false;
                     aatLeg.lengthConvexHullGeneratedAt = 0;
                 }
 
                 // What points does this leg have so far
-                const points = leg.points?.length ? leg.points : leg.penaltyPoints;
+                const points = (leg.points?.length ? leg.points : leg.penaltyPoints) ?? [];
 
                 // Did we generate from penalty points (used to reset convex hull above)
                 aatLeg.penaltyPoints = points == leg.penaltyPoints;
@@ -132,7 +135,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // a set of points containing the existing convex hull and add any new points
                     // to it then re-run the convex hull routine. As it doesn't care about
                     // order it will find the optimal set regardless.
-                    const newConvexHullPoints = [...(aatLeg.convexHull || []), ...points.slice(aatLeg.lengthConvexHullGeneratedAt)];
+                    const newConvexHullPoints = [...aatLeg.convexHull, ...points.slice(aatLeg.lengthConvexHullGeneratedAt)];
                     const newConvexHull = convexHull(newConvexHullPoints);
 
                     log('================================ >>> cvex h', leg.legno);
@@ -299,7 +302,6 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     scoredPoints = tempGraph.findPath(startPoint, fakePoint);
 
                     scoredPoints.shift();
-                    log('r scoredPoints:', [].concat(scoredPoints).reverse());
                     log('scoredPoints:', scoredPoints);
 
                     //
@@ -337,7 +339,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                         previousLeg = aatLegStatus[legno];
                     }
 
-                    const longestRemainingPath = maxGraph.findPath(startPoint, fakeFinishPoint).reverse();
+                    const longestRemainingPath = maxGraph.findPath(startPoint, fakeFinishPoint as BasePositionMessage).reverse();
                     log('longestRemainingPath', longestRemainingPath);
 
                     // Next do distance remaining, it's shortest parth from current point to home

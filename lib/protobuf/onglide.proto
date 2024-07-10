@@ -11,9 +11,11 @@ message OnglideWebSocketMessage {
 }
 
 message Identifiers {
-	string class = 1;
+	string className = 1;
 	string datecode = 2;
 	string competition = 3;
+	optional uint32 earliestScore = 4;
+	optional uint32 latestScore = 5;
 }		
 
 message PilotTracks {
@@ -23,10 +25,16 @@ message PilotTracks {
 
 
 message ScoreHistory {
+	uint32 t = 1; // epoch time it was output
+	optional uint32 sameAsT = 2; // epoch time it's the same as - if it hasn't changed, must refer to previous time
+	optional bytes scoreMessage = 3; // message that was sent
+}
+
+message ClassScoreHistory {
 	string class = 1;
 	string datecode = 2;
 
-	repeated PilotScore scores = 3; // partial of the PilotScore object in time order
+	repeated ScoreHistory history = 3; // 
 }
 	
 

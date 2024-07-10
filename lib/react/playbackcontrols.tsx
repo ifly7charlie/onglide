@@ -1,0 +1,154 @@
+import * as React from 'react';
+import {styled} from '@mui/material/styles';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Slider from '@mui/material/Slider';
+
+import {useSelector, useDispatch} from '../redux';
+import {fetchOldScores} from '../redux/scoresSlice';
+import {selectLatestUpdate} from '../redux/tracksSlice';
+
+const Widget = styled('div')(({theme}) => ({
+    padding: 24,
+    paddingBottom: 8,
+    borderRadius: 16,
+    width: '85%',
+    maxWidth: '100%',
+    margin: 'auto',
+    position: 'relative',
+    zIndex: 1,
+    backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.4)',
+    backdropFilter: 'blur(40px)'
+}));
+
+const TinyText = styled(Typography)({
+    fontSize: '0.75rem',
+    opacity: 0.38,
+    fontWeight: 500,
+    letterSpacing: 0.2
+});
+
+const SliderContainer = styled(Box)({width: '100%', overflow: 'hidden'});
+
+const BoxAfter = styled(Box)({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: '-1rem'
+});
+
+const BoxBefore = styled(Box)({
+    display: 'flex',
+    alignItems: 'right',
+    justifyContent: 'space-between',
+    marginTop: '-1rem'
+});
+
+const TimeSlider = styled(Slider)({
+    color: 'rgba(0,128,0,0.87)',
+    marginTop: '-1rem',
+    height: 4,
+    '& .MuiSlider-thumb': {
+        width: 8,
+        height: 8,
+        transition: '0.3s cubic-bezier(.47,1.64,.41,.8)',
+        '&::before': {
+            boxShadow: '0 2px 12px 0 rgba(0,0,0,0.4)'
+        },
+        '&:hover, &.Mui-focusVisible': {
+            boxShadow: `0px 0px 0px 8px 'rgb(0 0 0 / 16%)'`
+        },
+        '&.Mui-active': {
+            width: 20,
+            height: 20
+        }
+    },
+    '& .MuiSlider-rail': {
+        opacity: 0.28
+    }
+});
+const sliderSxReplay = {
+    color: 'rgba(0,0,0,0.87)'
+};
+
+import type {TZ, Epoch, Datecode, ClassName} from '../types';
+
+const PlaybackControls = ({
+    datecode,
+    className,
+    firstStart,
+    replayTime,
+    setReplayTime,
+    tz
+}: //
+{
+    datecode: Datecode;
+    className: ClassName;
+    firstStart: Epoch;
+    replayTime: Epoch;
+    setReplayTime: (t: Epoch) => void;
+    tz: TZ;
+}) => {
+    function formatDuration(value: number) {
+        const minute = Math.floor(value / 60);
+        const secondLeft = value - minute * 60;
+        return `${minute}:${secondLeft < 10 ? `0${secondLeft}` : secondLeft}`;
+    }
+
+    // Only update every 16 seconds (1<<4==16)
+    const latestUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4);
+
+    const dispatch = useDispatch();
+    const doSetTime = React.useCallback(
+        (t: Epoch | undefined) => {
+            const inReplay = !t || t >= latestUpdate - 60 ? false : true;
+            setReplayTime(inReplay ? t : undefined);
+            if (inReplay) {
+                dispatch(fetchOldScores({t: t as Epoch, now: latestUpdate, className, datecode}));
+            }
+        },
+        [dispatch, latestUpdate, className, datecode]
+    );
+
+    function formatTimes(t) {
+        // Figure out what the local language is for international date strings
+        //        const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
+
+        // And then produce a string to display it locally
+        const dt = new Date(t * 1000);
+        //        const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((t + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
+        return `${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})}`;
+    }
+
+    if (firstStart > latestUpdate) {
+        return null;
+    }
+
+    return (
+        <SliderContainer>
+            <Widget>
+                <BoxBefore>
+                    <TinyText>{formatTimes(firstStart)}</TinyText>
+                    {replayTime ? <TinyText>{formatTimes(replayTime)}</TinyText> : null}
+                    <TinyText>{formatTimes(latestUpdate)}</TinyText>
+                </BoxBefore>
+                <TimeSlider //
+                    aria-label="time-indicator"
+                    size="small"
+                    value={replayTime ?? latestUpdate}
+                    min={firstStart}
+                    step={1}
+                    max={latestUpdate}
+                    onChange={(_, value) => doSetTime(value as Epoch)}
+                    sx={replayTime ? sliderSxReplay : undefined}
+                />
+                <BoxAfter>
+                    {replayTime ? <TinyText>+{formatDuration(replayTime - firstStart)}</TinyText> : <TinyText sx={{opacity: 1}}>{'Live'}</TinyText>}
+                    <TinyText>+{formatDuration(latestUpdate - firstStart)}</TinyText>
+                </BoxAfter>
+            </Widget>
+        </SliderContainer>
+    );
+};
+
+export default React.memo(PlaybackControls, (a, b) => a.className == b.className && a.firstStart == b.firstStart && a.replayTime >> 4 == b.replayTime >> 4);

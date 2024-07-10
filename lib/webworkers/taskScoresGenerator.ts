@@ -1,4 +1,4 @@
-import {Compno, PositionStatus, AltitudeAgl, BasePositionMessage, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task} from '../types';
+import {Compno, PositionStatus, AltitudeAgl, BasePositionMessage, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task, DistanceKM, SpeedKPH} from '../types';
 
 import {PilotScore, PilotScoreLeg, SpeedDist} from '../protobuf/onglide';
 
@@ -18,7 +18,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         return Math.round((1000.0 * dist) / handicap) / 10;
     }
 
-    const doSpeedCalc = (sd: SpeedDist, legDuration: number, taskDuration: number) => {
+    const doSpeedCalc = (sd: SpeedDist | undefined, legDuration: number, taskDuration: number) => {
         if (!sd) {
             return;
         }
@@ -30,9 +30,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         }
     };
 
-    const doGrCalc = (sd: SpeedDist | null, agl: AltitudeAgl) => {
+    const doGrCalc = (sd: SpeedDist | null | undefined, agl: AltitudeAgl) => {
         if (sd && agl) {
-            sd.grRemaining = Math.round((sd.distanceRemaining || sd.minPossible) / (agl / 1000));
+            sd.grRemaining = Math.round((sd.distanceRemaining || sd.minPossible || 0) / (agl / 1000));
         }
     };
 
@@ -65,8 +65,6 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             return;
         }
 
-        //        log(item);
-
         // We will get called every time a calculation is ready for final scoring.
         // Our job is to calculate & populate the structure that goes to the front end
         //
@@ -82,6 +80,11 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
 
             currentLeg: item.currentLeg,
 
+            actual: {
+                taskDistance: 0 as DistanceKM,
+                taskSpeed: 0 as SpeedKPH
+            },
+
             // We will fill these in as we go
             legs: {},
             scoredPoints: [],
@@ -89,7 +92,13 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             maxDistancePoints: []
         };
 
-        let previousLeg: CalculatedTaskLegStatus = null;
+        // If we have no start we may have had a tick we should just pass it through and ignore
+        if (!item.utcStart) {
+            yield score;
+            continue;
+        }
+
+        let previousLeg: CalculatedTaskLegStatus | null = null;
         for (const leg of item.legs) {
             // For the time of the leg we use:
             // 1. AAT specific turnpoint time

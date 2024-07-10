@@ -64,6 +64,13 @@ type ComparableCompareFunction<T> = (a: T, b: T) => number;
 export interface Comparable<T> {
     compare: ComparableCompareFunction<T>;
 }
+
+export interface TickMessage extends TimeStampType {
+    c: Compno | FlarmID; // compno
+    tick: true;
+    _?: boolean;
+}
+
 export interface BasePositionMessage extends TimeStampType {
     lat: number;
     lng: number;
@@ -77,9 +84,12 @@ export interface PositionMessage extends BasePositionMessage {
     b?: Bearing; // course
     s?: Speed; // speed
     f?: string; // sender & id receiver
-    v?: string; // vario string
     l?: boolean | null; // is late
     _?: boolean; // live
+}
+
+export function isTick(m: any): m is TickMessage {
+    return 'tick' in m;
 }
 
 export enum PositionStatus {
@@ -89,7 +99,8 @@ export enum PositionStatus {
     Low = 3,
     Airborne = 4,
     Home = 5,
-    Landed = 6
+    Landed = 6,
+    Finished = 7
 }
 
 export interface EnrichedPosition extends PositionMessage {
@@ -225,11 +236,11 @@ export interface CalculatedTaskStatus extends TaskStatus {
 // points re-ordered if necessary
 export type SoftenGenerator<Type extends TimeStampType> = AsyncGenerator<Type, Type | void, void>;
 
-export type InOrderGenerator = AsyncGenerator<PositionMessage, void, Epoch | void>;
-export type InOrderGeneratorFunction = (getNow: Function | null) => InOrderGenerator;
+export type InOrderGenerator = AsyncGenerator<PositionMessage | TickMessage, void, Epoch | void>;
+export type InOrderGeneratorFunction = (getNow: () => Epoch) => InOrderGenerator;
 
 // Figure out what is happening in the flight
-export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition, void, Epoch | void>;
+export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition | TickMessage, void, Epoch | void>;
 
 // Figure out where in a task somebody is
 export type TaskStatusGenerator = AsyncGenerator<TaskStatus, void, void>;
@@ -254,7 +265,6 @@ export interface DeckData {
     posIndex: number;
     segmentIndex?: number;
     trackVersion: number;
-    oldestVarioIndex: number; //
 }
 
 export interface VarioData {
@@ -273,7 +283,6 @@ export interface VarioData {
     average: number; // average of total/Xperiod
     Xperiod: Epoch; // period
 
-    delay: Epoch; // how late is packet
     t: Epoch; // when was this updated
 }
 
@@ -301,11 +310,13 @@ export type SortKey =
 export interface DisplayPilotTrackData extends PilotTrackData {
     deckAdditional: {
         tr: Uint32Array;
-        colours: Uint8Array | null;
-        sortKey: SortKey;
+        climb: Uint8Array;
+        aheight: Uint8Array;
     };
     icon?: string;
     iconSelected?: string;
+
+    name: string;
 }
 
 export interface PilotTrackData {
@@ -315,12 +326,20 @@ export interface PilotTrackData {
     t?: Epoch;
 }
 
+// How close did we get to current turnpoint
+export interface NearestSectorPoint {
+    geometry?: {
+        coordinates: any;
+    };
+    properties?: {t: Epoch; dist: DistanceKM; p?: EnrichedPosition};
+}
+
 export {PilotScore, PilotScoreLeg} from './protobuf/onglide';
 import {PilotScore} from './protobuf/onglide';
-import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
+//import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 
 export type TrackData = Record<Compno, DisplayPilotTrackData>;
-export type ScoreData = Record<Compno, PilotScore>;
+export type ScoreData = Record<Compno, PilotScoreDisplay>;
 
 export type OtherPilotData = Record<ClassName_Compno, PositionMessage>;
 
@@ -328,12 +347,6 @@ export interface PilotScoreDisplay extends PilotScore {
     scoredGeoJSON?: any;
     minGeoJSON?: any;
     maxGeoJSON?: any;
-}
-
-export interface SelectedPilotDetails {
-    pilot: API_ClassName_Pilots_PilotDetail; // from db
-    score: PilotScoreDisplay;
-    track: PilotTrackData; // deck, vario
 }
 
 /// Database types
@@ -386,20 +399,42 @@ export interface ClassesTableRow {
     Dm: number | null;
 }
 
+export enum Units {
+    metric = 0,
+    british = 1
+}
+
+export enum PathLength {
+    recent = 0,
+    selectedFull = 1,
+    allFull = 2
+}
+
+export enum MapType {
+    street = 0,
+    satellite = 1
+}
+
+export enum TaskUp {
+    north = 0,
+    track = 1,
+    user = 2
+}
+
 export interface Options {
     //
-    rainRadar: 0 | 1;
+    rainRadar: boolean;
     rainRadarAdvance: 0 | 1 | 2 | 3;
-    units: 0 | 1;
-    mapType: 0 | 1;
+    units: Units;
+    mapType: MapType;
     map2d: boolean;
-    taskUp: 0 | 1 | 2;
+    taskUp: TaskUp;
     follow: boolean;
     zoomTask: boolean;
     sortKey: SortKey;
     showOthers: boolean;
     constructionLines?: boolean;
-    fullPaths?: boolean;
+    fullPaths?: PathLength;
 
     options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
     options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};

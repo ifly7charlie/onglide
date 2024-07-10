@@ -21,8 +21,8 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
         t: new Uint32Array(deckPointIncrement),
         climbRate: new Int8Array(deckPointIncrement),
         posIndex: 0,
-        trackVersion,
-        oldestVarioIndex: 0
+        segmentIndex: 1,
+        trackVersion
     };
     glider.vario = {min: Infinity, max: 0} as VarioData;
 }
@@ -33,8 +33,6 @@ export function generateIndices(deck: DeckData, glider: PilotTrackData) {
     if (!deck) {
         return;
     }
-    console.log(deck.compno, 'generateIndices');
-    glider.vario = {min: Infinity, max: 0} as VarioData;
 
     let lastTime = deck.t[0];
     if (!deck.indices) {
@@ -54,7 +52,7 @@ export function generateIndices(deck: DeckData, glider: PilotTrackData) {
             deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
         }
     }
-    deck.indices[deck.segmentIndex] = deck.posIndex;
+    deck.indices[deck.segmentIndex] = deck.posIndex - 1;
 }
 
 export function mergePoint(point: PositionMessage | PilotPosition, glider: PilotTrackData, latest = true): false | {start: number; end: number} {
@@ -113,7 +111,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         // If the gap is too long then we need to start the next segment as well
         if (point.t - lastTime > gapLength) {
             // If we have only one point in the previous segment then we should duplicate it
-            if (previousSegmentStart == deck.posIndex) {
+            if (previousSegmentStart == deck.posIndex - 1) {
                 // add it to the previous segment so there are two points in it, it's not a line
                 // without two points
                 pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
@@ -123,7 +121,6 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
             deck.segmentIndex++;
         } else {
             if (deck.posIndex - previousSegmentStart > 100) {
-                console.log(point.c, 'splitting segment', deck.segmentIndex, deck.posIndex);
                 pushPoint([point.lng, point.lat, point.a], point.g, point.t);
                 deck.segmentIndex++;
             }
@@ -134,34 +131,25 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     // Push the new point into the data array
     pushPoint([point.lng, point.lat, point.a], point.g, point.t);
 
-    // And update the vario numbers
-    calculateVario(glider.deck, glider.vario);
-
     return {start, end: deck.posIndex};
 }
 
-export function calculateVario(deck: DeckData, v: VarioData) {
-    const li = deck.posIndex - 1;
-    const t = deck.t[li];
+// Calculate vario for the specific index
+export function calculateVario(deck: DeckData, index: number) {
+    const t = deck.t[index];
 
-    // Find 40 seconds, skipping ahead points
-    while (deck.oldestVarioIndex < li && t - deck.t[deck.oldestVarioIndex] > 40) {
-        deck.oldestVarioIndex++;
-
-        // We need to make sure we have min/max - note min is meaningless till after start
-        v.min = Math.min(v.min, deck.agl[li]);
-        v.max = Math.max(v.max, deck.agl[li]);
+    // Find 40 seconds
+    let start = index;
+    while (start > 0 && t - deck.t[start] < 40) {
+        start--;
     }
 
-    // Helper for saving current
-    v.altitude = deck.positions[li * 3 + 2];
-    v.agl = deck.agl[li];
-    v.gainXsecond = v.lossXsecond = 0;
+    let v = {gainXsecond: 0, lossXsecond: 0} as VarioData;
 
     // Add them up
-    let previousAlt = deck.positions[deck.oldestVarioIndex * 3 + 2];
+    let previousAlt = deck.positions[start * 3 + 2];
     let initialAlt = previousAlt;
-    for (let c = deck.oldestVarioIndex; c < li; c++) {
+    for (let c = start; c < index; c++) {
         const altitude = deck.positions[c * 3 + 2];
         if (previousAlt !== undefined) {
             let diff = altitude - previousAlt;
@@ -173,13 +161,33 @@ export function calculateVario(deck: DeckData, v: VarioData) {
 
     // The total and the average, along with misc status values
     v.total = previousAlt - initialAlt;
-    v.Xperiod = (t - deck.t[deck.oldestVarioIndex]) as Epoch;
+    v.Xperiod = (t - deck.t[start]) as Epoch;
     v.average = Math.round((v.total * 10) / v.Xperiod) / 10;
-    v.lng = deck.positions[li * 3];
-    v.lat = deck.positions[li * 3 + 1];
-    v.agl = deck.agl[li];
+    v.lng = deck.positions[index * 3];
+    v.lat = deck.positions[index * 3 + 1];
+    v.agl = deck.agl[index];
     v.altitude = previousAlt;
     v.t = t as Epoch;
+
+    return v;
+}
+
+// Calculate vario for the specific index
+export function calculateAverage(deck: DeckData, index: number) {
+    const t = deck.t[index];
+
+    // Find 40 seconds
+    let start = index;
+    while (start > 0 && t - deck.t[start] < 40) {
+        start--;
+    }
+
+    if (start == index) {
+        return null;
+    }
+
+    // Add them up
+    return Math.round((10 * (deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2])) / (t - deck.t[start])) / 10;
 }
 
 //
@@ -239,7 +247,5 @@ export function pruneStartline(deck: DeckData, startTime: Epoch): number | undef
     deck.climbRate = deck.climbRate.slice(indexRemove);
 
     // this will reset all the vario calculations
-    deck.oldestVarioIndex = 0;
-
     return indexRemove;
 }

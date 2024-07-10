@@ -19,12 +19,11 @@ import {point} from '@turf/helpers';
 import {WebSocket, WebSocketServer} from 'ws';
 import type {IncomingMessage} from 'http';
 
-import {OnglideWebSocketMessage, Positions, PilotPosition} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
 // DB access
-//const db from '../db')
 import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
@@ -55,7 +54,7 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 import {spawnAprsContestListener, AprsCommandTrack, AprsCommandEnum} from '../lib/webworkers/aprs';
 import {ReplayController, ReplayConfig} from '../lib/webworkers/replay';
 
-import {webPathBaseTime} from '../lib/constants';
+import {webPathBaseTime, scoreChunkSize} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -117,8 +116,15 @@ interface Channel {
     replay?: ReplayController; // are we replaying?
 
     lastKeepAliveMsg?: any;
-    recentScores?: any;
-    allScores?: any;
+    recentScores?: Buffer;
+    allScores?: Buffer;
+
+    earliestScore: Epoch;
+    earliestStart: Epoch;
+    latestScore: Epoch;
+
+    scoresUpdatedAt: Epoch;
+    scoreHistory: Array<{t: Epoch; sameAsT?: Epoch; scoreMessage?: Buffer}>;
 
     statistics: Statistics;
 
@@ -197,11 +203,10 @@ const start = Math.trunc(Date.now() / 1000);
 const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
 let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
 const replayBase = parseInt(process.env.REPLAY ?? '0');
+let multiplier = process.env.REPLAY ? parseInt(process.env.REPLAY_MULTIPLIER || '1') : 1;
 
 // And the replay
 if (process.env.REPLAY) {
-    let multiplier = parseInt(process.env.REPLAY_MULTIPLIER || '1');
-
     getNow = (): Epoch => {
         const now = Math.trunc(Date.now() / 1000);
         const elapsed = now - start;
@@ -313,6 +318,7 @@ async function main() {
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
+        await updateScoreHistory();
     }
 
     if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
@@ -414,6 +420,7 @@ async function main() {
 
         //
         // We need to purge unused channels
+        const now = getNow();
         for (const channelName in channels) {
             const channel = channels[channelName];
 
@@ -422,7 +429,6 @@ async function main() {
                 return client.isAlive === false;
             });
 
-            const now = getNow();
             toterminate.forEach((client) => {
                 console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
                 channel.statistics.totalViewingTime += now - client.connectedAt;
@@ -467,6 +473,42 @@ async function main() {
                     0;
         }
     }, 60 * 1000);
+
+    setTimeout(() => {
+        setInterval(async function () {
+            // We need to save away the scores - we will save all of them every X minutes
+            const now = getNow();
+            for (const channelName in channels) {
+                const channel = channels[channelName];
+
+                const lastIndex = channel.scoreHistory.length;
+                // If they have changed since we saved them then we need to store the update
+                if (channel.allScores) {
+                    const include = !lastIndex || !channel.scoresUpdatedAt || channel.scoresUpdatedAt > channel.scoreHistory[lastIndex - 1].t;
+
+                    if (include) {
+                        channel.scoreHistory.push({t: channel.scoresUpdatedAt, scoreMessage: channel.allScores});
+                        channel.latestScore = now;
+                    } else {
+                        channel.scoreHistory.push({t: now, sameAsT: channel.scoresUpdatedAt});
+                    }
+                    channel.earliestScore = Math.min(channel.earliestScore, now) as Epoch;
+
+                    db.query(
+                        escape`insert ignore into scores (class, datecode, t, sameAsT, score) values 
+(${channel.className}, ${channel.datecode}, ${include ? channel.scoresUpdatedAt : now},
+${include ? null : channel.scoresUpdatedAt}, ${include ? Buffer.from(channel.allScores) : null})`
+                    )
+                        .then((r: any) => {
+                            console.log(`persisting scores ${channel.className} for ${new Date(channel.scoresUpdatedAt * 1000).toISOString()} @ ${new Date(now * 1000).toISOString()}: ${r.affectedRows ? 'saved' : 'skipped'}`);
+                        })
+                        .catch(console.error);
+                }
+            }
+        }, 60_000 / multiplier);
+    }, (getNow() % 60) * (1000 / multiplier));
+
+    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
 
     //
     // Update competition information
@@ -533,7 +575,11 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 },
                 webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
-                webPathData: {}
+                webPathData: {},
+                scoreHistory: [],
+                scoresUpdatedAt: 0 as Epoch,
+                earliestScore: Infinity as Epoch,
+                latestScore: 0 as Epoch
             };
         } else {
             // We move it to the new list
@@ -814,6 +860,37 @@ async function updateDDB() {
         });
 }
 
+async function updateScoreHistory() {
+    const now = getNow();
+    for (const channel of Object.values(channels)) {
+        await db.query<{t: Epoch; scoreMessage: Buffer}[]>(escape`select t, sameAsT, score as scoreMessage from scores where class=${channel.className} and datecode=${channel.datecode} order by t asc`).then((r) => {
+            if (r.length) {
+                channel.scoreHistory = r.filter((sh) => sh.t <= now && sh.scoreMessage);
+
+                //                const d = (d) => new Date(d * 1000).toISOString();
+                //                console.table(channel.scoreHistory.map((e) => [d(e.t), e.sameAsT ? d(e.sameAsT) : '-', e.scoreMessage ? 'yes' : 'no']));
+
+                if (channel.scoreHistory.length) {
+                    const latestValid = channel.scoreHistory.at(-1);
+                    channel.earliestScore = channel.scoreHistory[0].t;
+                    channel.latestScore = latestValid!.t;
+
+                    // If we don't have a score calculated use the last saved one, this will speed up starts
+                    if (!channel.allScores && latestValid) {
+                        channel.allScores = latestValid.scoreMessage;
+                        channel.scoresUpdatedAt = latestValid.t;
+                        console.log(`${channel.className}: adopted score from ${new Date(latestValid.t * 1000).toISOString()}`);
+                    }
+                }
+
+                console.log(`${channel.className}: ${channel.earliestScore} -> ${channel.latestScore}`);
+            }
+        });
+
+        console.log(`loaded ${channel.scoreHistory.length} historical scores for ${channel.className}`);
+    }
+}
+
 //
 // New connection, send it a packet for each glider we are tracking
 async function sendCurrentState(client: OgnWebSocket) {
@@ -827,7 +904,16 @@ async function sendCurrentState(client: OgnWebSocket) {
 
     client.send(
         OnglideWebSocketMessage.encode(
-            {identifiers: {class: channel.className, datecode: channel.datecode, competition: '1'}, t: getNow()} //
+            {
+                identifiers: {
+                    className: channel.className,
+                    datecode: channel.datecode,
+                    competition: '1', //
+                    earliestScore: channel.earliestStart < Infinity ? channel.earliestStart : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
+                    latestScore: channel.latestScore
+                },
+                t: getNow()
+            } //
         ).finish(),
         {binary: true}
     );
@@ -837,8 +923,8 @@ async function sendCurrentState(client: OgnWebSocket) {
 
     // Make sure we send the pilots ASAP
     if (channels[client.ognChannel]?.allScores) {
-        console.log('sending allScores', channels[client.ognChannel].allScores.length);
-        client.send(channels[client.ognChannel].allScores, {binary: true});
+        console.log('sending allScores', channels[client.ognChannel].allScores!.length);
+        client.send(channels[client.ognChannel].allScores!, {binary: true});
     } else {
         console.log('no current scores', client.ognChannel);
     }
@@ -902,7 +988,7 @@ async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
 
     const toStream = reduce(
         gliders,
-        (result, glider, compno) => {
+        (result, glider) => {
             if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
@@ -982,6 +1068,7 @@ async function sendScores(channel: Channel, allScores: Buffer, recentScores: Buf
     // Protobuf encode the scores message
     channel.recentScores = recentScores;
     channel.allScores = allScores;
+    channel.scoresUpdatedAt = getNow();
 
     // Send to each client and if they don't respond they will be cleaned up next time around
     channel.clients.forEach((client: any) => {
@@ -1004,6 +1091,7 @@ async function sendScores(channel: Channel, allScores: Buffer, recentScores: Buf
             // mix of the two
             glider.webPathEndPosition = 0;
             channel.webPathBaseTime = 0 as Epoch;
+            channel.earliestStart = Math.min(channel.earliestStart, recentStarts[compno]) as Epoch;
         }
     }
 }
@@ -1048,7 +1136,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
     //
     // Now we will fetch the points for the pilots
     const rawpoints: PositionMessage[] =
-        (await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
+        (await db.query<PositionMessage[]>(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
                                               FROM trackpoints
                                    WHERE datecode=${channel.datecode} AND class=${channel.className} AND t > ${now}
                                              ORDER BY t ASC`)) ?? [];
@@ -1079,7 +1167,7 @@ async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<voi
     //
     // Now we will fetch the points for the pilots
     const rawpoints: Array<PositionMessage & {x: string}> =
-        (await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l, station as x
+        (await db.query<Array<PositionMessage & {x: string}>>(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l, station as x
                                               FROM trackpoints
                                               WHERE datecode=${channel.datecode} AND class=${channel.className} AND compno=${glider.compno} AND t < ${now}
                                               ORDER BY t ASC`)) ?? [];
@@ -1330,7 +1418,8 @@ function setupOgnWebServer(req, res) {
     }
 
     // explict score request
-    const [valid, command, channelName, baseTimestamp] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)$/i) || [false, '', ''];
+    const [valid, command, channelName, timestampString]: string[] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)$/i) || [false, '', '', ''];
+    const timestamp = parseInt(timestampString);
     if (valid) {
         console.log(command, channelName);
         if (channelName in channels) {
@@ -1345,16 +1434,64 @@ function setupOgnWebServer(req, res) {
                     res.end(JSON.stringify(msg));
                     return;
                 }
+                case 'scorehistory': {
+                    // We need to produce a chunk that matches the timestamp provided
+                    const chunkStart = timestamp - (timestamp % scoreChunkSize); // 30 minute chunks
+                    const chunkEnd = chunkStart + scoreChunkSize; // 30 minute chunks
+                    const d = (d) => new Date(d * 1000).toISOString();
+                    console.log(`FOS: request for ${d(timestamp)} ${d(chunkStart)}=>${d(chunkEnd)}`);
+
+                    // Form the history and make sure we have the first scoreMessage even if it's a reference
+                    const history = channel.scoreHistory.filter((sh) => sh.t >= chunkStart && sh.t <= chunkEnd);
+                    console.log('filtered history length', history.length, channel.scoreHistory.length);
+                    if (history.length && history[0].sameAsT) {
+                        // If the first entry is a sameAs then we need to do a fixup of it and the ones that follow
+                        // they will all be the same number
+                        const replacement = channel.scoreHistory.findLast((sh) => sh.t <= history[0].sameAsT && sh.scoreMessage)?.scoreMessage;
+                        console.log('replacement', replacement, ' requested', history[0].sameAsT);
+
+                        for (let i = 1; i < history.length && history[i].sameAsT; i++) {
+                            history[i].sameAsT = history[0].t;
+                        }
+
+                        if (!replacement) {
+                            console.error(`unable to find referenced score history ${history[0]}`);
+                        } else {
+                            history[0].sameAsT = null;
+                            history[0].scoreMessage = replacement;
+                        }
+                    }
+                    const msg: any = ClassScoreHistory.encode({
+                        class: channel.className,
+                        datecode: '', // we need to use undefined otherwise it will die
+                        history: history.map((h) => ({...h, sameAsT: h.sameAsT ?? undefined, scoreMessage: h.scoreMessage ?? undefined}))
+                    }).finish();
+
+                    console.log(`sending scorehistory ${channelName} ${history.length}/${channel.scoreHistory.length} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)}`);
+                    console.table(history.map((e) => [d(e.t), e.sameAsT ? d(e.sameAsT) : '-', e.scoreMessage ? 'yes' : 'no']));
+
+                    res.setHeader('Content-Type', 'application/octet-stream');
+                    if (chunkEnd == timestamp + 1) {
+                        console.log('allowing caching');
+                        res.setHeader('Access-Control-Max-Age', 24 * 60 * 60); // 1 day
+                    }
+
+                    res.writeHead(200, headers);
+                    res.write(msg, 'binary');
+                    res.end(null, 'binary');
+                    return;
+                }
+
                 case 'tracks': {
-                    console.log(`sending historical data ${baseTimestamp} [current: ${channel.webPathBaseTime}]`);
-                    if (channel.webPathData[baseTimestamp]) {
+                    console.log(`sending historical data ${timestamp} ${new Date(timestamp * 1000).toISOString()} [current: ${channel.webPathBaseTime}]`);
+                    if (channel.webPathData[timestamp]) {
                         res.setHeader('Content-Type', 'application/octet-stream');
                         res.writeHead(200, headers);
-                        res.write(channel.webPathData[baseTimestamp], 'binary');
+                        res.write(channel.webPathData[timestamp], 'binary');
                         res.end(null, 'binary');
                         return;
                     } else {
-                        console.log('no historical data matching', channelName, baseTimestamp);
+                        console.log('no historical data matching', channelName, timestamp);
                     }
                 }
             }

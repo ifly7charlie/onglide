@@ -434,6 +434,10 @@ async function process_day_task(day, classid, classname) {
         console.log(`${classid} - ${date}: task changed`);
     }
 
+    for (const tp of day.task_points) {
+        tp.altitude = await new Promise((resolve) => getElevationOffset(toDeg(tp.latitude), toDeg(tp.longitude), resolve));
+    }
+
     // Do this as one block so we don't end up with broken tasks
     await mysql_db
         .transaction()
@@ -467,7 +471,7 @@ async function process_day_task(day, classid, classname) {
             }
 
             let values: (string | number)[] = [];
-            let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) ' + 'VALUES ';
+            let query = 'INSERT INTO taskleg ( class, datecode, taskid, legno, ' + 'length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12, altitude ) ' + 'VALUES ';
 
             let previousPoint: Coord | null = null;
             let currentPoint: Coord | null = null;
@@ -496,7 +500,7 @@ async function process_day_task(day, classid, classname) {
                 const bearingDeg = previousPoint ? (bearing(previousPoint, currentPoint) + 360) % 360 : 0;
                 let hi = 0; // only used when windicapping
 
-                query = query + "( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ? ),";
+                query = query + "( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?,? ),";
 
                 values = values.concat([
                     classid, //
@@ -515,7 +519,8 @@ async function process_day_task(day, classid, classname) {
                     tp.oz_line ? 90 : toDeg(tp.oz_angle1),
                     tp.oz_radius2 / 1000,
                     toDeg(tp.oz_angle2),
-                    tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0
+                    tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0,
+                    tp.altitude
                 ]);
             }
 
