@@ -9,6 +9,8 @@ import {cloneDeep as _clonedeep, keyBy as _keyby} from 'lodash';
 import {OnglideWebSocketMessage} from '../protobuf/onglide';
 import {MessagePort} from 'node:worker_threads';
 
+import equal from 'fast-deep-equal';
+
 /*
  * collect scores from a collection of different generators and post update messages
  *
@@ -48,10 +50,7 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
     // Called when a new score is available, save it in the
     // object structure and flag that it's there
     function updateScore(compno: Compno, score: PilotScore) {
-        mostRecentScores[compno] = score;
-        allScores[compno] = score;
-
-        if (process.env.NODE_ENV == 'development' || compno == 'SD') {
+        if (process.env.NODE_ENV == 'development') {
             console.log(`[${id}/${taskId}] score for ${compno}`);
         }
 
@@ -60,10 +59,16 @@ export function scoreCollector(interval: Epoch, port: MessagePort, task: Task, s
             startsToSend[compno] = mostRecentStart[compno] = score.utcStart as Epoch;
         }
 
-        oldestUpdate = Math.min(oldestUpdate, score.t);
-        newestUpdate = Math.max(newestUpdate, score.t);
+        if (scoreChanged(allScores[compno], score)) {
+            console.log(`updating score for ${compno}  status: ${score.flightStatus}`);
+            mostRecentScores[compno] = score;
+            allScores[compno] = score;
 
-        latestSent = false;
+            oldestUpdate = Math.min(oldestUpdate, score.t);
+            newestUpdate = Math.max(newestUpdate, score.t);
+
+            latestSent = false;
+        }
         return running;
     }
 
@@ -164,4 +169,39 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
     trackMetric('sc.done.' + className, 1);
     trackMetric('sc.done', 1);
     console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno}`);
+}
+
+function scoreChanged(oldScore?: PilotScore, newScore?: PilotScore): boolean {
+    //    console.log('CHANGED', oldScore, newScore);
+    if (!oldScore || !newScore) {
+        return !oldScore !== !newScore; // both undefined or defined
+    }
+    // If the timestamp is the same then nothing has changed
+    if (oldScore.t === newScore.t) {
+        return false;
+    }
+    // If the start time is different then it must have changed
+    if (oldScore.utcStart !== newScore.utcStart) {
+        return true;
+    }
+
+    // Now we know that duration or flight status must change for it to count
+    if (oldScore.flightStatus != newScore.flightStatus) {
+        console.log(newScore.compno, 'fs change', newScore.flightStatus, oldScore.flightStatus);
+        return true;
+    }
+
+    // If we haven't started then all we care about is flight status
+    if (!newScore.utcStart) {
+        return false;
+    }
+
+    // If we have scored and the score hasn't changed then we are equivalent - nothing after
+    // finish matters
+    if (oldScore.utcFinish && oldScore.utcFinish == newScore.utcFinish) {
+        return false;
+    }
+
+    // Otherwise check time and distance - actual should always be there and it's enough
+    return !equal(oldScore.actual, newScore.actual);
 }

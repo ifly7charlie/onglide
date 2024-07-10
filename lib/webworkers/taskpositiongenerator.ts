@@ -5,7 +5,22 @@
  *
  */
 
-import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, AltitudeAMSL} from '../types';
+import {
+    Compno,
+    Epoch,
+    DistanceKM,
+    BasePositionMessage,
+    PositionMessage,
+    TaskStatus,
+    EstimatedTurnType,
+    Task,
+    PositionStatus,
+    EnrichedPositionGenerator,
+    EnrichedPosition,
+    AltitudeAMSL,
+    isTick,
+    NearestSectorPoint
+} from '../types';
 
 import {lineString} from '@turf/helpers';
 import length from '@turf/length';
@@ -18,7 +33,7 @@ import {cloneDeep as _clonedeep} from 'lodash';
 
 import {checkIsInTP, checkIsInStartSector, stripPoints} from '../flightprocessing/taskhelper';
 
-const sleepInterval = 10 * 1000;
+const sleepInterval = parseInt(process.env.MIN_SCORING_EMIT_TIME_MS ?? '10000') || 10000;
 
 //export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
@@ -69,13 +84,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     let wasInStartSector = false;
     let landedBack = false;
 
-    // How close did we get to current turnpoint
-    interface NearestSectorPoint {
-        geometry?: {
-            coordinates: any;
-        };
-        properties?: {t: Epoch; dist: DistanceKM};
-    }
     let closestSectorPoint: NearestSectorPoint;
 
     interface PossibleAdvance {
@@ -113,15 +121,22 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             break;
         }
         try {
+            // What time have we scored to
+            status.t = current.value.t;
+            status.compno = current.value.c as Compno;
+
+            // We pass ticks through and then do nothing more
+            if (isTick(current.value)) {
+                yield {...status, tick: true} as any;
+                continue;
+            }
+
             // Keep track of where we are
             previousPoint = point;
             point = current.value;
 
-            // What time have we scored to
-            status.t = point.t;
             status.pointsProcessed++;
             status.lastProcessedPoint = simplifyPoint(point);
-            status.compno = point.c as Compno;
 
             if (status.flightStatus != point.ps) {
                 status.flightStatus = point.ps;
@@ -272,6 +287,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (inSector) {
                     log('* found a finish @ ' + point.t);
                     status.utcFinish = point.t;
+                    status.flightStatus = PositionStatus.Finished;
                     legStatus.entryTimeStamp = point.t;
                     //                legStatus.altitude = point.a;
                     //                legStatus.points.push(simplifyPoint(point));
@@ -445,7 +461,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                     `* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` +
                                         ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`
                                 );
-                                const possibleT = Math.round((nearestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch;
+                                const possibleT = Math.round((closestSectorPoint.properties.dist / distanceNeeded) * elapsedTime + previousPoint.t) as Epoch;
                                 possibleAdvances.push({
                                     possiblePoints: [
                                         {
@@ -475,10 +491,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     log(
                         `* using previously identified ${advanceChosen.estimatedTurnType} advance for sector, estimating turn @ ${advanceChosen.possiblePoints[0].t} [1 of ${possibleAdvances.length} candidates] and backtracking`
                     );
-                    //
-                    // backtrack to immediately after the dogleg so we don't miss new sectors if the gap finishes inside the sector or
-                    // there is only one point between them, we can ignore the point it will be dealt with on next pass of for loop
-                    iterator.next(advanceChosen.rewindTo);
 
                     legStatus.points.push(...advanceChosen.possiblePoints);
 
@@ -486,11 +498,27 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     legStatus.entryTimeStamp = advanceChosen.possiblePoints[0].t;
                     legStatus.estimatedTurn = advanceChosen.estimatedTurnType;
 
+                    // Just in case we missed more than one turn we set point to be the advance and then rewind to the end of the
+                    // gap - this allows us to do several advances in a row but the timing will get messed up as it
+                    // doesn't spread the speeds over the total range well, but it does calculate the proprotion of the first
+                    // dogleg so may be good enough - don't advance past more than 2
+                    if (!status.legs[status.currentLeg - 1].estimatedTurn) {
+                        point = {...point, ...advanceChosen.possiblePoints.at(-1), g: 0} as EnrichedPosition;
+                    }
+
                     // reset for next leg
+                    status.currentLeg++;
+
+                    // It's possible this should setup the closest to next correctly based on the backtrack
                     status.closestToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
-                    status.currentLeg++;
+
                     possibleAdvances = [];
+
+                    //
+                    // backtrack to immediately after the dogleg so we don't miss new sectors if the gap finishes inside the sector or
+                    // there is only one point between them, we can ignore the point it will be dealt with on next pass of for loop
+                    iterator.next(advanceChosen.rewindTo);
                 }
             }
 

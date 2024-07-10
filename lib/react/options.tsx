@@ -4,13 +4,23 @@ import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 import {cloneDeep as _cloneDeep} from 'lodash';
 
 import type {Options as OptionsType} from '../types';
+//import {PathLength, Units, MapType, TaskUp} from '../types';
 
 export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean}) {
     const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
 
     const radarFunction = () => {
-        const nextRadar = (props.options.rainRadarAdvance + 1) % 4;
-        props.setOptions(_cloneDeep({...props.options, rainRadarAdvance: nextRadar}));
+        let nextRadar = props.options.rainRadarAdvance + 1;
+        let rainRadar = props.options.rainRadar;
+        if (!rainRadar) {
+            rainRadar = true;
+            nextRadar = 0;
+        }
+        if (nextRadar >= 4) {
+            nextRadar = 0;
+            rainRadar = false;
+        }
+        props.setOptions(_cloneDeep({...props.options, rainRadarAdvance: nextRadar, rainRadar}));
     };
     const constructionLines = () => {
         props.setOptions(_cloneDeep({...props.options, constructionLines: !props.options.constructionLines}));
@@ -40,7 +50,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
         props.setOptions(_cloneDeep({...props.options, follow: !props.options.follow}));
     };
     const toggleFullPaths = () => {
-        props.setOptions(_cloneDeep({...props.options, fullPaths: !props.options.fullPaths}));
+        props.setOptions(_cloneDeep({...props.options, fullPaths: (props.options.fullPaths + 1) % 3}));
     };
     const toggleShowOthers = () => {
         props.setOptions(_cloneDeep({...props.options, showOthers: !props.options.showOthers}));
@@ -60,11 +70,22 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]} onClick={radarFunction}>
-                <FontAwesomeIcon icon={solid('umbrella')} />
-                &nbsp;
-                <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
-            </button>
+            {props.options.rainRadar ? (
+                <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance] + ', click to change timing or disable'} onClick={radarFunction}>
+                    <FontAwesomeIcon icon={solid('umbrella')} />
+                    &nbsp;
+                    <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
+                </button>
+            ) : (
+                <button title={'Click to enable rain radar'} onClick={radarFunction}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={solid('slash')} />
+                        <FontAwesomeIcon icon={solid('umbrella')} />
+                    </span>
+                    &nbsp;
+                    <span style={{fontSize: '9px'}}>{['off', 'now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
+                </button>
+            )}
             &nbsp;
             {props.options.constructionLines ? (
                 <button title="Click to hide Construction Lines" onClick={constructionLines}>
@@ -125,18 +146,25 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                 </button>
             )}
             &nbsp;
-            {props.options.fullPaths ? (
-                <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
-                    <FontAwesomeIcon icon={solid('route')} />
-                </button>
-            ) : (
-                <button title="Show recent paths for all pilots" onClick={toggleFullPaths}>
-                    <span className="fa-layers">
-                        <FontAwesomeIcon icon={solid('slash')} />
+            {
+                [
+                    <button title="Show recent paths for all pilots" onClick={toggleFullPaths}>
+                        <span className="fa-layers">
+                            <FontAwesomeIcon icon={solid('slash')} />
+                            <FontAwesomeIcon icon={solid('route')} />
+                        </span>
+                    </button>,
+                    <button title="Show full path for selected pilot" onClick={toggleFullPaths}>
+                        <span className="fa-layers">
+                            <FontAwesomeIcon icon={solid('1')} size="xs" transform="shrink-4 left-4 up-8" />
+                            <FontAwesomeIcon icon={solid('route')} />
+                        </span>
+                    </button>,
+                    <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
                         <FontAwesomeIcon icon={solid('route')} />
-                    </span>
-                </button>
-            )}
+                    </button>
+                ][props.options.fullPaths || 0]
+            }
             &nbsp;
             {!props.multipleClasses ? null : props.options.showOthers ? (
                 <button title="Showing gliders from other classes, click to only show current class" onClick={toggleShowOthers}>

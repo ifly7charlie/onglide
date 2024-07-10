@@ -5,7 +5,7 @@
  *
  */
 
-import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator} from '../types';
+import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator, isTick} from '../types';
 
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
@@ -22,15 +22,13 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             console.log(...a);
         };
 
-    log(JSON.stringify(airfield));
-
     let previousPoint: EnrichedPosition | null = null;
     let point: EnrichedPosition | null = null;
 
     let stationary: boolean | null = null;
     let airborneFound: boolean = false;
 
-    let nextArg: Epoch | void; // we may be asked to rewind and if we are then we should do so by passing this into iterator.next
+    let nextArg: Epoch | void = void false; // we may be asked to rewind and if we are then we should do so by passing this into iterator.next
 
     //
     // Loop reading the next point - this will block until a point
@@ -44,6 +42,22 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             break;
         }
         try {
+            //  If we get a tick and it's been long enough then we will send it on as a tick
+            if (isTick(current.value)) {
+                if (!previousPoint) {
+                    // If we have not had a point then we are unknown
+                    nextArg = yield {ps: PositionStatus.Unknown, ...current.value};
+                    continue;
+                } else if (current.value.t - previousPoint.t > 120) {
+                    // If we have had a point then we should report tick but with that status
+                    nextArg = yield {ps: previousPoint.ps, ...current.value};
+                    continue;
+                } else {
+                    // don't tick too often and don't try and process a tick as it has no coordinates
+                    continue;
+                }
+            }
+
             // Keep track of where we are
             point = current.value as EnrichedPosition;
             stationary = false;
@@ -63,7 +77,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
             // We can't do any more without a previous point
             if (!previousPoint) {
-                point.ps = point.g >= 50 ? PositionStatus.Airborne : PositionStatus.Unknown;
+                point.ps = point.g >= 70 ? PositionStatus.Airborne : PositionStatus.Grid;
                 previousPoint = point;
                 stationary = false;
                 nextArg = yield point;
@@ -76,12 +90,12 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             // Close to the ground 50m and we think we were flying
             if (point.g < 50) {
                 // Check for movements
-                const distanceFromLast = distance(point.geoJSON, previousPoint.geoJSON);
+                const distanceFromLast = distance(point.geoJSON, previousPoint.geoJSON!);
                 if (distanceFromLast < 0.012) {
                     // And enough elapsed time
                     if (point.t - previousPoint.t > 60) {
                         // And if it's at home or somewhere else
-                        if (distance(point.geoJSON, airfield.point) < 2) {
+                        if (distance(point.geoJSON, airfield.point!) < 2) {
                             point.ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
                         } else {
                             point.ps = PositionStatus.Landed;
