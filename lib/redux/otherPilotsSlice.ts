@@ -43,7 +43,7 @@ const _selectAllPositions = createSelector(
         (_state: OtherPilotsSliceState, _className: ClassName, t: Epoch | undefined) => t,
         (state: OtherPilotsSliceState) => state.positions
     ],
-    (t: Epoch, className: ClassName, others: OtherPilotData) => {
+    (className: ClassName, t: Epoch, others: OtherPilotData) => {
         const timeCutoff = (t == undefined ? Date.now() - 180 : t - 180) as Epoch;
         return _map(others, (pos, key) => ({
             className: key.split('_')[0],

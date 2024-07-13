@@ -32,7 +32,7 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
 
             if (decoded.identifiers) {
                 console.log('identifiers', decoded.identifiers, decoded.t);
-                dispatch(updateClassAction({...decoded.identifiers, t: decoded.t}));
+                dispatch(updateClassAction({...decoded.identifiers, t: decoded.t as Epoch}));
             }
 
             // Merge in changed tracks
