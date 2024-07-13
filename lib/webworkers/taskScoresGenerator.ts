@@ -70,6 +70,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         //
         const score: PilotScore = {
             t: item.t,
+            live: item._ ?? false,
             compno: compno,
 
             utcStart: item.utcStart,

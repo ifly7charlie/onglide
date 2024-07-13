@@ -19,6 +19,7 @@ interface TracksSliceState {
     earliestScore: Epoch;
     latestScore: Epoch;
     now: Epoch;
+    onlineStart: Epoch;
 }
 
 // Define the initial state using that type
@@ -27,7 +28,8 @@ const initialState: TracksSliceState = {
     datecode: '' as Datecode,
     now: 0 as Epoch,
     earliestScore: Infinity as Epoch,
-    latestScore: 0 as Epoch
+    latestScore: 0 as Epoch,
+    onlineStart: 0 as Epoch
 };
 
 export const nowSlice = createSlice({
@@ -37,6 +39,10 @@ export const nowSlice = createSlice({
     reducers: {
         updateNow: (state, {payload: now}: {payload: Epoch}) => {
             state.now = now;
+        },
+
+        offline: (state) => {
+            state.onlineStart = 0 as Epoch;
         }
     },
     extraReducers: (builder) => {
@@ -47,16 +53,18 @@ export const nowSlice = createSlice({
             state.datecode = payload.datecode as Datecode;
             state.earliestScore = payload.earliestScore as Epoch;
             state.latestScore = payload.latestScore as Epoch;
+            state.onlineStart = payload.t as Epoch;
         });
     },
     selectors: {
         selectNow: (state) => state.now,
         selectClassName: (state) => state.className,
         selectDatecode: (state) => state.datecode,
-        selectAvailableScoreTimes: (state) => ({earliestScore: state.earliestScore, latestScore: state.latestScore})
+        selectAvailableScoreTimes: (state) => ({earliestScore: state.earliestScore, latestScore: state.latestScore}),
+        selectOnline: (state) => state.onlineStart
     }
 });
 
 export default nowSlice.reducer;
-export const {updateNow} = nowSlice.actions;
-export const {selectNow, selectClassName, selectDatecode, selectAvailableScoreTimes} = nowSlice.selectors;
+export const {updateNow, offline} = nowSlice.actions;
+export const {selectNow, selectClassName, selectDatecode, selectAvailableScoreTimes, selectOnline} = nowSlice.selectors;

@@ -272,7 +272,7 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {
     );
 });
 
-export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) {
+export const Details = memo(function Details({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) {
     if (!pilot) {
         return null;
     }
@@ -324,7 +324,7 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
     // Figure out what to show based on the db status
     let flightDetails = null;
 
-    if (!score || !vario?.lat || score.flightStatus == PositionStatus.Unknown) {
+    if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
         flightDetails = <></>;
     } else if (!score?.utcStart) {
         if (score?.flightStatus == PositionStatus.Grid) {
@@ -397,12 +397,14 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
             <FontAwesomeIcon icon={solid('backward')} />
             &nbsp;
             {OptionalTime('', replayTime, tz)}
+            {process.env.NODE_ENV == 'development' && score ? OptionalTime(',', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
         </span>
     ) : uptodate ? (
         <span>
             &nbsp;
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
                 <FontAwesomeIcon icon={regular('square-check')} /> {Math.round(delay)}s delay
+                {process.env.NODE_ENV == 'development' && score ? ', ' + Math.round(latestUpdate - score?.t) + 's delay' + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
             </a>
         </span>
     ) : (
@@ -421,6 +423,7 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
                         {(vario?.lat || 0) > 0 ? <>&gt;1 hour ago</> : <>No tracking yet</>}
                     </>
                 )}
+                {process.env.NODE_ENV == 'development' && score ? ', ' + delayToText(latestUpdate - score?.t) + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
             </a>
         </span>
     );
@@ -466,11 +469,7 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
             {flightDetails}
         </div>
     );
-}
-
-//<!--                <a title="Show Wind Shading" href="#" onClick={() => props.setOptions('windshade')}>
-//                  <Icon type="magic" /> -->
-//            </a>
+});
 
 // Display the current height of the pilot as a percentage bar, note this is done altitude not AGL
 // which is probably wrong

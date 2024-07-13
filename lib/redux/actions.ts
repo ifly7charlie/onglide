@@ -8,7 +8,7 @@ import type {Compno, Epoch, SortKey} from '../types';
 import type {Identifiers} from '../protobuf/onglide';
 
 // Change of selected class
-export const updateClassAction = createAction<Identifiers>('updateClass');
+export const updateClassAction = createAction<Identifiers & {t: Epoch}>('updateClass');
 
 // New start time for a pilot
 export const updatePilotStartTimeAction = createAction<{compno: Compno; startUtc: Epoch}>('updatePilotStart');

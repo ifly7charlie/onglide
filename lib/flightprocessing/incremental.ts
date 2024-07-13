@@ -116,7 +116,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
                 // without two points
                 pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
             }
-
+            deck.indices[deck.segmentIndex] = deck.posIndex;
             // Start a new segment, on the next point (which has not yet been pushed)
             deck.segmentIndex++;
         } else {

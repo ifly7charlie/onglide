@@ -7,6 +7,7 @@ import Slider from '@mui/material/Slider';
 import {useSelector, useDispatch} from '../redux';
 import {fetchOldScores} from '../redux/scoresSlice';
 import {selectLatestUpdate} from '../redux/tracksSlice';
+import {selectOnline} from '../redux/nowSlice';
 
 const Widget = styled('div')(({theme}) => ({
     padding: 24,
@@ -71,6 +72,10 @@ const sliderSxReplay = {
     color: 'rgba(0,0,0,0.87)'
 };
 
+const sliderOffline = {
+    color: 'orange' //rgba(255,0,0,0.87)'
+};
+
 import type {TZ, Epoch, Datecode, ClassName} from '../types';
 
 const PlaybackControls = ({
@@ -97,6 +102,7 @@ const PlaybackControls = ({
 
     // Only update every 16 seconds (1<<4==16)
     const latestUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4);
+    const online = useSelector(selectOnline);
 
     const dispatch = useDispatch();
     const doSetTime = React.useCallback(
@@ -140,10 +146,10 @@ const PlaybackControls = ({
                     step={1}
                     max={latestUpdate}
                     onChange={(_, value) => doSetTime(value as Epoch)}
-                    sx={replayTime ? sliderSxReplay : undefined}
+                    sx={replayTime ? sliderSxReplay : !online ? sliderOffline : undefined}
                 />
                 <BoxAfter>
-                    {replayTime ? <TinyText>+{formatDuration(replayTime - firstStart)}</TinyText> : <TinyText sx={{opacity: 1}}>{'Live'}</TinyText>}
+                    {replayTime ? <TinyText>+{formatDuration(replayTime - firstStart)}</TinyText> : <TinyText sx={{opacity: 1}}>{online ? 'Live' : 'Offline'}</TinyText>}
                     <TinyText>+{formatDuration(latestUpdate - firstStart)}</TinyText>
                 </BoxAfter>
             </Widget>

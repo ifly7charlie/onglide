@@ -36,8 +36,9 @@ import {useWebsocketDecoder} from './useWebsocketDecoder';
 import PlaybackControls from './playbackcontrols';
 
 import dynamic from 'next/dynamic';
-import {selectNow, selectAvailableScoreTimes} from '../redux/nowSlice';
-import {useSelector} from '../redux';
+import {selectAvailableScoreTimes} from '../redux/nowSlice';
+import {useSelector, useDispatch} from '../redux';
+import {online, offline} from '../redux/nowSlice';
 
 const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     ssr: false,
@@ -94,9 +95,16 @@ export const OgnFeed = memo(
         const [follow, setFollow] = useState(false);
         const router = useRouter();
 
-        const mergeWsStatus = useCallback((state: any) => setWsStatus({...wsStatus, ...state}), [wsStatus, setWsStatus]);
+        const mergeWsStatus = useCallback(
+            (state: any) => {
+                console.log(new Date().toISOString(), 'WS:', state);
+                setWsStatus({...wsStatus, ...state});
+            },
+            [wsStatus, setWsStatus]
+        );
 
-        const {otherPilots, decoder} = useWebsocketDecoder({mergeWsStatus, className: vc, datecode});
+        const {decoder} = useWebsocketDecoder({mergeWsStatus, className: vc, datecode});
+        const dispatch = useDispatch();
 
         //        const now = useSelector(selectNow);
         const availableScores = useSelector(selectAvailableScoreTimes);
@@ -114,9 +122,15 @@ export const OgnFeed = memo(
         // We are using a webSocket to update our data here
         const {sendMessage} = useWebSocket(socketUrl, {
             reconnectAttempts: 15,
-            reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
+            reconnectInterval: (lastAttemptNumber: number) => {
+                mergeWsStatus({retry: lastAttemptNumber + 1});
+                return (1 << Math.max(lastAttemptNumber, 4)) * 1000 + Math.random() * 1200;
+            },
             retryOnError: true,
-            onOpen: (_a) => mergeWsStatus({state: 'open', retry: 0}),
+            shouldReconnect: () => true,
+            onOpen: (_a) => {
+                mergeWsStatus({state: 'open', retry: 0});
+            },
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
                 if (lastMessage.data === 'reload') {
@@ -131,12 +145,18 @@ export const OgnFeed = memo(
                     decoder(lastMessage.data);
                 }
             },
-
-            onError: (a) => {
-                console.warn(a, wsStatus);
-                wsStatus.state != 'closed' ? mergeWsStatus({state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
+            onClose: (_a) => {
+                dispatch(offline());
+                mergeWsStatus({state: 'retry'});
             },
-            onReconnectStop: (_numAttempts) => mergeWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
+            onError: (a) => {
+                wsStatus.state != 'closed' ? mergeWsStatus({state: 'retry'}) : null;
+            },
+            onReconnectStop: (_numAttempts) => mergeWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}), // clear status as offline
+            heartbeat: {
+                timeout: 30_000,
+                interval: 13_000
+            }
         });
 
         // Do we have a loaded set of details?
@@ -209,7 +229,6 @@ export const OgnFeed = memo(
                         replayTime={replayTime}
                         viewport={viewport}
                         setViewport={setViewport}
-                        otherPilots={otherPilots}
                         selectedCompno={selectedCompno}
                         status={status}
                     />

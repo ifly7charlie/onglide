@@ -19,7 +19,7 @@ import {point} from '@turf/helpers';
 import {WebSocket, WebSocketServer} from 'ws';
 import type {IncomingMessage} from 'http';
 
-import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
@@ -28,7 +28,7 @@ import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
 
 // Add points to the deck structures
-import {mergePoint, initialiseDeck, pruneStartline} from '../lib/flightprocessing/incremental';
+import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
@@ -44,7 +44,7 @@ console.log('dev mode', dev);
 let db: ReturnType<typeof mysql>;
 
 // lodash
-import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex} from 'lodash';
+import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex, sortedIndexBy as _sortedIndexBy} from 'lodash';
 
 //import _remove from 'lodash.remove';
 //import _groupby from 'lodash.groupby';
@@ -78,6 +78,8 @@ import {setSiteTz, getSiteTz} from '../lib/flightprocessing/timehelper.js';
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
+const d = (d) => new Date(d * 1000).toISOString();
+
 // Where is the comp based
 let location: AirfieldLocation;
 
@@ -96,6 +98,8 @@ interface Statistics {
 
     totalViewingTime: number;
 }
+
+interface ChannelTask {}
 
 interface Channel {
     //    name: string
@@ -116,17 +120,21 @@ interface Channel {
     replay?: ReplayController; // are we replaying?
 
     lastKeepAliveMsg?: any;
-    recentScores?: Buffer;
-    allScores?: Buffer;
+
+    statistics: Statistics;
+
+    // Tasks we are working on or have had
 
     earliestScore: Epoch;
     earliestStart: Epoch;
     latestScore: Epoch;
 
-    scoresUpdatedAt: Epoch;
-    scoreHistory: Array<{t: Epoch; sameAsT?: Epoch; scoreMessage?: Buffer}>;
+    allScores: Record<Compno, PilotScore>;
+    allScoresMsg?: Uint8Array;
 
-    statistics: Statistics;
+    scoreId: string;
+    scoresUpdatedAt: Epoch;
+    scoreHistory: Map<Compno, PilotScore[]>;
 
     // For the web buffer
     webPathBaseTime: Epoch;
@@ -152,6 +160,7 @@ interface Glider {
     datecode: Datecode;
     duplicate: number;
     utcStart: Epoch;
+    scoredStart: Epoch;
     scoringConfigured?: boolean;
 
     deck: DeckData;
@@ -202,11 +211,13 @@ const start = Math.trunc(Date.now() / 1000);
 // Correct timing for the competition
 const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
 let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
-const replayBase = parseInt(process.env.REPLAY ?? '0');
-let multiplier = process.env.REPLAY ? parseInt(process.env.REPLAY_MULTIPLIER || '1') : 1;
+const replayBase = parseInt(process.env.REPLAY ?? process.env.REPLAY_DB ?? '0');
+let multiplier = replayBase ? parseInt(process.env.REPLAY_MULTIPLIER || '1') : 1;
+
+console.log(JSON.stringify(process.env));
 
 // And the replay
-if (process.env.REPLAY) {
+if (replayBase) {
     getNow = (): Epoch => {
         const now = Math.trunc(Date.now() / 1000);
         const elapsed = now - start;
@@ -252,8 +263,8 @@ async function main() {
         connUtilization: 0.2
     });
 
-    if (process.env.REPLAY) {
-        console.log('readonly for replay');
+    if (process.env.REPLAY_DB) {
+        console.log('readonly for database replay');
         readOnly = true;
     }
 
@@ -271,7 +282,7 @@ async function main() {
             return false;
         }
 
-        if (!process.env.REPLAY && !(await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))?.[0]?.datecode) {
+        if (!replayBase && !(await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))?.[0]?.datecode) {
             console.error('no current date found for competition');
             console.table(await db.query<any[]>('SELECT * FROM compstatus'));
             console.table(await db.query<any[]>('SELECT * FROM competition'));
@@ -309,7 +320,7 @@ async function main() {
     const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
 
     // Start a listener for the location and competition
-    if (!replayBase) {
+    if (!process.env.REPLAY_DB) {
         aprsListener = spawnAprsContestListener({competition: internalName, location: {lt: location.lat, lg: location.lng}});
     }
 
@@ -318,7 +329,6 @@ async function main() {
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
-        await updateScoreHistory();
     }
 
     if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
@@ -411,7 +421,11 @@ async function main() {
         db.getClient()?.ping((e) => {
             if (e) {
                 console.log('db ping failed', e);
-                db.quit();
+                try {
+                    db.quit();
+                } catch (e) {
+                    /**/
+                }
             } else {
                 console.log('db pong');
             }
@@ -474,40 +488,6 @@ async function main() {
         }
     }, 60 * 1000);
 
-    setTimeout(() => {
-        setInterval(async function () {
-            // We need to save away the scores - we will save all of them every X minutes
-            const now = getNow();
-            for (const channelName in channels) {
-                const channel = channels[channelName];
-
-                const lastIndex = channel.scoreHistory.length;
-                // If they have changed since we saved them then we need to store the update
-                if (channel.allScores) {
-                    const include = !lastIndex || !channel.scoresUpdatedAt || channel.scoresUpdatedAt > channel.scoreHistory[lastIndex - 1].t;
-
-                    if (include) {
-                        channel.scoreHistory.push({t: channel.scoresUpdatedAt, scoreMessage: channel.allScores});
-                        channel.latestScore = now;
-                    } else {
-                        channel.scoreHistory.push({t: now, sameAsT: channel.scoresUpdatedAt});
-                    }
-                    channel.earliestScore = Math.min(channel.earliestScore, now) as Epoch;
-
-                    db.query(
-                        escape`insert ignore into scores (class, datecode, t, sameAsT, score) values 
-(${channel.className}, ${channel.datecode}, ${include ? channel.scoresUpdatedAt : now},
-${include ? null : channel.scoresUpdatedAt}, ${include ? Buffer.from(channel.allScores) : null})`
-                    )
-                        .then((r: any) => {
-                            console.log(`persisting scores ${channel.className} for ${new Date(channel.scoresUpdatedAt * 1000).toISOString()} @ ${new Date(now * 1000).toISOString()}: ${r.affectedRows ? 'saved' : 'skipped'}`);
-                        })
-                        .catch(console.error);
-                }
-            }
-        }, 60_000 / multiplier);
-    }, (getNow() % 60) * (1000 / multiplier));
-
     console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
 
     //
@@ -539,6 +519,8 @@ async function getDCode(): Promise<Datecode> {
 // Fetch the trackers from the database
 async function updateClasses(internalName: string, datecode: Datecode) {
     console.log(`updateClasses(${internalName}, ${datecode})`);
+
+    const scoreId = (Math.random() * 100000).toFixed(0);
 
     // Fetch the trackers from the database and the channel they are supposed to be in
     const classes = await db.query<{class: ClassName}[]>('SELECT class FROM compstatus');
@@ -576,9 +558,12 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
                 webPathData: {},
-                scoreHistory: [],
+                scoreHistory: new Map(),
+                allScores: {},
+                scoreId,
                 scoresUpdatedAt: 0 as Epoch,
                 earliestScore: Infinity as Epoch,
+                earliestStart: Infinity as Epoch,
                 latestScore: 0 as Epoch
             };
         } else {
@@ -600,9 +585,9 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // Prep for scoring
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
-            channel.scoring.hookScores(({allScores, recentScores, recentStarts}) => sendScores(channel, allScores, recentScores, recentStarts));
+            channel.scoring.hookScore(({compno, score, recentStart, t, scoreId}) => sendScore(channel, compno, score, recentStart, scoreId, t));
         }
-        if (process.env.REPLAY && !channel.replay) {
+        if (process.env.REPLAY_DB && !channel.replay) {
             getInitialTrackPointsForReplay(channel);
         }
     }
@@ -694,14 +679,17 @@ async function updateTasks(): Promise<void> {
             // If it has a task stop it scoring and start the new task
             if (channel.task) {
                 channel.scoring?.clearTask();
-                delete channel.allScores;
-                delete channel.recentScores;
+                channel.scoreHistory = new Map();
+                channel.allScores = {};
             }
 
             // We have a task so we will score what we know
             if (updatedTask) {
                 channel.task = updatedTask;
-                channel.scoring?.setTask(channel.task);
+                console.log('-----', channel.scoreId);
+                channel.scoreId = (Math.random() * 10000).toFixed(1);
+                console.log('****', channel.scoreId);
+                channel.scoring?.setTask(channel.task, channel.scoreId);
             }
         }
     }
@@ -803,12 +791,14 @@ async function updateTrackers(datecode: Datecode) {
             if (glider.scoringConfigured) {
                 if (startUtcChanged || handicapChanged) {
                     console.log(`${glider.className}:${glider.compno}: startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
-                    channels[glider.channelName].scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart);
+                    const channel = channels[glider.channelName];
+                    channel.scoreId = (Math.random() * 10000).toFixed(1);
+                    channel?.scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart, channel.scoreId);
                     updatedGliderCount++;
                 }
             } else {
                 try {
-                    loadedGliderCount++;
+                    loadedGliderCount++; // change to flarm id
                     await loadGliderPoints(glider, !keyedRemoved[makeClassname_Compno(glider)]);
                 } catch (e) {
                     console.error(e);
@@ -860,37 +850,6 @@ async function updateDDB() {
         });
 }
 
-async function updateScoreHistory() {
-    const now = getNow();
-    for (const channel of Object.values(channels)) {
-        await db.query<{t: Epoch; scoreMessage: Buffer}[]>(escape`select t, sameAsT, score as scoreMessage from scores where class=${channel.className} and datecode=${channel.datecode} order by t asc`).then((r) => {
-            if (r.length) {
-                channel.scoreHistory = r.filter((sh) => sh.t <= now && sh.scoreMessage);
-
-                //                const d = (d) => new Date(d * 1000).toISOString();
-                //                console.table(channel.scoreHistory.map((e) => [d(e.t), e.sameAsT ? d(e.sameAsT) : '-', e.scoreMessage ? 'yes' : 'no']));
-
-                if (channel.scoreHistory.length) {
-                    const latestValid = channel.scoreHistory.at(-1);
-                    channel.earliestScore = channel.scoreHistory[0].t;
-                    channel.latestScore = latestValid!.t;
-
-                    // If we don't have a score calculated use the last saved one, this will speed up starts
-                    if (!channel.allScores && latestValid) {
-                        channel.allScores = latestValid.scoreMessage;
-                        channel.scoresUpdatedAt = latestValid.t;
-                        console.log(`${channel.className}: adopted score from ${new Date(latestValid.t * 1000).toISOString()}`);
-                    }
-                }
-
-                console.log(`${channel.className}: ${channel.earliestScore} -> ${channel.latestScore}`);
-            }
-        });
-
-        console.log(`loaded ${channel.scoreHistory.length} historical scores for ${channel.className}`);
-    }
-}
-
 //
 // New connection, send it a packet for each glider we are tracking
 async function sendCurrentState(client: OgnWebSocket) {
@@ -902,39 +861,14 @@ async function sendCurrentState(client: OgnWebSocket) {
     console.log(client.ognChannel);
     const channel = channels[client.ognChannel];
 
-    client.send(
-        OnglideWebSocketMessage.encode(
-            {
-                identifiers: {
-                    className: channel.className,
-                    datecode: channel.datecode,
-                    competition: '1', //
-                    earliestScore: channel.earliestStart < Infinity ? channel.earliestStart : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
-                    latestScore: channel.latestScore
-                },
-                t: getNow()
-            } //
-        ).finish(),
-        {binary: true}
-    );
-
-    // If there has already been a keepalive then we will resend it to the client
-    const lastKeepAliveMsg = channels[client.ognChannel].lastKeepAliveMsg;
-
-    // Make sure we send the pilots ASAP
-    if (channels[client.ognChannel]?.allScores) {
-        console.log('sending allScores', channels[client.ognChannel].allScores!.length);
-        client.send(channels[client.ognChannel].allScores!, {binary: true});
-    } else {
-        console.log('no current scores', client.ognChannel);
-    }
+    sendAllScores(channel, getNow());
 
     // Send them the GeoJSONs, they need to keep this up to date
-    sendRecentPilotTracks(channels[client.ognChannel], client);
+    sendRecentPilotTracks(channel, client);
 
-    if (lastKeepAliveMsg) {
+    if (channel.lastKeepAliveMsg) {
         console.log('keepalive2');
-        client.send(lastKeepAliveMsg, {binary: true});
+        client.send(channel.lastKeepAliveMsg, {binary: true});
     }
 }
 
@@ -951,12 +885,10 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                 if (glider.className == channel.className) {
                     const p = glider.deck;
                     if (p) {
-                        const start = 0; //p.recentIndices[0];
-                        //                        const end = p.posIndex;
-                        // Find the end as 30 seconds before 'now'
-                        const end = _sortedIndex(p.t.subarray(0, p.posIndex), now) || p.posIndex;
+                        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), 0);
+                        const end = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), now), 0);
                         const length = end - start;
-                        //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${p.t[end]} => ${p.t[start]}, posIndex: ${p.posIndex}`);
+                        console.log(`${compno}: ${end} - ${start} = ${length}, ${p.t[end]} => ${p.t[start]}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                         if (length) {
                             result[glider.compno] = {
                                 compno: glider.compno,
@@ -992,7 +924,7 @@ async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
             if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    let start = glider.webPathEndPosition ?? 0;
+                    const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), 0);
                     const end = p.posIndex;
                     const length = end - start;
                     if (length) {
@@ -1056,42 +988,102 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
     });
 }
 
+async function sendAllScores(channel: Channel, t: Epoch | undefined) {
+    [channel.earliestStart, channel.earliestScore, channel.latestScore] = Object.values(channel.allScores).reduce(
+        ([earliestStart, earliestScore, latestScore], score) => [
+            Math.min(score.utcStart ?? Infinity, earliestStart), //
+            Math.min((score.t ?? 0) < 10 ? Infinity : score.t, earliestScore),
+            Math.max((score.t ?? 0) < 10 ? 0 : score.t, latestScore)
+        ],
+        [Infinity, Infinity, 0]
+    ) as [Epoch, Epoch, Epoch];
+
+    console.log(`sending all scores eScore: ${d(channel.earliestScore)}, eStart: ${d(channel.earliestStart)}, lScore: ${d(channel.latestScore)} t: ${d(t ?? 0)}`);
+
+    const updatedIdentifiers = OnglideWebSocketMessage.encode(
+        {
+            identifiers: {
+                className: channel.className,
+                datecode: channel.datecode,
+                competition: '1', //
+                earliestScore: channel.earliestStart < Infinity ? channel.earliestStart : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
+                latestScore: channel.latestScore,
+                scoreId: channel.scoreId
+            },
+            scores: {
+                scoreId: channel.scoreId,
+                pilots: channel.allScores
+            },
+            ...(t ? {t} : {})
+        } //
+    ).finish();
+    console.log(`${channel.className}: sending identifiers after rebuild of scoring ${channel.scoreId} allScores length: ${updatedIdentifiers!.length}`);
+
+    channel.clients.forEach((client: any) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(updatedIdentifiers, {binary: true});
+        }
+    });
+}
+
 // We need to fetch and repeat the scores for each class, enriched with vario information
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
-async function sendScores(channel: Channel, allScores: Buffer, recentScores: Buffer, recentStarts: Record<Compno, Epoch>) {
-    console.log('Sending score update', allScores?.length, recentScores?.length);
+async function sendScore(channel: Channel, compno: Compno, score: PilotScore, recentStart: Epoch | undefined, scoreId: string, t: Epoch | undefined) {
+    console.log(`${compno}: received ${score.live ? 'live' : 'replay'} score [${scoreId}] ${recentStart ? ', recently started, ' : ''}, ${d(t)}`);
+
+    if (compno == '_live') {
+        sendAllScores(channel, t);
+        return;
+    }
 
     // We don't know how many scores we have without decoding the protobuf message :(
-    trackMetric(channel.className + '.scoring.bytesSent', recentScores.byteLength * channel.clients.length);
-
-    // Protobuf encode the scores message
-    channel.recentScores = recentScores;
-    channel.allScores = allScores;
-    channel.scoresUpdatedAt = getNow();
+    if (t && channel.scoreId == scoreId) {
+        let sh = channel.scoreHistory.get(compno);
+        if (!sh) {
+            channel.scoreHistory.set(compno, (sh = []));
+        }
+        const index = _sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
+        if (index < sh.length && index >= 0) {
+            console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[index].t)} sh:[${index}/${sh.length}]`);
+        }
+        sh.splice(index, Infinity, score);
+    }
 
     // Send to each client and if they don't respond they will be cleaned up next time around
-    channel.clients.forEach((client: any) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(recentScores, {binary: true});
-        }
-    });
+    if (score.live) {
+        const msg = OnglideWebSocketMessage.encode({scores: {scoreId, pilots: {[compno]: score}}}).finish();
+        trackMetric(channel.className + '.scoring.bytesSent', msg.byteLength * channel.clients.length);
+        channel.clients.forEach((client: any) => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(msg, {binary: true});
+            }
+        });
 
-    // Prune startline
-    for (const compno in recentStarts) {
+        // Finally merge it in to the complete history, and reset the protobuf message
+        // we only do this if we are not in a 'rebuild' of the history, the first proper score
+        // will trigger the update
+        if (channel.scoreId == scoreId) {
+            channel.allScores[compno] = score;
+            channel.allScoresMsg = undefined;
+        }
+    }
+
+    if (recentStart) {
         const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
         if (glider) {
             const deck = glider.deck;
-            if (deck) {
-                console.log(`pruning startline for ${channel.className}:${compno} to ${recentStarts[compno]}/${timeToText(recentStarts[compno])}`);
-                pruneStartline(deck, recentStarts[compno]);
-            }
-
             // Reset the glider starting point, but also the channel so we don't use invalid
             // mix of the two
             glider.webPathEndPosition = 0;
             channel.webPathBaseTime = 0 as Epoch;
-            channel.earliestStart = Math.min(channel.earliestStart, recentStarts[compno]) as Epoch;
+            channel.earliestStart = Math.min(channel.earliestStart, recentStart) as Epoch;
+            if (glider.scoredStart && glider.scoredStart > recentStart) {
+                console.log(`${compno}: start time moved earlier in time, resending track`);
+                glider.scoredStart = recentStart;
+                updateGliderTrack(channel, glider);
+            }
+            glider.scoredStart = recentStart;
         }
     }
 }
@@ -1418,7 +1410,7 @@ function setupOgnWebServer(req, res) {
     }
 
     // explict score request
-    const [valid, command, channelName, timestampString]: string[] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)$/i) || [false, '', '', ''];
+    const [valid, command, channelName, timestampString]: string[] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)(\?[0-9.]+|)$/i) || [false, '', '', ''];
     const timestamp = parseInt(timestampString);
     if (valid) {
         console.log(command, channelName);
@@ -1441,34 +1433,29 @@ function setupOgnWebServer(req, res) {
                     const d = (d) => new Date(d * 1000).toISOString();
                     console.log(`FOS: request for ${d(timestamp)} ${d(chunkStart)}=>${d(chunkEnd)}`);
 
-                    // Form the history and make sure we have the first scoreMessage even if it's a reference
-                    const history = channel.scoreHistory.filter((sh) => sh.t >= chunkStart && sh.t <= chunkEnd);
-                    console.log('filtered history length', history.length, channel.scoreHistory.length);
-                    if (history.length && history[0].sameAsT) {
-                        // If the first entry is a sameAs then we need to do a fixup of it and the ones that follow
-                        // they will all be the same number
-                        const replacement = channel.scoreHistory.findLast((sh) => sh.t <= history[0].sameAsT && sh.scoreMessage)?.scoreMessage;
-                        console.log('replacement', replacement, ' requested', history[0].sameAsT);
-
-                        for (let i = 1; i < history.length && history[i].sameAsT; i++) {
-                            history[i].sameAsT = history[0].t;
-                        }
-
-                        if (!replacement) {
-                            console.error(`unable to find referenced score history ${history[0]}`);
-                        } else {
-                            history[0].sameAsT = null;
-                            history[0].scoreMessage = replacement;
-                        }
+                    const history: Record<Compno, {history: PilotScore[]}> = {};
+                    let scoreCount = 0;
+                    for (const [compno, scores] of channel.scoreHistory) {
+                        const preceeding = scores.findLast((score) => score.t < chunkStart);
+                        console.log(compno, 'preceeding score', preceeding?.t, d(preceeding?.t ?? 0));
+                        history[compno] = {
+                            history: [
+                                ...(preceeding ? [preceeding] : []), // oldest one before the chunk so we have everybody
+                                ...scores.filter((score) => score.t >= chunkStart && score.t <= chunkEnd)
+                            ]
+                        };
+                        scoreCount += history[compno].history.length;
                     }
+
+                    console.log('filtered history length', scoreCount);
                     const msg: any = ClassScoreHistory.encode({
-                        class: channel.className,
+                        className: channel.className,
                         datecode: '', // we need to use undefined otherwise it will die
-                        history: history.map((h) => ({...h, sameAsT: h.sameAsT ?? undefined, scoreMessage: h.scoreMessage ?? undefined}))
+                        pilots: history
                     }).finish();
 
-                    console.log(`sending scorehistory ${channelName} ${history.length}/${channel.scoreHistory.length} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)}`);
-                    console.table(history.map((e) => [d(e.t), e.sameAsT ? d(e.sameAsT) : '-', e.scoreMessage ? 'yes' : 'no']));
+                    console.log(`sending scorehistory ${channelName} ${scoreCount} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)}`);
+                    console.table([...Object.keys(history)].flatMap((compno) => history[compno].history.map((h) => [compno, h.t, d(h.t), h.live])));
 
                     res.setHeader('Content-Type', 'application/octet-stream');
                     if (chunkEnd == timestamp + 1) {

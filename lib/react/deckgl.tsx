@@ -59,7 +59,6 @@ export default function MApp(props: {
     tz: string;
     viewport: any;
     setViewport: Function;
-    otherPilots: OtherPilotData;
     status: string; // status line
     replayTime: Epoch;
 }) {
@@ -265,7 +264,7 @@ export default function MApp(props: {
     const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime ?? latestUpdate);
 
     // If we are displaying other pilots
-    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, vc, mapLight, map2d, props.replayTime) : null;
+    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(vc, mapLight, map2d, props.replayTime) : null;
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
@@ -286,7 +285,6 @@ export default function MApp(props: {
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
-        console.log('onDragStart');
         if (follow) {
             setFollow(false);
         }
