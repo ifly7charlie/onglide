@@ -38,7 +38,7 @@ import PlaybackControls from './playbackcontrols';
 import dynamic from 'next/dynamic';
 import {selectAvailableScoreTimes} from '../redux/nowSlice';
 import {useSelector, useDispatch} from '../redux';
-import {online, offline} from '../redux/nowSlice';
+import {offline} from '../redux/nowSlice';
 
 const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     ssr: false,
