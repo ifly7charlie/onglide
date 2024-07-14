@@ -112,13 +112,12 @@ export const OgnFeed = memo(
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
 
-        /*        useEffect(() => {
-            console.log('VC URL EFFECT', socketUrl, vc, datecode);
+        useEffect(() => {
             if (socketUrl != proposedUrl(vc, datecode)) {
                 setSocketUrl(proposedUrl(vc, datecode));
             }
         }, [vc, datecode, !!socketUrl]);
-*/
+
         // We are using a webSocket to update our data here
         const {sendMessage} = useWebSocket(socketUrl, {
             reconnectAttempts: 15,
