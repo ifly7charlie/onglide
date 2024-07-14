@@ -1,8 +1,7 @@
 import Graph from '../flightprocessing/dijkstras';
 
 import type {Epoch, DistanceKM, AltitudeAMSL, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
-
-import {PositionStatus} from '../types';
+import {isTick, PositionStatus} from '../types';
 
 import {cloneDeep as _clonedeep, keyBy as _keyby, sortBy as _sortby} from 'lodash';
 
@@ -71,7 +70,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
             // Wait for the start
             if (!current.startConfirmed && !current.startFound) {
-                if (flightStatus != taskStatus.flightStatus) {
+                if (flightStatus != taskStatus.flightStatus || isTick(taskStatus)) {
                     flightStatus = taskStatus.flightStatus;
                     yield taskStatus;
                 }

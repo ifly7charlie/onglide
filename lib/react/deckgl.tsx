@@ -546,7 +546,7 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): 
             id: 'tp',
             type: 'fill',
             paint: {
-                'fill-opacity': 0.6,
+                'fill-opacity': 0.25,
                 'fill-color': [
                     'case',
                     ['==', !selectedPilot, true],

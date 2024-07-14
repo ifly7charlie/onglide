@@ -78,7 +78,7 @@ import {setSiteTz, getSiteTz} from '../lib/flightprocessing/timehelper.js';
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
-const d = (d) => new Date(d * 1000).toISOString();
+const d = (d) => new Date(Math.min(d ?? 0, 2145916800) * 1000).toISOString();
 
 // Where is the comp based
 let location: AirfieldLocation;
@@ -878,17 +878,17 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
     const base = now - webPathBaseTime; // determine the last block block
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
-        console.log(`re-generateHistoricalTracks now: ${now}, base: ${base}, previous: ${channel.webPathBaseTime}`);
+        console.log(`re-generateHistoricalTracks now: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
         const toStream = reduce(
             gliders,
             (result, glider, compno) => {
                 if (glider.className == channel.className) {
                     const p = glider.deck;
                     if (p) {
-                        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), 0);
+                        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), Math.min(glider.scoredStart ?? glider.utcStart ?? 0, now - 120)), 0);
                         const end = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), now), 0);
                         const length = end - start;
-                        console.log(`${compno}: ${end} - ${start} = ${length}, ${p.t[end]} => ${p.t[start]}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
+                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                         if (length) {
                             result[glider.compno] = {
                                 compno: glider.compno,
