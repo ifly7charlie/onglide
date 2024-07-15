@@ -28,6 +28,10 @@ const otherUrl = faToData(faCircleUser);
 export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch) {
     const data = useSelector((state) => selectAllPositions(state, vc, now));
 
+    if (!data || !data.length) {
+        return null;
+    }
+
     return new IconLayer<(typeof data)[0]>({
         id: 'other_pilots',
         data,
