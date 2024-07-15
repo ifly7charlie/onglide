@@ -67,7 +67,7 @@ export const scoresSlice = createSlice({
         //
         // New class, needs to reset everything
         builder.addCase(updateClassAction, (state, {payload: {className, scoreId}}) => {
-            if (className != state.className && state.className) {
+            if (className != state.className) {
                 return {
                     className: className as ClassName,
                     scores: {},
