@@ -133,6 +133,8 @@ interface Channel {
     allScoresMsg?: Uint8Array;
 
     scoreId: string;
+    proposedScoreId: string;
+    scoreIdUpdateRequired: boolean;
     scoresUpdatedAt: Epoch;
     scoreHistory: Map<Compno, PilotScore[]>;
 
@@ -258,8 +260,8 @@ async function main() {
         },
         maxConnsFreq: 15 * 60 * 1000,
         usedConnsFreq: 10 * 60 * 1000,
-        maxRetries: 2,
-        zombieMaxTimeout: 120,
+        maxRetries: 4,
+        zombieMaxTimeout: 3600,
         connUtilization: 0.2
     });
 
@@ -497,6 +499,7 @@ async function main() {
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
+        await finaliseScoreId();
     }, 60 * 1000);
 }
 
@@ -520,8 +523,6 @@ async function getDCode(): Promise<Datecode> {
 async function updateClasses(internalName: string, datecode: Datecode) {
     console.log(`updateClasses(${internalName}, ${datecode})`);
 
-    const scoreId = (Math.random() * 100000).toFixed(0);
-
     // Fetch the trackers from the database and the channel they are supposed to be in
     const classes = await db.query<{class: ClassName}[]>('SELECT class FROM compstatus');
 
@@ -534,6 +535,8 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // New channel needs setup
         if (!channel) {
             // Update the saved data with the new values
+            const scoreId = (Math.random() * 10000).toFixed(1);
+
             channel = {
                 clients: [],
                 launching: false,
@@ -561,6 +564,8 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 scoreHistory: new Map(),
                 allScores: {},
                 scoreId,
+                proposedScoreId: scoreId,
+                scoreIdUpdateRequired: false,
                 scoresUpdatedAt: 0 as Epoch,
                 earliestScore: Infinity as Epoch,
                 earliestStart: Infinity as Epoch,
@@ -585,7 +590,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // Prep for scoring
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
-            channel.scoring.hookScore(({compno, score, recentStart, t, scoreId}) => sendScore(channel, compno, score, recentStart, scoreId, t));
+            channel.scoring.hookScore(({compno, score, recentStart, t, scoreId}) => sendScore(channel, compno, score, recentStart, channel.scoreId, t));
         }
         if (process.env.REPLAY_DB && !channel.replay) {
             getInitialTrackPointsForReplay(channel);
@@ -686,10 +691,9 @@ async function updateTasks(): Promise<void> {
             // We have a task so we will score what we know
             if (updatedTask) {
                 channel.task = updatedTask;
-                console.log('-----', channel.scoreId);
-                channel.scoreId = (Math.random() * 10000).toFixed(1);
-                console.log('****', channel.scoreId);
-                channel.scoring?.setTask(channel.task, channel.scoreId);
+                console.log(`${channel.className}: ** rescore ** ${channel.scoreId} => ${channel.proposedScoreId} (task changed)`);
+                channel.scoring?.setTask(channel.task, channel.proposedScoreId);
+                channel.scoreIdUpdateRequired = true;
             }
         }
     }
@@ -703,6 +707,7 @@ interface CTrackerRow {
     handicap: number;
     className: ClassName;
     utcStart: Epoch;
+    scoredStatus: 'H' | 'F' | 'S';
 }
 
 async function updateTrackers(datecode: Datecode) {
@@ -710,9 +715,9 @@ async function updateTrackers(datecode: Datecode) {
     let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
                                            ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
-                                        END utcStart
+                                        END utcStart, ppr.scoredStatus
                                         FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join
-                                             (select compno,class,start from pilotresult pr where pr.datecode=${datecode}) as ppr
+                                             (select compno,class,start,scoredstatus from pilotresult pr where pr.datecode=${datecode}) as ppr
                                       ON ppr.class=p.class and ppr.compno=p.compno`);
 
     const initialGliderCount = Object.keys(gliders).length;
@@ -749,6 +754,9 @@ async function updateTrackers(datecode: Datecode) {
                 aprsListener?.postMessage?.(command);
             }
         }
+        console.log(`${g.className}:${g.compno} terminating scoring as no flarm ids found`);
+        const channel = channels[g.channelName];
+        channel?.scoring?.clearGlider(g.compno);
         delete gliders[makeClassname_Compno(g)];
     });
 
@@ -790,10 +798,10 @@ async function updateTrackers(datecode: Datecode) {
 
             if (glider.scoringConfigured) {
                 if (startUtcChanged || handicapChanged) {
-                    console.log(`${glider.className}:${glider.compno}: startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
                     const channel = channels[glider.channelName];
-                    channel.scoreId = (Math.random() * 10000).toFixed(1);
-                    channel?.scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart, channel.scoreId);
+                    console.log(`${glider.className}:${glider.compno}: rescoring [${channel.proposedScoreId}] => startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
+                    channel?.scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart, channel.proposedScoreId);
+                    channel.scoreIdUpdateRequired = true;
                     updatedGliderCount++;
                 }
             } else {
@@ -821,6 +829,15 @@ async function updateTrackers(datecode: Datecode) {
             gliders[c + '_' + d.compno].duplicate = 1;
         });
     });
+}
+
+async function finaliseScoreId() {
+    for (const channel of Object.values(channels)) {
+        if (channel.scoreIdUpdateRequired) {
+            channel.scoring?.updateScoreId(channel.scoreId, channel.proposedScoreId);
+            channel.scoreId = channel.proposedScoreId;
+        }
+    }
 }
 
 //
@@ -1410,7 +1427,7 @@ function setupOgnWebServer(req, res) {
     }
 
     // explict score request
-    const [valid, command, channelName, timestampString]: string[] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\.bin|)(\?[0-9.]+|)$/i) || [false, '', '', ''];
+    const [valid, command, channelName, timestampString, scoreId]: string[] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\/[0-9.]+|)(\.bin|)$/i) || [false, '', '', '', ''];
     const timestamp = parseInt(timestampString);
     if (valid) {
         console.log(command, channelName);
@@ -1431,7 +1448,7 @@ function setupOgnWebServer(req, res) {
                     const chunkStart = timestamp - (timestamp % scoreChunkSize); // 30 minute chunks
                     const chunkEnd = chunkStart + scoreChunkSize; // 30 minute chunks
                     const d = (d) => new Date(d * 1000).toISOString();
-                    console.log(`FOS: request for ${d(timestamp)} ${d(chunkStart)}=>${d(chunkEnd)}`);
+                    console.log(`FOS: request for ${d(timestamp)} ${d(chunkStart)}=>${d(chunkEnd)} [${scoreId}]`);
 
                     const history: Record<Compno, {history: PilotScore[]}> = {};
                     let scoreCount = 0;

@@ -20,12 +20,13 @@ interface AddToScoreCollector {
     collect: (compno: Compno, input: TaskScoresGenerator, scoreId: string) => Promise<void>;
     reset: (scoreId?: string) => void;
     clearGlider: (compno: Compno) => void;
+    updateScoreId: (oldScoreId: string, scoreId: string) => void;
 }
 
 type ScoreIdDetails = {
     allScores: Record<Compno, PilotScore>;
     mostRecentStart: Record<Compno, Epoch>;
-    optionsForCompno: Record<Compno, {restartCount: number}>;
+    optionsForCompno: Record<Compno, {restartCount: number; scoreId: string}>;
     live: Record<Compno, boolean>;
 };
 
@@ -96,8 +97,8 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     return {
         collect: async function addToScoreCollector(compno: Compno, input: TaskScoresGenerator, scoreId: string) {
             const c = getScoreIdDetails(scoreId);
-            c.optionsForCompno[compno] = Object.assign(c.optionsForCompno[compno] ?? {}, {restartCount: (c.optionsForCompno[compno]?.restartCount ?? 0) + 1});
-            return iterateAndUpdate(id, className, compno, input, updateScore, c.optionsForCompno[compno], scoreId);
+            c.optionsForCompno[compno] = Object.assign(c.optionsForCompno[compno] ?? {}, {restartCount: (c.optionsForCompno[compno]?.restartCount ?? 0) + 1, scoreId});
+            return iterateAndUpdate(id, className, compno, input, updateScore, c.optionsForCompno[compno]);
         },
         reset: function (scoreId: string | undefined) {
             if (!scoreId) {
@@ -117,6 +118,28 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                     c.optionsForCompno[compno].restartCount++;
                 }
             }
+        },
+        // Move from one score ID to another
+        updateScoreId: function (oldScoreId: string, scoreId: string) {
+            const cO = scoreIdDetails.get(oldScoreId);
+            const cN = getScoreIdDetails(scoreId);
+            if (cO) {
+                // If it hasn't already been put into the new scoreId then
+                // (which means it hasn't already been restarted) then
+                // we need to just move it over
+                Object.keys(cO.allScores).forEach((compno) => {
+                    if (!(compno in cN.optionsForCompno)) {
+                        cN.allScores[compno] = cO.allScores[compno];
+                        delete cO.allScores[compno];
+                        cN.optionsForCompno[compno] = cO.optionsForCompno[compno];
+                        delete cO.optionsForCompno[compno];
+                        cN.live[compno] = cO.live[compno];
+                        delete cO.live[compno];
+                        cN.mostRecentStart[compno] = cO.mostRecentStart[compno];
+                        delete cO.mostRecentStart[compno];
+                    }
+                });
+            }
         }
     };
 
@@ -125,7 +148,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
 }
 
 type UpdateScoreFunction = (compno: Compno, score: PilotScore, scoreId: string) => boolean;
-async function iterateAndUpdate(id: string, className: ClassName, compno: Compno, input: TaskScoresGenerator, updateScore: UpdateScoreFunction, options: {restartCount: number}, scoreId: string): Promise<void> {
+async function iterateAndUpdate(id: string, className: ClassName, compno: Compno, input: TaskScoresGenerator, updateScore: UpdateScoreFunction, options: {restartCount: number; scoreId: string}): Promise<void> {
     // Loop till we are told to stop
     const myRestartCount = options.restartCount;
     try {
@@ -133,17 +156,17 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
             if (myRestartCount != options.restartCount) {
                 break;
             }
-            if (!updateScore(compno, value, scoreId)) {
+            if (!updateScore(compno, value, options.scoreId)) {
                 break;
             }
             await setTimeout(1); // explicit yield - ensures logging and stuff are working and spreads out between the different compnos so one doesn't starve the rest on restart
         }
     } catch (e) {
-        console.log(compno, 'scoreCollector exception', e);
+        console.log(compno, '[', options.scoreId, '] scoreCollector exception', e);
     }
     trackMetric('sc.done.' + className, 1);
     trackMetric('sc.done', 1);
-    console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${scoreId}]`);
+    console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
 }
 
 function scoreChanged(oldScore?: PilotScore, newScore?: PilotScore): boolean {

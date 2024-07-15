@@ -117,6 +117,14 @@ export class ScoringController {
         });
     }
 
+    updateScoreId(oldScoreId: string, scoreId: string) {
+        this.worker.postMessage({
+            action: ScoringCommandEnum.updateScoreId,
+            oldScoreId,
+            scoreId
+        });
+    }
+
     clearGlider(compno: Compno) {
         this.worker.postMessage({action: ScoringCommandEnum.clearGlider, className: this.className, datecode: this.datecode, compno});
     }
@@ -171,10 +179,11 @@ enum ScoringCommandEnum {
     track,
     initialTrack,
     rescoreGlider,
+    updateScoreId,
     clearGlider
 }
 
-export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | any;
+export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | any;
 
 interface ScoringCommandBase {
     className: ClassName;
@@ -195,6 +204,13 @@ interface ScoringCommandRescoreGlider extends ScoringCommandBase {
     compno: Compno;
     handicap: number;
     utcStart: Epoch;
+    scoreId: string;
+}
+
+interface ScoringCommandUpdateScoreId extends ScoringCommandBase {
+    action: ScoringCommandEnum.updateScoreId;
+
+    oldScoreId: string;
     scoreId: string;
 }
 
@@ -286,6 +302,11 @@ if (!isMainThread) {
         if (task.action == ScoringCommandEnum.rescoreGlider) {
             console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.hcap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
             rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+        }
+
+        if (task.action == ScoringCommandEnum.updateScoreId) {
+            console.log(`${task.className}/${task.compno}: update scoreId from ${task.oldScoreId} to ${task.scoreId} for unchanged gliders`);
+            scoreUpdater.updateScoreId(task.oldScoreId, task.scoreId);
         }
 
         if (task.action == ScoringCommandEnum.clearGlider) {
