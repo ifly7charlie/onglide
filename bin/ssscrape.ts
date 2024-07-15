@@ -11,7 +11,7 @@ import {Tabletojson} from 'tabletojson'; // tabletojson = require('tabletojson')
 import * as htmlparser from 'htmlparser2';
 //const htmlparser = require('htmlparser2');
 
-import {findOne, findAll, existsOne, removeElement, getChildren, getInnerHTML, getOuterHTML, textContent, getAttributeValue} from 'domutils';
+import {findOne, findAll, find, isTag, existsOne, removeElement, getChildren, getInnerHTML, getOuterHTML, textContent, getAttributeValue} from 'domutils';
 
 import {Element} from 'domhandler';
 
@@ -28,7 +28,7 @@ import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import {getElevationOffset} from '../lib/getelevationoffset';
 // handle unkownn gliders
-import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
+import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
 import _groupby from 'lodash.groupby';
 import _forEach from 'lodash.foreach';
@@ -295,6 +295,44 @@ async function ssscrape(deep = false) {
         });
 }
 
+async function findPilot(lastname: string, countrycode: string, homeclub: string) {
+    const names = lastname.split(' ').reverse();
+
+    for (const name of names) {
+        const possible = await fetch(`https://rankingdata.fai.org/SGP_SearchResults.php?surname=${name}&nationality=`)
+            .then((res) => res.text())
+            .then((body) => {
+                let dom = htmlparser.parseDocument(body);
+                console.log(lastname, dom);
+
+                const nameTable = findOne((x) => x.attribs?.class == 'RL_table_innerTable', dom.children);
+                if (nameTable) {
+                    const matches = find((x) => isTag(x) && x.name == 'a', nameTable.children, true, 100);
+
+                    const potentials = matches
+                        .map((match) => toElement(match))
+                        .map((match) => ({src: getAttributeValue(match, 'href')?.match(/pilotid=([0-9]+)/)?.[1], name: textContent(match)})) //
+                        .filter((m) => m.src && m.name && m.name != 'No image');
+
+                    console.log('***** potentials ****');
+                    console.table(potentials);
+
+                    console.log('***** potentials ****');
+                    console.table(names.map((n) => [n, potentials[0].name!.match(new RegExp(`(^${n}| +${n})`, 'i'))]));
+                    const filteredByName = potentials.filter((p) => names.every((n) => p.name!.match(new RegExp(`(^${n}| +${n})`, 'i'))));
+
+                    if (filteredByName.length == 1) {
+                        return parseInt(filteredByName[0]?.src ?? '0');
+                    }
+                    return undefined;
+                }
+            });
+        if (possible) {
+            return possible;
+        }
+    }
+}
+
 async function update_class(className, data, dataHtml) {
     // Get the name of the class, if not set use the type
     const nameRaw = className;
@@ -363,13 +401,28 @@ async function update_pilots(data) {
             return y;
         }
 
-        pilotnumber = pilotnumber + 1;
-        await t.query(escape`
+        const existing = (await mysql_db.query(escape`select fai, country from pilots where compno=${compno} and class=${classid}`)) ?? [];
+        console.log('====>', compno, existing);
+
+        if (!existing?.length || existing[0].fai < 300) {
+            let fainumber = existing.length && existing[0].fai < 300 ? await findPilot(pilot.Contestant, existing[0].country, pilot.Club) : 0;
+
+            if (!fainumber) {
+                fainumber = ++pilotnumber;
+            } else {
+                await download_picture(
+                    compno,
+                    classid, //
+                    {igc_id: fainumber, compno: pilot.Contestant, class: classid, greg: pilot.Glider?.substring(0, 8)?.trim()}
+                );
+            }
+
+            await t.query(escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
                            ${pilot.Contestant}, ${''}, ${pilot.Club}, null,
-                           ${pilotnumber}, '',
+                           ${fainumber}, '',
                            ${gravatar(pilot.Contestant)},
                            ${compno},
                            'Y',
@@ -381,6 +434,7 @@ async function update_pilots(data) {
                            homeclub=values(homeclub), fai=values(fai), country=values(country), email=values(email),
                            participating=values(participating), handicap=values(handicap),
                            glidertype=values(glidertype), greg=values(greg), registereddt=NOW()`);
+        }
     }
 
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
@@ -703,13 +757,11 @@ async function process_day_results(classid, className, date, day_number, results
                              finish=TIME(COALESCE(${rFinish},finish)),
                              duration=COALESCE(TIMEDIFF(${rFinish},${rStart}),duration),
                              scoredstatus= ${finished ? 'F' : 'H'},
-                             status = (CASE WHEN ((status = "-" or status = "S" or status="G") and ${finished} != "") THEN "F"
-                                        WHEN   ((status = "-" or status = "S" or status="G") and ${row.Finish} != "") THEN "H"
-                                        ELSE status END),
+                             statuschanged = (CASE WHEN (status != ${finished ? 'F' : 'H'}) THEN NULL
+                                        ELSE NOW() END),
                              datafromscoring = "Y",
                              speed=${scoredvals.as}, distance=${scoredvals.ad},
-                             hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd},
-                             daypoints=${parseInt(row.Points.replace(',', ''))}, dayrank=0, totalpoints=${0}, totalrank=${0}, penalty=${0}
+                             hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd}
                           WHERE datecode=${dateCode} AND compno=${pilot} and class=${classid}`);
 
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );
@@ -721,8 +773,8 @@ async function process_day_results(classid, className, date, day_number, results
                                                               WHERE datecode=${dateCode} and compno=${pilot} and class=${classid}`)
             )[0] || {igcavailable: false};
             if ((igcavailable || 'Y') == 'N' && url) {
-                await processIGC(classid, pilot, location, date, url, https, mysql, () => {});
-                doCheckForOGNMatches = true;
+                await processIGC(classid, pilot, location, date, url, https, mysql_db, () => {});
+                doCheckForOGNMatches = true; //
             }
         }
     }
@@ -810,6 +862,52 @@ async function update_contest(contest_name, dates, site_name, url) {
             .query(escape`delete from tasks`)
             .commit();
         console.log('deep update requested, deleted everything');
+    }
+}
+
+// Fetch the picture from FAI rankings
+async function download_picture(compno, classid, context) {
+    // Check when it was last checked
+    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND image is not null AND unix_timestamp()-updated < 86400`))[0];
+
+    if (lastUpdated) {
+        console.log(`not updating ${compno} picture`);
+        return;
+    }
+
+    // Find all the updater urls
+    const urls = (await mysql_db.query(escape`SELECT url FROM scoringsource WHERE type='pictureurl'`)) as {url: string}[];
+    let success = false;
+
+    for (const u of urls) {
+        const url = u.url.replace(/\{([A-Z_]+)\}/gi, function (_, v) {
+            return v in context ? context[v] : '';
+        });
+
+        console.log(`downloading picture for ${classid}:${compno} from ${url}`);
+
+        const res = await fetch(url, {headers: {Referer: 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/'}});
+
+        if (res.status != 200) {
+            console.log(` ${classid}:${compno}: website returns ${res.status}: ${res.statusText}`);
+            continue;
+        }
+
+        const data = Buffer.from(await res.arrayBuffer());
+        if (data) {
+            await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
+                                  ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)`);
+            success = true;
+            break;
+        } else {
+            console.log('no data');
+        }
+    }
+
+    if (!success) {
+        console.log(` ${classid}:${compno}: image update failed`);
+        await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, NULL, unix_timestamp() )
+                                  ON DUPLICATE KEY UPDATE image=NULL, updated=values(updated)`);
     }
 }
 

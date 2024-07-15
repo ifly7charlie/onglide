@@ -10,7 +10,7 @@
         "build:tsc": "tsc --project tsconfig-bin.json",
         "build:protobuf": "protoc --plugin=node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=. ./lib/protobuf/onglide.proto",
         "soaringspot": "node dist/bin/soaringspot.js",
-        "ssscrape": "bin/ssscrape.js",
+        "ssscrape": "node dist/bin/ssscrape.js",
         "rst": "node dist/bin/rst.js",
         "sgp": "node dist/bin/sgp.js",
         "setup": "bin/install.js",
