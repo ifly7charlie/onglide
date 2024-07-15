@@ -7,7 +7,7 @@ export function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string
     console.log('oldTracksUrl', hn);
     return (
         (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST ?? '') || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX ?? '') ? 'https://' : 'http://') +
-        `${hn}/tracks/${(vc + datecode + '.' + baseTime).toUpperCase()}.bin?${scoreId ?? '1'}`
+        `${hn}/tracks/${(vc + datecode + '.' + baseTime).toUpperCase()}/${scoreId ?? '1'}.bin`
     );
 }
 
@@ -16,7 +16,7 @@ export function oldScoresUrl(vc: ClassName, datecode: Datecode, baseTime: string
     console.log('oldScoresUrl', hn);
     return (
         (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST ?? '') || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX ?? '') ? 'https://' : 'http://') +
-        `${hn}/scorehistory/${(vc + datecode + '.' + baseTime).toUpperCase()}.bin?${scoreId ?? '1'}`
+        `${hn}/scorehistory/${(vc + datecode + '.' + baseTime).toUpperCase()}/${scoreId ?? 0}.bin`
     );
 }
 
