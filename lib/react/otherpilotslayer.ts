@@ -25,7 +25,7 @@ function faToData(f: any) {
 
 const otherUrl = faToData(faCircleUser);
 
-export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch) {
+export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch | undefined) {
     const data = useSelector((state) => selectAllPositions(state, vc, now));
 
     if (!data || !data.length) {

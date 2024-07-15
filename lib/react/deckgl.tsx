@@ -263,9 +263,6 @@ export default function MApp(props: {
 
     const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime ?? latestUpdate);
 
-    // If we are displaying other pilots
-    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(vc, mapLight, map2d, props.replayTime) : null;
-
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
@@ -280,7 +277,7 @@ export default function MApp(props: {
                 map.setLayoutProperty('contour-line', 'visible', !mapStreet ? 'none' : 'visible');
             }
         } catch (e) {}
-    }, [mapStreet]);
+    }, [mapStreet, mapRef?.current]);
     useEffect(fixupMap, [mapStreet, mapRef?.current]);
 
     // Cancel any follow
@@ -289,6 +286,9 @@ export default function MApp(props: {
             setFollow(false);
         }
     }, [setFollow, follow]);
+
+    // If we are displaying other pilots
+    const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
     return (
         <Map //

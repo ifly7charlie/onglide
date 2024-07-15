@@ -43,11 +43,11 @@ const _selectAllPositions = createSelector(
         (_state: OtherPilotsSliceState, _className: ClassName, t: Epoch | undefined) => t,
         (state: OtherPilotsSliceState) => state.positions
     ],
-    (className: ClassName, t: Epoch, others: OtherPilotData) => {
-        const timeCutoff = (t == undefined ? Math.trunc(Date.now() / 1000) - 180 : t - 180) as Epoch;
+    (className: ClassName, t: Epoch | undefined, others: OtherPilotData) => {
         try {
+            const timeCutoff = (t == undefined ? Math.trunc(Date.now() / 1000) - 180 : t - 180) as Epoch;
             const m = _map(others, (pos, key) => ({
-                className: key.split('_')?.[0],
+                className: key?.split('_')?.[0],
                 compno: pos.c,
                 ...pos,
                 position: [pos.lng, pos.lat, pos.a]
