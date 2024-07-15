@@ -80,7 +80,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     const start = deck.posIndex;
 
     // Resize required
-    if (deck.posIndex >= deck.t.length) {
+    if (deck.posIndex + 2 >= deck.t.length) {
         const newLength = deck.posIndex + deckPointIncrement;
         deck.positions = resize(Float32Array, deck.positions, newLength * 3);
         deck.t = resize(Uint32Array, deck.t, newLength);
@@ -88,7 +88,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         deck.climbRate = resize(Int8Array, deck.climbRate, newLength);
     }
 
-    if (deck.segmentIndex + 2 >= deck.indices.length) {
+    if (deck.segmentIndex + 3 >= deck.indices.length) {
         deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
     }
 
