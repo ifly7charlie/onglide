@@ -756,10 +756,10 @@ async function process_day_results(classid, className, date, day_number, results
                              start=TIME(COALESCE(${rStart},start)),
                              finish=TIME(COALESCE(${rFinish},finish)),
                              duration=COALESCE(TIMEDIFF(${rFinish},${rStart}),duration),
-                             scoredstatus= ${finished ? 'F' : 'H'},
-                             statuschanged = (CASE WHEN (status != ${finished ? 'F' : 'H'}) THEN NULL
+                             statuschanged = (CASE WHEN (scoredstatus == ${finished ? 'F' : 'H'}) THEN statuschanged
                                         ELSE NOW() END),
                              datafromscoring = "Y",
+                             scoredstatus= ${finished ? 'F' : 'H'},
                              speed=${scoredvals.as}, distance=${scoredvals.ad},
                              hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd}
                           WHERE datecode=${dateCode} AND compno=${pilot} and class=${classid}`);
