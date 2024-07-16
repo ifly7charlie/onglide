@@ -768,11 +768,11 @@ async function process_day_results(classid, className, date, day_number, results
             rows += r.affectedRows;
 
             // check the file to check tracking details
-            let {igcavailable} = (
-                await mysql_db.query(escape`SELECT igcavailable FROM pilotresult
+            let {igcavailable, tracker} = (
+                await mysql_db.query(escape`SELECT igcavailable, tracker FROM pilotresult left join tracker on tracker.compno = pilotresult.compno and tracker.class=pilotresult.class
                                                               WHERE datecode=${dateCode} and compno=${pilot} and class=${classid}`)
-            )[0] || {igcavailable: false};
-            if ((igcavailable || 'Y') == 'N' && url) {
+            )[0] || {igcavailable: false, tracker: 'unknown'};
+            if ((igcavailable || 'Y') == 'N' && url && (tracker ?? 'unknown') == 'unknown') {
                 await processIGC(classid, pilot, location, date, url, https, mysql_db, () => {});
                 doCheckForOGNMatches = true; //
             }
