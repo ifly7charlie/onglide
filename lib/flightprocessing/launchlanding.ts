@@ -35,7 +35,7 @@ const minTestTime = 5;
 // that we can use both in soaringspot.js (on the igc file) or for the flarm
 // ID. We can then correlate the two
 // note: id could be either class+compno or flarmid
-export function capturePossibleLaunchLanding(id: string, at: Epoch, point: Position, agl: AltitudeAgl, db, type) {
+export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl | undefined, db, type) {
     // Now we are going to manipulate this track to look for either launch or landing
     let track = unknownTrack[id];
 
