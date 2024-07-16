@@ -300,12 +300,13 @@ async function ssscrape(deep = false) {
 async function findPilot(lastname: string, countrycode: string, homeclub: string) {
     const names = lastname.split(' ').reverse();
 
+    console.log(`checking ranking list for ${lastname} from ${countrycode}`);
+
     for (const name of names) {
         const possible = await fetch(`https://rankingdata.fai.org/SGP_SearchResults.php?surname=${name}&nationality=${getCountryISO3(countrycode) ?? ''}`)
             .then((res) => res.text())
             .then((body) => {
                 let dom = htmlparser.parseDocument(body);
-                console.log(lastname, dom);
 
                 const nameTable = findOne((x) => x.attribs?.class == 'RL_table_innerTable', dom.children);
                 if (nameTable) {
@@ -319,12 +320,11 @@ async function findPilot(lastname: string, countrycode: string, homeclub: string
                     console.log('***** potentials ****');
                     console.table(potentials);
 
-                    console.log('***** potentials ****');
-                    console.table(names.map((n) => [n, potentials[0].name!.match(new RegExp(`(^${n}| +${n})`, 'i'))]));
                     const filteredByName = potentials.filter((p) => names.every((n) => p.name!.match(new RegExp(`(^${n}| +${n})`, 'i'))));
 
-                    if (filteredByName.length == 1) {
-                        return parseInt(filteredByName[0]?.src ?? '0');
+                    if (filteredByName.length == 1 && filteredByName[0]?.src) {
+                        console.log(`-> found using ${name} fai id: ${filteredByName[0].src}`);
+                        return parseInt(filteredByName[0].src);
                     }
                     return undefined;
                 }
