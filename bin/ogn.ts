@@ -163,6 +163,7 @@ interface Glider {
     duplicate: number;
     utcStart: Epoch;
     scoredStart: Epoch;
+    scoredStatus: 'S' | 'F' | 'H'; // from scoring
     scoringConfigured?: boolean;
 
     deck: DeckData;
@@ -730,7 +731,7 @@ async function updateTrackers(datecode: Datecode) {
     const removedGliders = _filter(gliders, (g) => {
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
-            console.log(g?.compno, newValue?.dbTrackerId, g.dbTrackerId);
+            console.log(`${g?.compno} - ${newValue?.dbTrackerId} vs ${g.dbTrackerId} status: ${newValue.scoredStatus}`);
             return true; // removed or it has changed id
         }
         return g.datecode != datecode;
@@ -767,6 +768,7 @@ async function updateTrackers(datecode: Datecode) {
 
             const startUtcChanged = gliders[gliderKey]?.utcStart != t.utcStart;
             const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
+            const scoredStatusChanged = gliders[gliderKey]?.scoredStatus != t.scoredStatus;
             const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
 
             // glider key not enough to check for datecode changes (force ignore of
@@ -797,8 +799,13 @@ async function updateTrackers(datecode: Datecode) {
             }
 
             if (glider.scoringConfigured) {
-                if (startUtcChanged || handicapChanged) {
-                    const channel = channels[glider.channelName];
+                const channel = channels[glider.channelName];
+                if (scoredStatusChanged && t.scoredStatus != 'S') {
+                    console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus}`);
+                    channel?.scoring?.clearGlider(glider.compno);
+                }
+                //
+                else if (startUtcChanged || handicapChanged) {
                     console.log(`${glider.className}:${glider.compno}: rescoring [${channel.proposedScoreId}] => startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
                     channel?.scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart, channel.proposedScoreId);
                     channel.scoreIdUpdateRequired = true;
