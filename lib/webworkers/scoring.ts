@@ -309,7 +309,7 @@ if (!isMainThread) {
             scoreUpdater.updateScoreId(task.oldScoreId, task.scoreId);
         }
 
-        if (task.action == ScoringCommandEnum.clearGlider) {
+        if (task.action == ScoringCommandEnum.clearGlider && scoreUpdater) {
             console.log(`${task.className}/${task.compno}: stopping scoring for ${task.compno}`);
             scoreUpdater.clearGlider(task.compno);
         }
