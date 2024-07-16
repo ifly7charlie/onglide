@@ -13,6 +13,8 @@ import * as htmlparser from 'htmlparser2';
 
 import {findOne, findAll, find, isTag, existsOne, removeElement, getChildren, getInnerHTML, getOuterHTML, textContent, getAttributeValue} from 'domutils';
 
+import getCountryISO3 from 'country-iso-2-to-3';
+
 import {Element} from 'domhandler';
 
 // Datecode helpers
@@ -299,7 +301,7 @@ async function findPilot(lastname: string, countrycode: string, homeclub: string
     const names = lastname.split(' ').reverse();
 
     for (const name of names) {
-        const possible = await fetch(`https://rankingdata.fai.org/SGP_SearchResults.php?surname=${name}&nationality=`)
+        const possible = await fetch(`https://rankingdata.fai.org/SGP_SearchResults.php?surname=${name}&nationality=${getCountryISO3(countrycode) ?? ''}`)
             .then((res) => res.text())
             .then((body) => {
                 let dom = htmlparser.parseDocument(body);
@@ -756,7 +758,7 @@ async function process_day_results(classid, className, date, day_number, results
                              start=TIME(COALESCE(${rStart},start)),
                              finish=TIME(COALESCE(${rFinish},finish)),
                              duration=COALESCE(TIMEDIFF(${rFinish},${rStart}),duration),
-                             statuschanged = (CASE WHEN (scoredstatus == ${finished ? 'F' : 'H'}) THEN statuschanged
+                             statuschanged = (CASE WHEN (scoredstatus = ${finished ? 'F' : 'H'}) THEN statuschanged
                                         ELSE NOW() END),
                              datafromscoring = "Y",
                              scoredstatus= ${finished ? 'F' : 'H'},
@@ -768,11 +770,11 @@ async function process_day_results(classid, className, date, day_number, results
             rows += r.affectedRows;
 
             // check the file to check tracking details
-            let {igcavailable, tracker} = (
-                await mysql_db.query(escape`SELECT igcavailable, tracker FROM pilotresult left join tracker on tracker.compno = pilotresult.compno and tracker.class=pilotresult.class
-                                                              WHERE datecode=${dateCode} and compno=${pilot} and class=${classid}`)
-            )[0] || {igcavailable: false, tracker: 'unknown'};
-            if ((igcavailable || 'Y') == 'N' && url && (tracker ?? 'unknown') == 'unknown') {
+            let {igcavailable, trackerid} = (
+                await mysql_db.query(escape`SELECT igcavailable, trackerid FROM pilotresult pr left join tracker on tracker.compno = pr.compno and tracker.class=pr.class
+                                                              WHERE datecode=${dateCode} and pr.compno=${pilot} and pr.class=${classid}`)
+            )[0] || {igcavailable: false, trackerid: 'unknown'};
+            if ((igcavailable || 'Y') == 'N' && url && (trackerid ?? 'unknown') == 'unknown') {
                 await processIGC(classid, pilot, location, date, url, https, mysql_db, () => {});
                 doCheckForOGNMatches = true; //
             }
