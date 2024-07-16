@@ -406,11 +406,12 @@ async function update_pilots(data) {
         const existing = (await mysql_db.query(escape`select fai, country from pilots where compno=${compno} and class=${classid}`)) ?? [];
         console.log('====>', compno, existing);
 
+        let fainumber = existing[0].fai;
         if (!existing?.length || existing[0].fai < 300) {
-            let fainumber = existing.length && existing[0].fai < 300 ? await findPilot(pilot.Contestant, existing[0].country, pilot.Club) : 0;
+            fainumber = existing.length && existing[0].fai < 300 ? await findPilot(pilot.Contestant, existing[0].country, pilot.Club) : 0;
 
             if (!fainumber) {
-                fainumber = ++pilotnumber;
+                fainumber = existing[0]?.fai ? existing[0].fai + 300 : ++pilotnumber;
             } else {
                 await download_picture(
                     compno,
@@ -418,8 +419,9 @@ async function update_pilots(data) {
                     {igc_id: fainumber, compno: pilot.Contestant, class: classid, greg: pilot.Glider?.substring(0, 8)?.trim()}
                 );
             }
+        }
 
-            await t.query(escape`
+        await t.query(escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
@@ -436,7 +438,6 @@ async function update_pilots(data) {
                            homeclub=values(homeclub), fai=values(fai), country=values(country), email=values(email),
                            participating=values(participating), handicap=values(handicap),
                            glidertype=values(glidertype), greg=values(greg), registereddt=NOW()`);
-        }
     }
 
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
