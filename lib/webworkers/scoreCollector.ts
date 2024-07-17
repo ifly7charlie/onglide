@@ -71,14 +71,18 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                 console.log(`[${id}]: ${className} ${Object.keys(c.live).length}/${Object.keys(c.optionsForCompno).length} live [${scoreId}]`);
                 // if all are live
                 if (Object.keys(c.live).length == Object.keys(c.optionsForCompno).length && scoreIdDetails.size > 1) {
-                    console.log(`[${id}]: closing old scoring tasks ${[...scoreIdDetails.keys()].join(',')}`);
-                    for (const [closeId, c] of scoreIdDetails.entries()) {
-                        if (closeId != scoreId) {
-                            console.log(`[${id}]: ${className} closing ${closeId}`);
-                            Object.values(c.optionsForCompno).forEach((option) => option.restartCount++);
+                    if (Object.values(c.optionsForCompno).some((o) => o.restartCount != 1)) {
+                        console.log(`[${id}]: received live for old scoring task ${scoreId} (all tasks ${[...scoreIdDetails.keys()].join(',')})`);
+                    } else {
+                        console.log(`[${id}]: recevied live for ${scoreId} closing old scoring tasks ${[...scoreIdDetails.keys()].join(',')}`);
+                        for (const [closeId, c] of scoreIdDetails.entries()) {
+                            if (closeId != scoreId) {
+                                console.log(`[${id}]: ${className} closing ${closeId}`);
+                                Object.values(c.optionsForCompno).forEach((option) => option.restartCount++);
+                            }
                         }
+                        port.postMessage({compno: '_live', score: {live: score.live}, t: getNow(), scoreId});
                     }
-                    port.postMessage({compno: '_live', score: {live: score.live}, t: getNow(), scoreId});
                 }
             }
 
