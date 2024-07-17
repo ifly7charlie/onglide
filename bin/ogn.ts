@@ -329,6 +329,7 @@ async function main() {
 
     {
         const datecode = await getDCode();
+        getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
@@ -497,6 +498,7 @@ async function main() {
     // Update competition information
     setInterval(async function () {
         const datecode = await getDCode();
+        getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
@@ -845,6 +847,12 @@ async function finaliseScoreId() {
             channel.scoreId = channel.proposedScoreId;
             channel.scoreIdUpdateRequired = false;
         }
+    }
+}
+function getProposedScoreId() {
+    for (const channel of Object.values(channels)) {
+        channel.proposedScoreId = (Math.random() * 10000).toFixed(1);
+        channel.scoreIdUpdateRequired = false;
     }
 }
 
