@@ -79,6 +79,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                             if (closeId != scoreId) {
                                 console.log(`[${id}]: ${className} closing ${closeId}`);
                                 Object.values(c.optionsForCompno).forEach((option) => option.restartCount++);
+                                scoreIdDetails.delete(closeId);
                             }
                         }
                         port.postMessage({compno: '_live', score: {live: score.live}, t: getNow(), scoreId});
