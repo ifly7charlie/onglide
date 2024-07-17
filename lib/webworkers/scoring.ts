@@ -120,6 +120,7 @@ export class ScoringController {
     updateScoreId(oldScoreId: string, scoreId: string) {
         this.worker.postMessage({
             action: ScoringCommandEnum.updateScoreId,
+            className: this.className,
             oldScoreId,
             scoreId
         });
@@ -305,7 +306,7 @@ if (!isMainThread) {
         }
 
         if (task.action == ScoringCommandEnum.updateScoreId) {
-            console.log(`${task.className}/${task.compno}: update scoreId from ${task.oldScoreId} to ${task.scoreId} for unchanged gliders`);
+            console.log(`${task.className}: update scoreId from ${task.oldScoreId} to ${task.scoreId} for unchanged gliders`);
             scoreUpdater.updateScoreId(task.oldScoreId, task.scoreId);
         }
 

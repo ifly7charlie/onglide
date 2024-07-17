@@ -843,6 +843,7 @@ async function finaliseScoreId() {
         if (channel.scoreIdUpdateRequired) {
             channel.scoring?.updateScoreId(channel.scoreId, channel.proposedScoreId);
             channel.scoreId = channel.proposedScoreId;
+            channel.scoreIdUpdateRequired = false;
         }
     }
 }
