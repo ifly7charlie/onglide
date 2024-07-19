@@ -79,7 +79,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
             // We can't do any more without a previous point
             if (!previousPoint) {
-                point.ps = point.g >= 70 ? PositionStatus.Airborne : PositionStatus.Grid;
+                point.ps = point.g >= 150 ? PositionStatus.Airborne : PositionStatus.Grid;
                 previousPoint = point;
                 stationary = false;
                 nextArg = yield point;
@@ -105,7 +105,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                     }
                     stationary = true;
                 }
-            } else {
+            } else if (point.g > 150) {
                 point.ps = PositionStatus.Airborne;
                 airborneFound = true;
             }

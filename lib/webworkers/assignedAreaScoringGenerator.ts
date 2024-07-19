@@ -198,7 +198,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // on circular sectors but not on wedges
                     //                log('  assuming leg end leg' + t + ', at ' + (minNextDistP ? minNextDistP : p) + ' mdp:' + minNextDistP + ', finish:' + finish);
 
-                    const intermediatePoint = taskStatus.closestToNextSectorPoint || taskStatus.lastProcessedPoint; // may be missing if restart and always further away after
+                    const intermediatePoint = taskStatus.closestToNextSectorPoint?.lat ? taskStatus.closestToNextSectorPoint : taskStatus.lastProcessedPoint;
                     const fakePoint: BasePositionMessage = {
                         a: 0 as AltitudeAMSL,
                         t: (taskStatus.currentLeg + (taskStatus.inSector ? 1 : 0)) as Epoch, //

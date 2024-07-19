@@ -313,6 +313,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     //                legStatus.altitude = point.a;
                     //                legStatus.points.push(simplifyPoint(point));
                     legStatus.points = [{t: point.t, a: point.a, lat: tp.nlat, lng: tp.nlng}];
+
+                    // explicity mark it as 'live' as it is a finish and the end of the flight
+                    // so we don't want to miss it.
+                    status._ = true;
+
+                    // Nowhere else to go
                     status.closestToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
                     // we are done scoring at this point so we can close the iterator and
