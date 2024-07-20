@@ -707,15 +707,18 @@ async function process_day_results(classid, className, date, day_number, results
             mysql_db.query(escape`UPDATE pilots SET country = ${flag} where compno=${pilot} and class=${className}`);
         }
 
-        function cDate(d) {
+        function cDate(d: string | undefined) {
             if (d == undefined) {
                 return undefined;
             }
             let x = new Date();
             const p = d.match(/([0-9]{2}):([0-9]{2}):([0-9]{2})/);
-            x.setHours(p[1]);
-            x.setMinutes(p[2]);
-            x.setSeconds(p[3]);
+            if (!p) {
+                return undefined;
+            }
+            x.setHours(parseInt(p[1]));
+            x.setMinutes(parseInt(p[2]));
+            x.setSeconds(parseInt(p[3]));
             return x;
         }
 
@@ -750,6 +753,7 @@ async function process_day_results(classid, className, date, day_number, results
         };
 
         const finished = actuals > 0;
+        const scoredStatus = finished ? 'F' : actuald > 0 ? 'H' : 'S';
 
         // If there is data from scoring then process it into the database
         if ((row['#'] != 'DNF' && row['#'] != 'DNS') || finished) {
@@ -759,10 +763,10 @@ async function process_day_results(classid, className, date, day_number, results
                              start=TIME(COALESCE(${rStart},start)),
                              finish=TIME(COALESCE(${rFinish},finish)),
                              duration=COALESCE(TIMEDIFF(${rFinish},${rStart}),duration),
-                             statuschanged = (CASE WHEN (scoredstatus = ${finished ? 'F' : 'H'}) THEN statuschanged
+                             statuschanged = (CASE WHEN (scoredstatus = ${scoredStatus}) THEN statuschanged
                                         ELSE NOW() END),
                              datafromscoring = "Y",
-                             scoredstatus= ${finished ? 'F' : 'H'},
+                             scoredstatus= ${scoredStatus},
                              speed=${scoredvals.as}, distance=${scoredvals.ad},
                              hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd}
                           WHERE datecode=${dateCode} AND compno=${pilot} and class=${classid}`);

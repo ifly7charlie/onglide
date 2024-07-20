@@ -757,6 +757,9 @@ async function process_day_scores(day, classid, classname, keys) {
             scoredvals.hd = row.scored_distance;
         }
 
+        const finished = row.scored_speed > 0;
+        const scoredStatus = finished ? 'F' : row.igc_file ? 'H' : 'S';
+
         // If there is data from scoring then process it into the database
         if (row.status_evaluated) {
             const r = await mysql_db.query(escape`
@@ -765,11 +768,13 @@ async function process_day_scores(day, classid, classname, keys) {
                              start=TIME(COALESCE(${convert_to_mysql(row.scored_start)},start)),
                              finish=TIME(COALESCE(${convert_to_mysql(row.scored_finish)},finish)),
                              duration=COALESCE(TIMEDIFF(${convert_to_mysql(row.scored_finish)},${convert_to_mysql(row.scored_start)}),duration),
-                             scoredstatus= ${row.scored_finish ? 'F' : 'H'},
+                             statuschanged = (CASE WHEN (scoredstatus = ${scoredStatus}) THEN statuschanged
+                                        ELSE NOW() END),
+                             datafromscoring = "Y",
+                             scoredstatus= ${scoredStatus},
                              status = (CASE WHEN ((status = "-" or status = "S" or status="G") and ${row.scored_finish} != "") THEN "F"
                                         WHEN   ((status = "-" or status = "S" or status="G") and ${row.igc_file} != "") THEN "H"
                                         ELSE status END),
-                             datafromscoring = "Y",
                              speed=${scoredvals.as * 3.6}, distance=${scoredvals.ad / 1000},
                              hspeed=${scoredvals.hs * 3.6}, hdistance=${scoredvals.hd / 1000},
                              daypoints=${row.points}, dayrank=${row.rank}, totalpoints=${row.points_total}, totalrank=${row.rank_total}, penalty=${row.penalty}
