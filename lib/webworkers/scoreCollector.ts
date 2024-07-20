@@ -141,6 +141,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                 Object.keys(cO.allScores).forEach((compno) => {
                     if (!(compno in cN.optionsForCompno)) {
                         cN.allScores[compno] = cO.allScores[compno];
+                        port.postMessage({compno, score: cN.allScores[compno], recentStart: false, t: cN.allScores[compno].t, scoreId});
                         delete cO.allScores[compno];
                         cN.optionsForCompno[compno] = cO.optionsForCompno[compno];
                         cN.optionsForCompno[compno].scoreId = scoreId;
