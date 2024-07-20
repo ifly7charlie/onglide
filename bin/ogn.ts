@@ -333,6 +333,7 @@ async function main() {
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
+        await finaliseScoreId();
     }
 
     if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
@@ -593,7 +594,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // Prep for scoring
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
-            channel.scoring.hookScore(({compno, score, recentStart, t, scoreId}) => sendScore(channel, compno, score, recentStart, channel.scoreId, t));
+            channel.scoring.hookScore(({compno, score, recentStart, t, scoreId}) => sendScore(channel, compno, score, recentStart, scoreId, t));
         }
         if (process.env.REPLAY_DB && !channel.replay) {
             getInitialTrackPointsForReplay(channel);

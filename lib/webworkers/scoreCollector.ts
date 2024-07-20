@@ -46,6 +46,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     // Record of scores per pilot and a flag to optimise transfer
     // of scores when nothing happening
     const scoreIdDetails = new Map<string, ScoreIdDetails>();
+    const allGliders = new Set<Compno>();
     let running = true;
 
     const getScoreIdDetails = (scoreId: string): ScoreIdDetails =>
@@ -67,10 +68,13 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
             // If we are now live we can close off the older ones
             if (score.live && !c.live[compno]) {
                 c.live[compno] = true;
+                const numLive = Object.keys(c.live).length;
+                const numRunning = Object.keys(c.optionsForCompno).length;
+                const numCompnos = allGliders.size;
 
-                console.log(`[${id}]: ${className} ${Object.keys(c.live).length}/${Object.keys(c.optionsForCompno).length} live [${scoreId}]`);
+                console.log(`[${id}]: ${className} ${numLive} live/${numRunning} run/${numCompnos} compno: [${scoreId}]`);
                 // if all are live
-                if (Object.keys(c.live).length == Object.keys(c.optionsForCompno).length && scoreIdDetails.size > 1) {
+                if (numLive == numRunning && numLive == numCompnos && scoreIdDetails.size > 1) {
                     if (Object.values(c.optionsForCompno).some((o) => o.restartCount != 1)) {
                         console.log(`[${id}]: received live for old scoring task ${scoreId} (all tasks ${[...scoreIdDetails.keys()].join(',')})`);
                     } else {
@@ -101,6 +105,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     // Return a function to
     return {
         collect: async function addToScoreCollector(compno: Compno, input: TaskScoresGenerator, scoreId: string) {
+            allGliders.add(compno);
             const c = getScoreIdDetails(scoreId);
             c.optionsForCompno[compno] = Object.assign(c.optionsForCompno[compno] ?? {}, {restartCount: (c.optionsForCompno[compno]?.restartCount ?? 0) + 1, scoreId});
             return iterateAndUpdate(id, className, compno, input, updateScore, c.optionsForCompno[compno]);
@@ -123,6 +128,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                     c.optionsForCompno[compno].restartCount++;
                 }
             }
+            allGliders.delete(compno);
         },
         // Move from one score ID to another
         updateScoreId: function (oldScoreId: string, scoreId: string) {
@@ -137,6 +143,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                         cN.allScores[compno] = cO.allScores[compno];
                         delete cO.allScores[compno];
                         cN.optionsForCompno[compno] = cO.optionsForCompno[compno];
+                        cN.optionsForCompno[compno].scoreId = scoreId;
                         delete cO.optionsForCompno[compno];
                         cN.live[compno] = cO.live[compno];
                         delete cO.live[compno];
