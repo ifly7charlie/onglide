@@ -719,7 +719,7 @@ async function updateTrackers(datecode: Datecode) {
     let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
                                            ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
-                                        END utcStart, ppr.scoredStatus
+                                              END utcStart, COALESCE(ppr.scoredStatus,'S')
                                         FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join
                                              (select compno,class,start,scoredstatus from pilotresult pr where pr.datecode=${datecode}) as ppr
                                       ON ppr.class=p.class and ppr.compno=p.compno`);
@@ -734,7 +734,7 @@ async function updateTrackers(datecode: Datecode) {
     const removedGliders = _filter(gliders, (g) => {
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
-            console.log(`${g?.compno} - ${newValue?.dbTrackerId} vs ${g.dbTrackerId} status: ${newValue.scoredStatus}`);
+            console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue.scoredStatus}`);
             return true; // removed or it has changed id
         }
         return g.datecode != datecode;
@@ -761,68 +761,78 @@ async function updateTrackers(datecode: Datecode) {
         console.log(`${g.className}:${g.compno} terminating scoring as no flarm ids found`);
         const channel = channels[g.channelName];
         channel?.scoring?.clearGlider(g.compno);
+        channel.scoreIdUpdateRequired = true; // ensure we change id even if nothing else changes - this should remove the glider from history
+        delete channel.allScores[g.compno]; // remove from old scores as it's not valid any more
+        channel.allScoresMsg = undefined;
+    });
+
+    // Timing issue as this is potentially async
+    removedGliders.forEach((g) => {
         delete gliders[makeClassname_Compno(g)];
     });
 
     // Now go through all the desired gliders and make sure we have linked them
     await Promise.allSettled(
-        cTrackers.map(async (t) => {
-            const gliderKey = makeClassname_Compno(t);
+        cTrackers
+            .filter((t) => t.dbTrackerId && t.dbTrackerId != 'unknown')
+            .map(async (t) => {
+                const gliderKey = makeClassname_Compno(t);
 
-            const startUtcChanged = gliders[gliderKey]?.utcStart != t.utcStart;
-            const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
-            const scoredStatusChanged = gliders[gliderKey]?.scoredStatus != t.scoredStatus;
-            const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
+                const startUtcChanged = gliders[gliderKey]?.utcStart != t.utcStart;
+                const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
+                const scoredStatusChanged = gliders[gliderKey]?.scoredStatus != t.scoredStatus;
+                const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
 
-            // glider key not enough to check for datecode changes (force ignore of
-            // typescript types as we don't want the rest set yet because we need
-            // to see if it's changed on existing object)
-            const glider: Glider = (gliders[gliderKey] = Object.assign(
-                gliders[gliderKey] || {}, //
-                {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
-            ));
-
-            // If we have a tracker for it then we need to link that as well
-            if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
-                const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
-
-                if (flarmIDs && flarmIDs.length) {
-                    // Tell APRS to start listening for the flarmid
-                    const command: AprsCommandTrack = {
-                        action: AprsCommandEnum.track, //
-                        compno: t.compno,
-                        className: t.className,
-                        trackerId: flarmIDs,
-                        channelName: glider.channelName
-                    };
-
-                    aprsListener?.postMessage?.(command);
-                    glider.flarmIdRegex = new RegExp(`^(${flarmIDs.join('|')})`, 'i');
-                }
-            }
-
-            if (glider.scoringConfigured) {
+                // glider key not enough to check for datecode changes (force ignore of
+                // typescript types as we don't want the rest set yet because we need
+                // to see if it's changed on existing object)
+                const glider: Glider = (gliders[gliderKey] = Object.assign(
+                    gliders[gliderKey] || {}, //
+                    {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
+                ));
                 const channel = channels[glider.channelName];
-                if (scoredStatusChanged && t.scoredStatus != 'S') {
-                    console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus}`);
-                    channel?.scoring?.clearGlider(glider.compno);
+
+                // If we have a tracker for it then we need to link that as well
+                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
+                    const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
+
+                    if (flarmIDs && flarmIDs.length) {
+                        // Tell APRS to start listening for the flarmid
+                        const command: AprsCommandTrack = {
+                            action: AprsCommandEnum.track, //
+                            compno: t.compno,
+                            className: t.className,
+                            trackerId: flarmIDs,
+                            channelName: glider.channelName
+                        };
+
+                        aprsListener?.postMessage?.(command);
+                        glider.flarmIdRegex = new RegExp(`^(${flarmIDs.join('|')})`, 'i');
+                    }
                 }
-                //
-                else if (startUtcChanged || handicapChanged) {
-                    console.log(`${glider.className}:${glider.compno}: rescoring [${channel.proposedScoreId}] => startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
-                    channel?.scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart, channel.proposedScoreId);
-                    channel.scoreIdUpdateRequired = true;
-                    updatedGliderCount++;
+
+                if (glider.scoringConfigured) {
+                    if (scoredStatusChanged && t.scoredStatus != 'S') {
+                        console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus}`);
+                        channel?.scoring?.clearGlider(glider.compno);
+                    }
+                    //
+                    else if (startUtcChanged || handicapChanged) {
+                        console.log(`${glider.className}:${glider.compno}: rescoring [${channel.proposedScoreId}] => startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
+                        channel?.scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart, channel.proposedScoreId);
+                        channel.scoreIdUpdateRequired = true;
+                        updatedGliderCount++;
+                    }
+                } else {
+                    try {
+                        loadedGliderCount++; // change to flarm id
+                        await loadGliderPoints(glider); //!keyedRemoved[makeClassname_Compno(glider)]);
+                        channel.scoreIdUpdateRequired = true;
+                    } catch (e) {
+                        console.error(e);
+                    }
                 }
-            } else {
-                try {
-                    loadedGliderCount++; // change to flarm id
-                    await loadGliderPoints(glider, !keyedRemoved[makeClassname_Compno(glider)]);
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-        })
+            })
     );
 
     const newGlidersCount = Object.keys(gliders).length;
@@ -1082,6 +1092,9 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[index].t)} sh:[${index}/${sh.length}]`);
         }
         sh.splice(index, Infinity, score);
+        if (compno == 'VL') {
+            console.table(sh.map((s, i) => [i, d(s.t), s.t, s.live, s.utcFinish]));
+        }
     }
 
     // Send to each client and if they don't respond they will be cleaned up next time around
@@ -1187,7 +1200,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
     }, 10000);
 }
 
-async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<void> {
+async function loadGliderPoints(glider: Glider): Promise<void> {
     const now = getNow();
     const channel = channels[glider.channelName];
     //
@@ -1199,6 +1212,7 @@ async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<voi
                                               ORDER BY t ASC`)) ?? [];
 
     // Make sure the flarm ID is valid for this data so we can exclude dodgy trackers more easily
+    console.log('filtering points to ', glider.flarmIdRegex);
     const points = !glider.flarmIdRegex ? rawpoints : rawpoints.filter((row) => glider.flarmIdRegex.test(row.x));
 
     initialiseDeck(glider.compno as Compno, glider, randomBytes(4).readUInt32BE(0));
@@ -1209,18 +1223,18 @@ async function loadGliderPoints(glider: Glider, firstTime: boolean): Promise<voi
     }
 
     // And pass the whole set to scoring to be loaded into the glider history
-    channel.scoring?.setInitialTrack(glider.compno, glider.handicap, glider.utcStart, points);
+    channel.scoring?.setInitialTrack(glider.compno, glider.handicap, glider.utcStart, points, channel.proposedScoreId, channel.task);
     glider.scoringConfigured = true;
 
     // Group them by comp number, this is quicker than multiple sub queries from the DB
     console.log(
-        `${channel.className}  ${firstTime ? 'first load' : 'reload'} all points for ${glider.compno} glider [${rawpoints.length - points.length} removed, ${points.length} loaded] ${glider.flarmIdRegex} ${timeToText(
-            points[0]?.t
-        )} to ${timeToText(points[points.length - 1]?.t)} @ ${timeToText(now)} - v${glider.deck.trackVersion.toString(16)}`
+        `${channel.className} load points for ${glider.compno} glider [${rawpoints.length - points.length} removed, ${points.length} loaded] ${glider.flarmIdRegex} ${timeToText(points[0]?.t)} to ${timeToText(
+            points[points.length - 1]?.t
+        )} @ ${timeToText(now)} - v${glider.deck.trackVersion.toString(16)}`
     );
 
     // If it's not the first time then we need to update the channel with the track
-    if (!firstTime) {
+    if (channel.task) {
         updateGliderTrack(channel, glider);
     }
 }
@@ -1236,6 +1250,11 @@ async function processAprsMessage(className: string, channel: Channel, message: 
 
     // Lookup the glider
     const glider = gliders[className + '_' + message.c];
+
+    if (!glider) {
+        console.log(`${message.c}: unexpected position ${d(message.t)}`);
+        return;
+    }
 
     // Check if they are a launch
     if (message.g > 100 && !channel.launching) {
@@ -1489,7 +1508,7 @@ function setupOgnWebServer(req, res) {
                     }).finish();
 
                     console.log(`sending scorehistory ${channelName} ${scoreCount} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)}`);
-                    console.table([...Object.keys(history)].flatMap((compno) => history[compno].history.map((h) => [compno, h.t, d(h.t), h.live])));
+                    //                    console.table([...Object.keys(history)].flatMap((compno) => history[compno].history.map((h) => [compno, h.t, d(h.t), h.live])));
 
                     res.setHeader('Content-Type', 'application/octet-stream');
                     if (chunkEnd == timestamp + 1) {

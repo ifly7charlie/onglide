@@ -84,25 +84,28 @@ export class ScoringController {
     }
 
     // Load these points into scoring
-    setInitialTrack(compno: Compno, handicap: number, utcStart: Epoch, points: PositionMessage[]) {
-        this.worker.postMessage({
+    setInitialTrack(compno: Compno, handicap: number, utcStart: Epoch, points: PositionMessage[], scoreId: string, task: any) {
+        const command: ScoringCommandTrack = {
             action: ScoringCommandEnum.initialTrack,
             className: this.className,
             datecode: this.datecode,
             compno,
             points,
             handicap,
-            utcStart
-        });
+            utcStart,
+            scoreId,
+            task
+        };
+        this.worker.postMessage(command);
     }
 
     // This actually starts scoring for the task
     setTask(task: any, scoreId: string) {
-        this.worker.postMessage({action: ScoringCommandEnum.newtask, className: this.className, datecode: this.datecode, task, scoreId});
+        this.worker.postMessage({action: ScoringCommandEnum.newTask, className: this.className, datecode: this.datecode, task, scoreId} as ScoringCommand);
     }
 
     clearTask() {
-        this.worker.postMessage({action: ScoringCommandEnum.cleartask, className: this.className, datecode: this.datecode});
+        this.worker.postMessage({action: ScoringCommandEnum.clearTask, className: this.className, datecode: this.datecode} as ScoringCommand);
     }
 
     rescoreGlider(compno: Compno, handicap: number, utcStart: Epoch, scoreId: string) {
@@ -114,24 +117,25 @@ export class ScoringController {
             handicap,
             utcStart,
             scoreId
-        });
+        } as ScoringCommand);
     }
 
     updateScoreId(oldScoreId: string, scoreId: string) {
         this.worker.postMessage({
             action: ScoringCommandEnum.updateScoreId,
+            datecode: this.datecode,
             className: this.className,
             oldScoreId,
             scoreId
-        });
+        } as ScoringCommand);
     }
 
     clearGlider(compno: Compno) {
-        this.worker.postMessage({action: ScoringCommandEnum.clearGlider, className: this.className, datecode: this.datecode, compno});
+        this.worker.postMessage({action: ScoringCommandEnum.clearGlider, className: this.className, datecode: this.datecode, compno} as ScoringCommand);
     }
 
     shutdown() {
-        this.worker.postMessage({action: ScoringCommandEnum.shutdown});
+        this.worker.postMessage({action: ScoringCommandEnum.shutdown} as ScoringCommand);
     }
 
     hookScore(callback: scoreCallback) {
@@ -175,16 +179,15 @@ let scoreUpdater: ReturnType<typeof scoreCollector>;
 enum ScoringCommandEnum {
     none,
     shutdown,
-    newtask,
-    cleartask,
-    track,
+    newTask,
+    clearTask,
     initialTrack,
     rescoreGlider,
     updateScoreId,
     clearGlider
 }
 
-export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | any;
+export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | ScoringCommandClearGlider | ScoringCommandClearTask;
 
 interface ScoringCommandBase {
     className: ClassName;
@@ -193,7 +196,7 @@ interface ScoringCommandBase {
 
 // Task has changed
 interface ScoringCommandNewTask extends ScoringCommandBase {
-    action: ScoringCommandEnum.newtask;
+    action: ScoringCommandEnum.newTask;
 
     task: any; // should define type, this is what is returned by API call
     scoreId: string;
@@ -217,8 +220,8 @@ interface ScoringCommandUpdateScoreId extends ScoringCommandBase {
 
 // Data for glider from DB - will reset track point
 // generators and initialise them with this data
-interface ScoringCommandTrack {
-    action: ScoringCommandEnum.track;
+interface ScoringCommandTrack extends ScoringCommandBase {
+    action: ScoringCommandEnum.initialTrack;
 
     compno: Compno;
     handicap: number;
@@ -226,11 +229,22 @@ interface ScoringCommandTrack {
 
     // Historical points, must be in sorted order
     points: PositionMessage[];
+    scoreId: string;
+    task: any;
 }
 
 // Exit
 interface ScoringCommandShutdown {
     action: ScoringCommandEnum.shutdown;
+}
+
+interface ScoringCommandClearGlider extends ScoringCommandBase {
+    action: ScoringCommandEnum.clearGlider;
+    compno: Compno;
+}
+
+interface ScoringCommandClearTask extends ScoringCommandBase {
+    action: ScoringCommandEnum.clearTask;
 }
 
 //
@@ -266,8 +280,7 @@ if (!isMainThread) {
         if (task.action == ScoringCommandEnum.initialTrack) {
             const itTask: ScoringCommandTrack = task;
             console.log(`${task.className}/${task.compno}: initial track received ${itTask.points.length} positions ${itTask.handicap} hcap, ${itTask.utcStart} utcStart`);
-            const alreadyScoring = !!gliders[makeClassname_Compno(task)]?.scoring;
-            const existingTask = gliders[makeClassname_Compno(task)]?.task;
+            const alreadyScoring = !!scoreCollector;
 
             gliders[makeClassname_Compno(task)] = {
                 className: task.className,
@@ -276,22 +289,22 @@ if (!isMainThread) {
                 utcStart: task.utcStart,
                 inorder: bindChannelForInOrderPackets(task.className, task.datecode, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
                 scoring: null,
-                task: existingTask,
+                task: task.task,
                 scoreId: task.scoreId
             };
 
-            if (alreadyScoring && existingTask) {
+            if (alreadyScoring) {
                 rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
             }
         }
 
         // Actually start scoring the task, will score all the gliders we have tracks for
-        if (task.action == ScoringCommandEnum.newtask) {
+        if (task.action == ScoringCommandEnum.newTask) {
             console.log(`${task.className}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})} [${task.scoreId}]`);
             startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task, task.scoreId);
         }
 
-        if (task.action == ScoringCommandEnum.cleartask) {
+        if (task.action == ScoringCommandEnum.clearTask) {
             console.log(`${task.className}: scoring task cleared`);
             scoreUpdater.reset();
             // Clear the task just in case
@@ -301,7 +314,7 @@ if (!isMainThread) {
         }
 
         if (task.action == ScoringCommandEnum.rescoreGlider) {
-            console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.hcap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
+            console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.handicap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
             rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
         }
 

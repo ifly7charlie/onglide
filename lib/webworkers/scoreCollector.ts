@@ -18,7 +18,7 @@ import equal from 'fast-deep-equal';
  */
 interface AddToScoreCollector {
     collect: (compno: Compno, input: TaskScoresGenerator, scoreId: string) => Promise<void>;
-    reset: (scoreId?: string) => void;
+    reset: () => void;
     clearGlider: (compno: Compno) => void;
     updateScoreId: (oldScoreId: string, scoreId: string) => void;
 }
@@ -105,33 +105,36 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     // Return a function to
     return {
         collect: async function addToScoreCollector(compno: Compno, input: TaskScoresGenerator, scoreId: string) {
+            console.log(`[${scoreId}]: scoreCollect collect ${compno}`);
             allGliders.add(compno);
             const c = getScoreIdDetails(scoreId);
             c.optionsForCompno[compno] = Object.assign(c.optionsForCompno[compno] ?? {}, {restartCount: (c.optionsForCompno[compno]?.restartCount ?? 0) + 1, scoreId});
             return iterateAndUpdate(id, className, compno, input, updateScore, c.optionsForCompno[compno]);
         },
-        reset: function (scoreId: string | undefined) {
-            if (!scoreId) {
-                for (const scoreId in scoreIdDetails.keys()) {
-                    const c = getScoreIdDetails(scoreId);
-                    Object.values(c.optionsForCompno).forEach((option) => option.restartCount++);
-                }
-            } else {
-                const c = getScoreIdDetails(scoreId);
-                Object.values(c.optionsForCompno).forEach((option) => option.restartCount++);
+        // Clear all scoring
+        reset: function () {
+            for (const compno in allGliders.keys()) {
+                console.log(`[ALL]: scoreCollect reset ${compno}`);
+                this.clearGlider(compno);
             }
         },
         clearGlider: function (compno: Compno) {
             for (const scoreId in scoreIdDetails.keys()) {
                 const c = getScoreIdDetails(scoreId);
+                console.log(`[ALL]: scoreCollect clearGlider ${compno}: restartCount ${c.optionsForCompno[compno]?.restartCount}`);
                 if (compno in c.optionsForCompno) {
                     c.optionsForCompno[compno].restartCount++;
                 }
+                delete c.allScores[compno];
+                delete c.mostRecentStart[compno];
+                delete c.live[compno];
+                delete c.optionsForCompno[compno];
             }
             allGliders.delete(compno);
         },
         // Move from one score ID to another
         updateScoreId: function (oldScoreId: string, scoreId: string) {
+            console.log(`[${oldScoreId}->${scoreId}]: scoreCollect updateScoreId`);
             const cO = scoreIdDetails.get(oldScoreId);
             const cN = getScoreIdDetails(scoreId);
             if (cO) {
