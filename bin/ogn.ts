@@ -918,7 +918,7 @@ async function sendCurrentState(client: OgnWebSocket) {
 
 async function generateHistoricalTracks(channel: Channel): Promise<void> {
     // Figure out the block that preceeds us, we do it a little late to allow reconnects to use websocket only
-    const now = (channel.mostRecentPosition - 20) as Epoch;
+    const now = (channel.mostRecentPosition - 30) as Epoch;
     const base = now - webPathBaseTime; // determine the last block block
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
@@ -968,7 +968,7 @@ async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
             if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), 0);
+                    const start = Math.max(0, Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), glider.webPathEndPosition));
                     const end = p.posIndex;
                     const length = end - start;
                     if (length) {
@@ -1001,7 +1001,7 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
     const toStream = {};
     const p = glider.deck;
     if (p) {
-        let start = 0; // glider.webPathEndPosition ?? 0;
+        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), 0);
         const end = p.posIndex;
         const length = end - start;
         //        if (length) {
@@ -1092,9 +1092,6 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[index].t)} sh:[${index}/${sh.length}]`);
         }
         sh.splice(index, Infinity, score);
-        if (compno == 'VL') {
-            console.table(sh.map((s, i) => [i, d(s.t), s.t, s.live, s.utcFinish]));
-        }
     }
 
     // Send to each client and if they don't respond they will be cleaned up next time around
@@ -1116,22 +1113,15 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         }
     }
 
-    if (recentStart) {
-        const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
-        if (glider) {
-            const deck = glider.deck;
-            // Reset the glider starting point, but also the channel so we don't use invalid
-            // mix of the two
-            glider.webPathEndPosition = 0;
-            channel.webPathBaseTime = 0 as Epoch;
-            channel.earliestStart = Math.min(channel.earliestStart, recentStart) as Epoch;
-            if (glider.scoredStart && glider.scoredStart > recentStart) {
-                console.log(`${compno}: start time moved earlier in time, resending track`);
-                glider.scoredStart = recentStart;
-                updateGliderTrack(channel, glider);
-            }
-            glider.scoredStart = recentStart;
-        }
+    const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
+    if (glider && glider.scoredStart != (score.utcStart as Epoch)) {
+        // Reset the glider starting point, but also the channel so we don't use invalid
+        // mix of the two
+        console.log(`${compno}: start time changed from ${glider.scoredStart} to ${score.utcStart}, resetting tracks`);
+        glider.webPathEndPosition = 0;
+        channel.webPathBaseTime = 0 as Epoch;
+        channel.earliestStart = Math.min(channel.earliestStart, score.utcStart ?? Infinity) as Epoch;
+        glider.scoredStart = score.utcStart as Epoch;
     }
 }
 
