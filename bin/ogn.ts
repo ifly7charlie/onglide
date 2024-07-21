@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Copyright 2020-2023 (c) Melissa Jenkins
+// Copyright 2020-2024 (c) Melissa Jenkins
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
@@ -728,6 +728,8 @@ async function updateTrackers(datecode: Datecode) {
     let updatedGliderCount = 0;
     let loadedGliderCount = 0;
 
+    console.table(cTrackers);
+
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
     // unknowns as they won't be in the trackers pick
     const keyedDb = keyBy<CTrackerRow>(cTrackers, makeClassname_Compno);
@@ -793,7 +795,7 @@ async function updateTrackers(datecode: Datecode) {
                 const channel = channels[glider.channelName];
 
                 // If we have a tracker for it then we need to link that as well
-                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
+                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown' && t.scoredStatus == 'S') {
                     const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
 
                     if (flarmIDs && flarmIDs.length) {
@@ -815,6 +817,16 @@ async function updateTrackers(datecode: Datecode) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
                         console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus}`);
                         channel?.scoring?.clearGlider(glider.compno);
+                        const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
+                        console.log(`Stopping APRS Listener for glider ${t.className}:${t.compno} => ${flarmIDs.join(',')}`);
+                        const command: AprsCommandTrack = {
+                            action: AprsCommandEnum.untrack,
+                            compno: t.compno, //
+                            className: t.className,
+                            channelName: glider.channelName,
+                            trackerId: flarmIDs
+                        };
+                        aprsListener?.postMessage?.(command);
                     }
                     //
                     else if (startUtcChanged || handicapChanged) {
