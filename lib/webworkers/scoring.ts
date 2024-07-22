@@ -306,7 +306,7 @@ if (!isMainThread) {
 
         if (task.action == ScoringCommandEnum.clearTask) {
             console.log(`${task.className}: scoring task cleared`);
-            scoreUpdater.reset();
+            scoreUpdater?.reset();
             // Clear the task just in case
             Object.values(gliders).forEach((g) => {
                 g.task = undefined;
@@ -320,12 +320,12 @@ if (!isMainThread) {
 
         if (task.action == ScoringCommandEnum.updateScoreId) {
             console.log(`${task.className}: update scoreId from ${task.oldScoreId} to ${task.scoreId} for unchanged gliders`);
-            scoreUpdater.updateScoreId(task.oldScoreId, task.scoreId);
+            scoreUpdater?.updateScoreId(task.oldScoreId, task.scoreId);
         }
 
         if (task.action == ScoringCommandEnum.clearGlider && scoreUpdater) {
             console.log(`${task.className}/${task.compno}: stopping scoring for ${task.compno}`);
-            scoreUpdater.clearGlider(task.compno);
+            scoreUpdater?.clearGlider(task.compno);
         }
     });
 }
@@ -362,7 +362,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
     if (!glider || !glider.task) {
         console.error(`unable to rescore glider ${compno}, ${config.className}: no task or glider not found`);
     } else {
-        scoreUpdater.collect(compno, (glider.scoring = getScoringChain(glider, config, glider.task)), scoreId);
+        scoreUpdater?.collect(compno, (glider.scoring = getScoringChain(glider, config, glider.task)), scoreId);
     }
 }
 
