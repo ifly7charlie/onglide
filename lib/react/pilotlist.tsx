@@ -70,6 +70,13 @@ function PilotImage(props) {
     return <div className="ih" style={{backgroundImage: `url(/outline.gif)`}} />;
 }
 
+function sanitize(n: any) {
+    if (typeof n === 'number' && isNaN(n)) {
+        return '-';
+    }
+    return n;
+}
+
 function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any) {
     return (
         <li id={id} style={{width}}>
@@ -81,7 +88,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
             </a>
             <hr />
             <div className="summarycomponent">
-                <div className="main-text">{main.value}</div>
+                <div className="main-text">{sanitize(main.value)}</div>
                 {main.units ? <div className="units">{main.units}</div> : null}
                 <div className="main-icon">
                     <a href="#" title={main.description} className="tooltipicon">
@@ -92,7 +99,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
             <hr />
             {data1?.value != undefined ? (
                 <div className="summarycomponent">
-                    <div className="data-text">{data1.value}</div>
+                    <div className="data-text">{sanitize(data1.value)}</div>
                     {data1.units ? <div className="units">{data1.units}</div> : null}
                     <div className="data-icon">
                         <a href="#" title={data1.description} className="tooltipicon">
@@ -103,7 +110,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
             ) : null}
             {data2?.value !== undefined && data2.value !== null ? (
                 <div className="summarycomponent">
-                    <div className="data-text">{data2.value}</div>
+                    <div className="data-text">{sanitize(data2.value)}</div>
                     {data2.units ? <div className="units">{data2.units}</div> : null}
                     {data2.icon ? (
                         <div className="data-icon">
