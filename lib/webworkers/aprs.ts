@@ -87,13 +87,13 @@ interface Aircraft {
     className: string;
     trackers: string | string[];
 
-    lastMessage?: number;
-    lastTime?: number;
+    lastTime: number;
     lastPoint?: Coord;
     lastMoved?: number;
 
     kf?: any; // altitude smoothing
-    stationary?: number; // consecutive stationary fixes
+    stationary: number; // consecutive stationary fixes
+    ground: boolean;
 
     channel?: BroadcastChannel; // where to send packets
 
@@ -114,21 +114,56 @@ const aircraft: Record<ClassName_Compno, Aircraft> = {};
 // Mapping by trackerid to aircraft record
 const trackers: Record<string, Aircraft> = {};
 
-// And for sending message onwards - all we don here is fetch and enrich
+// And for sending message onwards - all we do here is fetch and enrich
 const channels: Record<string, BroadcastChannel> = {};
 
 //
 // Start a listener
-export function spawnAprsContestListener(config: AprsListenerConfig): Worker {
-    if (!isMainThread) {
-        throw new Error('umm, this is only available in main thread');
-    }
-    console.log('Starting APRS worker thread');
+export class AprsController {
+    worker: Worker;
 
-    return new Worker(__filename, {env: SHARE_ENV, workerData: config});
+    constructor(config: AprsListenerConfig) {
+        if (!isMainThread) {
+            throw new Error('umm, this is only available in main thread');
+        }
+        console.log('Starting APRS worker thread');
+
+        this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config});
+    }
+
+    trackGlider(compno: Compno, className: ClassName, channelName: string, trackerIds: string) {
+        const flarmIDs = trackerIds.split(',').filter((i) => i.match(/[0-9A-F]{6}$/i)) as string[];
+        if (flarmIDs && flarmIDs.length) {
+            // Tell APRS to start listening for the flarmid
+            console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
+            const command: AprsCommandTrack = {
+                action: AprsCommandEnum.track,
+                compno: compno, //
+                className: className,
+                channelName: channelName,
+                trackerId: flarmIDs
+            };
+            this.worker.postMessage?.(command);
+        }
+    }
+    untrackGlider(compno: Compno, className: ClassName, channelName: string, trackerIds: string) {
+        const flarmIDs = trackerIds.split(',').filter((i) => i.match(/[0-9A-F]{6}$/i)) as string[];
+        if (flarmIDs && flarmIDs.length) {
+            // Tell APRS to start listening for the flarmid
+            console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
+            const command: AprsCommandTrack = {
+                action: AprsCommandEnum.untrack,
+                compno: compno, //
+                className: className,
+                channelName: channelName,
+                trackerId: flarmIDs
+            };
+            this.worker.postMessage?.(command);
+        }
+    }
 }
 
-if (!isMainThread) {
+if (!isMainThread && parentPort) {
     console.log('Started APRS worker thread');
 
     initialiseInsights();
@@ -153,7 +188,9 @@ if (!isMainThread) {
                 trackers: task.trackerId,
 
                 // Not had a message
-                lastMessage: 0,
+                lastTime: 0,
+                stationary: 0,
+                ground: true,
 
                 // Setup logging
                 log:
@@ -234,7 +271,7 @@ function startAprsListener(config: AprsListenerConfig) {
         if (data.charAt(0) != '#' && !data.startsWith('user')) {
             const packet = parser.parseaprs(data);
             if (packet && 'latitude' in packet && 'longitude' in packet && 'comment' in packet && packet.comment?.startsWith('id')) {
-                processPacket(packet);
+                processPacket(packet).catch((e) => console.error(e));
             }
         } else {
             // Server keepalive
@@ -319,7 +356,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
 //
 // collect points, emit to competition db every 30 seconds
-function processPacket(packet: aprsPacket) {
+async function processPacket(packet: aprsPacket) {
     // Flarm ID we use is last 6 characters, check if OGN tracker or regular flarm
     const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6);
     const ognTracker = packet.sourceCallsign?.slice(0, 3) == 'OGN';
@@ -355,7 +392,7 @@ function processPacket(packet: aprsPacket) {
     statistics.aprsDelay += td;
 
     // Helper function with some closures so we can report it properly
-    const withElevation = async (gl: number) => {
+    const sendMessage = (gl: number) => {
         let message: PositionMessage = {
             c: aircraft ? (aircraft.compno as Compno) : (flarmId as FlarmID),
             lat: Math.round(packet!.latitude * 1000000) / 1000000,
@@ -381,12 +418,13 @@ function processPacket(packet: aprsPacket) {
 
     // Look it up, have we had packets for this before?
     const aircraft = trackers[flarmId];
+    const airfieldDistance = distance(jPoint, airfieldLocation);
 
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough
     if (!aircraft) {
-        if (distance(jPoint, airfieldLocation) < 20 && packet.altitude < airfieldElevation + 750) {
-            getElevationOffset(packet.latitude, packet.longitude, withElevation);
+        if (airfieldDistance < 20 && packet.altitude < airfieldElevation + 750) {
+            getElevationOffset(packet.latitude, packet.longitude, sendMessage);
         }
         return;
     }
@@ -419,6 +457,26 @@ function processPacket(packet: aprsPacket) {
             return;
         }
     }
+
+    // Check if they are moving on the ground - we don't want to track this
+    const groundElevation = await getElevationOffset(packet.latitude, packet.longitude);
+    const aircraftElevation = altitude - groundElevation;
+
+    // If we had been stationary for a while and we are low enough to be on the ground
+    // then mark it as so
+    if (aircraft.stationary > 5 && aircraftElevation < 100) {
+        aircraft.ground = true;
+    }
+
+    // If we have 'taken' off
+    if (aircraft.ground && aircraftElevation > 100) {
+        aircraft.ground = false;
+    }
+
+    if (aircraft.ground && airfieldDistance > 3) {
+        return;
+    }
+
     if (speedBetweenKph > 450 /*kph*/) {
         console.log(
             `IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${
@@ -466,7 +524,5 @@ function processPacket(packet: aprsPacket) {
     // Logging if requested
     aircraft.log(packet.origpacket);
     aircraft.log(`${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
-
-    // Enrich with elevation and send to everybody, this is async
-    getElevationOffset(packet.latitude, packet.longitude, withElevation);
+    sendMessage(groundElevation);
 }

@@ -25,7 +25,7 @@ const options = {
     },
     updateAgeOnGet: true,
     allowStale: true,
-    ttl: 72 * 3600 * 1000
+    ttl: 24 * 3600 * 1000
 };
 
 const cache = new LRUCache(options);
@@ -43,7 +43,16 @@ export function getCacheSize(): number {
 //       point at the same time and do more work.  It won't cause it to fail it just wastes CPU and
 //       memory as we keep fetching the same item
 //
-export async function getElevationOffset(lat, lng, cb) {
+export async function getElevationOffset(lat: number, lng: number): Promise<number>;
+export async function getElevationOffset(lat: number, lng: number, cb: Function): Promise<void>;
+export async function getElevationOffset(lat: number, lng: number, cb: Function | undefined = undefined) {
+    if (!cb) {
+        return new Promise<number>((r) => _getElevationOffset(lat, lng, r));
+    }
+    return _getElevationOffset(lat, lng, cb);
+}
+
+async function _getElevationOffset(lat, lng, cb) {
     // Checking process.env is expensive so cache this
     if (!referrer) {
         referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
@@ -104,7 +113,7 @@ export async function getElevationOffset(lat, lng, cb) {
         }
 
         // Go and get the URL
-        fetch(url, {headers: {Referer: referrer}})
+        fetch(url, {headers: {Referer: referrer!}})
             .then((res) => {
                 if (res.status != 200) {
                     throw `MapBox API returns ${res.status}: ${res.statusText}, ensure "${referrer}" is in the allowed ACL`;
