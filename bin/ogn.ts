@@ -1425,6 +1425,7 @@ function setupWebSocketServer(server) {
             channels[channel].clients.push(ws);
         } else {
             console.log('Unknown channel ' + channel);
+            ws.send('reload');
             ws.isAlive = false;
         }
 
