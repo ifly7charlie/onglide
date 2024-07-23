@@ -762,10 +762,12 @@ async function updateTrackers(datecode: Datecode) {
         }
         console.log(`${g.className}:${g.compno} terminating scoring as no flarm ids found`);
         const channel = channels[g.channelName];
-        channel?.scoring?.clearGlider(g.compno);
-        channel.scoreIdUpdateRequired = true; // ensure we change id even if nothing else changes - this should remove the glider from history
-        delete channel.allScores[g.compno]; // remove from old scores as it's not valid any more
-        channel.allScoresMsg = undefined;
+        if (channel) {
+            channel.scoring?.clearGlider(g.compno);
+            channel.scoreIdUpdateRequired = true; // ensure we change id even if nothing else changes - this should remove the glider from history
+            delete channel.allScores[g.compno]; // remove from old scores as it's not valid any more
+            channel.allScoresMsg = undefined;
+        }
     });
 
     // Timing issue as this is potentially async
