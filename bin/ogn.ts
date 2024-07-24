@@ -217,8 +217,6 @@ let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
 const replayBase = parseInt(process.env.REPLAY ?? process.env.REPLAY_DB ?? '0');
 let multiplier = replayBase ? parseInt(process.env.REPLAY_MULTIPLIER || '1') : 1;
 
-console.log(JSON.stringify(process.env));
-
 // And the replay
 if (replayBase) {
     getNow = (): Epoch => {
