@@ -690,6 +690,7 @@ async function updateTasks(): Promise<void> {
                 channel.scoring?.clearTask();
                 channel.scoreHistory = new Map();
                 channel.allScores = {};
+                channel.task = undefined;
             }
 
             // We have a task so we will score what we know
@@ -719,7 +720,7 @@ async function updateTrackers(datecode: Datecode) {
     let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
                                            ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
-                                              END utcStart, COALESCE(ppr.scoredStatus,'S')
+                                              END utcStart, COALESCE(ppr.scoredStatus,'S') scoredStatus
                                         FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join
                                              (select compno,class,start,scoredstatus from pilotresult pr where pr.datecode=${datecode}) as ppr
                                       ON ppr.class=p.class and ppr.compno=p.compno`);
