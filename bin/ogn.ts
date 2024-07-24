@@ -1048,7 +1048,7 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
 async function sendAllScores(channel: Channel, t: Epoch | undefined) {
     [channel.earliestStart, channel.earliestScore, channel.latestScore] = Object.values(channel.allScores).reduce(
         ([earliestStart, earliestScore, latestScore], score) => [
-            Math.min(score.utcStart ?? Infinity, earliestStart), //
+            Math.min((score.utcStart ?? 0) < 10 ? Infinity : score.utcStart, earliestStart), //
             Math.min((score.t ?? 0) < 10 ? Infinity : score.t, earliestScore),
             Math.max((score.t ?? 0) < 10 ? 0 : score.t, latestScore)
         ],
