@@ -341,7 +341,7 @@ DROP TABLE IF EXISTS `trackerhistory`;
 CREATE TABLE `trackerhistory` (
   `compno` char(4) DEFAULT NULL,
   `changed` datetime DEFAULT NULL,
-  `flarmid` char(10) DEFAULT NULL,
+  `flarmid` text DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
   `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot') DEFAULT 'none'

@@ -748,7 +748,7 @@ async function updateTrackers(datecode: Datecode) {
             const flarmIDs = _filter(g.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i)) as string[];
             if (flarmIDs && flarmIDs.length) {
                 // Tell APRS to start listening for the flarmid
-                console.log(`Stopping APRS Listener for glider ${g.className}:${g.compno} => ${flarmIDs.join(',')}`);
+                console.log(`Stopping APRS Listener for glider ${g.className}:${g.compno} => ${flarmIDs.join(',')} [channel ${g.channelName}]`);
                 const command: AprsCommandTrack = {
                     action: AprsCommandEnum.untrack,
                     compno: g.compno, //
@@ -759,7 +759,7 @@ async function updateTrackers(datecode: Datecode) {
                 aprsListener?.postMessage?.(command);
             }
         }
-        console.log(`${g.className}:${g.compno} terminating scoring as no flarm ids found`);
+        console.log(`${g.className}:${g.compno} terminating scoring as no flarm ids found [channel ${g.channelName}]`);
         const channel = channels[g.channelName];
         if (channel) {
             channel.scoring?.clearGlider(g.compno);
@@ -816,7 +816,7 @@ async function updateTrackers(datecode: Datecode) {
 
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
-                        console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus}`);
+                        console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus} [channel ${glider.channelName}]`);
                         channel?.scoring?.clearGlider(glider.compno);
                         const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
                         console.log(`Stopping APRS Listener for glider ${t.className}:${t.compno} => ${flarmIDs.join(',')}`);
