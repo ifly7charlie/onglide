@@ -92,7 +92,6 @@ async function roboControl() {
                 FROM scoringsource where type='robocontrol'`)
         )[0] ?? {url: null, overwrite: true};
         robocontrol_url = row.url;
-        overwrite = row.overwrite ?? true;
     }
 
     if (!robocontrol_url) {
@@ -117,16 +116,18 @@ async function roboControl() {
             }
             for (const p of location || []) {
                 if (p.flarm?.length) {
-                    console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    if (overwrite) {
-                        await mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
-                    } else {
-                        mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn} and trackerid='unknown'`);
-                    }
-                    await mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
+                    updateTrackers(p.cn, p.flarm.join(','), 'robocontrol');
                 }
             }
         });
+}
+
+async function updateTrackers(compno: string, trackerIds: string, feedType: 'robocontrol' | 'soaringspot') {
+    let success = !!(await mysql_db.query(escape`UPDATE tracker SET trackerid = ${trackerIds},feedid=${feedType} WHERE compno = ${compno} and (feedid=${feedType} or feedid is null)`)).affectedRows;
+    if (success) {
+        console.log(`${feedType}: updated tracker ${compno} to ${trackerIds}`);
+    }
+    await mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${compno}, now(), ${trackerIds}, '', null, ${feedType} )`);
 }
 
 //
@@ -295,12 +296,9 @@ async function update_pilots(class_url, classid, classname, keys) {
             .split(',')
             .map((id) => id.match(/([a-f0-9]{6})$/i)?.[1])
             .filter((id) => !!id);
-        console.log(`flarms: ${compno}: ${flarmIds} => ${flarms}`);
+
         if (flarms.length) {
-            await t.query(escape`INSERT INTO tracker (class,compno,type,trackerid) VALUES (${classid},
-                                     ${compno}, 'flarm', ${flarms.join(',')} )
-                                  ON DUPLICATE KEY update trackerid=values(trackerid)`);
-            await t.query(escape`INSERT INTO trackerhistory VALUES ( ${compno}, now(), ${flarms.join(',')}, '', null, 'soaringspot' )`);
+            updateTrackers(compno, flarms.join(','), 'soaringspot');
         }
 
         // Download pictures
