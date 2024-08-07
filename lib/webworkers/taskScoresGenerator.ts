@@ -233,9 +233,6 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             }
         }
 
-        if (!process.env.REPLAY && Date.now() / 1000 - score.t > 930) {
-            console.log(score.compno, 'scored delay:', (Date.now() / 1000 - score.t).toFixed(0));
-        }
         yield score;
     }
 

@@ -91,7 +91,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                 }
             }
 
-            console.log(`[${id}] updating score for ${compno} [${scoreId}] status: ${score.flightStatus}, ${new Date(score.t * 1000).toISOString()}`);
+            //            console.log(`[${id}] updating score for ${compno} [${scoreId}] status: ${score.flightStatus}, ${new Date(score.t * 1000).toISOString()}`);
             c.allScores[compno] = score;
 
             //            oldestUpdate = Math.min(c.oldestUpdate, score.t);
