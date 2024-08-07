@@ -559,7 +559,7 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
                 // We don't handle multiple starts at all so abort
                 if (tp.multiple_start != 0) {
                     console.log(`${classid} - ${date}: multiple start not supported`);
-                    break;
+                    continue;
                 }
 
                 // can we extract a number off the leading part of the turnpoint name, if so treat it as a trigraph
