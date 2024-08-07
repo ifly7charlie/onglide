@@ -296,8 +296,9 @@ async function ssscrape(deep = false) {
             }
         });
 }
+import render from 'dom-serializer';
 
-async function findPilot(lastname: string, countrycode: string, homeclub: string) {
+async function findPilot(lastname: string, countrycode: string, classid: string, compno: string) {
     const names = lastname.split(' ').reverse();
 
     console.log(`checking ranking list for ${lastname} from ${countrycode}`);
@@ -310,21 +311,29 @@ async function findPilot(lastname: string, countrycode: string, homeclub: string
 
                 const nameTable = findOne((x) => x.attribs?.class == 'RL_table_innerTable', dom.children);
                 if (nameTable) {
-                    const matches = find((x) => isTag(x) && x.name == 'a', nameTable.children, true, 100);
+                    const matches = find((x) => isTag(x) && x.name == 'a', nameTable.children, true, 100).map(toElement);
 
                     const potentials = matches
-                        .map((match) => toElement(match))
-                        .map((match) => ({src: getAttributeValue(match, 'href')?.match(/pilotid=([0-9]+)/)?.[1], name: textContent(match)})) //
-                        .filter((m) => m.src && m.name && m.name != 'No image');
+                        .map((match) => ({id: getAttributeValue(match, 'href')?.match(/pilotid=([0-9]+)/)?.[1], name: textContent(match)})) //
+                        .filter((m) => m.id && m.name && m.name != 'No image');
 
                     console.log('***** potentials ****');
                     console.table(potentials);
 
                     const filteredByName = potentials.filter((p) => names.every((n) => p.name!.match(new RegExp(`(^${n}| +${n})`, 'i'))));
 
-                    if (filteredByName.length == 1 && filteredByName[0]?.src) {
-                        console.log(`-> found using ${name} fai id: ${filteredByName[0].src}`);
-                        return parseInt(filteredByName[0].src);
+                    if (filteredByName.length == 1 && filteredByName[0]?.id) {
+                        const img = matches
+                            .filter((match) => match && getAttributeValue(match, 'href')?.match(/pilotid=([0-9]+)/)?.[1] == filteredByName[0].id)
+                            .map((row) => row && findOne((x) => isTag(x) && x.name == 'img', row.children))
+                            .map((img) => img && getAttributeValue(img, 'src'))
+                            .filter((src) => !!src);
+
+                        console.log(`-> found using ${name} fai id: ${filteredByName[0].id}, ${img}`);
+                        if (img.length && img[0]) {
+                            /*await*/ downloadPicture('https://rankingdata.fai.org/' + img[0], classid, compno);
+                        }
+                        return parseInt(filteredByName[0].id);
                     }
                     return undefined;
                 }
@@ -406,12 +415,12 @@ async function update_pilots(data) {
         const existing = (await mysql_db.query(escape`select fai, country from pilots where compno=${compno} and class=${classid}`)) ?? [];
         console.log('====>', compno, existing);
 
-        let fainumber = existing[0].fai;
-        if (!existing?.length || existing[0].fai < 300) {
-            fainumber = existing.length && existing[0].fai < 300 ? await findPilot(pilot.Contestant, existing[0].country, pilot.Club) : 0;
+        let fainumber = existing[0]?.fai;
+        if (!existing?.length || !fainumber || fainumber < 300) {
+            fainumber = existing.length && fainumber < 300 ? await findPilot(pilot.Contestant, existing[0].country, classid, compno) : 0;
 
             if (!fainumber) {
-                fainumber = existing[0]?.fai ? existing[0].fai + 300 : ++pilotnumber;
+                fainumber = ++pilotnumber;
             } else {
                 await download_picture(
                     compno,
@@ -892,22 +901,9 @@ async function download_picture(compno, classid, context) {
         });
 
         console.log(`downloading picture for ${classid}:${compno} from ${url}`);
-
-        const res = await fetch(url, {headers: {Referer: 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/'}});
-
-        if (res.status != 200) {
-            console.log(` ${classid}:${compno}: website returns ${res.status}: ${res.statusText}`);
-            continue;
-        }
-
-        const data = Buffer.from(await res.arrayBuffer());
-        if (data) {
-            await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
-                                  ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)`);
+        if (await downloadPicture(url, classid, compno)) {
             success = true;
             break;
-        } else {
-            console.log('no data');
         }
     }
 
@@ -915,6 +911,27 @@ async function download_picture(compno, classid, context) {
         console.log(` ${classid}:${compno}: image update failed`);
         await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, NULL, unix_timestamp() )
                                   ON DUPLICATE KEY UPDATE image=NULL, updated=values(updated)`);
+    }
+}
+
+async function downloadPicture(url: string, classid: string, compno: string) {
+    console.log(`downloading picture for ${classid}:${compno} from ${url}`);
+
+    const res = await fetch(url, {headers: {Referer: 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/'}});
+
+    if (res.status != 200) {
+        console.log(` ${classid}:${compno}: website returns ${res.status}: ${res.statusText}`);
+        return false;
+    }
+
+    const data = Buffer.from(await res.arrayBuffer());
+    if (data) {
+        await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
+                                  ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)`);
+        return true;
+    } else {
+        console.log('no data');
+        return false;
     }
 }
 
