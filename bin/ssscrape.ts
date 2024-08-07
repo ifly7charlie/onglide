@@ -420,16 +420,16 @@ async function update_pilots(data) {
             fainumber = existing.length && fainumber < 300 ? await findPilot(pilot.Contestant, existing[0].country, classid, compno) : 0;
 
             if (!fainumber) {
-                fainumber = ++pilotnumber;
-            } else {
+                fainumber = existing[0]?.fai ? existing[0].fai + 300 : ++pilotnumber;
+            }            
+        }
                 await download_picture(
                     compno,
                     classid, //
                     {igc_id: fainumber, compno: pilot.Contestant, class: classid, greg: pilot.Glider?.substring(0, 8)?.trim()}
                 );
-            }
-        }
 
+        
         await t.query(escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
