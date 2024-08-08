@@ -44,10 +44,12 @@ function PriorityQueue() {
  * Pathfinding starts here
  */
 export default class Graph<VertexType, WeightType extends number> {
+    name: string;
     vertices: Map<VertexType, Map<VertexType, WeightType>>;
 
-    constructor() {
+    constructor(name = 'unknown') {
         this.vertices = new Map<VertexType, Map<VertexType, WeightType>>();
+        this.name = name;
     }
 
     clone(existing: Graph<VertexType, WeightType>) {
