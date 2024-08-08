@@ -11,6 +11,8 @@ import https from 'node:https';
 
 import {readFileSync} from 'fs';
 
+import SunCalc from 'suncalc';
+
 // Helper function
 //import distance from '@turf/distance';
 import {point} from '@turf/helpers';
@@ -328,6 +330,7 @@ async function main() {
 
     {
         const datecode = await getDCode();
+        location.sunset = SunCalc.getTimes(new Date(getNow() * 1000), location.lat, location.lng).night.getTime();
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
@@ -498,6 +501,7 @@ async function main() {
     // Update competition information
     setInterval(async function () {
         const datecode = await getDCode();
+        location.sunset = SunCalc.getTimes(new Date(getNow() * 1000), location.lat, location.lng).night.getTime();
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
@@ -732,6 +736,8 @@ async function updateTrackers(datecode: Datecode) {
     let updatedGliderCount = 0;
     let loadedGliderCount = 0;
 
+    const afterSunset = getNow() > location.sunset;
+
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
     // unknowns as they won't be in the trackers pick
     const keyedDb = keyBy<CTrackerRow>(cTrackers, makeClassname_Compno);
@@ -741,7 +747,7 @@ async function updateTrackers(datecode: Datecode) {
             console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue.scoredStatus}`);
             return true; // removed or it has changed id
         }
-        return g.datecode != datecode;
+        return g.datecode != datecode || afterSunset;
     });
 
     // Now unsubsribe from each of them
@@ -802,7 +808,7 @@ async function updateTrackers(datecode: Datecode) {
                 if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown' && t.scoredStatus == 'S') {
                     const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
 
-                    if (flarmIDs && flarmIDs.length) {
+                    if (flarmIDs && flarmIDs.length && !afterSunset) {
                         // Tell APRS to start listening for the flarmid
                         const command: AprsCommandTrack = {
                             action: AprsCommandEnum.track, //
@@ -1228,7 +1234,7 @@ async function getInitialTrackPointsForReplay(channel: Channel): Promise<void> {
 }
 
 async function loadGliderPoints(glider: Glider): Promise<void> {
-    const now = getNow();
+    const now = Math.min(location.sunset, getNow()) as Epoch;
     const channel = channels[glider.channelName];
     //
     // Now we will fetch the points for the pilots

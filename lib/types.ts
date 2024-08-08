@@ -53,6 +53,7 @@ export interface AirfieldLocation {
     name: string;
     tz: TZ;
     tzoffset: number;
+    sunset: Epoch;
     lat: number;
     lng: number;
     officialDelay: Epoch;
