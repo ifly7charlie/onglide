@@ -482,9 +482,10 @@ async function process_day_task(day, classid, classname, keys) {
     }
 
     // Less likely to change for no reason
-    const safeTask = {...task_details};
-    delete safeTask['_links'];
-    delete safeTask['_embedded'];
+    const safeTask = {...task_details, ...(W ? {W, winddir} : {})};
+    for (const t of ['_links', '_embedded', 'info', 'notes', 'qnh', 'task_value', 'task_name']) {
+        delete safeTask[t];
+    }
 
     // So we don't rebuild tasks if they haven't changed
     const hash = createHash('sha256').update(JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points'])).update(JSON.stringify(safeTask)).digest('base64');
