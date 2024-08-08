@@ -454,6 +454,10 @@ export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs:
         leg++;
         previousPoint = point;
     }
+    while (leg < legs.length) {
+        saveLeg(leg, 0, undefined);
+        leg++;
+    }
     return (Math.round(distance * 10) / 10) as DistanceKM;
 }
 
