@@ -34,6 +34,10 @@ function PriorityQueue() {
     this.isEmpty = function () {
         return !this._nodes.length;
     };
+
+    this.length = function () {
+        return this._nodes.length;
+    };
 }
 
 /**
