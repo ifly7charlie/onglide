@@ -189,6 +189,8 @@ async function doIt() {
                         restart_delay: 30000,
                         max_restarts: 1000,
                         autorestart: true,
+                        wait_ready: true,
+                        listen_timeout: 240000,
                         log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
                     });
                 }
@@ -203,6 +205,8 @@ async function doIt() {
                         max_restarts: 30,
                         autorestart: true,
                         updateEnv: true,
+                        wait_ready: true,
+                        listen_timeout: 30000,
                         log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
                     };
 
