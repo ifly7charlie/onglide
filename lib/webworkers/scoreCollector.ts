@@ -28,6 +28,7 @@ type ScoreIdDetails = {
     mostRecentStart: Record<Compno, Epoch>;
     optionsForCompno: Record<Compno, {restartCount: number; scoreId: string}>;
     live: Record<Compno, boolean>;
+    state: 'starting' | 'aborted' | 'live';
 };
 
 //
@@ -52,7 +53,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     const getScoreIdDetails = (scoreId: string): ScoreIdDetails =>
         scoreIdDetails.has(scoreId) //
             ? scoreIdDetails.get(scoreId)!
-            : scoreIdDetails.set(scoreId, {allScores: {}, mostRecentStart: {}, optionsForCompno: {}, live: {}}).get(scoreId)!;
+            : scoreIdDetails.set(scoreId, {allScores: {}, mostRecentStart: {}, optionsForCompno: {}, live: {}, state: 'starting'}).get(scoreId)!;
 
     //  let oldestUpdate = Infinity;
     //    let newestUpdate = 0;
@@ -72,21 +73,31 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                 const numRunning = Object.keys(c.optionsForCompno).length;
                 const numCompnos = allGliders.size;
 
-                console.log(`[${id}]: ${className} ${numLive} live/${numRunning} run/${numCompnos} compno: [${scoreId}]`);
+                for (const [closeId, old] of scoreIdDetails.entries()) {
+                    if (closeId != scoreId) {
+                        console.log(`[${id}] ${className}/${compno}: closing ${closeId}`);
+                        if (old.optionsForCompno[compno]) {
+                            old.optionsForCompno[compno].restartCount++;
+                        }
+                    }
+                }
+
+                console.log(`[${id}] ${className}/${compno}: ${c.state} - ${numLive} live, ${numRunning} running, ${numCompnos} compnos [${scoreId}]`);
                 // if all are live
-                if (numLive == numRunning && numLive == numCompnos && scoreIdDetails.size > 1) {
-                    if (Object.values(c.optionsForCompno).some((o) => o.restartCount != 1)) {
-                        console.log(`[${id}]: received live for old scoring task ${scoreId} (all tasks ${[...scoreIdDetails.keys()].join(',')})`);
+                if (numLive == numRunning && numLive == numCompnos) {
+                    if (c.state === 'aborted' || Object.values(c.optionsForCompno).some((o) => o.restartCount != 1)) {
+                        console.log(`[${id}] ${className}: received live for old scoring task ${scoreId} (all tasks ${[...scoreIdDetails.keys()].join(',')})`);
                     } else {
-                        console.log(`[${id}]: recevied live for ${scoreId} closing old scoring tasks ${[...scoreIdDetails.keys()].join(',')}`);
-                        for (const [closeId, c] of scoreIdDetails.entries()) {
+                        console.log(`[${id}] ${className}: received live for ${scoreId} closing old scoring tasks ${[...scoreIdDetails.keys()].join(',')}`);
+                        for (const [closeId, old] of scoreIdDetails.entries()) {
                             if (closeId != scoreId) {
-                                console.log(`[${id}]: ${className} closing ${closeId}`);
-                                Object.values(c.optionsForCompno).forEach((option) => option.restartCount++);
+                                console.log(`[${id}] ${className}: closing ${closeId}`);
+                                Object.values(old.optionsForCompno).forEach((option) => option.restartCount++);
                                 scoreIdDetails.delete(closeId);
                             }
                         }
                         port.postMessage({compno: '_live', score: {live: score.live}, t: getNow(), scoreId});
+                        c.state = 'live';
                     }
                 }
             }
@@ -105,7 +116,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     // Return a function to
     return {
         collect: async function addToScoreCollector(compno: Compno, input: TaskScoresGenerator, scoreId: string) {
-            console.log(`[${scoreId}]: scoreCollect collect ${compno}`);
+            console.log(`[${scoreId}] ${className}: scoreCollect collect ${compno}`);
             allGliders.add(compno);
             const c = getScoreIdDetails(scoreId);
             c.optionsForCompno[compno] = Object.assign(c.optionsForCompno[compno] ?? {}, {restartCount: (c.optionsForCompno[compno]?.restartCount ?? 0) + 1, scoreId});
@@ -114,14 +125,14 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
         // Clear all scoring
         reset: function () {
             for (const compno in allGliders.keys()) {
-                console.log(`[ALL]: scoreCollect reset ${compno}`);
+                console.log(`[ALL] ${className}: scoreCollect reset ${compno}`);
                 this.clearGlider(compno);
             }
         },
         clearGlider: function (compno: Compno) {
             for (const scoreId in scoreIdDetails.keys()) {
                 const c = getScoreIdDetails(scoreId);
-                console.log(`[ALL]: scoreCollect clearGlider ${compno}: restartCount ${c.optionsForCompno[compno]?.restartCount}`);
+                console.log(`[ALL] ${className}: scoreCollect clearGlider ${compno}: restartCount ${c.optionsForCompno[compno]?.restartCount}`);
                 if (compno in c.optionsForCompno) {
                     c.optionsForCompno[compno].restartCount++;
                 }
@@ -134,10 +145,16 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
         },
         // Move from one score ID to another
         updateScoreId: function (oldScoreId: string, scoreId: string) {
-            console.log(`[${oldScoreId}->${scoreId}]: scoreCollect updateScoreId`);
+            if (oldScoreId === scoreId) {
+                return;
+            }
+            console.log(`[${oldScoreId}->${scoreId}] ${className}: scoreCollect updateScoreId`);
             const cO = scoreIdDetails.get(oldScoreId);
             const cN = getScoreIdDetails(scoreId);
             if (cO) {
+                const migrated: Compno[] = [],
+                    cancelled: Compno[] = [];
+
                 // If it hasn't already been put into the new scoreId then
                 // (which means it hasn't already been restarted) then
                 // we need to just move it over
@@ -153,8 +170,16 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                         delete cO.live[compno];
                         cN.mostRecentStart[compno] = cO.mostRecentStart[compno];
                         delete cO.mostRecentStart[compno];
+                        migrated.push(compno as Compno);
+                    } else {
+                        if (cO.state === 'starting') {
+                            cO.optionsForCompno[compno].restartCount++;
+                            cancelled.push(compno as Compno);
+                        }
                     }
                 });
+                cO.state = 'aborted';
+                console.log(`[${oldScoreId}->${scoreId}] ${className}: scoreCollect, migrated: ${migrated.join(',')}, cancelled: ${cancelled.join(',')}`);
             }
         }
     };
