@@ -260,7 +260,7 @@ export const OgnFeed = memo(
                             <PlaybackControls //
                                 className={vc}
                                 datecode={datecode}
-                                firstStart={availableScores.earliestScore}
+                                {...availableScores}
                                 replayTime={replayTime}
                                 setReplayTime={setReplayTime}
                                 tz={tz}
