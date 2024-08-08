@@ -1059,7 +1059,7 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
         ([earliestStart, earliestScore, latestScore], score) => [
             Math.min((score.utcStart ?? 0) < 10 ? Infinity : score.utcStart, earliestStart), //
             Math.min((score.t ?? 0) < 10 ? Infinity : score.t, earliestScore),
-            Math.max((score.t ?? 0) < 10 ? 0 : score.t, latestScore)
+            Math.max(score.utcFinish || ((score.t ?? 0) < 10 ? 0 : score.t), latestScore)
         ],
         [Infinity, Infinity, 0]
     ) as [Epoch, Epoch, Epoch];
@@ -1073,7 +1073,7 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
                 datecode: channel.datecode,
                 competition: '1', //
                 earliestScore: channel.earliestStart < Infinity ? channel.earliestStart : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
-                latestScore: channel.latestScore,
+                latestScore: channel.latestScore + 120,
                 scoreId: channel.liveScoreId
             },
             scores: {
