@@ -583,5 +583,5 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     }
 
     log(`Sending final startings for ${status.compno}`);
-    yield status;
+    yield {...status, tick: true, _: true} as any;
 };
