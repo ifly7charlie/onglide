@@ -168,32 +168,18 @@ export const scoresSlice = createSlice({
                 }
             } */
         ),
-        selectAllTimes: createSelector(
-            [(_state: RootState, t: Epoch | undefined) => t, (state: ScoresSliceState, t: Epoch | undefined) => (t ? null : state.scores), (state: ScoresSliceState, t: Epoch | undefined) => (t ? state.historical : null)],
-            (t: Epoch | undefined, scores: ScoreData | null, historical: HistoricalScoreData | null) => {
-                if (!t) {
-                    return _reduce(
-                        scores,
-                        (prev, current, key) => {
-                            prev[key] = {startUtc: current.utcStart, finishUtc: current.utcFinish};
-                            return prev;
-                        },
-                        {}
-                    );
-                }
-                return _reduce(
-                    historical,
-                    (result, scores, compno) => {
-                        const index = _sortedIndexBy(scores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
-                        if (index >= 0) {
-                            result[compno] = {startUtc: scores[index].utcStart, finishUtc: scores[index].utcFinish};
-                        }
-                        return result;
-                    },
-                    {}
-                );
-            }
-        ),
+        selectAllTimes: createSelector([(state: ScoresSliceState) => state.scores], (scores: ScoreData | null) => {
+            // this doesn't need to deal with history as there can only be one start/finish recorded as a restart
+            // obliterates any previous scoring
+            return _reduce(
+                scores ?? {},
+                (prev, current, key) => {
+                    prev[key] = {startUtc: current.utcStart, finishUtc: current.utcFinish};
+                    return prev;
+                },
+                {}
+            );
+        }),
         selectPilotScore: createSelector(
             [
                 //
