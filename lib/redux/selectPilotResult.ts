@@ -107,7 +107,7 @@ export const selectAuto = createSelector(
                     var speed = score.handicapped?.taskSpeed || score.actual?.taskSpeed || 0;
                     var distance = score.handicapped?.taskDistance || score.actual?.taskDistance || 0;
 
-                    console.log(score.compno, score.utcFinish, speed, distance, nowIsh, score.t);
+                    //                    console.log(score.compno, score.utcFinish, speed, distance, nowIsh, score.t);
                     if (score.utcFinish || (speed > 5 && speed < 300 && score.flightStatus == PositionStatus.Airborne && nowIsh - score.t < 1800)) {
                         sortKey = 10000 + Math.round(speed * 10);
                         value = Math.round(speed);

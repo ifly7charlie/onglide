@@ -6,6 +6,7 @@ import type {Epoch, Compno, SortKey} from '../types';
 import {PathLength} from '../types';
 
 import {selectAllTracks} from '../redux/tracksSlice';
+import {selectAllTimes} from '../redux/scoresSlice';
 import {useSelector} from '../redux';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
@@ -38,6 +39,7 @@ export function pilotsTrackLayer(
     fullPaths: PathLength
 ) {
     const trackData = useSelector((state) => selectAllTracks(state));
+    const startTimes = useSelector((state) => selectAllTimes(state));
 
     if (!trackData) {
         console.log('missing layers');
@@ -55,12 +57,18 @@ export function pilotsTrackLayer(
             return;
         }
 
+        const currentTime = props.replayTime || latestUpdate;
+        const clipStartAt = (startTimes[compno]?.startUtc ?? Infinity) - 30;
+
         // For all but selected gliders just show most recent track
         const tripsFiltering = {
-            currentTime: (props.replayTime || latestUpdate) - referenceDate - 2,
-            fadeTrail: fullPaths == PathLength.recent || (fullPaths == PathLength.selectedFull && !selected),
-            trailLength: recentTrackLength
+            currentTime: currentTime - referenceDate - 2,
+            fadeTrail: fullPaths == PathLength.recent || (fullPaths == PathLength.selectedFull && !selected) || currentTime <= clipStartAt,
+            trailLength: recentTrackLength,
+            startTime: currentTime > clipStartAt ? clipStartAt - 5 - referenceDate : 0
         };
+
+        console.log(tripsFiltering, startTimes[compno]);
 
         const getColor = sortKey == 'climb' ? {value: track.deckAdditional.climb, size: 3} : sortKey == 'aheight' ? {value: track.deckAdditional.aheight, size: 3} : undefined;
 

@@ -942,6 +942,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
     // Figure out the block that preceeds us, we do it a little late to allow reconnects to use websocket only
     const now = (channel.mostRecentPosition - 30) as Epoch;
     const base = now - webPathBaseTime; // determine the last block block
+    const firstPointTime = Math.min(channel.earliestStart ?? channel.earliestScore ?? 0, now - 120);
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
         console.log(`re-generateHistoricalTracks now: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
@@ -951,7 +952,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                 if (glider.className == channel.className) {
                     const p = glider.deck;
                     if (p) {
-                        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), Math.min(glider.scoredStart ?? glider.utcStart ?? 0, now - 120)), 0);
+                        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), firstPointTime), 0);
                         const end = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), now), 0);
                         const length = end - start;
                         console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
@@ -990,7 +991,7 @@ async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
             if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    const start = Math.max(0, Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), glider.webPathEndPosition));
+                    const start = Math.max(0, Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), channel.earliestStart ?? channel.earliestScore ?? 0), glider.webPathEndPosition));
                     const end = p.posIndex;
                     const length = end - start;
                     if (length) {
@@ -1023,7 +1024,7 @@ async function updateGliderTrack(channel: Channel, glider: Glider) {
     const toStream = {};
     const p = glider.deck;
     if (p) {
-        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), glider.scoredStart ?? glider.utcStart ?? 0), 0);
+        const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), channel.earliestStart ?? channel.earliestScore ?? 0), 0);
         const end = p.posIndex;
         const length = end - start;
         //        if (length) {
@@ -1072,7 +1073,7 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
                 className: channel.className,
                 datecode: channel.datecode,
                 competition: '1', //
-                earliestScore: channel.earliestStart < Infinity ? channel.earliestStart : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
+                earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
                 latestScore: channel.latestScore + 120,
                 scoreId: channel.liveScoreId
             },
