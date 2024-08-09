@@ -144,7 +144,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                         status.lastProcessedPoint = simplifyPoint(previousPoint);
                     }
                     let startIsCloseOrPassed = status.t + 59 > (status.utcStart ?? 0);
-                    if (lastTickStatus && !startIsCloseOrPassed) {
+                    if (lastTickStatus && !startIsCloseOrPassed && !status._) {
                         continue;
                     }
                     lastTickStatus = _clonedeep(status);
