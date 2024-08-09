@@ -255,7 +255,7 @@ function spawnScoringContestListener(config: ScoringConfig): Worker {
     }
     console.log(`Starting Scoring:${config.className} worker thread`);
 
-    return new Worker(__filename, {env: SHARE_ENV, workerData: config});
+    return new Worker(__filename, {env: SHARE_ENV, workerData: config, name: `${config.airfield}:${config.className}`});
 }
 
 if (!isMainThread) {

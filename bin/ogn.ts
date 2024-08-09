@@ -309,6 +309,7 @@ async function main() {
 
     console.log('Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL);
     console.log(`db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}`);
+    process.title = process.env.MYSQL_DATABASE ?? 'unknown';
 
     // Set the altitude offset for launching, this will take time to return
     // so there is a period when location altitude will be wrong for launches
