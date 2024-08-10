@@ -6,6 +6,8 @@
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
+import {toDateCode} from '../lib/datecode';
+
 // Helper
 const fetcher = (url) => fetch(url).then((res) => res.json());
 const https = require('node:https');
@@ -283,7 +285,7 @@ async function update_task(task) {
 
     // So we don't rebuild tasks if they haven't changed
     const hash = createHash('sha256').update(JSON.stringify(task)).digest('base64');
-    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=todcode(${convert_to_mysql_datetime(date)}) AND class=${classid}`);
+    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid}`);
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
         console.log(`${classid} - ${date}: task unchanged`);
@@ -306,19 +308,19 @@ async function update_task(task) {
         .query(
             escape`
             UPDATE compstatus SET starttime = COALESCE(${convert_to_mysql_time(date)},starttime)
-              WHERE datecode = todcode(${convert_to_mysql_datetime(date)})`
+              WHERE datecode = ${toDateCode(date)}`
         )
 
         // remove any old crud
-        .query(escape`DELETE FROM tasks WHERE datecode=todcode(${convert_to_mysql_datetime(date)}) AND class=${classid} AND task='B'`)
+        .query(escape`DELETE FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid} AND task='B'`)
 
         // and add a new one
         .query(
             escape`
-          INSERT INTO tasks (datecode, class, flown, description, distance, hdistance, duration, type, task, nostart, hash )
-             VALUES ( todcode(${convert_to_mysql_datetime(date)}), ${classid},
+          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, nostart, hash )
+             VALUES ( ${toDateCode(date)}, ${classid},
                       'N', ${task.taskName},
-                      0, 0, '00:00:00',
+                      '00:00:00',
                       ${tasktype}, 'B', ${convert_to_mysql_time(date)}, ${hash} )`
         )
 
@@ -361,12 +363,12 @@ async function update_task(task) {
                 let hi = 0; // only used when windicapping
                 query =
                     query +
-                    '( ?, todcode(?), ?, ?, ' + //
+                    '( ?, ?, ?, ?, ' + //
                     " ?,?, ?, ?, 0, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
 
                 values = values.concat([
                     'sgp',
-                    convert_to_mysql_datetime(date),
+                    toDateCode(date),
                     taskid,
                     i, //
                     leglength,
@@ -395,7 +397,7 @@ async function update_task(task) {
         // Remove the old task and legs for this class and date
         .query((r, ro) => {
             const taskid = ro[ro.length - 2].insertId;
-            return ['DELETE FROM tasks WHERE class=? AND taskid != ? AND datecode = todcode(?)', [classid, taskid, convert_to_mysql_datetime(date)]];
+            return ['DELETE FROM tasks WHERE class=? AND taskid != ? AND datecode = ?', [classid, taskid, toDateCode(date)]];
         })
         .query((r, ro) => {
             const taskid = ro[ro.length - 3].insertId;
@@ -412,7 +414,7 @@ async function update_task(task) {
         .query(
             escape`INSERT IGNORE INTO pilotresult
                ( class, datecode, compno, status, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable )
-             SELECT ${classid}, todcode(${date}),
+             SELECT ${classid}, ${toDateCode(date)},
                compno, '-', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N'
              FROM pilots WHERE pilots.class = ${classid}`
         )
@@ -422,7 +424,7 @@ async function update_task(task) {
             escape`INSERT INTO contestday (class, script, length, result_type, info, winddir, windspeed, daynumber, status,
                                                    notes, calendardate, datecode )
                                          VALUES ( 'sgp', LEFT('Sailplane Grand Prix',60), 0, 
-                                                  '', '', 0, 0, 1, 'Y', '', ${convert_to_mysql_datetime(date)}, todcode(${convert_to_mysql_datetime(date)}))
+                                                  '', '', 0, 0, 1, 'Y', '', ${convert_to_mysql_datetime(date)}, ${toDateCode(date)})
                                        ON DUPLICATE KEY
                                        UPDATE turnpoints = values(turnpoints), script = LEFT(values(script),60), length=values(length),
                                           result_type=values(result_type), info=values(info),
@@ -432,7 +434,7 @@ async function update_task(task) {
 
         // Update the last date for results
         .query(
-            escape`UPDATE compstatus SET resultsdatecode = GREATEST(todcode(${convert_to_mysql_datetime(date)}),COALESCE(resultsdatecode,todcode(${convert_to_mysql_datetime(date)})))
+            escape`UPDATE compstatus SET resultsdatecode = GREATEST(${toDateCode(date)},COALESCE(resultsdatecode,${toDateCode(date)}))
                        WHERE class=${classid}`
         )
 
