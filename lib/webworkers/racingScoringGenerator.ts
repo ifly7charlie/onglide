@@ -37,6 +37,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             // Wait for the start
             if ((!current.startConfirmed && !current.startFound) || !taskStatus.utcStart) {
                 if (flightStatus != taskStatus.flightStatus || isTick(taskStatus)) {
+                    log(compno, 'rsg: no start tick');
                     flightStatus = taskStatus.flightStatus;
                     yield taskStatus;
                 }
@@ -50,7 +51,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             compno = taskStatus.compno;
 
             // Make sure the task position or time has changed
-            if (lastClosestToNext === taskStatus.closestToNext && lastTime === taskStatus.t) {
+            if (!isTick(taskStatus) && lastClosestToNext === taskStatus.closestToNext && lastTime === taskStatus.t) {
                 continue;
             }
             lastClosestToNext = taskStatus.closestToNext;

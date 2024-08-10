@@ -7,8 +7,6 @@ import {updateTracks, updatePositions, selectTrackVersion, fetchOldTracks} from 
 import {updateScores} from '../redux/scoresSlice';
 import {updateOtherPilotsPositions} from '../redux/otherPilotsSlice';
 
-import {selectClassName} from '../redux/nowSlice';
-
 import {updateNow} from '../redux/nowSlice';
 
 import {updateClassAction} from '../redux/actions';
@@ -21,8 +19,6 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
     const dispatch = useDispatch();
     const oldChecksums = useSelector(selectTrackVersion);
 
-    const [otherPilots, setOtherPilots] = useState<OtherPilotData>({});
-
     const decoder = async (data: Buffer): Promise<void> => {
         return new Response(data).arrayBuffer().then(async (ab) => {
             const decoded = OnglideWebSocketMessage.decode(new Uint8Array(ab));
@@ -32,8 +28,7 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
 
             if (decoded.identifiers) {
                 console.log('identifiers', decoded.identifiers, decoded.t);
-                dispatch(updateClassAction(decoded.identifiers));
-                return;
+                dispatch(updateClassAction({...decoded.identifiers, t: decoded.t as Epoch}));
             }
 
             // Merge in changed tracks
@@ -61,16 +56,6 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
                 // Update the current class
                 dispatch(updatePositions({positions: decoded.positions.class[className].positions, t: decoded.t as Epoch}));
                 dispatch(updateOtherPilotsPositions({positions: decoded.positions, t: decoded.t as Epoch}));
-
-                /*
-                // And now update our other pilots list
-                Object.entries(decoded.positions.class).forEach(
-                    (
-                        [className, {positions}] //
-                    ) => positions.forEach((pos) => (otherPilots[makeClassname_Compno(className as ClassName, pos.c as Compno)] = pos as PositionMessage))
-                );
-
-                setOtherPilots(otherPilots); */
             }
 
             if (decoded.ka) {
@@ -83,7 +68,7 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
         });
     };
 
-    return {otherPilots, decoder};
+    return {decoder};
 }
 /*
 function mergePointToPilot(point: PilotPosition, trackData: TrackData) {

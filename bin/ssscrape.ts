@@ -11,7 +11,9 @@ import {Tabletojson} from 'tabletojson'; // tabletojson = require('tabletojson')
 import * as htmlparser from 'htmlparser2';
 //const htmlparser = require('htmlparser2');
 
-import {findOne, findAll, existsOne, removeElement, getChildren, getInnerHTML, getOuterHTML, textContent, getAttributeValue} from 'domutils';
+import {findOne, findAll, find, isTag, existsOne, removeElement, getChildren, getInnerHTML, getOuterHTML, textContent, getAttributeValue} from 'domutils';
+
+import getCountryISO3 from 'country-iso-2-to-3';
 
 import {Element} from 'domhandler';
 
@@ -28,7 +30,7 @@ import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import {getElevationOffset} from '../lib/getelevationoffset';
 // handle unkownn gliders
-import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
+import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
 import _groupby from 'lodash.groupby';
 import _forEach from 'lodash.foreach';
@@ -294,6 +296,53 @@ async function ssscrape(deep = false) {
             }
         });
 }
+import render from 'dom-serializer';
+
+async function findPilot(lastname: string, countrycode: string, classid: string, compno: string) {
+    const names = lastname.split(' ').reverse();
+
+    console.log(`checking ranking list for ${lastname} from ${countrycode}`);
+
+    for (const name of names) {
+        const possible = await fetch(`https://rankingdata.fai.org/SGP_SearchResults.php?surname=${name}&nationality=${getCountryISO3(countrycode) ?? ''}`)
+            .then((res) => res.text())
+            .then((body) => {
+                let dom = htmlparser.parseDocument(body);
+
+                const nameTable = findOne((x) => x.attribs?.class == 'RL_table_innerTable', dom.children);
+                if (nameTable) {
+                    const matches = find((x) => isTag(x) && x.name == 'a', nameTable.children, true, 100).map(toElement);
+
+                    const potentials = matches
+                        .map((match) => ({id: getAttributeValue(match, 'href')?.match(/pilotid=([0-9]+)/)?.[1], name: textContent(match)})) //
+                        .filter((m) => m.id && m.name && m.name != 'No image');
+
+                    console.log('***** potentials ****');
+                    console.table(potentials);
+
+                    const filteredByName = potentials.filter((p) => names.every((n) => p.name!.match(new RegExp(`(^${n}| +${n})`, 'i'))));
+
+                    if (filteredByName.length == 1 && filteredByName[0]?.id) {
+                        const img = matches
+                            .filter((match) => match && getAttributeValue(match, 'href')?.match(/pilotid=([0-9]+)/)?.[1] == filteredByName[0].id)
+                            .map((row) => row && findOne((x) => isTag(x) && x.name == 'img', row.children))
+                            .map((img) => img && getAttributeValue(img, 'src'))
+                            .filter((src) => !!src);
+
+                        console.log(`-> found using ${name} fai id: ${filteredByName[0].id}, ${img}`);
+                        if (img.length && img[0]) {
+                            /*await*/ downloadPicture('https://rankingdata.fai.org/' + img[0], classid, compno);
+                        }
+                        return parseInt(filteredByName[0].id);
+                    }
+                    return undefined;
+                }
+            });
+        if (possible) {
+            return possible;
+        }
+    }
+}
 
 async function update_class(className, data, dataHtml) {
     // Get the name of the class, if not set use the type
@@ -363,13 +412,30 @@ async function update_pilots(data) {
             return y;
         }
 
-        pilotnumber = pilotnumber + 1;
+        const existing = (await mysql_db.query(escape`select fai, country from pilots where compno=${compno} and class=${classid}`)) ?? [];
+        console.log('====>', compno, existing);
+
+        let fainumber = existing[0]?.fai;
+        if (!existing?.length || !fainumber || fainumber < 300) {
+            fainumber = existing.length && fainumber < 300 ? await findPilot(pilot.Contestant, existing[0].country, classid, compno) : 0;
+
+            if (!fainumber) {
+                fainumber = existing[0]?.fai ? existing[0].fai + 300 : ++pilotnumber;
+            }            
+        }
+                await download_picture(
+                    compno,
+                    classid, //
+                    {igc_id: fainumber, compno: pilot.Contestant, class: classid, greg: pilot.Glider?.substring(0, 8)?.trim()}
+                );
+
+        
         await t.query(escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
                            ${pilot.Contestant}, ${''}, ${pilot.Club}, null,
-                           ${pilotnumber}, '',
+                           ${fainumber}, '',
                            ${gravatar(pilot.Contestant)},
                            ${compno},
                            'Y',
@@ -648,15 +714,18 @@ async function process_day_results(classid, className, date, day_number, results
             mysql_db.query(escape`UPDATE pilots SET country = ${flag} where compno=${pilot} and class=${className}`);
         }
 
-        function cDate(d) {
+        function cDate(d: string | undefined) {
             if (d == undefined) {
                 return undefined;
             }
             let x = new Date();
             const p = d.match(/([0-9]{2}):([0-9]{2}):([0-9]{2})/);
-            x.setHours(p[1]);
-            x.setMinutes(p[2]);
-            x.setSeconds(p[3]);
+            if (!p) {
+                return undefined;
+            }
+            x.setHours(parseInt(p[1]));
+            x.setMinutes(parseInt(p[2]));
+            x.setSeconds(parseInt(p[3]));
             return x;
         }
 
@@ -691,6 +760,7 @@ async function process_day_results(classid, className, date, day_number, results
         };
 
         const finished = actuals > 0;
+        const scoredStatus = finished ? 'F' : actuald > 0 ? 'H' : 'S';
 
         // If there is data from scoring then process it into the database
         if ((row['#'] != 'DNF' && row['#'] != 'DNS') || finished) {
@@ -700,27 +770,25 @@ async function process_day_results(classid, className, date, day_number, results
                              start=TIME(COALESCE(${rStart},start)),
                              finish=TIME(COALESCE(${rFinish},finish)),
                              duration=COALESCE(TIMEDIFF(${rFinish},${rStart}),duration),
-                             scoredstatus= ${finished ? 'F' : 'H'},
-                             status = (CASE WHEN ((status = "-" or status = "S" or status="G") and ${finished} != "") THEN "F"
-                                        WHEN   ((status = "-" or status = "S" or status="G") and ${row.Finish} != "") THEN "H"
-                                        ELSE status END),
+                             statuschanged = (CASE WHEN (scoredstatus = ${scoredStatus}) THEN statuschanged
+                                        ELSE NOW() END),
                              datafromscoring = "Y",
+                             scoredstatus= ${scoredStatus},
                              speed=${scoredvals.as}, distance=${scoredvals.ad},
-                             hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd},
-                             daypoints=${parseInt(row.Points.replace(',', ''))}, dayrank=0, totalpoints=${0}, totalrank=${0}, penalty=${0}
+                             hspeed=${scoredvals.hs}, hdistance=${scoredvals.hd}
                           WHERE datecode=${dateCode} AND compno=${pilot} and class=${classid}`);
 
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );
             rows += r.affectedRows;
 
             // check the file to check tracking details
-            let {igcavailable} = (
-                await mysql_db.query(escape`SELECT igcavailable FROM pilotresult
-                                                              WHERE datecode=${dateCode} and compno=${pilot} and class=${classid}`)
-            )[0] || {igcavailable: false};
-            if ((igcavailable || 'Y') == 'N' && url) {
-                await processIGC(classid, pilot, location, date, url, https, mysql, () => {});
-                doCheckForOGNMatches = true;
+            let {igcavailable, trackerid} = (
+                await mysql_db.query(escape`SELECT igcavailable, trackerid FROM pilotresult pr left join tracker on tracker.compno = pr.compno and tracker.class=pr.class
+                                                              WHERE datecode=${dateCode} and pr.compno=${pilot} and pr.class=${classid}`)
+            )[0] || {igcavailable: false, trackerid: 'unknown'};
+            if ((igcavailable || 'Y') == 'N' && url && (trackerid ?? 'unknown') == 'unknown') {
+                await processIGC(classid, pilot, location, date, url, https, mysql_db, () => {});
+                doCheckForOGNMatches = true; //
             }
         }
     }
@@ -808,6 +876,60 @@ async function update_contest(contest_name, dates, site_name, url) {
             .query(escape`delete from tasks`)
             .commit();
         console.log('deep update requested, deleted everything');
+    }
+}
+
+// Fetch the picture from FAI rankings
+async function download_picture(compno, classid, context) {
+    // Check when it was last checked
+    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND image is not null AND unix_timestamp()-updated < 86400`))[0];
+
+    if (lastUpdated) {
+        console.log(`not updating ${compno} picture`);
+        return;
+    }
+
+    // Find all the updater urls
+    const urls = (await mysql_db.query(escape`SELECT url FROM scoringsource WHERE type='pictureurl'`)) as {url: string}[];
+    let success = false;
+
+    for (const u of urls) {
+        const url = u.url.replace(/\{([A-Z_]+)\}/gi, function (_, v) {
+            return v in context ? context[v] : '';
+        });
+
+        console.log(`downloading picture for ${classid}:${compno} from ${url}`);
+        if (await downloadPicture(url, classid, compno)) {
+            success = true;
+            break;
+        }
+    }
+
+    if (!success) {
+        console.log(` ${classid}:${compno}: image update failed`);
+        await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, NULL, unix_timestamp() )
+                                  ON DUPLICATE KEY UPDATE image=NULL, updated=values(updated)`);
+    }
+}
+
+async function downloadPicture(url: string, classid: string, compno: string) {
+    console.log(`downloading picture for ${classid}:${compno} from ${url}`);
+
+    const res = await fetch(url, {headers: {Referer: 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/'}});
+
+    if (res.status != 200) {
+        console.log(` ${classid}:${compno}: website returns ${res.status}: ${res.statusText}`);
+        return false;
+    }
+
+    const data = Buffer.from(await res.arrayBuffer());
+    if (data) {
+        await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
+                                  ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)`);
+        return true;
+    } else {
+        console.log('no data');
+        return false;
     }
 }
 

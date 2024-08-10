@@ -80,7 +80,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     const start = deck.posIndex;
 
     // Resize required
-    if (deck.posIndex >= deck.t.length) {
+    if (deck.posIndex + 2 >= deck.t.length) {
         const newLength = deck.posIndex + deckPointIncrement;
         deck.positions = resize(Float32Array, deck.positions, newLength * 3);
         deck.t = resize(Uint32Array, deck.t, newLength);
@@ -88,7 +88,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         deck.climbRate = resize(Int8Array, deck.climbRate, newLength);
     }
 
-    if (deck.segmentIndex + 2 >= deck.indices.length) {
+    if (deck.segmentIndex + 3 >= deck.indices.length) {
         deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
     }
 
@@ -116,7 +116,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
                 // without two points
                 pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
             }
-
+            deck.indices[deck.segmentIndex] = deck.posIndex;
             // Start a new segment, on the next point (which has not yet been pushed)
             deck.segmentIndex++;
         } else {
@@ -188,64 +188,4 @@ export function calculateAverage(deck: DeckData, index: number) {
 
     // Add them up
     return Math.round((10 * (deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2])) / (t - deck.t[start])) / 10;
-}
-
-//
-// If the pilot has started we can prune before the startline
-export function pruneStartline(deck: DeckData, startTime: Epoch): number | undefined {
-    //    console.log('pruneStartline', deck.compno, startTime);
-    // Keep 30 seconds before start
-    if (!deck || deck.t[0] >= startTime) {
-        //        console.log(`can't prune startline for ${deck?.compno} first point later than startTime ${startTime}`);
-        return undefined;
-    }
-
-    // Find the point in the array of times
-    let indexRemove = _sortedIndex(deck.t.subarray(0, deck.posIndex - 1), startTime);
-    if (!indexRemove || indexRemove == deck.posIndex - 1) {
-        console.log(`can't prune startline for ${deck.compno} no enough points yet ${indexRemove} == ${deck.posIndex}-1 [${deck.t[deck.posIndex - 1]} <= ${startTime}`);
-        return undefined;
-    }
-
-    // Find the index into the segments that is the index or above
-    let segmentPos = _sortedIndex(deck.indices.subarray(0, deck.segmentIndex), indexRemove);
-
-    // A segment starts on this position - we can remove all before
-    if (deck.indices[segmentPos] == indexRemove) {
-    }
-    // A segment starts one afterwards - this is tricky it means
-    // the start point was the last point of previous segment
-    // ie indexRemove points to the last point in the previous segment
-    else if (deck.indices[segmentPos] == indexRemove + 1) {
-        // in this case we will truncate the previous segment and keep one
-        // more point
-        segmentPos--;
-        indexRemove--;
-    }
-    // in segment keep this segment but remove the segment before
-    else {
-        segmentPos--;
-    }
-
-    // first we need to remove old segments - start with the older list as may be points in it
-    //    deck.recentIndices[0] = Math.max(deck.recentIndices[0] - indexRemove, 0);
-    //    deck.recentIndices[1] = Math.max(deck.recentIndices[1] - indexRemove, 0);
-
-    // Remove before
-    deck.indices = new Uint32Array(deck.indices.subarray(segmentPos).map((p) => Math.max(0, p - indexRemove)));
-
-    // Adjust the offsets and If we are removing anything then resze it down
-    deck.segmentIndex -= segmentPos;
-    // reduce the index
-    deck.posIndex -= indexRemove;
-    deck.indices[deck.segmentIndex] = deck.posIndex;
-
-    // And then take the end of the buffer for displaying data
-    deck.positions = deck.positions.slice(indexRemove * 3);
-    deck.agl = deck.agl.slice(indexRemove);
-    deck.t = deck.t.slice(indexRemove);
-    deck.climbRate = deck.climbRate.slice(indexRemove);
-
-    // this will reset all the vario calculations
-    return indexRemove;
 }

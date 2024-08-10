@@ -75,49 +75,57 @@ export const selectAuto = createSelector(
         (state: RootState, t: Epoch | undefined) => selectAllScores(state, t) ?? [], //
         (state: RootState, t: Epoch | undefined) => selectAllAGL(state, t)
     ],
-    (_t: Epoch | undefined, scores: ScoreData, altitudes): AllDisplayKeys =>
-        Object.values(scores).map((score) => {
-            const agl = altitudes[score.compno as Compno];
+    (t: Epoch | undefined, scores: ScoreData, altitudes): AllDisplayKeys => {
+        const nowIsh = t ? t : _reduce(scores, (m, v) => (v.t && v.t > m ? v.t : m), 0);
+        return Object.values(scores)
+            .map((score) => {
+                if (!score.compno) {
+                    return undefined;
+                }
+                const agl = altitudes[score.compno as Compno];
 
-            let sortKey: number = Infinity;
-            let value: any = undefined;
-            let suffix: string = '';
-            let converter: OptionalConverterFunction | null = null;
+                let sortKey: number = Infinity;
+                let value: any = undefined;
+                let suffix: string = '';
+                let converter: OptionalConverterFunction | null = null;
 
-            // If it is scored then distance or speed
-            // Before they start show altitude, sort to the end of the list
-            if (!score || score.flightStatus == PositionStatus.Unknown) {
-                sortKey = -2;
-                value = '-';
-            } else if (score.flightStatus == PositionStatus.Grid || (!score.utcStart && score.flightStatus == PositionStatus.Home)) {
-                sortKey = -1;
-                value = '-';
-            } else if (!score.utcStart) {
-                sortKey = agl / 10000;
-                value = agl;
-                converter = convertHeight;
-            } else {
-                // After start, it's speed if we have recent points and are airborne or finished
-                // or distance if they have distance, otherwise just height
-                var speed = score.handicapped?.taskSpeed || score.actual?.taskSpeed || 0;
-                var distance = score.handicapped?.taskDistance || score.actual?.taskDistance || 0;
-
-                if ((speed > 5 && speed < 300 && score.flightStatus == PositionStatus.Airborne) || score?.utcFinish) {
-                    sortKey = 10000 + Math.round(speed * 10);
-                    value = Math.round(speed);
-                    suffix = 'kph';
-                } else if (distance > 7.5) {
-                    sortKey = Math.round(distance * 10);
-                    value = Math.round(distance);
-                    suffix = 'km';
-                } else {
+                // If it is scored then distance or speed
+                // Before they start show altitude, sort to the end of the list
+                if (!score || score.flightStatus == PositionStatus.Unknown) {
+                    sortKey = -2;
+                    value = '-';
+                } else if (score.flightStatus == PositionStatus.Grid || (!score.utcStart && score.flightStatus == PositionStatus.Home)) {
+                    sortKey = -1;
+                    value = '-';
+                } else if (!score.utcStart) {
                     sortKey = agl / 10000;
                     value = agl;
                     converter = convertHeight;
+                } else {
+                    // After start, it's speed if we have recent points and are airborne or finished
+                    // or distance if they have distance, otherwise just height
+                    var speed = score.handicapped?.taskSpeed || score.actual?.taskSpeed || 0;
+                    var distance = score.handicapped?.taskDistance || score.actual?.taskDistance || 0;
+
+                    //                    console.log(score.compno, score.utcFinish, speed, distance, nowIsh, score.t);
+                    if (score.utcFinish || (speed > 5 && speed < 300 && score.flightStatus == PositionStatus.Airborne && nowIsh - score.t < 1800)) {
+                        sortKey = 10000 + Math.round(speed * 10);
+                        value = Math.round(speed);
+                        suffix = 'kph';
+                    } else if (distance > 7.5) {
+                        sortKey = Math.round(distance * 10);
+                        value = Math.round(distance);
+                        suffix = 'km';
+                    } else {
+                        sortKey = agl / 10000;
+                        value = agl;
+                        converter = convertHeight;
+                    }
                 }
-            }
-            return converter ? {compno: score.compno as Compno, sortKey, value, converter} : {compno: score.compno as Compno, sortKey, value, suffix};
-        })
+                return converter ? {compno: score.compno as Compno, sortKey, value, converter} : {compno: score.compno as Compno, sortKey, value, suffix};
+            })
+            .filter((t) => !!t);
+    }
 );
 
 export const selectSpeed = createSelector(
@@ -407,179 +415,6 @@ const selectHeightAgl = createSelector(
         });
     }
 );
-
-/*
-export const selectPilotResult = createSelector(
-    [
-        (_state: RootState, _sortKey: SortKey, t: Epoch | undefined, units: Units, tz: TZ) => t,
-        (_state: RootState, sortKey: SortKey, _t: Epoch | undefined) => sortKey,
-        (_state: RootState, _sortKey: SortKey, t: Epoch | undefined, units: number, tz: string) => t,
-        (state: RootState, _sortKey: SortKey, _t: Epoch | undefined) => selectAllScores(state ),
-        (state: RootState, _sortKey: SortKey, t: Epoch | undefined) => selectAllVarios(state, t)
-    ],
-    (t: Epoch | undefined, sortKey: SortKey, scores: ScoreData, varios: VarioData) => {
-        //
-        // Map function
-        function pilotSortKey(compno: Compno, score: PilotScore, vario: VarioData, t: Epoch | undefined): ShortDisplayKeys {
-            var newKey;
-            var suffix = '';
-            var displayAs: number | string | null = null;
-
-            // Make sure we actually have data..
-            if (!score && !vario) {
-                return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon: faCircleQuestion};
-            }
-
-            // Update delay numbers
-            const delay = t === undefined ? vario.delay : null;
-
-            let icon: IconDefinition | null = faCircleQuestion;
-
-            if (!score) {
-            } else if (score?.flightStatus == PositionStatus.Landed) {
-                icon = faCow;
-            } else if (score?.flightStatus == PositionStatus.Home) {
-                icon = faHouse;
-            } else if (score?.flightStatus == PositionStatus.Grid) {
-                icon = faCirclePause;
-            } else if (delay === null) {
-                icon = null;
-            } else if (delay > 100) {
-                icon = delay > 300 ? faSignal : faClock;
-            }
-
-            if (score?.utcFinish) {
-                icon = faTrophy;
-            } else if (vario?.agl < 50) {
-                // noop - done above
-            } else if (vario?.average > 1) {
-                icon = faCloudArrowUp;
-            } else {
-                icon = faPaperPlane;
-            }
-
-            if (!score && sortKey != 'height' && sortKey != 'aheight' && sortKey != 'auto') {
-                return {compno, sortKey: -9999999999999, displayAs: '-', units: '', icon};
-            }
-
-            const remaining = (a) => Math.round((a?.distanceRemaining || a?.minPossible || 0) * 10) / 10;
-
-            // data is in score.details.x
-            switch (sortKey) {
-                case 'start':
-                    if (score.utcStart) {
-                        [displayAs, suffix] = formatTime(score.utcStart, tz);
-                    }
-                    newKey = score.utcStart;
-                    break;
-                case 'finish':
-                    if (score.utcFinish) {
-                        [displayAs, suffix] = formatTime(score.utcFinish, tz);
-                    }
-                    newKey = score.utcFinish;
-                    break;
-                case 'duration':
-                    if (!score.utcStart) {
-                        displayAs = '-';
-                        suffix = '';
-                        newKey = '';
-                    } else {
-                        newKey = new Date(0);
-                        newKey.setSeconds((score.utcFinish ? score.utcFinish : t) - score.utcStart);
-                        const iso = newKey.toISOString();
-                        newKey = -newKey.getTime() / 1000;
-                        displayAs = iso.substr(11, 5);
-                        suffix = iso.substr(17, 2);
-                    }
-                    break;
-                case 'delay':
-                    // Delay not relevant if home or finished
-                    if (score.flightStatus == PositionStatus.Home || score?.utcFinish || delay === null) {
-                        displayAs = '-';
-                        suffix = '';
-                        newKey = '0';
-                    } else {
-                        newKey = delay;
-                        [displayAs] = delayToText(delay).split(' ');
-                    }
-                    break;
-                case 'ld':
-                    if (score?.utcFinish) {
-                        displayAs = 'finished';
-                        newKey = 99999;
-                        suffix = '';
-                    } else if ((score.handicapped?.grRemaining ?? 0) > 200) {
-                        displayAs = '∞';
-                        newKey = -9999;
-                        suffix = '';
-                    } else if ((score.handicapped?.grRemaining ?? 0) > 0) {
-                        displayAs = Math.round(score.handicapped!.grRemaining!);
-                        suffix = ':1';
-                        newKey = -displayAs;
-                    } else {
-                        displayAs = '-';
-                        newKey = -99998;
-                        suffix = '';
-                    }
-                    break;
-                case 'ald':
-                    if (score?.utcFinish) {
-                        displayAs = 'finished';
-                        newKey = 99999;
-                        suffix = '';
-                    } else if ((score.actual?.grRemaining ?? 0) > 200) {
-                        displayAs = '∞';
-                        newKey = -9999;
-                        suffix = '';
-                    } else if ((score.actual?.grRemaining ?? 0) > 0) {
-                        displayAs = Math.round(score.actual!.grRemaining!);
-                        suffix = ':1';
-                        newKey = -displayAs;
-                    } else {
-                        displayAs = '-';
-                        newKey = -99999;
-                        suffix = '';
-                    }
-                    break;
-                case 'done':
-                    newKey = score.handicapped?.taskDistance;
-                    suffix = 'km';
-                    break;
-                case 'auto':
-            }
-            if (!newKey) {
-                newKey = 0;
-                suffix = '';
-            }
-
-            if (displayAs !== null) {
-                if (!displayAs) {
-                    displayAs = '-';
-                }
-            } else {
-                if (newKey != '') {
-                    displayAs = newKey;
-                } else {
-                    displayAs = '-';
-                }
-            }
-
-            return {
-                compno,
-                sortKey: newKey,
-                displayAs,
-                units: suffix,
-                icon
-            };
-        }
-
-        return _sortBy(
-            _map(scores, (score, compno: Compno) => pilotSortKey(compno, score, varios[compno], t)),
-            ['sortKey', 'compno']
-        );
-    }
-);
-*/
 
 export const sortOrders = {
     auto: selectAuto,

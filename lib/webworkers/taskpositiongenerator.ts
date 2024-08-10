@@ -33,7 +33,7 @@ import {cloneDeep as _clonedeep} from 'lodash';
 
 import {checkIsInTP, checkIsInStartSector, stripPoints} from '../flightprocessing/taskhelper';
 
-const sleepInterval = parseInt(process.env.MIN_SCORING_EMIT_TIME_MS ?? '10000') || 10000;
+const sleepInterval = parseInt(process.env.MIN_SCORING_EMIT_TIME_MS ?? '30000') || 30000;
 
 //export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
@@ -52,6 +52,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
         };
     }
 
+    let lastTickStatus: TaskStatus | null = null;
     let status: TaskStatus = null;
     // Reset everything related to the current task
     function resetStart() {
@@ -123,11 +124,32 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
         try {
             // What time have we scored to
             status.t = current.value.t;
+            status._ = current.value._;
             status.compno = current.value.c as Compno;
 
             // We pass ticks through and then do nothing more
             if (isTick(current.value)) {
-                yield {...status, tick: true} as any;
+                const progress = (status?.closestToNext ?? 0) - (lastTickStatus?.closestToNext ?? 0);
+                let ok =
+                    !lastTickStatus?.closestToNext ||
+                    lastTickStatus.closestToNext > 0 ||
+                    status.flightStatus != lastTickStatus.flightStatus ||
+                    status.currentLeg != lastTickStatus.currentLeg ||
+                    (progress < 0 && -progress / lastTickStatus.closestToNext / lastTickStatus.closestToNext > 0.1) || // 10% of remaining distance at least
+                    (task.rules.aat && (status.inPenalty || status.inSector));
+
+                if (ok) {
+                    log('ok tick on isTick', status);
+                    if (previousPoint) {
+                        status.lastProcessedPoint = simplifyPoint(previousPoint);
+                    }
+                    let startIsCloseOrPassed = status.t + 59 > (status.utcStart ?? 0);
+                    if (lastTickStatus && !startIsCloseOrPassed && !status._) {
+                        continue;
+                    }
+                    lastTickStatus = _clonedeep(status);
+                    yield {...status, tick: true} as any;
+                }
                 continue;
             }
 
@@ -171,12 +193,18 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // If there is a specific start time and we are before it then
                 // do nothing,
                 if (point.t < task.rules.nostartutc - 10) {
+                    if (point._) {
+                        await setTimeout(Math.min((task.rules.nostartutc - 10 - point.t) * 1000, 10 * sleepInterval));
+                    }
                     continue;
                 }
 
                 // If the pilot has a specific utcStart time already then
                 // ignore before - this can happen if scored into soaringspot
                 if (status.utcStart && point.t < status.utcStart) {
+                    if (point._) {
+                        await setTimeout(Math.min((status.utcStart - point.t - 10) * 1000, 10 * sleepInterval));
+                    }
                     continue;
                 }
 
@@ -193,6 +221,13 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status.legs[0].exitTimeStamp = status.utcStart;
 
                     console.log(point.c, 'start reached', new Date(point.t * 1000).toISOString());
+
+                    // If we were not tracking at the start then we can assume a start point at the
+                    // start point... this will allow dog leg etc to calculate and may help with 'recovery'
+                    if (!previousPoint) {
+                        previousPoint = {...status.legs[0].points[0], ps: PositionStatus.Airborne, c: point.c, g: 0, a: 0};
+                    }
+
                     if (point._) {
                         yield status;
                         await setTimeout(sleepInterval);
@@ -292,6 +327,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     //                legStatus.altitude = point.a;
                     //                legStatus.points.push(simplifyPoint(point));
                     legStatus.points = [{t: point.t, a: point.a, lat: tp.nlat, lng: tp.nlng}];
+
+                    // explicity mark it as 'live' as it is a finish and the end of the flight
+                    // so we don't want to miss it.
+                    status._ = true;
+
+                    // Nowhere else to go
                     status.closestToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
                     // we are done scoring at this point so we can close the iterator and
@@ -303,7 +344,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     // we must see a point to complete this so nothing to do
                     if (point._) {
                         yield status;
-                        await setTimeout(sleepInterval);
+                        await setTimeout((1 / 10) * sleepInterval);
                     }
                     continue;
                 }
@@ -465,7 +506,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                 possibleAdvances.push({
                                     possiblePoints: [
                                         {
-                                            a: null,
+                                            a: 0,
                                             t: possibleT,
                                             lat: closestSectorPoint.geometry.coordinates[1],
                                             lng: closestSectorPoint.geometry.coordinates[0]
@@ -526,7 +567,11 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             if (point._) {
                 log(status);
                 yield status;
-                await setTimeout(sleepInterval);
+                if (task.rules.aat) {
+                    await setTimeout((status.inSector ? 2 : 1) * sleepInterval); // less often for in sector aat
+                } else {
+                    await setTimeout(Math.max((Math.min(status.closestToNext ?? Infinity, 25) / 25) * sleepInterval, 5000)); //
+                }
             }
         } catch (e) {
             console.log('Exception in taskPositionGenerator');
@@ -538,5 +583,5 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     }
 
     log(`Sending final startings for ${status.compno}`);
-    yield status;
+    yield {...status, tick: true, _: true} as any;
 };

@@ -171,7 +171,7 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
             break;
 
         case 'sector':
-            if (turnpoint.a1 != 180) {
+            if (turnpoint.a1 != 180 && turnpoint.r2 == 0) {
                 polypoints.push([ltlg.dlong(), ltlg.dlat()]);
             }
 
@@ -194,6 +194,7 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
                 }
 
                 polypoints = [].concat(polypoints, addArc((center - (turnpoint.a2 / 180) * Math.PI) as Radian, (center - (turnpoint.a1 * Math.PI) / 180) as Radian, ltlg, turnpoint.r2, false));
+                polypoints.push(polypoints[0]);
             }
             //turnpoint a2 has been configured and has a radius
             else if (turnpoint.a2 == 0 && turnpoint.r1 != turnpoint.r2 && turnpoint.r2 != 0) {
@@ -209,8 +210,8 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
 
     // Reduce precision
     polypoints.forEach((p) => {
-        p[0] = Math.round(100000.0 * p[0]) / 100000;
-        p[1] = Math.round(100000.0 * p[1]) / 100000;
+        p[0] = Math.fround(100000.0 * p[0]) / 100000;
+        p[1] = Math.fround(100000.0 * p[1]) / 100000;
     });
 
     // Generate the line list
@@ -452,6 +453,10 @@ export function sumPath(path: BasePositionMessage[], startLeg: number = 0, legs:
         }
         leg++;
         previousPoint = point;
+    }
+    while (leg < legs.length) {
+        saveLeg(leg, 0, undefined);
+        leg++;
     }
     return (Math.round(distance * 10) / 10) as DistanceKM;
 }

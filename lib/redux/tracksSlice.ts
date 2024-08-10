@@ -3,16 +3,16 @@
 //
 
 import {createSlice, createAsyncThunk} from '@reduxjs/toolkit';
-import {original} from 'immer';
 
 import type {PayloadAction} from '@reduxjs/toolkit';
 
 import {createSelector} from 'reselect';
 
-import {updatePilotStartTimeAction, updateClassAction, updateSortKeyAction} from './actions';
-import {selectNow} from './nowSlice';
+import {updateClassAction} from './actions';
 
-import {PilotPosition, OnglideWebSocketMessage, Identifiers} from '../protobuf/onglide';
+import type {RootState} from './store';
+
+import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 
 //const updateTracksAction = createAction<PilotTracks>('updateTracks');
 
@@ -30,12 +30,12 @@ import type {
 
 import {oldTracksUrl} from '../react/fixupUrls';
 
-import type {PilotTracks, PilotTrack, Positions} from '../protobuf/onglide';
+import type {PilotTracks, PilotTrack} from '../protobuf/onglide';
 
-import {mergePoint, pruneStartline, calculateVario, calculateAverage, generateIndices} from '../flightprocessing/incremental';
+import {mergePoint, calculateVario, calculateAverage, generateIndices} from '../flightprocessing/incremental';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
-import {mergeVHPoint, initaliseVH, pruneVHStartline} from '../react/deckvh';
+import {mergeVHPoint, initaliseVH} from '../react/deckvh';
 
 interface TracksSliceState {
     className: ClassName;
@@ -43,6 +43,8 @@ interface TracksSliceState {
     latestUpdate: Epoch;
     tracks: TrackData;
     trackVersion: string;
+    baseTime: Epoch;
+    scoreId: string;
 }
 
 // Define the initial state using that type
@@ -51,7 +53,9 @@ const initialState: TracksSliceState = {
     dateCode: '' as Datecode,
     latestUpdate: 0 as Epoch,
     tracks: {},
-    trackVersion: ''
+    trackVersion: '',
+    baseTime: 0 as Epoch,
+    scoreId: ''
 };
 
 // Data for vario display
@@ -187,10 +191,12 @@ const _selectAllAGL = createSelector(
 // Find the old tracks
 export const fetchOldTracks = createAsyncThunk<{downloaded: PilotTracks; websocket: PilotTracks}, {baseTime: Epoch; className: ClassName; datecode: Datecode; residual: PilotTracks}>(
     'tracks/fetchOldTracks', //
-    async ({baseTime, datecode, className, residual}, {signal}) => {
-        return await fetch(oldTracksUrl(className, datecode, baseTime.toString()), {signal}) //
+    async ({baseTime, datecode, className, residual}, {signal, getState}) => {
+        const state = (getState() as RootState).tracks;
+        return await fetch(oldTracksUrl(className, datecode, baseTime.toString(), state.scoreId), {signal}) //
             .then((res) => res.arrayBuffer())
-            .then(async (ab) => ({downloaded: OnglideWebSocketMessage.decode(new Uint8Array(ab)).tracks, websocket: residual}));
+            .then(async (ab) => ({downloaded: OnglideWebSocketMessage.decode(new Uint8Array(ab)).tracks, websocket: residual}))
+            .catch(async (_ab) => ({downloaded: undefined, websocket: residual}));
     }
 );
 
@@ -204,28 +210,23 @@ export const tracksSlice = createSlice({
     },
     extraReducers: (builder) => {
         //
-        // New start time (from scoring), prune the startline to match it
-        builder.addCase(updatePilotStartTimeAction, (state, {payload: {compno, startUtc}}) => {
-            const track = state.tracks[compno];
-            if (track?.deck) {
-                const pruneTo = pruneStartline(track.deck!, startUtc);
-                if (pruneTo) {
-                    pruneVHStartline(track, pruneTo);
-                }
-            }
-        });
-
-        //
         // New class, needs to reset everything
-        builder.addCase(updateClassAction, (state, {payload: {className}}) => {
-            if (className != state.className && state.className) {
+        builder.addCase(updateClassAction, (state, {payload: {className, scoreId}}) => {
+            if (className != state.className) {
                 return {
                     className: className as ClassName,
                     dateCode: '' as Datecode,
                     latestUpdate: 0 as Epoch,
                     tracks: {},
-                    trackVersion: ''
+                    trackVersion: '',
+                    baseTime: 0 as Epoch,
+                    scoreId: scoreId
                 };
+            }
+            // If the score id has changed then we may have incomplete tracks
+            // this should trigger a reload of the history
+            if (state.scoreId != scoreId) {
+                state.scoreId = scoreId;
             }
         });
 
@@ -238,7 +239,9 @@ export const tracksSlice = createSlice({
         //
         // Http query of old tracks, load it and then load the one from websocket
         builder.addCase(fetchOldTracks.fulfilled, (state, action) => {
-            _updateTracks(state, {payload: action.payload.downloaded, type: action.type});
+            if (action.payload.downloaded) {
+                _updateTracks(state, {payload: action.payload.downloaded, type: action.type});
+            }
             _updateTracks(state, {payload: action.payload.websocket, type: action.type});
         });
     },
@@ -254,9 +257,6 @@ export const tracksSlice = createSlice({
         selectAllTracks: (state) => state.tracks,
         selectLatestUpdate: (state) => state.latestUpdate,
         selectTrackVersion: (state) => state.trackVersion,
-        /*            Object.values(state.tracks ?? {})
-                .map((g) => g.deck?.trackVersion.toString(16) ?? g.compno).sort()
-                .join(','), */
         selectNewestBaseTime: (state) => Object.values(state.tracks).reduce((oldest, track) => Math.max(oldest, track.t ?? 0), 0)
     }
 });
@@ -304,12 +304,12 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
     //    const state = original(draft);
     const tracks = action.payload;
 
-    console.log('UT-', state.trackVersion, tracks);
-
-    let x;
+    if (tracks.baseTime) {
+        state.baseTime = tracks.baseTime as Epoch;
+    }
 
     // Go through all of them and update the track version while including the data if required
-    state.trackVersion = x = Object.entries(tracks.pilots)
+    state.trackVersion = Object.entries(tracks.pilots)
         .map(([compno, track]: [Compno, PilotTrack]) => {
             if (!state.tracks[compno]) {
                 state.tracks[compno] = {compno: compno} as DisplayPilotTrackData;
@@ -392,7 +392,4 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
         })
         .sort()
         .join(',');
-
-
-    //    return state;
 }

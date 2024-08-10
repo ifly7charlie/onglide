@@ -79,26 +79,44 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         // How far through are we
         let position = 0;
         const now: Epoch = getNow();
+        let hiccup: Epoch = 0 as Epoch;
+
+        // Make sure we always have at least one entry for the glider, this should
+        // ensure we have a placeholder for every pilot regardless of flarm messages
+        // we use 1 so we don't get picked up as !t
+        yield {t: messageQueue[0]?.t || (1 as Epoch), c: compno, tick: true, _: false};
 
         //
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
         while (position < messageQueue.length && !messageQueue[position]?._ && messageQueue[position]?.t < now - inOrderDelay) {
             const message = messageQueue[position++];
-            const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
+            const nextPoint = yield {...message, _: false}; //position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
 
             // If we need to go backwards then do so
             if (nextPoint) {
                 for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+            } else if (message.t - hiccup > 60) {
+                hiccup = message.t;
+                const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
+                if (nextPoint) {
+                    for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+                }
             }
         }
 
-        // Make sure we always have at least one entry for the glider, this should
-        // ensure we have a placeholder for every pilot regardless of flarm messages
-        yield {t: (now - inOrderDelay) as Epoch, c: compno, tick: true, _: true};
+        // Flag that we have completed replay so we can tell that all gliders are live
+        // we use 2 so we don't get picked up as !t, and so we can tell it's live tick
+        yield {
+            //
+            t: (messageQueue.length ? messageQueue[Math.min(position, messageQueue.length - 1)]?.t : undefined) || (2 as Epoch),
+            c: compno,
+            tick: true,
+            _: true
+        };
 
         console.log(
-            `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue[position]?.t ?? 0) * 1000).toISOString()}`
+            `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue.at(-1)?.t ?? 0) * 1000).toISOString()}`
         );
 
         // Loop till we are told to stop (an exception on yield)
@@ -133,7 +151,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
                 // If we were woken without a message (ie a tick) then we need to just call with no data
                 if (!insertIndex && position == messageQueue.length) {
-                    const nextPoint = yield {c: compno, _: true, tick: true, t: getNow()};
+                    const nextPoint = yield {c: compno, _: true, tick: true, t: messageQueue.at(-1)?.t ?? getNow()};
 
                     // If we need to go backwards then do so (the iterator returns the time it wants to rewind to)
                     if (nextPoint) {

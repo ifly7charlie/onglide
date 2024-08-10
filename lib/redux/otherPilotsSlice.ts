@@ -22,7 +22,7 @@ import {makeClassname_Compno} from '../types';
 
 import type {ClassPositions} from '../protobuf/onglide';
 
-import {map as _map} from 'lodash';
+import {map as _map, reduce as _reduce} from 'lodash';
 
 interface OtherPilotsSliceState {
     positions: OtherPilotData;
@@ -43,14 +43,19 @@ const _selectAllPositions = createSelector(
         (_state: OtherPilotsSliceState, _className: ClassName, t: Epoch | undefined) => t,
         (state: OtherPilotsSliceState) => state.positions
     ],
-    (t: Epoch, className: ClassName, others: OtherPilotData) => {
-        const timeCutoff = (t == undefined ? Date.now() - 180 : t - 180) as Epoch;
-        return _map(others, (pos, key) => ({
-            className: key.split('_')[0],
-            compno: pos.c,
-            ...pos,
-            position: [pos.lng, pos.lat, pos.a]
-        })).filter((p) => p.t > timeCutoff && p.className != className);
+    (className: ClassName, t: Epoch | undefined, others: OtherPilotData) => {
+        try {
+            const timeCutoff = (t == undefined ? Math.trunc(Date.now() / 1000) - 180 : t - 180) as Epoch;
+            const m = _map(others, (pos, key) => ({
+                className: key?.split('_')?.[0],
+                compno: pos.c,
+                ...pos,
+                position: [pos.lng, pos.lat, pos.a]
+            }));
+            return m.filter((p) => p.t > timeCutoff && p.className != className);
+        } catch (e) {
+            console.error(e);
+        }
     }
 );
 

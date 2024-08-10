@@ -70,10 +70,11 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         //
         const score: PilotScore = {
             t: item.t,
+            live: item._ ?? false,
             compno: compno,
 
-            utcStart: item.utcStart,
-            utcFinish: item.utcFinish,
+            utcStart: item.utcStart ?? 0,
+            utcFinish: item.utcFinish ?? 0,
             flightStatus: item.flightStatus,
             inSector: item.inSector,
             inPenalty: item.inPenalty,
@@ -232,9 +233,6 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             }
         }
 
-        if (!process.env.REPLAY && Date.now() / 1000 - score.t > 930) {
-            console.log(score.compno, 'scored delay:', (Date.now() / 1000 - score.t).toFixed(0));
-        }
         yield score;
     }
 

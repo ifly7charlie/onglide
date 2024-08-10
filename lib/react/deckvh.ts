@@ -41,12 +41,6 @@ export function initaliseVH(glider: DisplayPilotTrackData): void {
     };
 }
 
-export function pruneVHStartline({deckAdditional}: DisplayPilotTrackData, indexRemove: number) {
-    deckAdditional.tr = deckAdditional.tr.slice(indexRemove);
-    deckAdditional.climb = deckAdditional.climb.slice(indexRemove * 3);
-    deckAdditional.aheight = deckAdditional.aheight.slice(indexRemove * 3);
-}
-
 export function mergeVHPoint(point: PositionMessage | PilotPosition, {deckAdditional, deck}: DisplayPilotTrackData, position: number) {
     // Resize required
     const newLength = position + deckPointIncrement;

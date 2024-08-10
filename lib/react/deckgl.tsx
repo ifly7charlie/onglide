@@ -59,7 +59,6 @@ export default function MApp(props: {
     tz: string;
     viewport: any;
     setViewport: Function;
-    otherPilots: OtherPilotData;
     status: string; // status line
     replayTime: Epoch;
 }) {
@@ -264,9 +263,6 @@ export default function MApp(props: {
 
     const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime ?? latestUpdate);
 
-    // If we are displaying other pilots
-    const otherPilotLayer = props.options.showOthers ? otherPilotsLayer(props.otherPilots, vc, mapLight, map2d, props.replayTime) : null;
-
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
@@ -281,16 +277,18 @@ export default function MApp(props: {
                 map.setLayoutProperty('contour-line', 'visible', !mapStreet ? 'none' : 'visible');
             }
         } catch (e) {}
-    }, [mapStreet]);
+    }, [mapStreet, mapRef?.current]);
     useEffect(fixupMap, [mapStreet, mapRef?.current]);
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
-        console.log('onDragStart');
         if (follow) {
             setFollow(false);
         }
     }, [setFollow, follow]);
+
+    // If we are displaying other pilots
+    const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
     return (
         <Map //
@@ -548,7 +546,7 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): 
             id: 'tp',
             type: 'fill',
             paint: {
-                'fill-opacity': 0.6,
+                'fill-opacity': 0.25,
                 'fill-color': [
                     'case',
                     ['==', !selectedPilot, true],

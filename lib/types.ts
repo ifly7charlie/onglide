@@ -19,6 +19,7 @@ export type SpeedKPH = number & As<'SpeedKPH'>;
 export type Compno = string & As<'Compno'>;
 export type ClassName = string & As<'ClassName'>;
 export type ChannelName = string & As<'ChannelName'>;
+export type TaskVersion = string & As<'TaskVersion'>;
 
 export type TZ = string & As<'TZ'>;
 
@@ -52,6 +53,7 @@ export interface AirfieldLocation {
     name: string;
     tz: TZ;
     tzoffset: number;
+    sunset: Epoch;
     lat: number;
     lng: number;
     officialDelay: Epoch;
@@ -202,6 +204,7 @@ export interface TaskStatus extends TimeStampType {
 
     // Who are we ;)
     compno: Compno;
+    _?: boolean;
 }
 
 //

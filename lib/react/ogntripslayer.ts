@@ -24,9 +24,41 @@ interface OgnTripsData {
     g: Int16Array;
 }
 
-export class OgnTripsLayer extends TripsLayer<OgnTripsData> {
+type _OgnTripsLayerProps<DataT = unknown> = {
+    startTime?: number;
+};
+
+const uniformBlock = `\
+uniform startUniforms {
+  float startTime;
+} starts;
+`;
+
+const startUniforms = {
+    name: 'starts',
+    fs: uniformBlock,
+    uniformTypes: {
+        startTime: 'f32'
+    }
+}; //as const satisfies ShaderModule<TripsProps>;
+
+export class OgnTripsLayer extends TripsLayer<OgnTripsData, _OgnTripsLayerProps> {
     constructor(a) {
         super(a);
+    }
+
+    static layerName = 'OgnTripsLayer';
+
+    getShaders() {
+        const shaders = super.getShaders();
+        shaders.inject['fs:#decl'] += `
+uniform float startTime;
+`;
+        shaders.inject['fs:#main-start'] += `
+if(vTime < startTime) {
+discard;
+}`;
+        return shaders;
     }
 
     initializeState() {
@@ -39,6 +71,18 @@ export class OgnTripsLayer extends TripsLayer<OgnTripsData> {
                 update: this.calculatePickingColors
             }
         });
+    }
+
+    draw(params) {
+        const {startTime} = this.props;
+        //        const startProps = {startTime: startTime ?? 0};
+        //        const model = this.state.model!;
+        //        model.shaderInputs.setProps({starts: startProps});
+        params.uniforms = {
+            ...params.uniforms,
+            startTime: startTime ?? 0
+        };
+        super.draw(params);
     }
 
     // Deckgl generates an offscreen pixmap that it renders z-order into and the

@@ -7,6 +7,7 @@ import Slider from '@mui/material/Slider';
 import {useSelector, useDispatch} from '../redux';
 import {fetchOldScores} from '../redux/scoresSlice';
 import {selectLatestUpdate} from '../redux/tracksSlice';
+import {selectOnline} from '../redux/nowSlice';
 
 const Widget = styled('div')(({theme}) => ({
     padding: 24,
@@ -71,12 +72,18 @@ const sliderSxReplay = {
     color: 'rgba(0,0,0,0.87)'
 };
 
+const sliderOffline = {
+    color: 'orange' //rgba(255,0,0,0.87)'
+};
+
 import type {TZ, Epoch, Datecode, ClassName} from '../types';
 
 const PlaybackControls = ({
     datecode,
     className,
-    firstStart,
+    earliestScore,
+    latestScore,
+    live,
     replayTime,
     setReplayTime,
     tz
@@ -84,8 +91,10 @@ const PlaybackControls = ({
 {
     datecode: Datecode;
     className: ClassName;
-    firstStart: Epoch;
+    earliestScore: Epoch;
+    latestScore: Epoch;
     replayTime: Epoch;
+    live: boolean;
     setReplayTime: (t: Epoch) => void;
     tz: TZ;
 }) => {
@@ -96,18 +105,21 @@ const PlaybackControls = ({
     }
 
     // Only update every 16 seconds (1<<4==16)
-    const latestUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4);
+    const latestTrackUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4); // from tracks
+    const replayEndTime = !live ? latestTrackUpdate : latestScore;
+
+    const online = useSelector(selectOnline);
 
     const dispatch = useDispatch();
     const doSetTime = React.useCallback(
         (t: Epoch | undefined) => {
-            const inReplay = !t || t >= latestUpdate - 60 ? false : true;
+            const inReplay = !t || t >= replayEndTime - 60 ? false : true;
             setReplayTime(inReplay ? t : undefined);
             if (inReplay) {
-                dispatch(fetchOldScores({t: t as Epoch, now: latestUpdate, className, datecode}));
+                dispatch(fetchOldScores({t: t as Epoch, now: replayEndTime, className, datecode}));
             }
         },
-        [dispatch, latestUpdate, className, datecode]
+        [dispatch, replayEndTime, className, datecode]
     );
 
     function formatTimes(t) {
@@ -120,7 +132,7 @@ const PlaybackControls = ({
         return `${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})}`;
     }
 
-    if (firstStart > latestUpdate) {
+    if (earliestScore > replayEndTime) {
         return null;
     }
 
@@ -128,27 +140,35 @@ const PlaybackControls = ({
         <SliderContainer>
             <Widget>
                 <BoxBefore>
-                    <TinyText>{formatTimes(firstStart)}</TinyText>
+                    <TinyText>{formatTimes(earliestScore)}</TinyText>
                     {replayTime ? <TinyText>{formatTimes(replayTime)}</TinyText> : null}
-                    <TinyText>{formatTimes(latestUpdate)}</TinyText>
+                    <TinyText>{formatTimes(replayEndTime)}</TinyText>
                 </BoxBefore>
                 <TimeSlider //
                     aria-label="time-indicator"
                     size="small"
-                    value={replayTime ?? latestUpdate}
-                    min={firstStart}
+                    value={replayTime ?? replayEndTime}
+                    min={earliestScore}
                     step={1}
-                    max={latestUpdate}
+                    max={replayEndTime}
                     onChange={(_, value) => doSetTime(value as Epoch)}
-                    sx={replayTime ? sliderSxReplay : undefined}
+                    sx={replayTime ? sliderSxReplay : !online ? sliderOffline : undefined}
                 />
                 <BoxAfter>
-                    {replayTime ? <TinyText>+{formatDuration(replayTime - firstStart)}</TinyText> : <TinyText sx={{opacity: 1}}>{'Live'}</TinyText>}
-                    <TinyText>+{formatDuration(latestUpdate - firstStart)}</TinyText>
+                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>{online ? 'Live' : 'Offline'}</TinyText>}
+                    <TinyText>+{formatDuration(replayEndTime - earliestScore)}</TinyText>
                 </BoxAfter>
             </Widget>
         </SliderContainer>
     );
 };
 
-export default React.memo(PlaybackControls, (a, b) => a.className == b.className && a.firstStart == b.firstStart && a.replayTime >> 4 == b.replayTime >> 4);
+export default React.memo(
+    PlaybackControls,
+    (a, b) =>
+        a.className == b.className && //
+        a.earliestScore == b.earliestScore &&
+        a.latestScore == b.latestScore &&
+        a.live == b.live &&
+        a.replayTime >> 4 == b.replayTime >> 4
+);

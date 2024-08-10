@@ -48,14 +48,16 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                     // If we have not had a point then we are unknown
                     nextArg = yield {ps: PositionStatus.Unknown, ...current.value};
                     continue;
-                } else if (current.value.t - previousPoint.t > 120) {
+                } else {
+                    // if (current.value.t - previousPoint.t > 120) {
                     // If we have had a point then we should report tick but with that status
                     nextArg = yield {ps: previousPoint.ps, ...current.value};
                     continue;
-                } else {
-                    // don't tick too often and don't try and process a tick as it has no coordinates
-                    continue;
-                }
+                } //else {
+                // don't tick too often and don't try and process a tick as it has no coordinates
+                //                    console.log('supressing tick due to time', current.value.t, previousPoint.t);
+                //                    continue;
+                //                }
             }
 
             // Keep track of where we are
@@ -77,7 +79,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
             // We can't do any more without a previous point
             if (!previousPoint) {
-                point.ps = point.g >= 70 ? PositionStatus.Airborne : PositionStatus.Grid;
+                point.ps = point.g >= 150 ? PositionStatus.Airborne : PositionStatus.Grid;
                 previousPoint = point;
                 stationary = false;
                 nextArg = yield point;
@@ -103,7 +105,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                     }
                     stationary = true;
                 }
-            } else {
+            } else if (point.g > 150) {
                 point.ps = PositionStatus.Airborne;
                 airborneFound = true;
             }

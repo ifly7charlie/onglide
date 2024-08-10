@@ -52,6 +52,7 @@ FROM productionbase AS ogn
 WORKDIR /onglide
 COPY --from=ognbuildimage /onglide/dist .
 COPY ./.env ./.env.local
+RUN touch .docker
 EXPOSE 3000
 
 

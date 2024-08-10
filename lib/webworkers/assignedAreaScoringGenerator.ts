@@ -1,8 +1,7 @@
 import Graph from '../flightprocessing/dijkstras';
 
 import type {Epoch, DistanceKM, AltitudeAMSL, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
-
-import {PositionStatus} from '../types';
+import {isTick, PositionStatus} from '../types';
 
 import {cloneDeep as _clonedeep, keyBy as _keyby, sortBy as _sortby} from 'lodash';
 
@@ -46,8 +45,8 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             convexHull: [],
             lengthConvexHullGeneratedAt: 0,
             fingerPrint: '',
-            taskPoints: task.legs[tl.legno].coordinates.map((sPoint: [number, number]) => {
-                return {t: -tl.legno as Epoch, lat: sPoint[1], lng: sPoint[0]};
+            taskPoints: task.legs[tl.legno].coordinates.map((sPoint: [number, number], index) => {
+                return {t: (-tl.legno + index / 500) as Epoch, lat: sPoint[1], lng: sPoint[0]};
             })
         };
     });
@@ -61,17 +60,17 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
         return String(leg.entryTimeStamp || '-') + ',' + (leg.exitTimeStamp || '-') + ',' + ((leg?.points?.length ?? 0) * 10000 + leg.penaltyPoints?.length || 'np');
     }
 
-    let scoredStatus: CalculatedTaskStatus;
+    let scoredStatus: CalculatedTaskStatus = {} as CalculatedTaskStatus;
     let flightStatus: PositionStatus | undefined = undefined;
 
     for await (const current of taskStatusGenerator) {
         try {
-            const taskStatus = (scoredStatus = current);
-            log(current);
+            const taskStatus = Object.assign(scoredStatus, current);
+            log(taskStatus);
 
             // Wait for the start
             if (!current.startConfirmed && !current.startFound) {
-                if (flightStatus != taskStatus.flightStatus) {
+                if (flightStatus != taskStatus.flightStatus || isTick(taskStatus)) {
                     flightStatus = taskStatus.flightStatus;
                     yield taskStatus;
                 }
@@ -188,7 +187,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // To figure out the partial time we will generate a temporary object and copy
                     // the data into it, then we will add a link from current point to all the points
                     // in the previous sector so we can optimise properly
-                    var tempGraph = new Graph<BasePositionMessage, DistanceKM>();
+                    var tempGraph = new Graph<BasePositionMessage, DistanceKM>('tempGraph');
                     tempGraph.clone(aatGraph);
 
                     // If we are not in a sector it is a bit easier as it is just to the landout.  This is not
@@ -198,18 +197,19 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // and this is doing it to the centre of the sector rather than the nearest point - it will be right
                     // on circular sectors but not on wedges
                     //                log('  assuming leg end leg' + t + ', at ' + (minNextDistP ? minNextDistP : p) + ' mdp:' + minNextDistP + ', finish:' + finish);
+                    const isInSector = taskStatus.inSector || taskStatus.inPenalty;
 
-                    const intermediatePoint = taskStatus.closestToNextSectorPoint || taskStatus.lastProcessedPoint; // may be missing if restart and always further away after
+                    const intermediatePoint = taskStatus.closestToNextSectorPoint?.lat ? taskStatus.closestToNextSectorPoint : taskStatus.lastProcessedPoint;
                     const fakePoint: BasePositionMessage = {
                         a: 0 as AltitudeAMSL,
-                        t: (taskStatus.currentLeg + (taskStatus.inSector ? 1 : 0)) as Epoch, //
-                        lat: task.legs[taskStatus.currentLeg + (taskStatus.inSector ? 1 : 0)].nlat,
-                        lng: task.legs[taskStatus.currentLeg + (taskStatus.inSector ? 1 : 0)].nlng
+                        t: (taskStatus.currentLeg + (isInSector ? 1 : 0)) as Epoch, //
+                        lat: task.legs[taskStatus.currentLeg + (isInSector ? 1 : 0)].nlat,
+                        lng: task.legs[taskStatus.currentLeg + (isInSector ? 1 : 0)].nlng
                     };
 
                     const aatPreviousLeg = aatLegStatus[taskStatus.currentLeg - 1];
                     if (aatPreviousLeg) {
-                        if (taskStatus.inSector || taskStatus.inPenalty) {
+                        if (isInSector) {
                             const convexHull = aatLegStatus[taskStatus.currentLeg].convexHull;
                             // Unlink constructed distance as we can't use it - would be better to wait to link I think
                             for (const point of convexHull) {
@@ -236,35 +236,49 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                 for (const previousLegPoint of aatPreviousLeg.convexHull) {
                                     // Link each point in the sector to any point later in time - I think it's safe
                                     // to use convex hull as it's the furthest extent. Also link that to next point (fakePoint)
-                                    for (const firstSectorPointO of chForward) {
-                                        const firstSectorPoint = _clonedeep(firstSectorPointO);
+                                    for (const firstSectorPoint of chForward) {
+                                        tempGraph.addLink(firstSectorPoint, previousLegPoint, (1000 - distHaversine(firstSectorPoint, previousLegPoint)) as DistanceKM);
+                                    }
+                                }
+                                // Link each point in the sector to any point later in time - I think it's safe
+                                // to use convex hull as it's the furthest extent. Also link that to next point (fakePoint)
+                                let valid = false;
+                                for (const firstSectorPoint of chForward) {
+                                    const ls = lineString([
+                                        [firstSectorPoint.lng, firstSectorPoint.lat],
+                                        [fakePoint.lng, fakePoint.lat]
+                                    ]);
 
-                                        const ls = lineString([
-                                            [firstSectorPoint.lng, firstSectorPoint.lat],
-                                            [fakePoint.lng, fakePoint.lat]
-                                        ]);
+                                    const lsDistance = length(ls);
 
-                                        const lsDistance = length(ls);
-
-                                        for (const secondSectorPoint of chReversed) {
-                                            if (firstSectorPoint.t >= secondSectorPoint.t) {
-                                                break;
-                                            }
-                                            tempGraph.addLink(firstSectorPoint, previousLegPoint, (1000 - distHaversine(firstSectorPoint, previousLegPoint)) as DistanceKM);
-
-                                            const distScoredOnLine = Math.max(lsDistance - distHaversine(secondSectorPoint, fakePoint), 0);
+                                    for (const secondSectorPoint of chReversed) {
+                                        if (firstSectorPoint.t >= secondSectorPoint.t) {
+                                            break;
+                                        }
+                                        const distScoredOnLine = Math.max(lsDistance - distHaversine(secondSectorPoint, fakePoint), 0);
+                                        if (distScoredOnLine > 0) {
                                             const scoredTo = along(ls, distScoredOnLine);
 
                                             const intermediatePointL: BasePositionMessage = {
-                                                a: 0,
+                                                a: 0 + distScoredOnLine / 1000,
                                                 t: secondSectorPoint.t,
                                                 lat: scoredTo.geometry.coordinates[1],
                                                 lng: scoredTo.geometry.coordinates[0]
                                             };
 
+                                            //                                            console.log('add link', intermediatePointL.t, firstSectorPoint.t, 'along:', distScoredOnLine);
+                                            //                                            console.log('add link', fakePoint.t, intermediatePointL.t);
                                             tempGraph.addLink(intermediatePointL, firstSectorPoint, (1000 - distScoredOnLine) as DistanceKM);
                                             tempGraph.addLink(fakePoint, intermediatePointL, 0 as DistanceKM);
+                                            valid = true;
                                         }
+                                    }
+                                }
+                                // If we didn't find a 'change of direction towards next sector' then we need to link all the points to next TP directly
+                                if (!valid) {
+                                    for (const firstSectorPoint of chForward) {
+                                        //                                        tempGraph.addLink(firstSectorPoint, fakePoint, (1000 - distHaversine(firstSectorPoint, fakePoint)) as DistanceKM);
+                                        tempGraph.addLink(firstSectorPoint, fakePoint, 1000 as DistanceKM);
                                     }
                                 }
                             }
@@ -275,19 +289,21 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                     [taskStatus.closestSectorPoint.lng, taskStatus.closestSectorPoint.lat]
                                 ]);
                                 const lsDistance = length(ls);
-                                const scoredTo = along(ls, Math.max(lsDistance - taskStatus.closestToNext, 0));
+                                if (lsDistance > 0) {
+                                    const scoredTo = along(ls, Math.max(lsDistance - taskStatus.closestToNext, 0));
 
-                                const intermediatePointL: BasePositionMessage = {
-                                    a: 0,
-                                    t: -taskStatus.currentLeg as Epoch,
-                                    lat: scoredTo.geometry.coordinates[1],
-                                    lng: scoredTo.geometry.coordinates[0]
-                                };
+                                    const intermediatePointL: BasePositionMessage = {
+                                        a: 0,
+                                        t: -taskStatus.currentLeg as Epoch,
+                                        lat: scoredTo.geometry.coordinates[1],
+                                        lng: scoredTo.geometry.coordinates[0]
+                                    };
 
-                                log('add link', ppoint.t, intermediatePointL, 'along:', lsDistance, 'ctn', taskStatus.closestToNext);
-                                log('add link', intermediatePointL, fakePoint);
-                                tempGraph.addLink(ppoint, intermediatePointL, (1000 - lsDistance) as DistanceKM);
-                                tempGraph.addLink(intermediatePointL, fakePoint, 0 as DistanceKM);
+                                    //                                    console.log('add link', ppoint.t, intermediatePointL, 'along:', lsDistance, 'ctn', taskStatus.closestToNext);
+                                    //                                    console.log('add link', intermediatePointL, fakePoint);
+                                    tempGraph.addLink(ppoint, intermediatePointL, (1000 - lsDistance) as DistanceKM);
+                                    tempGraph.addLink(intermediatePointL, fakePoint, 0 as DistanceKM);
+                                }
                             }
                         } else {
                             console.log('missing closest sector point', JSON.stringify(taskStatus));
@@ -326,26 +342,39 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     //
 
                     // 1. Build the graphs
-                    const maxGraph = new Graph<BasePositionMessage, DistanceKM>();
-                    maxGraph.clone(aatGraph); // max possible graph, intialised for turnpoints flown but not finish
+                    if (!taskStatus.inSector && !taskStatus.inPenalty) {
+                        // MAX only changes if we have advanced a sector, as long as you are in the sector
+                        // we can assume you could fly to the maximum position even if you don't
+                        const maxGraph = new Graph<BasePositionMessage, DistanceKM>('maxGraph');
+                        maxGraph.clone(aatGraph); // max possible graph, intialised for turnpoints flown but not finish
+                        //                    maxGraph.removeVertex(fakeFinishPoint); // remove any previous solutions
 
-                    let previousLeg = aatLegStatus[taskStatus.currentLeg - 1];
-                    for (let legno = taskStatus.currentLeg; legno < task.legs.length; legno++) {
-                        for (const ppoint of previousLeg.convexHull.length ? previousLeg.convexHull : previousLeg.taskPoints) {
-                            for (const point of aatLegStatus[legno].taskPoints) {
-                                maxGraph.addLinkIfMissing(point, ppoint, () => (1000 - distHaversine(point, ppoint)) as DistanceKM);
+                        let previousLeg = aatLegStatus[taskStatus.currentLeg - 1];
+                        for (let legno = taskStatus.currentLeg; legno < task.legs.length; legno++) {
+                            for (const ppoint of previousLeg.convexHull.length ? previousLeg.convexHull : previousLeg.taskPoints) {
+                                for (const point of aatLegStatus[legno].taskPoints) {
+                                    maxGraph.addLinkIfMissing(point, ppoint, () => (1000 - distHaversine(point, ppoint)) as DistanceKM);
+                                }
                             }
+                            previousLeg = aatLegStatus[legno];
                         }
-                        previousLeg = aatLegStatus[legno];
-                    }
 
-                    const longestRemainingPath = maxGraph.findPath(startPoint, fakeFinishPoint as BasePositionMessage).reverse();
-                    log('longestRemainingPath', longestRemainingPath);
+                        const longestRemainingPath = maxGraph.findPath(startPoint, fakeFinishPoint as BasePositionMessage).reverse();
+                        log(taskStatus.compno, 'longestRemainingPath', longestRemainingPath);
+
+                        // First sum up the total maximum distance - could be different solution than current
+                        // score and covers whole flight
+                        scoredStatus.maxPossible = sumPath(longestRemainingPath, 0, task.legs, (leg, distance, point) => {
+                            if (point) {
+                                scoredStatus.legs[leg].maxPossible = {distance, point};
+                            }
+                        });
+                    }
 
                     // Next do distance remaining, it's shortest parth from current point to home
                     const updatedIntermediate = _clonedeep(intermediatePoint);
 
-                    const drGraph = new Graph<BasePositionMessage, DistanceKM>();
+                    const drGraph = new Graph<BasePositionMessage, DistanceKM>('drGraph');
                     const minRemainingFirstLeg = taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg;
                     for (const point of aatLegStatus[minRemainingFirstLeg].taskPoints) {
                         drGraph.addLink(updatedIntermediate, point, distHaversine(updatedIntermediate, point) as DistanceKM);
@@ -368,7 +397,9 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     });
 
                     sumPath(drPath.slice(1), taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg : taskStatus.currentLeg - 1, task.legs, (leg, distance, p) => {
-                        drPoints.push(p);
+                        if (p) {
+                            drPoints.push(p);
+                        }
                     });
 
                     // Finally we need to find min possible remaining task distance
@@ -376,7 +407,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // minimum distance from the next tp to the finish. AAT graph has all actuals
                     // and nothing beyond so we can add the rest of the mindistance track as
                     // fixed points
-                    const minGraph = new Graph<BasePositionMessage, DistanceKM>();
+                    const minGraph = new Graph<BasePositionMessage, DistanceKM>('minGraph');
                     minGraph.clone(aatGraph); // already linked up to current so can just link from current CvxHull
                     // to shortest points
 
@@ -394,15 +425,11 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     const shortestRemainingPath = minGraph.findPath(startPoint, fakeFinishPoint).reverse();
                     log('shortestRemainingPath', shortestRemainingPath);
 
-                    // First sum up the total maximum distance - could be different solution than current
-                    // score and covers whole flight
-                    scoredStatus.maxPossible = sumPath(longestRemainingPath, 0, task.legs, (leg, distance, point) => {
-                        scoredStatus.legs[leg].maxPossible = {distance, point};
-                    });
-
                     // Then add from where we are to the end of the task
                     scoredStatus.minPossible = sumPath(shortestRemainingPath, 0, task.legs, (leg, distance, point) => {
-                        scoredStatus.legs[leg].minPossible = {distance, point};
+                        if (point) {
+                            scoredStatus.legs[leg].minPossible = {distance, point};
+                        }
                     });
                 } else {
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
@@ -412,10 +439,6 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 // Reverse and output for logging...
                 scoredPoints = scoredPoints.reverse();
                 log('optimal path:', scoredPoints);
-
-                // We get them out backwards so switch it round and iterate, each node is named after its time
-                let previousPoint: BasePositionMessage | null = null;
-                let leg = 0;
 
                 scoredStatus.distance = sumPath(scoredPoints, 0, task.legs, (leg, distance, point) => {
                     log('SSD>', leg, distance, point);

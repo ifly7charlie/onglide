@@ -3,6 +3,7 @@ import {memo} from 'react';
 import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
+import {faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import {TZ, Compno, Units, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus, Options, SortKey} from '../types';
 
@@ -70,6 +71,13 @@ function PilotImage(props) {
     return <div className="ih" style={{backgroundImage: `url(/outline.gif)`}} />;
 }
 
+function sanitize(n: any) {
+    if (typeof n === 'number' && isNaN(n)) {
+        return '-';
+    }
+    return n;
+}
+
 function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any) {
     return (
         <li id={id} style={{width}}>
@@ -81,7 +89,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
             </a>
             <hr />
             <div className="summarycomponent">
-                <div className="main-text">{main.value}</div>
+                <div className="main-text">{sanitize(main.value)}</div>
                 {main.units ? <div className="units">{main.units}</div> : null}
                 <div className="main-icon">
                     <a href="#" title={main.description} className="tooltipicon">
@@ -92,7 +100,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
             <hr />
             {data1?.value != undefined ? (
                 <div className="summarycomponent">
-                    <div className="data-text">{data1.value}</div>
+                    <div className="data-text">{sanitize(data1.value)}</div>
                     {data1.units ? <div className="units">{data1.units}</div> : null}
                     <div className="data-icon">
                         <a href="#" title={data1.description} className="tooltipicon">
@@ -103,7 +111,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
             ) : null}
             {data2?.value !== undefined && data2.value !== null ? (
                 <div className="summarycomponent">
-                    <div className="data-text">{data2.value}</div>
+                    <div className="data-text">{sanitize(data2.value)}</div>
                     {data2.units ? <div className="units">{data2.units}</div> : null}
                     {data2.icon ? (
                         <div className="data-icon">
@@ -272,7 +280,7 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {
     );
 });
 
-export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) {
+export const Details = memo(function Details({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) {
     if (!pilot) {
         return null;
     }
@@ -324,7 +332,7 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
     // Figure out what to show based on the db status
     let flightDetails = null;
 
-    if (!score || !vario?.lat || score.flightStatus == PositionStatus.Unknown) {
+    if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
         flightDetails = <></>;
     } else if (!score?.utcStart) {
         if (score?.flightStatus == PositionStatus.Grid) {
@@ -397,12 +405,14 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
             <FontAwesomeIcon icon={solid('backward')} />
             &nbsp;
             {OptionalTime('', replayTime, tz)}
+            {process.env.NODE_ENV == 'development' && score ? OptionalTime(',', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
         </span>
     ) : uptodate ? (
         <span>
             &nbsp;
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
                 <FontAwesomeIcon icon={regular('square-check')} /> {Math.round(delay)}s delay
+                {process.env.NODE_ENV == 'development' && score ? ', ' + Math.round(latestUpdate - score?.t) + 's delay' + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
             </a>
         </span>
     ) : (
@@ -421,6 +431,7 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
                         {(vario?.lat || 0) > 0 ? <>&gt;1 hour ago</> : <>No tracking yet</>}
                     </>
                 )}
+                {process.env.NODE_ENV == 'development' && score ? ', ' + delayToText(latestUpdate - score?.t) + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
             </a>
         </span>
     );
@@ -466,11 +477,7 @@ export function Details({compno, pilot, units, tz, replayTime}: {compno: Compno;
             {flightDetails}
         </div>
     );
-}
-
-//<!--                <a title="Show Wind Shading" href="#" onClick={() => props.setOptions('windshade')}>
-//                  <Icon type="magic" /> -->
-//            </a>
+});
 
 // Display the current height of the pilot as a percentage bar, note this is done altitude not AGL
 // which is probably wrong
@@ -567,6 +574,7 @@ export const PilotList = memo(function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
+    live,
     setOptions,
     handicapped,
     now,
@@ -577,6 +585,7 @@ export const PilotList = memo(function PilotList({
     selectedPilot: Compno;
     setSelectedCompno: Function;
     options: Options;
+    live: boolean;
     setOptions: Function;
     handicapped: boolean;
     now: Epoch | undefined;
@@ -607,6 +616,28 @@ export const PilotList = memo(function PilotList({
         [selectedPilot]
     );
 
+    // Prevent unneeded re-render by using callbacks
+    const setSort = useCallback(
+        (o) => {
+            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
+        },
+        [order, handicapped, options]
+    );
+    const toggleVisible = useCallback(() => {
+        setVisible(!visible);
+    }, [visible]);
+
+    if (!live) {
+        return (
+            <div style={{width: '100%'}}>
+                <div style={{margin: '0 auto', width: 'fit-content'}}>
+                    <br />
+                    <FontAwesomeIcon icon={faSpinner} spin={true} /> Rescoring...
+                </div>
+            </div>
+        );
+    }
+
     // Generate the pilot list, sorted by the correct key
     const pilotComponents = pilotList.map((pilot) => {
         return (
@@ -620,17 +651,6 @@ export const PilotList = memo(function PilotList({
             />
         );
     });
-
-    // Prevent unneeded re-render by using callbacks
-    const setSort = useCallback(
-        (o) => {
-            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
-        },
-        [order, handicapped, options]
-    );
-    const toggleVisible = useCallback(() => {
-        setVisible(!visible);
-    }, [visible]);
 
     // Output the whole of the pilots list component
     return (

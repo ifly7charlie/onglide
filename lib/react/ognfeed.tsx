@@ -36,8 +36,9 @@ import {useWebsocketDecoder} from './useWebsocketDecoder';
 import PlaybackControls from './playbackcontrols';
 
 import dynamic from 'next/dynamic';
-import {selectNow, selectAvailableScoreTimes} from '../redux/nowSlice';
-import {useSelector} from '../redux';
+import {selectAvailableScoreTimes} from '../redux/nowSlice';
+import {useSelector, useDispatch} from '../redux';
+import {offline} from '../redux/nowSlice';
 
 const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     ssr: false,
@@ -94,9 +95,16 @@ export const OgnFeed = memo(
         const [follow, setFollow] = useState(false);
         const router = useRouter();
 
-        const mergeWsStatus = useCallback((state: any) => setWsStatus({...wsStatus, ...state}), [wsStatus, setWsStatus]);
+        const mergeWsStatus = useCallback(
+            (state: any) => {
+                console.log(new Date().toISOString(), 'WS:', state);
+                setWsStatus({...wsStatus, ...state});
+            },
+            [wsStatus, setWsStatus]
+        );
 
-        const {otherPilots, decoder} = useWebsocketDecoder({mergeWsStatus, className: vc, datecode});
+        const {decoder} = useWebsocketDecoder({mergeWsStatus, className: vc, datecode});
+        const dispatch = useDispatch();
 
         //        const now = useSelector(selectNow);
         const availableScores = useSelector(selectAvailableScoreTimes);
@@ -104,19 +112,24 @@ export const OgnFeed = memo(
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
 
-        /*        useEffect(() => {
-            console.log('VC URL EFFECT', socketUrl, vc, datecode);
+        useEffect(() => {
             if (socketUrl != proposedUrl(vc, datecode)) {
                 setSocketUrl(proposedUrl(vc, datecode));
             }
         }, [vc, datecode, !!socketUrl]);
-*/
+
         // We are using a webSocket to update our data here
         const {sendMessage} = useWebSocket(socketUrl, {
             reconnectAttempts: 15,
-            reconnectInterval: 2000 + Math.random() * 500, //(lastAttemptNumber: number) => (2 << (lastAttemptNumber >> 2)) * 1000 + Math.random() * 300,
+            reconnectInterval: (lastAttemptNumber: number) => {
+                mergeWsStatus({retry: lastAttemptNumber + 1});
+                return (1 << Math.max(lastAttemptNumber, 4)) * 1000 + Math.random() * 1200;
+            },
             retryOnError: true,
-            onOpen: (_a) => mergeWsStatus({state: 'open', retry: 0}),
+            shouldReconnect: () => true,
+            onOpen: (_a) => {
+                mergeWsStatus({state: 'open', retry: 0});
+            },
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
                 if (lastMessage.data === 'reload') {
@@ -131,21 +144,28 @@ export const OgnFeed = memo(
                     decoder(lastMessage.data);
                 }
             },
-
-            onError: (a) => {
-                console.warn(a, wsStatus);
-                wsStatus.state != 'closed' ? mergeWsStatus({state: 'retry', retry: (wsStatus.retry ?? 0) + 1}) : null;
+            onClose: (_a) => {
+                dispatch(offline());
+                mergeWsStatus({state: 'retry'});
             },
-            onReconnectStop: (_numAttempts) => mergeWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}) // clear status as offline
+            onError: (a) => {
+                wsStatus.state != 'closed' ? mergeWsStatus({state: 'retry'}) : null;
+            },
+            onReconnectStop: (_numAttempts) => mergeWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}), // clear status as offline
+            heartbeat: {
+                timeout: 30_000,
+                interval: 13_000
+            }
         });
 
         // Do we have a loaded set of details?
         const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
+        const connected = wsStatus.state == 'open' || (wsStatus.state == 'retry' && (wsStatus.retry ?? 0) < 2);
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
                 connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
-                retry: (wsStatus.retry ?? 0) < 4 && wsStatus.at ? null : [(wsStatus.at ? 'Rec' : 'C') + 'onnecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
+                retry: (wsStatus.retry ?? 0) < 2 && wsStatus.at ? null : [(wsStatus.at ? 'Rec' : 'C') + 'onnecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
                 closed: ['Connection to tracking is closed, please reload to reconnect', <FontAwesomeIcon icon={solid('link-slash')} />]
             }[wsStatus.state ?? 'open'];
 
@@ -209,40 +229,39 @@ export const OgnFeed = memo(
                         replayTime={replayTime}
                         viewport={viewport}
                         setViewport={setViewport}
-                        otherPilots={otherPilots}
                         selectedCompno={selectedCompno}
                         status={status}
                     />
                 </div>
                 <div className="resultsOverlay" key="results">
-                    {connectionStatus}
                     <div className="resultsUnderlay">
                         {notes && notes != '' && (
                             <>
-                                <br />
                                 <span style={{clear: 'both', color: 'red'}}>{notes}</span>
                                 <br />
                             </>
                         )}
                         <TaskDetails vc={vc} fitBounds={fitBounds} />
-                        {valid ? (
+                        {connectionStatus}
+                        {valid && connected ? (
                             <PilotList
                                 key="pilotList"
                                 pilots={pilots}
                                 selectedPilot={selectedCompno}
                                 setSelectedCompno={setCompno}
                                 now={replayTime}
+                                live={availableScores.live}
                                 tz={tz}
                                 options={options}
                                 setOptions={setOptions}
                                 handicapped={handicapped}
                             />
                         ) : null}
-                        {valid ? (
+                        {valid && connected ? (
                             <PlaybackControls //
                                 className={vc}
                                 datecode={datecode}
-                                firstStart={availableScores.earliestScore}
+                                {...availableScores}
                                 replayTime={replayTime}
                                 setReplayTime={setReplayTime}
                                 tz={tz}
