@@ -9,7 +9,7 @@ import {initialiseInsights, trackMetric, trackAggregatedMetric} from '../lib/ins
 import http from 'node:http';
 import https from 'node:https';
 
-import {readFileSync} from 'fs';
+import {readFileSync, existsSync} from 'fs';
 
 import SunCalc from 'suncalc';
 
@@ -339,13 +339,13 @@ async function main() {
         await finaliseScoreId();
     }
 
-    if ('PM2_HOME' in process.env) {
-        console.log('PM2: waiting for scoring to be completed...');
+    if ('PM2_HOME' in process.env || existsSync('.docker')) {
+        console.log('PM2/DOCKER: waiting for scoring to be completed...');
         const checkScoringNotReady = () => Object.values(channels).some((c) => !c.liveScoreId);
         while (checkScoringNotReady()) {
             await setTimeoutPromise(5000);
         }
-        console.log('PM2: starting http(s) listener');
+        console.log('PM2/DOCKER: starting http(s) listener');
     }
 
     if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
