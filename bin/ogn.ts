@@ -339,6 +339,15 @@ async function main() {
         await finaliseScoreId();
     }
 
+    if ('PM2_HOME' in process.env) {
+        console.log('PM2: waiting for scoring to be completed...');
+        const checkScoringNotReady = () => Object.values(channels).some((c) => !c.liveScoreId);
+        while (checkScoringNotReady()) {
+            await setTimeoutPromise(5000);
+        }
+        console.log('PM2: starting http(s) listener');
+    }
+
     if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
         try {
             const options = {
@@ -1066,7 +1075,8 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
         [Infinity, Infinity, 0]
     ) as [Epoch, Epoch, Epoch];
 
-    console.log(`sending all scores eScore: ${d(channel.earliestScore)}, eStart: ${d(channel.earliestStart)}, lScore: ${d(channel.latestScore)} t: ${d(t ?? 0)}`);
+    //    console.log(`sending all scores eScore: ${d(channel.earliestScore)}, eStart: ${d(channel.earliestStart)}, lScore: ${d(channel.latestScore)} t: ${d(t ?? 0)}`);
+    //    console.table(Object.values(channel.allScores).map((s) => [s.compno, d(s.t), d(s.utcStart), d(s.utcFinish)]));
 
     const updatedIdentifiers = OnglideWebSocketMessage.encode(
         {
@@ -1085,10 +1095,11 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
             ...(t ? {t} : {})
         } //
     ).finish();
+
     console.log(
-        `${channel.className}: sending identifiers after rebuild of scoring live:${channel.liveScoreId}, ${channel.scoreId != channel.liveScoreId ? 'rescore ' + channel.scoreId + ' in progress ' : ''}allScores length: ${
+        `${channel.className}: sending scores & identifiers: live:${channel.liveScoreId}, ${channel.scoreId != channel.liveScoreId ? 'rescore ' + channel.scoreId + ' in progress ' : ''}allScores length: ${
             updatedIdentifiers!.length
-        }`
+        } eScore: ${d(channel.earliestScore)}, eStart: ${d(channel.earliestStart)}, lScore: ${d(channel.latestScore)} t: ${d(t ?? 0)}`
     );
 
     channel.clients.forEach((client: any) => {
@@ -1111,8 +1122,16 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         }
         channel.liveScoreId = scoreId;
         sendAllScores(channel, t);
-        if (process?.send) {
-            process.send('ready');
+
+        const pendingChannels = Object.values(channels).filter((c) => !c.liveScoreId);
+        if (pendingChannels.length) {
+            console.log(`Channels not yet scored: ${pendingChannels.map((c) => `${c.className} (${c.datecode})`).join(', ')}`);
+        } else {
+            console.log('all channels scored');
+            if (process?.send) {
+                console.log('*** sent process ready');
+                process.send('ready');
+            }
         }
         return;
     }
