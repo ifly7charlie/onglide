@@ -316,7 +316,7 @@ async function main() {
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
-        //        await updateTasks();
+        await updateTasks();
         await finaliseScoreId();
     }
 
@@ -496,7 +496,7 @@ async function main() {
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
-        //        await updateTasks();
+        await updateTasks();
         await finaliseScoreId();
     }, 60 * 1000);
 }
@@ -953,7 +953,6 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
 async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
     // Make sure they are up to date (does nothing if they are)
     await generateHistoricalTracks(channel);
-    const now = getNow();
 
     const toStream = reduce(
         gliders,
