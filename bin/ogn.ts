@@ -166,6 +166,7 @@ interface Glider {
     duplicate: number;
     utcStart: Epoch;
     scoredStart: Epoch;
+    scoredFinish: Epoch;
     scoredStatus: 'S' | 'F' | 'H'; // from scoring
     scoringConfigured?: boolean;
 
@@ -769,10 +770,6 @@ async function updateTrackers(datecode: Datecode) {
     const keyedRemoved = keyBy(removedGliders, makeClassname_Compno);
     removedGliders.forEach((g) => {
         if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
-            const flarmIDs = _filter(g.dbTrackerId.split(','), (i) => i.match(/[0-9A-F]{6}$/i)) as string[];
-            if (flarmIDs && flarmIDs.length) {
-                // Tell APRS to start listening for the flarmid
-                console.log(`Stopping APRS Listener for glider ${g.className}:${g.compno} => ${flarmIDs.join(',')} [channel ${g.channelName}]`);
             aprsController?.untrackGlider(g.compno, g.className, g.channelName, g.dbTrackerId);
         }
         console.log(`${g.className}:${g.compno} terminating scoring as no flarm ids found [channel ${g.channelName}]`);
@@ -817,14 +814,14 @@ async function updateTrackers(datecode: Datecode) {
 
                     if (flarmIDs && flarmIDs.length && !afterSunset) {
                         // Tell APRS to start listening for the flarmid
-                    aprsController?.trackGlider(t.compno, t.className, glider.channelName, t.dbTrackerId);
-                    glider.flarmIdRegex = new RegExp(
-                        `^(${t.dbTrackerId
-                            .split(',')
-                            .filter((i: string) => i.match(/[0-9A-F]{6}$/i))
-                            .join('|')})`,
-                        'i'
-                    );
+                        aprsController?.trackGlider(t.compno, t.className, glider.channelName, t.dbTrackerId);
+                        glider.flarmIdRegex = new RegExp(
+                            `^(${t.dbTrackerId
+                                .split(',')
+                                .filter((i: string) => i.match(/[0-9A-F]{6}$/i))
+                                .join('|')})`,
+                            'i'
+                        );
                     }
                 }
 
@@ -835,7 +832,6 @@ async function updateTrackers(datecode: Datecode) {
                         const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
                         console.log(`Stopping APRS Listener for glider ${t.className}:${t.compno} => ${flarmIDs.join(',')}`);
                         aprsController?.untrackGlider(t.compno, t.className, glider.channelName, t.dbTrackerId);
-
                     }
                     //
                     else if (startUtcChanged || handicapChanged) {
@@ -1178,16 +1174,6 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         console.log(`${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
     }
 
-    const glider = gliders[makeClassname_Compno(channel.className, compno as Compno)];
-    if (glider && glider.scoredStart != (score.utcStart as Epoch)) {
-        // Reset the glider starting point, but also the channel so we don't use invalid
-        // mix of the two
-        console.log(`${compno}: start time changed from ${glider.scoredStart} to ${score.utcStart}, resetting tracks`);
-        glider.webPathEndPosition = 0;
-        channel.webPathBaseTime = 0 as Epoch;
-        channel.earliestStart = Math.min(channel.earliestStart, score.utcStart ?? Infinity) as Epoch;
-        glider.scoredStart = score.utcStart as Epoch;
-    }
     if (glider && glider.scoredFinish != (score.utcFinish as Epoch)) {
         // Reset the glider starting point, but also the channel so we don't use invalid
         // mix of the two

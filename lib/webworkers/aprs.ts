@@ -135,7 +135,7 @@ export class AprsController {
         const flarmIDs = trackerIds.split(',').filter((i) => i.match(/[0-9A-F]{6}$/i)) as string[];
         if (flarmIDs && flarmIDs.length) {
             // Tell APRS to start listening for the flarmid
-            console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
+            console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
             const command: AprsCommandTrack = {
                 action: AprsCommandEnum.track,
                 compno: compno, //
