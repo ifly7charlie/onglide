@@ -27,10 +27,19 @@ import distance from '@turf/distance';
 import {Coord, point} from '@turf/helpers';
 
 // For smoothing altitudes
-import KalmanFilter from 'kalmanjs';
+//import KalmanFilter from 'kalmanjs';
 
-import {PositionMessage} from './positionmessage';
-import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, Bearing, Speed} from '../types';
+import {getNow, readOnly} from '../now';
+
+import {PositionMessage} from '../types';
+interface InterimPositionMessage extends PositionMessage {
+    //    aircraft: Aircraft;
+    j?: Coord;
+    f: FlarmID; // id
+    o: string; // sender
+}
+
+import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
 
 // APRS connection
 let connection;
@@ -39,6 +48,9 @@ const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'gl
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
 import {trackMetric, initialiseInsights} from '../insights';
+//import {pathToFileURL} from 'node:url';
+
+import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
 
 export enum AprsCommandEnum {
     none,
@@ -47,11 +59,21 @@ export enum AprsCommandEnum {
     untrack
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | any;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
-    action: AprsCommandEnum; //= AprsCommandEnum.track
+    action: AprsCommandEnum.track;
+
+    className: ClassName;
+    channelName: string;
+    compno: string | Compno;
+    datecode: Datecode;
+    trackerId: string | string[];
+}
+
+export interface AprsCommandUntrack {
+    action: AprsCommandEnum.untrack;
 
     className: string | ClassName;
     channelName: string;
@@ -61,7 +83,7 @@ export interface AprsCommandTrack {
 
 // Exit
 export interface AprsCommandShutdown {
-    action: AprsCommandEnum; //= AprsCommandEnum.shutdown
+    action: AprsCommandEnum.shutdown;
 }
 
 export interface AprsListenerConfig {
@@ -85,10 +107,10 @@ const statistics = {
 interface Aircraft {
     compno: string;
     className: string;
-    trackers: string | string[];
+    trackers: FlarmID[];
 
     lastTime: number;
-    lastPoint?: Coord;
+    lastSent?: InterimPositionMessage;
     lastMoved?: number;
 
     kf?: any; // altitude smoothing
@@ -97,8 +119,20 @@ interface Aircraft {
 
     channel?: BroadcastChannel; // where to send packets
 
+    messages: InterimPositionMessage[]; // sorted array of all packets received for the glider
+
     // Logging for aircraft
     log: (...x) => void;
+
+    // Interval handler
+    interval: NodeJS.Timeout;
+}
+
+interface Tracker {
+    id: FlarmID;
+    index: number;
+    aircraft: Aircraft;
+    db: AbstractSublevel<DB, string | Uint8Array | Buffer, string, string> | undefined;
 }
 
 // Where is the airfield?
@@ -112,10 +146,20 @@ let unknownChannel: BroadcastChannel;
 const aircraft: Record<ClassName_Compno, Aircraft> = {};
 
 // Mapping by trackerid to aircraft record
-const trackers: Record<string, Aircraft> = {};
+const trackers: Record<FlarmID, Tracker> = {};
+
+// ID for each receiver
+let highestReceiverId: number = 0;
+const receivers: Record<string, number> = {};
 
 // And for sending message onwards - all we do here is fetch and enrich
-const channels: Record<string, BroadcastChannel> = {};
+const channels: Record<ChannelName, BroadcastChannel> = {};
+
+// Our persistence
+import {ClassicLevel} from 'classic-level';
+import type {AbstractSublevel} from 'abstract-level';
+class DB extends ClassicLevel<string, string> {}
+let db: Record<Datecode, DB> = {};
 
 //
 // Start a listener
@@ -131,8 +175,9 @@ export class AprsController {
         this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config});
     }
 
-    trackGlider(compno: Compno, className: ClassName, channelName: string, trackerIds: string) {
+    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string) {
         const flarmIDs = trackerIds.split(',').filter((i) => i.match(/[0-9A-F]{6}$/i)) as string[];
+        console.log('TRACKGLIDER', flarmIDs);
         if (flarmIDs && flarmIDs.length) {
             // Tell APRS to start listening for the flarmid
             console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
@@ -140,7 +185,8 @@ export class AprsController {
                 action: AprsCommandEnum.track,
                 compno: compno, //
                 className: className,
-                channelName: channelName,
+                channelName,
+                datecode,
                 trackerId: flarmIDs
             };
             this.worker.postMessage?.(command);
@@ -151,7 +197,7 @@ export class AprsController {
         if (flarmIDs && flarmIDs.length) {
             // Tell APRS to start listening for the flarmid
             console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
-            const command: AprsCommandTrack = {
+            const command: AprsCommandUntrack = {
                 action: AprsCommandEnum.untrack,
                 compno: compno, //
                 className: className,
@@ -181,63 +227,40 @@ if (!isMainThread && parentPort) {
 
         // Track a specific glider - this effectively associates the
         // tracker ID with the glider
-        if (task.action == AprsCommandEnum.track) {
-            const trackerObject: Aircraft = {
-                compno: task.compno,
-                className: task.className,
-                trackers: task.trackerId,
-
-                // Not had a message
-                lastTime: 0,
-                stationary: 0,
-                ground: true,
-
-                // Setup logging
-                log:
-                    task.compno == (process.env.NEXT_PUBLIC_COMPNO || '')
-                        ? function log() {
-                              console.log(task.compno, ...arguments);
-                          }
-                        : function log() {}
-            };
-
-            // Link the glider in
-            aircraft[task.className + '/' + task.compno] = trackerObject;
-
-            // Link the tracker(s) in
-            (typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId)?.forEach((t) => (trackers[t] = trackerObject));
-
-            // And make sure we have a channel for it
-            if (!channels[task.channelName]) {
-                channels[task.channelName] = new BroadcastChannel(task.channelName);
-            }
-
-            // And link the broadcast channel to it
-            aircraft[task.className + '/' + task.compno].channel = channels[task.channelName];
-            console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
-        }
-
-        if (task.action == AprsCommandEnum.untrack) {
-            // What are we removing
-            const toRemove = aircraft[makeClassname_Compno(task)];
-            if (!toRemove) {
-                return;
-            }
-
-            // remove the trackers
-            (typeof toRemove.trackers == 'string' ? [toRemove.trackers] : toRemove.trackers).forEach((t) => delete trackers[t]);
-
-            // Remove the glider details
-            delete aircraft[makeClassname_Compno(task)];
-            console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers}`);
+        switch (task.action) {
+            case AprsCommandEnum.track:
+                trackGlider(task);
+                break;
+            case AprsCommandEnum.untrack:
+                untrackGlider(task);
+                break;
         }
     });
 
     // Any unknown gliders get sent to this for identification
     unknownChannel = new BroadcastChannel('Unknown_' + workerData.competition);
 
-    // Let's listen
     startAprsListener(<AprsListenerConfig>workerData);
+}
+
+async function initDB(className: ClassName, datecode: Datecode) {
+    if (db[className + datecode]) {
+        return db[className + datecode];
+    }
+
+    const path = `${process.env.DB_PATH ?? '/tmp'}/aprs-${className}-${datecode}.db`;
+    const openedDb = (db[className + datecode] = new DB(path));
+    await openedDb.open().catch((e: any) => {
+        console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
+        return undefined;
+    });
+
+    if (!(openedDb?.status == 'open' || openedDb?.status == 'opening')) {
+        console.log(path, openedDb?.status, new Error('db status invalid'));
+        delete db[className + datecode];
+        return undefined;
+    }
+    return openedDb;
 }
 
 //
@@ -354,11 +377,95 @@ function startAprsListener(config: AprsListenerConfig) {
     }, 1 * 60 * 1000);
 }
 
+async function trackGlider(task: AprsCommandTrack) {
+    console.log('*** trackGlider ***', task.compno, task.trackerId);
+    const aircraft: Aircraft = {
+        compno: task.compno,
+        className: task.className,
+        trackers: task.trackerId as FlarmID[],
+
+        // Not had a message
+        lastTime: 0,
+        stationary: 0,
+        ground: true,
+
+        // Setup logging
+        log:
+            task.compno == (process.env.NEXT_PUBLIC_COMPNO || '')
+                ? function log() {
+                      console.log(task.compno, ...arguments);
+                  }
+                : function log() {},
+
+        messages: [],
+
+        interval: setInterval(() => processMessageQueue(aircraft), 1000)
+    };
+
+    // Link the glider in
+    aircraft[task.className + '/' + task.compno] = aircraft;
+
+    const db = await initDB(task.className, task.datecode);
+
+    // Link the tracker(s) in
+    const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
+
+    trackerList.forEach((id: string, index: number) => {
+        console.log('load tracker', aircraft.compno, id);
+        trackers[id] = {
+            id: id as FlarmID,
+            index,
+            aircraft,
+            db: db?.sublevel<string, InterimPositionMessage>(id, {})
+        };
+        loadPointsForTracker(trackers[id]);
+    });
+
+    // And make sure we have a channel for it
+    if (!channels[task.channelName]) {
+        channels[task.channelName] = new BroadcastChannel(task.channelName);
+    }
+
+    // And link the broadcast channel to it
+    aircraft[task.className + '/' + task.compno].channel = channels[task.channelName];
+    console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
+}
+
+function untrackGlider(task: AprsCommandUntrack) {
+    // What are we removing
+    const toRemove = aircraft[makeClassname_Compno(task)];
+    if (!toRemove) {
+        return;
+    }
+
+    // remove the trackers
+    toRemove.trackers.forEach((t) => {
+        const tracker = trackers[t];
+        tracker.db?.close();
+        delete trackers[t];
+    });
+
+    clearInterval(toRemove.interval);
+
+    // Remove the glider details
+    delete aircraft[makeClassname_Compno(task)];
+    console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers}`);
+}
+
+function sortKey(sender: string, tracker: Tracker | undefined): number {
+    const rid = (receivers[sender] ??= highestReceiverId++);
+    return (tracker?.index ?? 0) << (16 + (rid & 0xffff));
+}
+
+function messageSortKey(m: InterimPositionMessage): number {
+    return m.t; //sortKey(m.o, trackers[m.f]);
+}
+
 //
 // collect points, emit to competition db every 30 seconds
 async function processPacket(packet: aprsPacket) {
     // Flarm ID we use is last 6 characters, check if OGN tracker or regular flarm
-    const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6);
+    const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6) as FlarmID;
     const ognTracker = packet.sourceCallsign?.slice(0, 3) == 'OGN';
 
     // Lookup the altitude adjustment for the
@@ -386,144 +493,215 @@ async function processPacket(packet: aprsPacket) {
     // Check if the packet is late, based on previous packets for the glider
     const now = new Date().getTime() / 1000;
     const td = Math.floor(now - packet.timestamp);
-    let islate: boolean | null = null;
 
     statistics.msgsReceived++;
     statistics.aprsDelay += td;
 
-    // Helper function with some closures so we can report it properly
-    const sendMessage = (gl: number) => {
-        let message: PositionMessage = {
-            c: aircraft ? (aircraft.compno as Compno) : (flarmId as FlarmID),
-            lat: Math.round(packet!.latitude * 1000000) / 1000000,
-            lng: Math.round(packet!.longitude * 1000000) / 1000000,
-            a: altitude,
-            g: Math.round(Math.max(altitude - gl, 0)),
-            t: packet.timestamp as Epoch,
-            b: packet.course as Bearing,
-            s: (Math.round((packet.speed ?? 0) * 10) / 10) as Speed,
-            f: flarmId + ',' + sender,
-            l: islate
-        };
-
-        // Send the message to the correct place - if we don't know it
-        // (and it's low enough for a launch) then let somebody
-        // identify it for us, otherwise we'll send it for tracking
-        if (aircraft) {
-            aircraft.channel!.postMessage(message);
-        } else if (message.g < 750 /*m*/) {
-            unknownChannel.postMessage(message);
-        }
-    };
-
     // Look it up, have we had packets for this before?
-    const aircraft = trackers[flarmId];
+    const tracker = trackers[flarmId];
+    const aircraft = tracker?.aircraft;
     const airfieldDistance = distance(jPoint, airfieldLocation);
+    const agl = await getElevationOffset(packet.latitude, packet.longitude).then((e) => Math.round(Math.max(altitude - e, 0)));
+
+    if (altitude > 7500) {
+        return;
+    }
+
+    const message: InterimPositionMessage = {
+        c: aircraft ? (aircraft.compno as Compno) : (flarmId as FlarmID),
+        lat: Math.round(packet!.latitude * 1000000) / 1000000,
+        lng: Math.round(packet!.longitude * 1000000) / 1000000,
+        a: altitude,
+        g: agl,
+        t: packet.timestamp as Epoch,
+        b: packet.course as Bearing,
+        s: (Math.round((packet.speed ?? 0) * 10) / 10) as Speed,
+        f: flarmId,
+        o: sender,
+        l: null
+    };
 
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough
     if (!aircraft) {
         if (airfieldDistance < 20 && packet.altitude < airfieldElevation + 750) {
-            getElevationOffset(packet.latitude, packet.longitude, sendMessage);
+            unknownChannel.postMessage(message);
         }
-        return;
-    }
-
-    // Generate log function as it's quite slow to read environment all the time
-    if (!aircraft.log) {
-    }
-
-    if (!packet.altitude) {
-        console.log('unknown altitude in decoded packet', aircraft.compno, packet);
         return;
     }
 
     statistics.knownReceived++;
+    tracker.db?.put([message.t, sender].join('/'), JSON.stringify(message));
 
-    // Ignore duplicates
-    if ((aircraft.lastTime ?? 0) >= packet.timestamp) {
+    message.j = jPoint;
+
+    // Figure out where to insert (sorted by time)
+    const messageQueue = aircraft.messages;
+    const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
+    messageQueue.splice(insertIndex, 0, message);
+}
+
+//
+// Read the database for all points for a specific aircraft tracker
+//
+async function loadPointsForTracker(tracker: Tracker) {
+    if (!tracker.db) {
+        console.log('no database available for loading trackpoints');
         return;
     }
-
-    // Check to make sure they have moved or that it's been about 10 seconds since the last update
-    // this reduces load from stationary aircrafts on the ground and allows us to track stationary aircrafts
-    // better. the 1 ensures that first packet gets picked up after restart
-    // Also make sure the speed between points is < 330kph - ignoring ordering
-    const distanceFromLast = aircraft.lastPoint ? distance(jPoint, aircraft.lastPoint) : 1;
-    const speedBetweenKph = distanceFromLast / (Math.abs(packet.timestamp - (aircraft.lastMoved ?? 0)) / 3600);
-    if (distanceFromLast < 0.01) {
-        if (packet.timestamp - aircraft.lastTime < 10) {
-            aircraft.stationary++;
-            return;
+    const aircraft = tracker.aircraft;
+    try {
+        const messageQueue = aircraft.messages;
+        for await (const [key, messageJson] of tracker.db.iterator()) {
+            console.log(messageJson);
+            const message = JSON.parse(messageJson);
+            const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
+            message.j = point([message.lat, message.lng]);
+            messageQueue.splice(insertIndex, 0, message);
         }
+        console.log(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${messageQueue.length} points loaded`);
+    } catch (err) {
+        console.error(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${err}...`);
     }
+}
 
-    // Check if they are moving on the ground - we don't want to track this
-    const groundElevation = await getElevationOffset(packet.latitude, packet.longitude);
-    const aircraftElevation = altitude - groundElevation;
+//
+// This iterates through the queue on a regular basis and deals with each point
+// it also ensures time order and is where you can perform filtering for positioning
+// jumps or to prefer specific receivers.
+//
+// Note that we do not consume the message queue - it is used for scoring restarts etc
+// so all messages are kept.
+async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined = undefined, to: Epoch = getNow()) {
+    //
+    let lastSent = aircraft.lastSent;
+    let messages = aircraft.messages;
+    const start = from ?? aircraft.lastTime ?? 0;
+    const realNow = getNow();
+    let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
-    // If we had been stationary for a while and we are low enough to be on the ground
-    // then mark it as so
-    if (aircraft.stationary > 5 && aircraftElevation < 100) {
-        aircraft.ground = true;
-    }
-
-    // If we have 'taken' off
-    if (aircraft.ground && aircraftElevation > 100) {
-        aircraft.ground = false;
-    }
-
-    if (aircraft.ground && airfieldDistance > 3) {
-        return;
-    }
-
-    if (speedBetweenKph > 450 /*kph*/) {
+    if (position < messages.length) {
         console.log(
-            `IGNORING JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${
-                packet.speed
-            }, ${distanceFromLast}km ${speedBetweenKph.toFixed(1)}kph ${packet.timestamp - aircraft.lastMoved}s`
+            `processMessageQueue ${aircraft.compno}: t: ${lastSent?.t} < [${start}-${to}...rn:${realNow}], p: ${position} < ${messages.length}, m: ${messages.at(position)?.t ?? 'no message'}, lm: ${messages.at(-1)?.t}`
         );
-        statistics.jumps++;
-        return;
     }
 
-    aircraft.stationary = 0;
-    aircraft.lastMoved = packet.timestamp;
+    while (position < messages.length && messages[position].t < to) {
+        const t = messages[position].t;
+        aircraft.lastTime = t;
+        const live = t == realNow;
 
-    if (altitude > 10000) {
-        console.log(
-            `IGNORING ALTITUDE JUMP ${packet.timestamp} ${altitude}\t${aircraft.compno} ** ${ognTracker} ${td} from ${sender}/${flarmId}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${
-                packet.speed
-            }, ${distanceFromLast}km ${speedBetweenKph}kph`
-        );
-        statistics.jumps++;
-        return;
+        // Get all the messages that are for the same time (we may have several for each time)
+        let duplicatePosition = position + 1;
+        while (duplicatePosition < messages.length && messages[duplicatePosition].t == t) duplicatePosition++;
+
+        // Get list and then advance past it
+        const duplicates = messages.slice(position, duplicatePosition);
+        position = duplicatePosition;
+
+        if (!duplicates.length) {
+            console.log('no duplicates for ', position, duplicatePosition);
+        }
+
+        // If we have many we need to reduce this to one
+        // we take smallest difference in position, or if the same the smallest vertical difference from
+        // previously selected point. If point is the same then don't prefer it.
+        const sorted = lastSent
+            ? duplicates
+                  .map((point) => {
+                      const dH = distance(point.j!, lastSent!.j!);
+                      const dV = point.a - lastSent!.a;
+                      const dT = point.t - lastSent!.t;
+                      return {
+                          ...point,
+                          dH,
+                          dV,
+                          dT,
+                          dSH: dH / dT, //km/s
+                          dSV: Math.abs(dV / dT) // m/s
+                      };
+                  })
+                  // Quickly remove faster than 300kph Horizontal or 30m/s Vertical
+                  // as they can't possible be correct
+                  .filter((point) => point.dSH < 300 / 3600 && point.dSV < 30)
+                  // Then sort them by amount of change
+                  .sort((a, b) => (a.dH - a.dH > 0.001 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
+            : duplicates;
+
+        // If it hasn't changed then we will ignore it - this should prevent us getting stuck on the previous
+        // one
+        const filtered = lastSent ? sorted.filter((a) => a.lat != lastSent!.lat || a.lng != lastSent!.lng || a.a != lastSent!.a) : sorted;
+
+        if (duplicates.length > 1 && lastSent) {
+            console.table([lastSent]);
+            console.table(
+                duplicates.map((point) => {
+                    const dH = lastSent ? distance(point.j!, lastSent!.j!) : 0;
+                    const dV = point.a - lastSent!.a;
+                    const dT = point.t - lastSent!.t;
+                    return {
+                        ...point,
+                        dH,
+                        dV,
+                        dT,
+                        dSH: dH / dT, //km/s
+                        dSV: Math.abs(dV / dT) // m/s
+                    };
+                })
+            );
+            console.log('----sorted-----');
+            console.table(sorted.map((f) => [f.o, f.lat, f.lng, f.a]));
+            console.log('----filtered-----');
+            console.table(filtered.map((f) => [f.o, f.lat, f.lng, f.a]));
+        }
+
+        // We haven't picked one because we have had no movement but we have had packets
+        const stationary = lastSent && !filtered.length && sorted.length && realNow - lastSent.t > 30;
+
+        // Take the first one, if we don't
+        const point = filtered.at(0) ?? (stationary ? sorted[0] : undefined);
+
+        if (duplicates.length > 1) {
+            console.log(realNow, aircraft.compno, stationary ? 'stationary' : '', 'multiple packets', duplicates.length, duplicates.map((m: InterimPositionMessage) => m.o).join(','), 'picked', point?.o);
+        }
+
+        if (!point) {
+            continue;
+        }
+
+        if (stationary) {
+            aircraft.stationary++;
+
+            // If we had been stationary for a while and we are low enough to be on the ground
+            // then mark it as so
+            if (aircraft.stationary > 5 && point.g < 100) {
+                aircraft.ground = true;
+            }
+        }
+
+        // If we have 'taken' off
+        if (aircraft.ground && point.g > 110) {
+            aircraft.ground = false;
+        }
+
+        // If we are on the ground and we are more than 3 km from airfield location then we don't
+        // want to report it. This doesn't filter initial points as you are not marked as on the ground
+        // till several stationary points have happened
+        if (aircraft.ground) {
+            // && distance(point.j!, airfieldLocation) > 3) {
+            continue;
+        }
+
+        // If we are stationary we don't need to report the points
+        if (!stationary) {
+            aircraft.stationary = 0;
+            aircraft.lastMoved = point.t;
+        }
+
+        // Check for very late and log it
+        aircraft.lastSent = point;
+        aircraft.lastTime = point.t;
+
+        aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, l: live});
     }
-
-    if (td > 600) {
-        console.log(`${aircraft.compno}/${sender} : VERY delayed flarm packet received, ${(td / 60).toFixed(1)}  minutes old, ignoring`);
-        return;
-    }
-
-    const betweenPacketGap = packet.timestamp - aircraft.lastTime;
-
-    // Kalman smoothing - reset if more than 30 seconds since last packet
-    if (!aircraft.kf || betweenPacketGap > 30) {
-        aircraft.kf = new KalmanFilter();
-        // add it to the filter but don't use the result
-        aircraft.kf.filter(altitude);
-    } else {
-        // And now use the kalman filtered altitude for everything else
-        altitude = Math.floor(aircraft.kf.filter(altitude));
-    }
-
-    // Check for very late and log it
-    aircraft.lastPoint = jPoint;
-    aircraft.lastTime = packet.timestamp;
-
-    // Logging if requested
-    aircraft.log(packet.origpacket);
-    aircraft.log(`${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
-
-    sendMessage(groundElevation);
 }

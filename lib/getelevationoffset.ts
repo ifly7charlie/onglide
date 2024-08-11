@@ -20,9 +20,9 @@ import {LRUCache} from 'lru-cache';
 
 const options = {
     max: 3600,
-    dispose: function (key, n) {
-        console.log('flushed ' + key + ' from cache');
-    },
+    //    dispose: function (key, n) {
+    //        console.log('flushed ' + key + ' from cache');
+    //    },
     updateAgeOnGet: true,
     allowStale: true,
     ttl: 24 * 3600 * 1000
@@ -91,7 +91,7 @@ async function _getElevationOffset(lat, lng, cb) {
     if (!pixels) {
         // Make sure we don't fetch same thing twice at the same time
         if (url in pending) {
-            console.log('queued elevation request');
+            //            console.log('queued elevation request');
             pending[url].push(cb);
             return;
         } else {

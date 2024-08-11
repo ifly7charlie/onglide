@@ -85,8 +85,7 @@ export interface PositionMessage extends BasePositionMessage {
     g: AltitudeAgl; // agl
     b?: Bearing; // course
     s?: Speed; // speed
-    f?: string; // sender & id receiver
-    l?: boolean | null; // is late
+    l?: boolean | null; // picked
     _?: boolean; // live
 }
 

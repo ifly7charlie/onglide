@@ -211,27 +211,8 @@ interface OgnWebSocket extends WebSocket {
 
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
-let readOnly = process.env.OGN_READ_ONLY == undefined ? false : !!parseInt(process.env.OGN_READ_ONLY);
 
-const start = Math.trunc(Date.now() / 1000);
-
-// Correct timing for the competition
-const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
-let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
-const replayBase = parseInt(process.env.REPLAY ?? process.env.REPLAY_DB ?? '0');
-let multiplier = replayBase ? parseInt(process.env.REPLAY_MULTIPLIER || '1') : 1;
-
-// And the replay
-if (replayBase) {
-    getNow = (): Epoch => {
-        const now = Math.trunc(Date.now() / 1000);
-        const elapsed = now - start;
-        const effectiveElapsed = elapsed * multiplier;
-        return (replayBase + effectiveElapsed) as Epoch;
-    };
-}
-
-console.log(`Competition delay: ${compDelay} seconds, competition time: ${getNow()} = ${new Date(getNow() * 1000).toISOString()}, replay: ${replayBase > 0}`);
+import {getNow, readOnly, replayBase} from '../lib/now';
 
 async function main() {
     if (error) {
@@ -268,9 +249,8 @@ async function main() {
         connUtilization: 0.2
     });
 
-    if (process.env.REPLAY_DB) {
-        console.log('readonly for database replay');
-        readOnly = true;
+    if (readOnly) {
+        console.log('readonly');
     }
 
     // Allow insights if it's configured.
@@ -336,7 +316,7 @@ async function main() {
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
-        await updateTasks();
+        //        await updateTasks();
         await finaliseScoreId();
     }
 
@@ -506,7 +486,7 @@ async function main() {
         }
     }, 60 * 1000);
 
-    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
+    //    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
 
     //
     // Update competition information
@@ -516,7 +496,7 @@ async function main() {
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
-        await updateTasks();
+        //        await updateTasks();
         await finaliseScoreId();
     }, 60 * 1000);
 }
@@ -751,7 +731,6 @@ async function updateTrackers(datecode: Datecode) {
     let updatedGliderCount = 0;
     let loadedGliderCount = 0;
 
-    console.table(cTrackers);
     const afterSunset = getNow() > location.sunset;
 
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
@@ -809,20 +788,15 @@ async function updateTrackers(datecode: Datecode) {
                 const channel = channels[glider.channelName];
 
                 // If we have a tracker for it then we need to link that as well
-                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown' && t.scoredStatus == 'S') {
-                    const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
-
-                    if (flarmIDs && flarmIDs.length && !afterSunset) {
-                        // Tell APRS to start listening for the flarmid
-                        aprsController?.trackGlider(t.compno, t.className, glider.channelName, t.dbTrackerId);
-                        glider.flarmIdRegex = new RegExp(
-                            `^(${t.dbTrackerId
-                                .split(',')
-                                .filter((i: string) => i.match(/[0-9A-F]{6}$/i))
-                                .join('|')})`,
-                            'i'
-                        );
-                    }
+                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown' && t.scoredStatus == 'S' && !afterSunset) {
+                    aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId);
+                    glider.flarmIdRegex = new RegExp(
+                        `^(${t.dbTrackerId
+                            .split(',')
+                            .filter((i: string) => i.match(/[0-9A-F]{6}$/i))
+                            .join('|')})`,
+                        'i'
+                    );
                 }
 
                 if (glider.scoringConfigured) {
@@ -950,7 +924,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                         const start = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), firstPointTime), 0);
                         const end = Math.max(_sortedIndex(p.t.subarray(0, p.posIndex), now), 0);
                         const length = end - start;
-                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
+                        //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                         if (length) {
                             result[glider.compno] = {
                                 compno: glider.compno,
@@ -1338,7 +1312,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
             Object.assign(
                 escape`INSERT IGNORE INTO trackpoints (class,datecode,compno,lat,lng,altitude,agl,t,bearing,speed,station)
                                                   VALUES ( ${glider.className}, ${channel.datecode}, ${glider.compno},
-                                                           ${message.lat}, ${message.lng}, ${message.a}, ${message.g}, ${message.t}, ${message.b}, ${message.s}, ${message.f} )`,
+                                                           ${message.lat}, ${message.lng}, ${message.a}, ${message.g}, ${message.t}, ${message.b}, ${message.s}, '' )`,
                 {timeout: 1000}
             )
         ).then((result) => {
@@ -1411,7 +1385,7 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
         match.dbTrackerId = flarmId;
 
         // And we should ask the flarm handler to listen for them properly
-        aprsController?.trackGlider(match.compno, match.className, channelName(match.className, datecode), flarmId);
+        aprsController?.trackGlider(match.compno, match.className, datecode, channelName(match.className, datecode), flarmId);
 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {
