@@ -160,11 +160,12 @@ export const OgnFeed = memo(
 
         // Do we have a loaded set of details?
         const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
+        const connected = wsStatus.state == 'open' || (wsStatus.state == 'retry' && (wsStatus.retry ?? 0) < 2);
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
                 connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
-                retry: (wsStatus.retry ?? 0) < 4 && wsStatus.at ? null : [(wsStatus.at ? 'Rec' : 'C') + 'onnecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
+                retry: (wsStatus.retry ?? 0) < 2 && wsStatus.at ? null : [(wsStatus.at ? 'Rec' : 'C') + 'onnecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
                 closed: ['Connection to tracking is closed, please reload to reconnect', <FontAwesomeIcon icon={solid('link-slash')} />]
             }[wsStatus.state ?? 'open'];
 
@@ -233,34 +234,34 @@ export const OgnFeed = memo(
                     />
                 </div>
                 <div className="resultsOverlay" key="results">
-                    {connectionStatus}
                     <div className="resultsUnderlay">
                         {notes && notes != '' && (
                             <>
-                                <br />
                                 <span style={{clear: 'both', color: 'red'}}>{notes}</span>
                                 <br />
                             </>
                         )}
                         <TaskDetails vc={vc} fitBounds={fitBounds} />
-                        {valid ? (
+                        {connectionStatus}
+                        {valid && connected ? (
                             <PilotList
                                 key="pilotList"
                                 pilots={pilots}
                                 selectedPilot={selectedCompno}
                                 setSelectedCompno={setCompno}
                                 now={replayTime}
+                                live={availableScores.live}
                                 tz={tz}
                                 options={options}
                                 setOptions={setOptions}
                                 handicapped={handicapped}
                             />
                         ) : null}
-                        {valid ? (
+                        {valid && connected ? (
                             <PlaybackControls //
                                 className={vc}
                                 datecode={datecode}
-                                firstStart={availableScores.earliestScore}
+                                {...availableScores}
                                 replayTime={replayTime}
                                 setReplayTime={setReplayTime}
                                 tz={tz}

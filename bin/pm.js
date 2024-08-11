@@ -136,7 +136,8 @@ async function doIt() {
             NEXT_PUBLIC_WEBSOCKET_HOST: domain + '-ws.onglide.com',
             API_HOSTNAME: (process.env.API_HOSTNAME.slice(0, process.env.API_HOSTNAME.indexOf(':')) || process.env.API_HOSTNAME) + ':' + (3000 + keys.portoffset),
             WEBSOCKET_PORT: 8000 + keys.portoffset,
-            STATUS_SERVER_PORT: 8100 + keys.portoffset
+            STATUS_SERVER_PORT: 8100 + keys.portoffset,
+            PROCESS_TITLE: domain
         };
 
         if (delay) {
@@ -170,7 +171,7 @@ async function doIt() {
                         await pm2.start({
                             script: scoringScript,
                             name: domain + '_scoring',
-                            env: environment,
+                            env: {...environment, PROCESS_TITLE: domain + '_scoring'},
                             restart_delay: 100,
                             max_restarts: 10,
                             autorestart: true,
@@ -185,10 +186,14 @@ async function doIt() {
                     await pm2.start({
                         script: 'dist/bin/ogn.js',
                         name: domain + '_ogn',
-                        env: environment,
+                        env: {...environment, PROCESS_TITLE: domain + '_ogn'},
                         restart_delay: 30000,
                         max_restarts: 1000,
                         autorestart: true,
+                        wait_ready: true,
+                        listen_timeout: 240000,
+                        exec_mode: 'cluster',
+                        instances: 1,
                         log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
                     });
                 }
@@ -198,11 +203,15 @@ async function doIt() {
                         script: './node_modules/.bin/next',
                         name: domain + '_next',
                         args: (dev ? 'dev -p ' : 'start -p ') + (3000 + portOffset),
-                        env: environment,
+                        env: {...environment, PROCESS_TITLE: domain + '_next'},
                         restart_delay: 30000, // 30 seconds
                         max_restarts: 30,
                         autorestart: true,
                         updateEnv: true,
+                        wait_ready: true,
+                        listen_timeout: 30000,
+                        exec_mode: 'cluster',
+                        instances: 1,
                         log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
                     };
 

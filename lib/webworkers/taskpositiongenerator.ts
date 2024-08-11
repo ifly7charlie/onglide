@@ -140,6 +140,13 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                 if (ok) {
                     log('ok tick on isTick', status);
+                    if (previousPoint) {
+                        status.lastProcessedPoint = simplifyPoint(previousPoint);
+                    }
+                    let startIsCloseOrPassed = status.t + 59 > (status.utcStart ?? 0);
+                    if (lastTickStatus && !startIsCloseOrPassed && !status._) {
+                        continue;
+                    }
                     lastTickStatus = _clonedeep(status);
                     yield {...status, tick: true} as any;
                 }
@@ -214,6 +221,13 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status.legs[0].exitTimeStamp = status.utcStart;
 
                     console.log(point.c, 'start reached', new Date(point.t * 1000).toISOString());
+
+                    // If we were not tracking at the start then we can assume a start point at the
+                    // start point... this will allow dog leg etc to calculate and may help with 'recovery'
+                    if (!previousPoint) {
+                        previousPoint = {...status.legs[0].points[0], ps: PositionStatus.Airborne, c: point.c, g: 0, a: 0};
+                    }
+
                     if (point._) {
                         yield status;
                         await setTimeout(sleepInterval);
@@ -492,7 +506,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                 possibleAdvances.push({
                                     possiblePoints: [
                                         {
-                                            a: null,
+                                            a: 0,
                                             t: possibleT,
                                             lat: closestSectorPoint.geometry.coordinates[1],
                                             lng: closestSectorPoint.geometry.coordinates[0]
@@ -569,5 +583,5 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     }
 
     log(`Sending final startings for ${status.compno}`);
-    yield status;
+    yield {...status, tick: true, _: true} as any;
 };

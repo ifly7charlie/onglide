@@ -75,7 +75,8 @@ export const selectAuto = createSelector(
         (state: RootState, t: Epoch | undefined) => selectAllScores(state, t) ?? [], //
         (state: RootState, t: Epoch | undefined) => selectAllAGL(state, t)
     ],
-    (_t: Epoch | undefined, scores: ScoreData, altitudes): AllDisplayKeys => {
+    (t: Epoch | undefined, scores: ScoreData, altitudes): AllDisplayKeys => {
+        const nowIsh = t ? t : _reduce(scores, (m, v) => (v.t && v.t > m ? v.t : m), 0);
         return Object.values(scores)
             .map((score) => {
                 if (!score.compno) {
@@ -106,7 +107,8 @@ export const selectAuto = createSelector(
                     var speed = score.handicapped?.taskSpeed || score.actual?.taskSpeed || 0;
                     var distance = score.handicapped?.taskDistance || score.actual?.taskDistance || 0;
 
-                    if ((speed > 5 && speed < 300 && score.flightStatus == PositionStatus.Airborne) || score?.utcFinish) {
+                    //                    console.log(score.compno, score.utcFinish, speed, distance, nowIsh, score.t);
+                    if (score.utcFinish || (speed > 5 && speed < 300 && score.flightStatus == PositionStatus.Airborne && nowIsh - score.t < 1800)) {
                         sortKey = 10000 + Math.round(speed * 10);
                         value = Math.round(speed);
                         suffix = 'kph';

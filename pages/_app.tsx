@@ -20,7 +20,7 @@ const defaultOptions: Options = {
     units: Units.metric,
     mapType: MapType.satellite,
     map2d: true,
-    taskUp: TaskUp.track,
+    taskUp: TaskUp.north,
     follow: true,
     zoomTask: true,
     sortKey: 'auto',

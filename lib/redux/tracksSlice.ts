@@ -3,18 +3,16 @@
 //
 
 import {createSlice, createAsyncThunk} from '@reduxjs/toolkit';
-import {original} from 'immer';
 
 import type {PayloadAction} from '@reduxjs/toolkit';
 
 import {createSelector} from 'reselect';
 
-import {updatePilotStartTimeAction, updateClassAction} from './actions';
-import {selectNow} from './nowSlice';
+import {updateClassAction} from './actions';
 
 import type {RootState} from './store';
 
-import {PilotPosition, OnglideWebSocketMessage, Identifiers} from '../protobuf/onglide';
+import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 
 //const updateTracksAction = createAction<PilotTracks>('updateTracks');
 
@@ -32,12 +30,12 @@ import type {
 
 import {oldTracksUrl} from '../react/fixupUrls';
 
-import type {PilotTracks, PilotTrack, Positions} from '../protobuf/onglide';
+import type {PilotTracks, PilotTrack} from '../protobuf/onglide';
 
-import {mergePoint, pruneStartline, calculateVario, calculateAverage, generateIndices} from '../flightprocessing/incremental';
+import {mergePoint, calculateVario, calculateAverage, generateIndices} from '../flightprocessing/incremental';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
-import {mergeVHPoint, initaliseVH, pruneVHStartline} from '../react/deckvh';
+import {mergeVHPoint, initaliseVH} from '../react/deckvh';
 
 interface TracksSliceState {
     className: ClassName;
@@ -212,18 +210,6 @@ export const tracksSlice = createSlice({
     },
     extraReducers: (builder) => {
         //
-        // New start time (from scoring), prune the startline to match it
-        builder.addCase(updatePilotStartTimeAction, (state, {payload: {compno, startUtc}}) => {
-            const track = state.tracks[compno];
-            if (track?.deck) {
-                const pruneTo = pruneStartline(track.deck!, startUtc);
-                if (pruneTo) {
-                    pruneVHStartline(track, pruneTo);
-                }
-            }
-        });
-
-        //
         // New class, needs to reset everything
         builder.addCase(updateClassAction, (state, {payload: {className, scoreId}}) => {
             if (className != state.className) {
@@ -271,9 +257,6 @@ export const tracksSlice = createSlice({
         selectAllTracks: (state) => state.tracks,
         selectLatestUpdate: (state) => state.latestUpdate,
         selectTrackVersion: (state) => state.trackVersion,
-        /*            Object.values(state.tracks ?? {})
-                .map((g) => g.deck?.trackVersion.toString(16) ?? g.compno).sort()
-                .join(','), */
         selectNewestBaseTime: (state) => Object.values(state.tracks).reduce((oldest, track) => Math.max(oldest, track.t ?? 0), 0)
     }
 });
@@ -409,6 +392,4 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
         })
         .sort()
         .join(',');
-
-    //    return state;
 }

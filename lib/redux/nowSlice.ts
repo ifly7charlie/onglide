@@ -20,6 +20,7 @@ interface TracksSliceState {
     latestScore: Epoch;
     now: Epoch;
     onlineStart: Epoch;
+    liveScoreId: string;
 }
 
 // Define the initial state using that type
@@ -29,7 +30,8 @@ const initialState: TracksSliceState = {
     now: 0 as Epoch,
     earliestScore: Infinity as Epoch,
     latestScore: 0 as Epoch,
-    onlineStart: 0 as Epoch
+    onlineStart: 0 as Epoch,
+    liveScoreId: ''
 };
 
 export const nowSlice = createSlice({
@@ -54,13 +56,14 @@ export const nowSlice = createSlice({
             state.earliestScore = payload.earliestScore as Epoch;
             state.latestScore = payload.latestScore as Epoch;
             state.onlineStart = payload.t as Epoch;
+            state.liveScoreId = payload.scoreId;
         });
     },
     selectors: {
         selectNow: (state) => state.now,
         selectClassName: (state) => state.className,
         selectDatecode: (state) => state.datecode,
-        selectAvailableScoreTimes: (state) => ({earliestScore: state.earliestScore, latestScore: state.latestScore}),
+        selectAvailableScoreTimes: (state) => ({earliestScore: state.earliestScore, latestScore: state.latestScore, live: !!state.liveScoreId}),
         selectOnline: (state) => state.onlineStart
     }
 });

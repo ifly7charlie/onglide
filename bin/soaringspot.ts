@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Copyright 2020 (c) Melissa Jenkins
+// Copyright 2020- (c) Melissa Jenkins
 // Part of Onglide.com competition tracking service
 // BSD licence but please if you find bugs send pull request to github
 
@@ -92,7 +92,6 @@ async function roboControl() {
                 FROM scoringsource where type='robocontrol'`)
         )[0] ?? {url: null, overwrite: true};
         robocontrol_url = row.url;
-        overwrite = row.overwrite ?? true;
     }
 
     if (!robocontrol_url) {
@@ -117,16 +116,18 @@ async function roboControl() {
             }
             for (const p of location || []) {
                 if (p.flarm?.length) {
-                    console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    if (overwrite) {
-                        await mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn}`);
-                    } else {
-                        mysql_db.query(escape`UPDATE tracker SET trackerid = ${p.flarm.join(',')} WHERE compno = ${p.cn} and trackerid='unknown'`);
-                    }
-                    await mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${p.cn}, now(), ${p.flarm.join(',')}, '', null, 'robocontrol' )`);
+                    updateTrackers(p.cn, p.flarm.join(','), 'robocontrol');
                 }
             }
         });
+}
+
+async function updateTrackers(compno: string, trackerIds: string, feedType: 'robocontrol' | 'soaringspot') {
+    let success = !!(await mysql_db.query(escape`UPDATE tracker SET trackerid = ${trackerIds},feedid=${feedType} WHERE compno = ${compno} and (feedid=${feedType} or feedid is null)`)).affectedRows;
+    if (success) {
+        console.log(`${feedType}: updated tracker ${compno} to ${trackerIds}`);
+    }
+    await mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${compno}, now(), ${trackerIds}, '', null, ${feedType} )`);
 }
 
 //
@@ -295,12 +296,9 @@ async function update_pilots(class_url, classid, classname, keys) {
             .split(',')
             .map((id) => id.match(/([a-f0-9]{6})$/i)?.[1])
             .filter((id) => !!id);
-        console.log(`flarms: ${compno}: ${flarmIds} => ${flarms}`);
+
         if (flarms.length) {
-            await t.query(escape`INSERT INTO tracker (class,compno,type,trackerid) VALUES (${classid},
-                                     ${compno}, 'flarm', ${flarms.join(',')} )
-                                  ON DUPLICATE KEY update trackerid=values(trackerid)`);
-            await t.query(escape`INSERT INTO trackerhistory VALUES ( ${compno}, now(), ${flarms.join(',')}, '', null, 'soaringspot' )`);
+            updateTrackers(compno, flarms.join(','), 'soaringspot');
         }
 
         // Download pictures
@@ -484,9 +482,10 @@ async function process_day_task(day, classid, classname, keys) {
     }
 
     // Less likely to change for no reason
-    const safeTask = {...task_details};
-    delete safeTask['_links'];
-    delete safeTask['_embedded'];
+    const safeTask = {...task_details, ...(W ? {W, winddir} : {})};
+    for (const t of ['_links', '_embedded', 'info', 'notes', 'qnh', 'task_value', 'task_name']) {
+        delete safeTask[t];
+    }
 
     // So we don't rebuild tasks if they haven't changed
     const hash = createHash('sha256').update(JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points'])).update(JSON.stringify(safeTask)).digest('base64');
@@ -529,11 +528,9 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
         // and add a new one
         .query(
             escape`
-          INSERT INTO tasks (datecode, class, flown, description, distance, hdistance, duration, type, task, nostart, hash )
+          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, nostart, hash )
              VALUES ( ${toDateCode(date)}, ${classid},
                       'N', ${task_details.task_type},
-                      ${task_details.task_distance / 1000},
-                      ${task_details.task_distance / 1000},
                       ${duration}, ${tasktype}, 'B', ${convert_to_mysql(task_details.no_start)}, ${hash} )`
         )
 
@@ -561,7 +558,7 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
                 // We don't handle multiple starts at all so abort
                 if (tp.multiple_start != 0) {
                     console.log(`${classid} - ${date}: multiple start not supported`);
-                    break;
+                    continue;
                 }
 
                 // can we extract a number off the leading part of the turnpoint name, if so treat it as a trigraph
@@ -742,8 +739,7 @@ async function process_day_scores(day, classid, classname, keys) {
                 scoredvals.ad = actuald;
                 scoredvals.hd = hcapd;
             }
-        }
-        if (keys.actuals) {
+        } else if (keys.actuals) {
             // actuals on soaring spot (fai probably)
             scoredvals.as = row.scored_speed;
             scoredvals.ad = row.scored_distance;

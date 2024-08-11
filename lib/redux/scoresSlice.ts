@@ -168,6 +168,18 @@ export const scoresSlice = createSlice({
                 }
             } */
         ),
+        selectAllTimes: createSelector([(state: ScoresSliceState) => state.scores], (scores: ScoreData | null) => {
+            // this doesn't need to deal with history as there can only be one start/finish recorded as a restart
+            // obliterates any previous scoring
+            return _reduce(
+                scores ?? {},
+                (prev, current, key) => {
+                    prev[key] = {startUtc: current.utcStart, finishUtc: current.utcFinish};
+                    return prev;
+                },
+                {}
+            );
+        }),
         selectPilotScore: createSelector(
             [
                 //
@@ -254,7 +266,7 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
 
 export default scoresSlice.reducer;
 export const {updateScores} = scoresSlice.actions;
-export const {selectReplayAvailable, selectAllScores, selectPilotScore, selectAllStatus} = scoresSlice.selectors;
+export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus} = scoresSlice.selectors;
 
 //////////////////////////////////////////
 // Logic for updates

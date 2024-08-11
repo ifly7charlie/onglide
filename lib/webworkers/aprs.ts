@@ -524,5 +524,6 @@ async function processPacket(packet: aprsPacket) {
     // Logging if requested
     aircraft.log(packet.origpacket);
     aircraft.log(`${altitude}\t${aircraft.compno} -> ${ognTracker} ${td}/${islate} from ${sender}: ${packet.altitude?.toFixed(0)} + ${aoa} adjust :: ${packet.speed}`);
+
     sendMessage(groundElevation);
 }

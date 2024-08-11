@@ -3,6 +3,7 @@ import {memo} from 'react';
 import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
+import {faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import {TZ, Compno, Units, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus, Options, SortKey} from '../types';
 
@@ -573,6 +574,7 @@ export const PilotList = memo(function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
+    live,
     setOptions,
     handicapped,
     now,
@@ -583,6 +585,7 @@ export const PilotList = memo(function PilotList({
     selectedPilot: Compno;
     setSelectedCompno: Function;
     options: Options;
+    live: boolean;
     setOptions: Function;
     handicapped: boolean;
     now: Epoch | undefined;
@@ -613,6 +616,28 @@ export const PilotList = memo(function PilotList({
         [selectedPilot]
     );
 
+    // Prevent unneeded re-render by using callbacks
+    const setSort = useCallback(
+        (o) => {
+            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
+        },
+        [order, handicapped, options]
+    );
+    const toggleVisible = useCallback(() => {
+        setVisible(!visible);
+    }, [visible]);
+
+    if (!live) {
+        return (
+            <div style={{width: '100%'}}>
+                <div style={{margin: '0 auto', width: 'fit-content'}}>
+                    <br />
+                    <FontAwesomeIcon icon={faSpinner} spin={true} /> Rescoring...
+                </div>
+            </div>
+        );
+    }
+
     // Generate the pilot list, sorted by the correct key
     const pilotComponents = pilotList.map((pilot) => {
         return (
@@ -626,17 +651,6 @@ export const PilotList = memo(function PilotList({
             />
         );
     });
-
-    // Prevent unneeded re-render by using callbacks
-    const setSort = useCallback(
-        (o) => {
-            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
-        },
-        [order, handicapped, options]
-    );
-    const toggleVisible = useCallback(() => {
-        setVisible(!visible);
-    }, [visible]);
 
     // Output the whole of the pilots list component
     return (

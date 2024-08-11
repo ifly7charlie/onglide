@@ -255,7 +255,7 @@ function spawnScoringContestListener(config: ScoringConfig): Worker {
     }
     console.log(`Starting Scoring:${config.className} worker thread`);
 
-    return new Worker(__filename, {env: SHARE_ENV, workerData: config});
+    return new Worker(__filename, {env: SHARE_ENV, workerData: config, name: `${config.airfield}:${config.className}`});
 }
 
 if (!isMainThread) {
@@ -369,7 +369,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) {
     const log =
-        glider.compno == '3J'
+        glider.compno == '---'
             ? console.log
             : () => {
                   /*noop*/
