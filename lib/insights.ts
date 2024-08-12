@@ -1,11 +1,11 @@
-import {setup, defaultClient, TelemetryClient} from 'applicationinsights';
+//import {setup, defaultClient, TelemetryClient} from 'applicationinsights';
 
 declare global {
-    var insightsDefClient: TelemetryClient | any;
+    var insightsDefClient: /*TelemetryClient |*/ any;
 }
 
 export function initialiseInsights() {
-    if (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING && !global.insightsDefClient) {
+    /*    if (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING && !global.insightsDefClient) {
         console.log(process.env.APPLICATIONINSIGHTS_CONNECTION_STRING);
         setup(process.env.APPLICATIONINSIGHTS_CONNECTION_STRING) //
             .setAutoCollectConsole(true)
@@ -22,17 +22,17 @@ export function initialiseInsights() {
         global.insightsDefClient = defaultClient;
     } else {
         global.insightsDefClient = null;
-    }
+    }*/
 }
 
 export function trackMetric(name: string, value: number): void {
     if (global.insightsDefClient) {
-        global.insightsDefClient.trackMetric({name, value});
+        //        global.insightsDefClient.trackMetric({name, value});
     }
 }
 
 export function trackAggregatedMetric(scope: string, name: string, value: number, count: number = 1, period: number = 60000): void {
     if (global.insightsDefClient) {
-        global.insightsDefClient.trackMetric({name, value, count, period, kind: 'Aggregation', properties: {scope}});
+        //        global.insightsDefClient.trackMetric({name, value, count, period, kind: 'Aggregation', properties: {scope}});
     }
 }

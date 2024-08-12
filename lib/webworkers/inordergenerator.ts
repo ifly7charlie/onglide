@@ -1,7 +1,7 @@
 import {Epoch, Datecode, ClassName, Compno, PositionMessage, InOrderGeneratorFunction, InOrderGenerator} from '../types';
 import {inOrderDelay} from '../constants';
 
-import {sortedLastIndexBy as _sortedLastIndexBy} from 'lodash';
+import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
 import {BroadcastChannel} from 'node:worker_threads';
 
 //
@@ -17,13 +17,11 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
     // that is not asynchronous. Once we have achieved this
     // all the rest of the logic can simply be reading from the
     // generator
-    type ResolveNotificationFunction = (number) => void;
+    type ResolveNotificationFunction = (boolean) => void;
     let resolveNotifications: ResolveNotificationFunction[] = [];
 
     // We need somewhere to store the unprocessed message queue
     let messageQueue: PositionMessage[] = initialPoints;
-
-    console.log(`bound ${initialPoints.length} points to ${compno}/${className}`);
 
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
@@ -37,30 +35,32 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             return;
         }
 
+        // Reset on timestamp 0
+        if (message.t == 0) {
+            messageQueue = [];
+            return;
+        }
+
         // Figure out where to insert (sorted by time)
         const insertIndex = _sortedLastIndexBy(messageQueue, message, (o) => o.t);
 
-        // In dense coverage it's not uncommon to get a duplicate packet. We always take the first one we
-        // have received. The packets may be very different and ideally we would identify problem receivers
-        // and then choose when to accept their messages or not
-        if (messageQueue[insertIndex]?.t != message.t) {
-            // Actually insert the point into the array
-            messageQueue.splice(insertIndex, 0, message);
-
-            const toNotify = resolveNotifications.slice();
-            resolveNotifications.length = 0;
-            toNotify.forEach((resolveFunction) => resolveFunction(insertIndex));
+        // Sanity check, this should never happen
+        if (messageQueue[insertIndex]?.t == message.t) {
+            console.log(`${message.c}: unexpected duplicate packet`);
+            return;
         }
-    };
 
-    // We may want to check regularily for replay
-    const tickFastInterval = tick
-        ? setInterval(() => {
-              const toNotify = resolveNotifications.slice();
-              resolveNotifications.length = 0;
-              toNotify.forEach((resolveFunction) => resolveFunction(messageQueue.length + 1));
-          }, 1000)
-        : null;
+        if (message.c == '212') {
+            console.log(message.t, message._);
+        }
+
+        // Actually insert the point into the array
+        messageQueue.splice(insertIndex, 0, message);
+
+        const toNotify = resolveNotifications.slice();
+        resolveNotifications.length = 0;
+        toNotify.forEach((resolveFunction) => resolveFunction(false));
+    };
 
     // And slower for when we are not getting coordinates
     const tickSlowInterval = setInterval(() => {
@@ -68,7 +68,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         if (messageQueue.length) {
             const toNotify = resolveNotifications.slice();
             resolveNotifications.length = 0;
-            toNotify.forEach((resolveFunction) => resolveFunction(0));
+            toNotify.forEach((resolveFunction) => resolveFunction(true));
         }
     }, 60_000);
 
@@ -78,20 +78,27 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         //
         // How far through are we
         let position = 0;
-        const now: Epoch = getNow();
+        let now: Epoch = getNow();
         let hiccup: Epoch = 0 as Epoch;
+
+        console.log('InOrderGenerator', compno, '1');
 
         // Make sure we always have at least one entry for the glider, this should
         // ensure we have a placeholder for every pilot regardless of flarm messages
         // we use 1 so we don't get picked up as !t
         yield {t: messageQueue[0]?.t || (1 as Epoch), c: compno, tick: true, _: false};
 
+        console.log('InOrderGenerator', compno, '2');
+        if (!messageQueue.length) {
+            await new Promise((resolve) => resolveNotifications.push(resolve));
+        }
+
         //
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
-        while (position < messageQueue.length && !messageQueue[position]?._ && messageQueue[position]?.t < now - inOrderDelay) {
+        while (!messageQueue[position]?._) {
             const message = messageQueue[position++];
-            const nextPoint = yield {...message, _: false}; //position == messageQueue.length || messageQueue[position]?.t >= now - inOrderDelay};
+            const nextPoint = yield {...message, _: false};
 
             // If we need to go backwards then do so
             if (nextPoint) {
@@ -102,6 +109,8 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
                 if (nextPoint) {
                     for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
                 }
+            } else if (position == messageQueue.length) {
+                await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
             }
         }
 
@@ -121,6 +130,10 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
         // Loop till we are told to stop (an exception on yield)
         while (true) {
+            // Find the position of the message we got up to, should always be increasing but better safe than sorry
+            // as we may have had a reset of the message
+            let position = _sortedIndexBy(messageQueue, {t: now} as any, (o) => o.t);
+
             // Check to see if there is an eligible message in the queue
             // we won't forward it on until it's been there long enough
             const nowCutoff: Epoch = (getNow() - inOrderDelay) as Epoch;
@@ -128,11 +141,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             if (position < messageQueue.length && messageQueue[position]?.t < nowCutoff) {
                 const message = messageQueue[position++];
                 const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= nowCutoff};
-
-                // If we need to go backwards then do so (the iterator returns the time it wants to rewind to)
-                if (nextPoint) {
-                    for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
-                }
+                now = nextPoint ? nextPoint : message.t;
             }
 
             // If we didn't have anything then sleep a second until we do
@@ -144,27 +153,21 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
                 // As we do out of order if it's inserted before us then
                 // we just skip forward
-                const insertIndex = await new Promise<number>((resolve) => resolveNotifications.push(resolve));
-                if (insertIndex && insertIndex < position && position < messageQueue.length) {
-                    position++;
-                }
+                const tick = await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
 
                 // If we were woken without a message (ie a tick) then we need to just call with no data
-                if (!insertIndex && position == messageQueue.length) {
+                if (tick) {
                     const nextPoint = yield {c: compno, _: true, tick: true, t: messageQueue.at(-1)?.t ?? getNow()};
 
                     // If we need to go backwards then do so (the iterator returns the time it wants to rewind to)
                     if (nextPoint) {
-                        for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+                        now = nextPoint;
                     }
                 }
             }
         }
 
         console.log(`Closing message loop for ${className}:${compno}`);
-        if (tickFastInterval) {
-            clearInterval(tickFastInterval);
-        }
         clearInterval(tickSlowInterval);
     };
 

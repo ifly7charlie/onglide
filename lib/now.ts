@@ -1,7 +1,7 @@
 import {Epoch} from './types';
 
 const start = Math.trunc(Date.now() / 1000);
-const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
+const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '10') : 10;
 
 export const replayBase = parseInt(process.env.REPLAY ?? process.env.REPLAY_DB ?? '0');
 let multiplier = replayBase ? parseInt(process.env.REPLAY_MULTIPLIER || '1') : 1;

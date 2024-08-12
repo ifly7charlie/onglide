@@ -99,7 +99,13 @@ const statistics = {
     msgsReceived: 0,
     knownReceived: 0,
     aprsDelay: 0,
+    normalPackets: 0,
+    aprsDelayForDelayed: 0,
+    delayedPackets: 0,
     periodStart: 0,
+    outOfOrder: 0,
+    duplicates: 0,
+    invalidPacket: 0,
     jumps: 0
 };
 
@@ -109,7 +115,7 @@ interface Aircraft {
     className: string;
     trackers: FlarmID[];
 
-    lastTime: number;
+    lastTime?: number;
     lastSent?: InterimPositionMessage;
     lastMoved?: number;
 
@@ -212,9 +218,10 @@ export class AprsController {
 if (!isMainThread && parentPort) {
     console.log('Started APRS worker thread');
 
-    initialiseInsights();
+    //    initialiseInsights();
 
     // The parent can post a few different messages to us
+
     //
     // action: shutdown
     // action: track
@@ -249,6 +256,7 @@ async function initDB(className: ClassName, datecode: Datecode) {
     }
 
     const path = `${process.env.DB_PATH ?? '/tmp'}/aprs-${className}-${datecode}.db`;
+    console.log('opening points database', path);
     const openedDb = (db[className + datecode] = new DB(path));
     await openedDb.open().catch((e: any) => {
         console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
@@ -266,6 +274,10 @@ async function initDB(className: ClassName, datecode: Datecode) {
 //
 // Connect to the APRS Server
 function startAprsListener(config: AprsListenerConfig) {
+    if (process.env.REPLAY_DB) {
+        return;
+    }
+
     // Settings for connecting to the APRS server
     const PASSCODE = -1;
     const APRSSERVER = process.env.APRS_SERVER || possibleServers[Math.trunc(possibleServers.length * Math.random())];
@@ -295,6 +307,8 @@ function startAprsListener(config: AprsListenerConfig) {
             const packet = parser.parseaprs(data);
             if (packet && 'latitude' in packet && 'longitude' in packet && 'comment' in packet && packet.comment?.startsWith('id')) {
                 processPacket(packet).catch((e) => console.error(e));
+            } else {
+                statistics.invalidPacket++;
             }
         } else {
             // Server keepalive
@@ -315,7 +329,7 @@ function startAprsListener(config: AprsListenerConfig) {
             clearInterval(kaInterval);
             startAprsListener(config);
         }
-        connection.connect();
+        setTimeout(() => connection.connect(), unstableCount * 1000);
     });
 
     // Start the APRS connection
@@ -331,9 +345,15 @@ function startAprsListener(config: AprsListenerConfig) {
         if (statistics.periodStart) {
             console.log(period);
             console.log(
-                `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s, average aprs delay: ${(statistics.aprsDelay / statistics.msgsReceived).toFixed(
-                    1
-                )}s, ignored ${statistics.jumps} jumps, unstableCount: ${unstableCount}`
+                `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${statistics.duplicates}, invalid: ${
+                    statistics.invalidPacket
+                }, aprs server unstableCount: ${unstableCount}`
+            );
+            console.log(
+                `APRS: NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s, DELAYED: average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, ${(
+                    (100 * statistics.delayedPackets) /
+                    statistics.msgsReceived
+                ).toFixed(0)}% packets delayed`
             );
             trackMetric('aprs.msgsReceived', statistics.msgsReceived);
             trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
@@ -385,7 +405,6 @@ async function trackGlider(task: AprsCommandTrack) {
         trackers: task.trackerId as FlarmID[],
 
         // Not had a message
-        lastTime: 0,
         stationary: 0,
         ground: true,
 
@@ -406,20 +425,22 @@ async function trackGlider(task: AprsCommandTrack) {
     aircraft[task.className + '/' + task.compno] = aircraft;
 
     const db = await initDB(task.className, task.datecode);
+    const interimQueue = [];
 
     // Link the tracker(s) in
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
-
-    trackerList.forEach((id: string, index: number) => {
-        console.log('load tracker', aircraft.compno, id);
-        trackers[id] = {
-            id: id as FlarmID,
-            index,
-            aircraft,
-            db: db?.sublevel<string, InterimPositionMessage>(id, {})
-        };
-        loadPointsForTracker(trackers[id]);
-    });
+    await Promise.allSettled(
+        trackerList.map((id: string, index: number) => {
+            console.log('load tracker', aircraft.compno, id);
+            trackers[id] = {
+                id: id as FlarmID,
+                index,
+                aircraft,
+                db: db?.sublevel(id, {})
+            };
+            return loadPointsForTracker(trackers[id], interimQueue);
+        })
+    );
 
     // And make sure we have a channel for it
     if (!channels[task.channelName]) {
@@ -428,6 +449,7 @@ async function trackGlider(task: AprsCommandTrack) {
 
     // And link the broadcast channel to it
     aircraft[task.className + '/' + task.compno].channel = channels[task.channelName];
+    aircraft.messages = interimQueue;
     console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
 }
 
@@ -468,21 +490,31 @@ async function processPacket(packet: aprsPacket) {
     const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6) as FlarmID;
     const ognTracker = packet.sourceCallsign?.slice(0, 3) == 'OGN';
 
+    if (!packet.latitude || !packet.longitude || !flarmId || !packet.timestamp || !packet.altitude) {
+        statistics.invalidPacket++;
+        return;
+    }
+
+    // Get the ACTUAL delay (note this doesn't work for replay)
+    const now = new Date().getTime() / 1000;
+    const td = Math.floor(now - packet.timestamp);
+
     // Lookup the altitude adjustment for the
     let sender = packet.digipeaters?.pop()?.callsign || 'unknown';
     if (sender == 'DLY2APRS') {
         sender = packet.digipeaters?.[0]?.callsign || 'unknown';
+        statistics.aprsDelayForDelayed += td;
+        statistics.delayedPackets++;
+    } else {
+        statistics.aprsDelay += td;
+        statistics.normalPackets++;
     }
 
-    let aoa = ognTracker ? 0 : altitudeOffsetAdjust[sender] || 0;
-    if (aoa == null) {
-        //        console.log(`ignoring packet from ${sender} as blocked`);
-        return;
-    }
-
-    if (!packet.latitude || !packet.longitude || !flarmId || !packet.timestamp || !packet.altitude) {
-        return;
-    }
+    let aoa = 0; // ognTracker ? 0 : altitudeOffsetAdjust[sender] || 0;
+    //    if (aoa == null) {
+    //        console.log(`ignoring packet from ${sender} as blocked`);
+    //        return;
+    //    }
 
     // Apply the correction
     let altitude = Math.floor(packet.altitude + aoa);
@@ -490,12 +522,7 @@ async function processPacket(packet: aprsPacket) {
     // geojson for helper function slater
     const jPoint = point([packet.latitude, packet.longitude]);
 
-    // Check if the packet is late, based on previous packets for the glider
-    const now = new Date().getTime() / 1000;
-    const td = Math.floor(now - packet.timestamp);
-
     statistics.msgsReceived++;
-    statistics.aprsDelay += td;
 
     // Look it up, have we had packets for this before?
     const tracker = trackers[flarmId];
@@ -538,31 +565,41 @@ async function processPacket(packet: aprsPacket) {
     // Figure out where to insert (sorted by time)
     const messageQueue = aircraft.messages;
     const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
+    if (insertIndex != messageQueue.length) {
+        statistics.outOfOrder++;
+    }
+    if (insertIndex > 0 && messageQueue[insertIndex - 1].t == message.t) {
+        statistics.duplicates++;
+    }
     messageQueue.splice(insertIndex, 0, message);
 }
 
 //
 // Read the database for all points for a specific aircraft tracker
 //
-async function loadPointsForTracker(tracker: Tracker) {
+async function loadPointsForTracker(tracker: Tracker, messageQueue: InterimPositionMessage[]) {
     if (!tracker.db) {
         console.log('no database available for loading trackpoints');
         return;
     }
     const aircraft = tracker.aircraft;
     try {
-        const messageQueue = aircraft.messages;
+        let loaded = 0;
         for await (const [key, messageJson] of tracker.db.iterator()) {
-            console.log(messageJson);
             const message = JSON.parse(messageJson);
             const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
             message.j = point([message.lat, message.lng]);
             messageQueue.splice(insertIndex, 0, message);
+            loaded++;
         }
-        console.log(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${messageQueue.length} points loaded`);
+        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${loaded}/${messageQueue.length} points loaded`);
     } catch (err) {
         console.error(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${err}...`);
     }
+}
+
+async function restartMessageQueue(aircraft: Aircraft) {
+    processMessageQueue(aircraft, 0 as Epoch, getNow());
 }
 
 //
@@ -580,16 +617,23 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
     const realNow = getNow();
     let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
-    if (position < messages.length) {
+    /*    if (position < messages.length) {
         console.log(
             `processMessageQueue ${aircraft.compno}: t: ${lastSent?.t} < [${start}-${to}...rn:${realNow}], p: ${position} < ${messages.length}, m: ${messages.at(position)?.t ?? 'no message'}, lm: ${messages.at(-1)?.t}`
         );
+        } */
+
+    // If we have been asked to resent all points then we shall do so
+    if (aircraft.lastTime && start === 0) {
+        console.log(`processMessageQueue: resending all points for ${aircraft.compno}`);
+        aircraft.channel!.postMessage({c: aircraft.compno, t: 0});
     }
 
+    let count = 0;
     while (position < messages.length && messages[position].t < to) {
         const t = messages[position].t;
         aircraft.lastTime = t;
-        const live = t == realNow;
+        count++;
 
         // Get all the messages that are for the same time (we may have several for each time)
         let duplicatePosition = position + 1;
@@ -632,7 +676,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         // one
         const filtered = lastSent ? sorted.filter((a) => a.lat != lastSent!.lat || a.lng != lastSent!.lng || a.a != lastSent!.a) : sorted;
 
-        if (duplicates.length > 1 && lastSent) {
+        /*        if (duplicates.length > 1 && lastSent) {
             console.table([lastSent]);
             console.table(
                 duplicates.map((point) => {
@@ -654,18 +698,19 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
             console.log('----filtered-----');
             console.table(filtered.map((f) => [f.o, f.lat, f.lng, f.a]));
         }
-
+*/
         // We haven't picked one because we have had no movement but we have had packets
         const stationary = lastSent && !filtered.length && sorted.length && realNow - lastSent.t > 30;
 
         // Take the first one, if we don't
         const point = filtered.at(0) ?? (stationary ? sorted[0] : undefined);
 
-        if (duplicates.length > 1) {
-            console.log(realNow, aircraft.compno, stationary ? 'stationary' : '', 'multiple packets', duplicates.length, duplicates.map((m: InterimPositionMessage) => m.o).join(','), 'picked', point?.o);
-        }
+        //        if (duplicates.length > 1) {
+        //            console.log(t, t - realNow, aircraft.compno, stationary ? 'stationary' : '', 'multiple packets', duplicates.length, duplicates.map((m: InterimPositionMessage) => m.o).join(','), 'picked', point?.o);
+        //        }
 
         if (!point) {
+            console.log(aircraft.compno, 'no point found');
             continue;
         }
 
@@ -689,6 +734,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         // till several stationary points have happened
         if (aircraft.ground) {
             // && distance(point.j!, airfieldLocation) > 3) {
+            console.log(point.c, 'ground - not processing');
             continue;
         }
 
@@ -702,6 +748,11 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         aircraft.lastSent = point;
         aircraft.lastTime = point.t;
 
-        aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, l: live});
+        // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
+        // all it does is stop it sending to the front end
+        aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: start != 0 || position == messages.length});
+    }
+    if (count > 0) {
+        console.log(aircraft.compno, 'processed ', count, position, messages.length, messages[position], from, start, to);
     }
 }

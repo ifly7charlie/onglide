@@ -46,6 +46,7 @@
         "applicationinsights": "^2.3.4",
         "babel-plugin-macros": "^3.1.0",
         "bootstrap": "^5.3.3",
+        "classic-level": "^1.4.1",
         "country-iso-2-to-3": "=1.1.0",
         "country-iso-3-to-2": "=1.1.1",
         "deck.gl": "^9.0.27",
