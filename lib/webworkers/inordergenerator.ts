@@ -1,5 +1,4 @@
 import {Epoch, Datecode, ClassName, Compno, PositionMessage, InOrderGeneratorFunction, InOrderGenerator} from '../types';
-import {inOrderDelay} from '../constants';
 
 import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
 import {BroadcastChannel} from 'node:worker_threads';
@@ -113,7 +112,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             }
         }
 
-        let now: Epoch = (getNow() - inOrderDelay) as Epoch;
+        let now: Epoch = getNow();
         console.log(
             `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue.at(-1)?.t ?? 0) * 1000).toISOString()}`
         );

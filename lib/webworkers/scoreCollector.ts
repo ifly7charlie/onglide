@@ -66,8 +66,6 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
             const recentStart = score.utcStart && c.mostRecentStart[compno] != score.utcStart ? score.utcStart : undefined;
             c.mostRecentStart[compno] = score.utcStart as Epoch;
 
-            console.log(compno, 'scored @', score.t, score.live);
-
             // If we are now live we can close off the older ones
             if (score.live && !c.live[compno]) {
                 c.live[compno] = true;
