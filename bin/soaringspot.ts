@@ -184,7 +184,8 @@ async function soaringSpot(deep = false) {
             await update_contest(contest, keys);
 
             // Update each class in the competition
-            for (const cclass of contest._embedded['http://api.soaringspot.com/rel/classes']) {
+            for (const cclass of contest._embedded['http://api.soaringspot.com/rel/classes'].map((c)=>({...c,order:Math.random()})).sort((a,b)=>a.order-b.order)) {
+                await new Promise((r)=>setTimeout(r,10000));
                 await update_class(cclass, keys);
             }
         }
@@ -233,10 +234,12 @@ async function update_class(compClass, keys) {
     //    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
 
     // Now add details of pilots
-    await update_pilots(compClass._links.self.href, classid, name, keys);
+    await update_pilots(compClass._links.self.href, classid, name, keys)
+    await new Promise((r)=>setTimeout(r,5000));
 
     // Import the results
     await process_class_tasks(compClass._links.self.href, classid, name, keys);
+    await new Promise((r)=>setTimeout(r,5000));
     await process_class_results(compClass._links.self.href, classid, name, keys);
 }
 
@@ -392,15 +395,15 @@ async function process_class_tasks(class_url, classid, classname, keys) {
         console.log(`${classname}: unable to fetch tasks ${tasks?.message}`);
         return 0;
     }
-    let dates: string[] = [];
-    for (const day of tasks._embedded['http://api.soaringspot.com/rel/tasks'].sort((a,b)=>-a.task_date.localeCompare(b.task_date)).slice(0,1)) {
-        dates.push(day.task_date);
-
-        // Download the task and prep pilotresult table
+    const day = tasks._embedded['http://api.soaringspot.com/rel/tasks'].sort((a,b)=>a.task_date.localeCompare(b.task_date)).at(-1)
+    // Download the task and prep pilotresult table
+    if( day ) {
+    console.log(`${classname}: date.task_date: task checks scheduled`);
         await process_day_task(day, classid, classname, keys);
     }
-
-    console.log(`${classname}: ${dates.join(',')} task checks scheduled`);
+    else {
+        console.log(`${classname}: no dates? `);
+    }
 }
 
 //
@@ -413,14 +416,16 @@ async function process_class_results(class_url, classid, classname, keys) {
     }
 
     let dates: string[] = [];
-    for (const day of results._embedded['http://api.soaringspot.com/rel/class_results']) {
-        dates.push(day.task_date);
-
+    const day = results._embedded['http://api.soaringspot.com/rel/class_results'].sort((a,b)=>a.task_date.localeCompare(b.task_date)).at(-1)
+    if( day ) { 
+        console.log(`${classname}: date.task_date: result checks scheduled`);
         // Update the scores for the task
         await process_day_scores(day, classid, classname, keys);
     }
+    else {
+        console.log(`${classname}: no result dates? `);
+    }
 
-    console.log(`${classname}: ${dates.join(',')} result checks scheduled`);
 }
 
 //
@@ -623,7 +628,7 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
                 ]);
             }
 
-            // If we don't have any valid turnpoints then don't try and download them!
+            // If we don't have any valid turnpoints then don't try and downloadthem!
             if (!query.length || !previousPoint) {
                 return null;
             }
@@ -793,7 +798,7 @@ async function process_day_scores(day, classid, classname, keys) {
                                                               WHERE datecode=${toDateCode(date)} and compno=${pilot} and class=${classid}`)
             )?.[0] || {igcavailable: 'N'};
             if ((igcavailable || 'Y') == 'N' && row?._links?.['http://api.soaringspot.com/rel/flight']) {
-                console.log(date, pilot, igcavailable);
+                console.log(date, pilot, igcavailable, 'checking for IGC');
                 await processIGC(classid, pilot, location.altitude, date, row._links['http://api.soaringspot.com/rel/flight']['href'], https, mysql_db, () => {
                     soaringSpotAuthHeaders(keys);
                 });

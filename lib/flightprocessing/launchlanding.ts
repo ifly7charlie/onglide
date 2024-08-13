@@ -241,7 +241,8 @@ export async function processIGC(classid, compno, location, date, url, https, my
     let key = [String(date).substring(8, 11), classid, compno].join('/');
 
     // De-escape it
-    url = url.replaceAll('&amp;', '&');
+    url = url.replaceAll('&amp;', '&')
+    mysql.query(escape`UPDATE pilotresult SET igcavailable="P" WHERE datecode=todcode(${date}) and compno=${compno} and class=${classid}`);
 
     // Initiate a streaming request
     return https.get(url, getHeaders ? getHeaders() : undefined, function (response) {
