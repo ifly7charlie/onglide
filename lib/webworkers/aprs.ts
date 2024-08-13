@@ -662,47 +662,24 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
                       const dT = point.t - lastSent!.t;
                       return {
                           ...point,
-                          dH,
+                          dH: dH * 1000,
                           dV,
                           dT,
-                          dSH: dH / dT, //km/s
+                          dSH: (3600 * dH) / dT, //km/s
                           dSV: Math.abs(dV / dT) // m/s
                       };
                   })
                   // Quickly remove faster than 300kph Horizontal or 30m/s Vertical
                   // as they can't possible be correct
-                  .filter((point) => point.dSH < 300 / 3600 && point.dSV < 30)
+                  .filter((point) => point.dSH < (point.s || 160) * 2 && point.dSV < 30)
                   // Then sort them by amount of change
-                  .sort((a, b) => (a.dH - a.dH > 0.001 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
+                  .sort((a, b) => (a.dH - a.dH > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
             : duplicates;
 
         // If it hasn't changed then we will ignore it - this should prevent us getting stuck on the previous
         // one
         const filtered = lastSent ? sorted.filter((a) => a.lat != lastSent!.lat || a.lng != lastSent!.lng || a.a != lastSent!.a) : sorted;
 
-        /*        if (duplicates.length > 1 && lastSent) {
-            console.table([lastSent]);
-            console.table(
-                duplicates.map((point) => {
-                    const dH = lastSent ? distance(point.j!, lastSent!.j!) : 0;
-                    const dV = point.a - lastSent!.a;
-                    const dT = point.t - lastSent!.t;
-                    return {
-                        ...point,
-                        dH,
-                        dV,
-                        dT,
-                        dSH: dH / dT, //km/s
-                        dSV: Math.abs(dV / dT) // m/s
-                    };
-                })
-            );
-            console.log('----sorted-----');
-            console.table(sorted.map((f) => [f.o, f.lat, f.lng, f.a]));
-            console.log('----filtered-----');
-            console.table(filtered.map((f) => [f.o, f.lat, f.lng, f.a]));
-        }
-*/
         // We haven't picked one because we have had no movement but we have had packets
         const stationary = lastSent && !filtered.length && sorted.length && realNow - lastSent.t > 30;
 
@@ -713,8 +690,34 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         //            console.log(t, t - realNow, aircraft.compno, stationary ? 'stationary' : '', 'multiple packets', duplicates.length, duplicates.map((m: InterimPositionMessage) => m.o).join(','), 'picked', point?.o);
         //        }
 
+        //            if (duplicates.length || a) {
+        if (aircraft.compno == '95') {
+            // duplicates.length > 1 && lastSent) {
+            console.log(aircraft.compno, 'no point found ===========');
+            console.table([lastSent]);
+            console.table(
+                lastSent
+                    ? duplicates.map((point) => {
+                          const dH = lastSent ? distance(point.j!, lastSent!.j!) : 0;
+                          const dV = point.a - lastSent!.a;
+                          const dT = point.t - lastSent!.t;
+                          return {
+                              ...point,
+                              dH: Math.round(1000 * dH),
+                              dV,
+                              dT,
+                              dSH: Math.round((3600 * dH) / dT), //km/s
+                              dSV: Math.round(10 * Math.abs(dV / dT)) / 10 // m/s
+                          };
+                      })
+                    : duplicates
+            );
+            console.log('----sorted-----');
+            console.table(sorted.map((f) => [f.o, f.lat, f.lng, f.a]));
+            console.log('----filtered-----');
+            console.table(filtered.map((f) => [f.o, f.lat, f.lng, f.a]));
+        }
         if (!point) {
-            console.log(aircraft.compno, 'no point found');
             continue;
         }
 
@@ -751,7 +754,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         }
 
         // Check for very late and log it
-        aircraft.lastSent = point;
+        aircraft.lastSent = lastSent = point;
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
         // all it does is stop it sending to the front end

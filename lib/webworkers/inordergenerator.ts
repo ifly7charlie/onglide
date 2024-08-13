@@ -23,6 +23,8 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
     // We need somewhere to store the unprocessed message queue
     let messageQueue: PositionMessage[] = initialPoints;
 
+    const log = compno == 'AD' ? (...a) => console.log(compno + ':', ...a) : () => {};
+
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
     // channel to simplify things
@@ -54,9 +56,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             console.log(message.c, message.t, 'inserting out of order', messageQueue.length, insertIndex);
         }
 
-        if (message.c == 'A3') {
-            console.log(`${message.c}: ${message.t}, live: ${message._}`);
-        }
+        log(`${message.t}, live: ${message._}`);
 
         // Actually insert the point into the array
         messageQueue.splice(insertIndex, 0, message);
@@ -84,38 +84,28 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         // when we get to the end which will result downstream events emitting a score
         while (!messageQueue[position]?._) {
             if (position == messageQueue.length) {
-                console.log(compno, 'end of queue', position, messageQueue.length);
+                log('end of queue', position, messageQueue.length);
                 // Skip all the ticks, they shouldn't happen but don't wait forever
                 let count = 0;
                 for (; count < 10 && (await new Promise<boolean>((resolve) => resolveNotifications.push(resolve))); count++) {}
-                console.log(`${compno}: more messages found... ${count} waits`);
+                log(` more messages found... ${count} waits`);
                 // don't process it now as we need the while clause to evaluate the _
                 continue;
             }
 
             const message = messageQueue[position++];
-            if (compno == 'A3') {
-                console.log(`${compno}: msg ${message?.t} p: ${position}/${messageQueue.length}`);
-            }
             const nextPoint = yield message;
 
             // If we need to go backwards then do so
             if (nextPoint) {
-                if (compno == 'A3') {
-                    console.log(`${compno}: rewind to ${nextPoint}`);
-                }
                 for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
             } else {
                 if (message.t - hiccup > 60) {
-                    if (compno == 'A3') {
-                        console.log(`${compno}: hiccup`);
-                    }
                     hiccup = message.t;
                     const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
                     if (nextPoint) {
-                        if (compno == 'A3') {
-                            console.log(`${compno}: rewind to ${nextPoint} (hiccup)`);
-                        }
+                        log(`rewind to ${nextPoint} (hiccup)`);
+
                         for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
                         continue;
                     }
@@ -139,9 +129,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
                 await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
             }
 
-            if (compno == 'A3') {
-                console.log(`${compno}: normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
-            }
+            log(` normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
 
             //            if (position < messageQueue.length && messageQueue[position]?.t < nowCutoff) {
             const message = messageQueue[position++];

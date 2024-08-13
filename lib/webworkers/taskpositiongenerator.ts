@@ -194,7 +194,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // do nothing,
                 if (point.t < task.rules.nostartutc - 10) {
                     if (point._) {
-                        await setTimeout(Math.min((task.rules.nostartutc - 10 - point.t) * 1000, 10 * sleepInterval));
+                        await setTimeout(Math.min((task.rules.nostartutc - 10 - point.t) * 1000, sleepInterval));
                     }
                     continue;
                 }
@@ -203,7 +203,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // ignore before - this can happen if scored into soaringspot
                 if (status.utcStart && point.t < status.utcStart) {
                     if (point._) {
-                        await setTimeout(Math.min((status.utcStart - point.t - 10) * 1000, 10 * sleepInterval));
+                        await setTimeout(Math.min((status.utcStart - point.t - 10) * 1000, sleepInterval));
                     }
                     continue;
                 }

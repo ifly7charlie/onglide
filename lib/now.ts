@@ -3,7 +3,7 @@ import {Epoch} from './types';
 const start = Math.trunc(Date.now() / 1000);
 const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '10') : 10;
 
-const replayBaseString = process.env.NEXT_PUBLIC_REPLAY ?? process.env.REPLAY ?? process.env.REPLAY_DB ?? '0';
+const replayBaseString = process.env.NEXT_PUBLIC_REPLAY ?? process.env.REPLAY ?? '0';
 export const replayBase = replayBaseString.indexOf(':') != -1 ? new Date(replayBaseString).getTime() / 1000 : parseInt(replayBaseString);
 let multiplier = replayBase ? parseInt(process.env.REPLAY_MULTIPLIER || '1') : 1;
 let internalGetNow = (): Epoch => {
