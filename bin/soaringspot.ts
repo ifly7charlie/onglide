@@ -169,6 +169,10 @@ async function soaringSpot(deep = false) {
     // links in this code are HTTP because that is how they are returned in the JSON
     // HOWEVER! All fetches will be https because the enumeration links are all https
     const contests = (await sendSoaringSpotRequest('https://api.soaringspot.com/v1/', keys)) as any;
+    if( ! contests ) {
+        console.log('unable to fetch contest');
+        return;
+    }
 
     // loop through all, there probably is only one but API spec implies more than one.
     await contests._embedded['http://api.soaringspot.com/rel/contests'].forEach(async function (contest) {
@@ -180,7 +184,8 @@ async function soaringSpot(deep = false) {
             await update_contest(contest, keys);
 
             // Update each class in the competition
-            for (const cclass of contest._embedded['http://api.soaringspot.com/rel/classes']) {
+            for (const cclass of contest._embedded['http://api.soaringspot.com/rel/classes'].map((c)=>({...c,order:Math.random()})).sort((a,b)=>a.order-b.order)) {
+                await new Promise((r)=>setTimeout(r,10000));
                 await update_class(cclass, keys);
             }
         }
@@ -229,10 +234,12 @@ async function update_class(compClass, keys) {
     //    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
 
     // Now add details of pilots
-    await update_pilots(compClass._links.self.href, classid, name, keys);
+    await update_pilots(compClass._links.self.href, classid, name, keys)
+    await new Promise((r)=>setTimeout(r,5000));
 
     // Import the results
     await process_class_tasks(compClass._links.self.href, classid, name, keys);
+    await new Promise((r)=>setTimeout(r,5000));
     await process_class_results(compClass._links.self.href, classid, name, keys);
 }
 
@@ -244,6 +251,10 @@ async function update_pilots(class_url, classid, classname, keys) {
 
     // Fetch the list of pilots
     const results = await sendSoaringSpotRequest(class_url + '/contestants', keys);
+    if( ! results ) {
+        console.log(classid, 'unable to fetch contestants');
+        return;
+    }
 
     // Start a transaction for updating pilots
     let t = mysql_db.transaction();
@@ -380,39 +391,41 @@ async function download_picture(compno, classid, mysql, context) {
 // for a given class update all the tasks
 async function process_class_tasks(class_url, classid, classname, keys) {
     const tasks = await sendSoaringSpotRequest(class_url + '/tasks', keys);
-    if ('code' in tasks || !('_embedded' in tasks)) {
-        console.log(`${classname}: unable to fetch tasks ${tasks.message}`);
+    if (!tasks || 'code' in tasks || !('_embedded' in tasks)) {
+        console.log(`${classname}: unable to fetch tasks ${tasks?.message}`);
         return 0;
     }
-    let dates: string[] = [];
-    for (const day of tasks._embedded['http://api.soaringspot.com/rel/tasks']) {
-        dates.push(day.task_date);
-
-        // Download the task and prep pilotresult table
+    const day = tasks._embedded['http://api.soaringspot.com/rel/tasks'].sort((a,b)=>a.task_date.localeCompare(b.task_date)).at(-1)
+    // Download the task and prep pilotresult table
+    if( day ) {
+    console.log(`${classname}: date.task_date: task checks scheduled`);
         await process_day_task(day, classid, classname, keys);
     }
-
-    console.log(`${classname}: ${dates.join(',')} task checks scheduled`);
+    else {
+        console.log(`${classname}: no dates? `);
+    }
 }
 
 //
 // for a given class update all the results
 async function process_class_results(class_url, classid, classname, keys) {
     const results = await sendSoaringSpotRequest(class_url + '/results', keys);
-    if ('code' in results || !('_embedded' in results)) {
-        console.log(`${classname}: no results: ${results.message}`);
+    if (!results || 'code' in results || !('_embedded' in results)) {
+        console.log(`${classname}: no results: ${results?.message}`);
         return 0;
     }
 
     let dates: string[] = [];
-    for (const day of results._embedded['http://api.soaringspot.com/rel/class_results']) {
-        dates.push(day.task_date);
-
+    const day = results._embedded['http://api.soaringspot.com/rel/class_results'].sort((a,b)=>a.task_date.localeCompare(b.task_date)).at(-1)
+    if( day ) { 
+        console.log(`${classname}: date.task_date: result checks scheduled`);
         // Update the scores for the task
         await process_day_scores(day, classid, classname, keys);
     }
+    else {
+        console.log(`${classname}: no result dates? `);
+    }
 
-    console.log(`${classname}: ${dates.join(',')} result checks scheduled`);
 }
 
 //
@@ -615,7 +628,7 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
                 ]);
             }
 
-            // If we don't have any valid turnpoints then don't try and download them!
+            // If we don't have any valid turnpoints then don't try and downloadthem!
             if (!query.length || !previousPoint) {
                 return null;
             }
@@ -785,7 +798,7 @@ async function process_day_scores(day, classid, classname, keys) {
                                                               WHERE datecode=${toDateCode(date)} and compno=${pilot} and class=${classid}`)
             )?.[0] || {igcavailable: 'N'};
             if ((igcavailable || 'Y') == 'N' && row?._links?.['http://api.soaringspot.com/rel/flight']) {
-                console.log(date, pilot, igcavailable);
+                console.log(date, pilot, igcavailable, 'checking for IGC');
                 await processIGC(classid, pilot, location.altitude, date, row._links['http://api.soaringspot.com/rel/flight']['href'], https, mysql_db, () => {
                     soaringSpotAuthHeaders(keys);
                 });
@@ -933,7 +946,14 @@ function soaringSpotAuthHeaders(keys) {
 // Fetch values from the soaringpot api
 //
 async function sendSoaringSpotRequest(url, keys): Promise<any> {
-    return fetch(url, soaringSpotAuthHeaders(keys)).then((res) => res.json());
+    return fetch(url, soaringSpotAuthHeaders(keys)).then(async (res) => {
+        if (!res.ok) {
+            console.log( 'Error with soaring spot', url, res.status);
+        }
+        const result = await res.text();
+        console.log(result);
+        return JSON.parse(result);
+    }).catch((e) => { console.error(e); return null});
 }
 
 // Get rid of the T at the front...
