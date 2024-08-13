@@ -449,8 +449,10 @@ async function trackGlider(task: AprsCommandTrack) {
     // And link the broadcast channel to it
     aircraft[task.className + '/' + task.compno].channel = channels[task.channelName];
     aircraft.messages = interimQueue;
-    console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
-    aircraft.interval = setInterval(() => processMessageQueue(aircraft), 1000);
+    setTimeout(() => {
+        console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
+        aircraft.interval = setInterval(() => processMessageQueue(aircraft), 1000);
+    }, Math.random() * 1000);
 }
 
 function untrackGlider(task: AprsCommandUntrack) {
@@ -613,7 +615,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
     //
     let lastSent = aircraft.lastSent;
     let messages = aircraft.messages;
-    const start = from ?? aircraft.lastTime ?? 0;
+    const start = from ?? ((aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch);
     const realNow = getNow();
     let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
@@ -628,6 +630,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         console.log(`processMessageQueue: resending all points for ${aircraft.compno}`);
         aircraft.channel!.postMessage({c: aircraft.compno, t: 1, _: false, tick: true} as any);
         aircraft.lastTime = 0;
+        aircraft.lastTick = 0 as Epoch;
     }
 
     let count = 0;
@@ -721,12 +724,14 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
             // If we had been stationary for a while and we are low enough to be on the ground
             // then mark it as so
             if (aircraft.stationary > 5 && point.g < 100) {
+                console.log(`${point.c}: on ground @ ${point.t}`);
                 aircraft.ground = true;
             }
         }
 
         // If we have 'taken' off
         if (aircraft.ground && point.g > 110) {
+            console.log(`${point.c}: left ground @ ${point.t}`);
             aircraft.ground = false;
         }
 
@@ -735,7 +740,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         // till several stationary points have happened
         if (aircraft.ground) {
             // && distance(point.j!, airfieldLocation) > 3) {
-            console.log(point.c, 'ground - not processing');
+            //            console.log(`${point.c}: on ground - not processing ${point.t}, live: ${start !== 0}`);
             continue;
         }
 
@@ -750,24 +755,26 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
         // all it does is stop it sending to the front end
-        if (aircraft.compno == 'PP') {
-            console.log('PP =>', point.c, point.t);
+        if (aircraft.compno == 'RP') {
+            console.log('RP =>', point.c, point.t);
         }
 
         const live = start != 0 || position == messages.length;
         aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
     }
-    if (start == 0 || (count == 0 && realNow - aircraft.lastTick > 60)) {
+    if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {
         aircraft.channel!.postMessage({
             c: aircraft.compno, //
             t: (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch),
             _: true,
             tick: true
         } as any);
-        aircraft.lastTick = realNow;
+        aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
+
+        console.log(`${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} f:${from} s:${start} t:${to}`);
     }
 
     if (count > 1) {
-        console.log(aircraft.compno, 'processed ', count, position, messages.length, messages[position]?.t, from, start, to);
+        console.log(`${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, f:${from} s:${start} t:${to}`);
     }
 }

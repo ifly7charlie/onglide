@@ -34,6 +34,8 @@ import {scoreCollector} from './scoreCollector';
 
 import {cloneDeep as _clonedeep} from 'lodash';
 
+import {getNow} from '../now';
+
 // FLOW:
 //
 // APRS => broadcast channel [ClassName_Compno] // incoming unsorted aprs packets
@@ -279,7 +281,7 @@ if (!isMainThread) {
         // of gliders to track
         if (task.action == ScoringCommandEnum.initialTrack) {
             const itTask: ScoringCommandTrack = task;
-            console.log(`${task.className}/${task.compno}: initial track received ${itTask.points.length} positions ${itTask.handicap} hcap, ${itTask.utcStart} utcStart`);
+            console.log(`${task.className}/${task.compno}: ${itTask.handicap} hcap, ${itTask.utcStart} utcStart [${itTask.scoreId}]`);
             const alreadyScoring = !!scoreCollector;
 
             gliders[makeClassname_Compno(task)] = {
@@ -391,22 +393,4 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) 
     const scores = taskScoresGenerator(task, glider.compno, glider.handicap, distances, log);
 
     return scores;
-}
-
-// Correct timing for the competition
-const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') : 0;
-let getNow = (): Epoch => (Math.trunc(Date.now() / 1000) - compDelay) as Epoch;
-
-// And the replay
-if (process.env.REPLAY) {
-    let start = Math.trunc(Date.now() / 1000);
-    let multiplier = parseInt(process.env.REPLAY_MULTIPLIER || '1');
-    const replayBase = parseInt(process.env.REPLAY);
-
-    getNow = (): Epoch => {
-        const now = Math.trunc(Date.now() / 1000);
-        const elapsed = now - start;
-        const effectiveElapsed = elapsed * multiplier;
-        return (replayBase + effectiveElapsed) as Epoch;
-    };
 }

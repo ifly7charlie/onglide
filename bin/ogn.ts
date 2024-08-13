@@ -1253,6 +1253,11 @@ async function processAprsMessage(className: string, channel: Channel, message: 
         return;
     }
 
+    // We ignore ticks
+    if ('tick' in message) {
+        return;
+    }
+
     // Check if they are a launch
     if (message.g > 100 && !channel.launching) {
         console.log(`Launch detected: ${glider.compno}, class: ${glider.className}`);

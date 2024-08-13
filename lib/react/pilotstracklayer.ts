@@ -68,8 +68,6 @@ export function pilotsTrackLayer(
             startTime: currentTime > clipStartAt ? clipStartAt - 5 - referenceDate : 0
         };
 
-        console.log(tripsFiltering, startTimes[compno]);
-
         const getColor = sortKey == 'climb' ? {value: track.deckAdditional.climb, size: 3} : sortKey == 'aheight' ? {value: track.deckAdditional.aheight, size: 3} : undefined;
 
         return new OgnTripsLayer({

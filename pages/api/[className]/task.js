@@ -4,6 +4,7 @@ import escape from 'sql-template-strings';
 import {calculateTaskLength} from '../../../lib/flightprocessing/taskhelper';
 
 import {toDateCode, fromDateCode} from '../../../lib/datecode';
+import {replay, getNow} from '../../../lib/now';
 
 export default async function taskHandler(req, res) {
     const {
@@ -16,13 +17,23 @@ export default async function taskHandler(req, res) {
         return;
     }
 
-    const contestday = await query(escape`
+    const contestday = await query(
+        replay()
+            ? escape`
          SELECT contestday.*, DATE_FORMAT( contestday.calendardate, "%a %D %M" ) displaydate
           FROM contestday, compstatus cs
-          WHERE (((${process.env.REPLAY || ''}) = '' AND contestday.datecode= cs.datecode) OR (${process.env.REPLAY || ''} != '' AND contestday.datecode=${toDateCode(new Date(parseInt(process.env.REPLAY) * 1000))}))
+          WHERE contestday.datecode=${toDateCode(new Date(getNow() * 1000))}
             AND cs.class = contestday.class and contestday.class= ${className}
           LIMIT 1
-    `);
+    `
+            : escape`
+         SELECT contestday.*, DATE_FORMAT( contestday.calendardate, "%a %D %M" ) displaydate
+          FROM contestday, compstatus cs
+          WHERE contestday.datecode= cs.datecode
+            AND cs.class = contestday.class and contestday.class= ${className}
+          LIMIT 1
+    `
+    );
 
     if (!contestday || !contestday.length) {
         console.log('task.js: date not yet started', className, contestday);
