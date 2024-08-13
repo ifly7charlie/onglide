@@ -9,6 +9,7 @@
         "build": "yarn build:protobuf && yarn build:tsc",
         "build:tsc": "tsc --project tsconfig-bin.json",
         "build:protobuf": "protoc --plugin=node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=. ./lib/protobuf/onglide.proto",
+        "build:docker": "docker compose build",
         "soaringspot": "node dist/bin/soaringspot.js",
         "ssscrape": "node dist/bin/ssscrape.js",
         "rst": "node dist/bin/rst.js",
