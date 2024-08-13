@@ -41,6 +41,19 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             return;
         }
 
+        // If it's a inbound tick (ie change of place in the queue we just mark it as such and move on
+        if ('tick' in message) {
+            console.log('TICK MSG', message);
+            const toNotify = resolveNotifications.slice();
+            resolveNotifications.length = 0;
+            toNotify.forEach((resolveFunction) => resolveFunction(true));
+            return;
+        }
+
+        if (!message.lat) {
+            console.log('hmmm, malformed', message);
+        }
+
         // Figure out where to insert (sorted by time)
         const insertIndex = _sortedLastIndexBy(messageQueue, message, (o) => o.t);
 
@@ -50,8 +63,12 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             return;
         }
 
+        if (messageQueue.length != insertIndex) {
+            console.log(message.c, message.t, 'inserting out of order', messageQueue.length, insertIndex);
+        }
+
         if (message.c == '212') {
-            console.log(message.t, message._);
+            console.log(message.c, message.t, message._);
         }
 
         // Actually insert the point into the array
@@ -78,17 +95,9 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         //
         // How far through are we
         let position = 0;
-        let now: Epoch = getNow();
         let hiccup: Epoch = 0 as Epoch;
 
-        console.log('InOrderGenerator', compno, '1');
-
-        // Make sure we always have at least one entry for the glider, this should
-        // ensure we have a placeholder for every pilot regardless of flarm messages
-        // we use 1 so we don't get picked up as !t
-        yield {t: messageQueue[0]?.t || (1 as Epoch), c: compno, tick: true, _: false};
-
-        console.log('InOrderGenerator', compno, '2');
+        console.log('InOrderGenerator', compno, '2', messageQueue.length);
         if (!messageQueue.length) {
             await new Promise((resolve) => resolveNotifications.push(resolve));
         }
@@ -97,33 +106,35 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
         while (!messageQueue[position]?._) {
+            if (position == messageQueue.length) {
+                console.log(compno, 'end of queue', position, messageQueue.length);
+                // Skip all the ticks, they shouldn't happen but don't wait forever
+                let count = 0;
+                for (; count < 10 && (await new Promise<boolean>((resolve) => resolveNotifications.push(resolve))); count++) {}
+                console.log(compno, 'more messages found', count);
+                // don't process it now as we need the while clause to evaluate the _
+                continue;
+            }
+
             const message = messageQueue[position++];
-            const nextPoint = yield {...message, _: false};
+            const nextPoint = yield {...message};
 
             // If we need to go backwards then do so
             if (nextPoint) {
                 for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
-            } else if (message.t - hiccup > 60) {
-                hiccup = message.t;
-                const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
-                if (nextPoint) {
-                    for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+            } else {
+                if (message.t - hiccup > 60) {
+                    hiccup = message.t;
+                    const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
+                    if (nextPoint) {
+                        for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+                        continue;
+                    }
                 }
-            } else if (position == messageQueue.length) {
-                await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
             }
         }
 
-        // Flag that we have completed replay so we can tell that all gliders are live
-        // we use 2 so we don't get picked up as !t, and so we can tell it's live tick
-        yield {
-            //
-            t: (messageQueue.length ? messageQueue[Math.min(position, messageQueue.length - 1)]?.t : undefined) || (2 as Epoch),
-            c: compno,
-            tick: true,
-            _: true
-        };
-
+        let now: Epoch = getNow();
         console.log(
             `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue.at(-1)?.t ?? 0) * 1000).toISOString()}`
         );
@@ -138,9 +149,13 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             // we won't forward it on until it's been there long enough
             const nowCutoff: Epoch = (getNow() - inOrderDelay) as Epoch;
 
+            if (compno == 'MX') {
+                console.log('MX', position, messageQueue.length, now, nowCutoff);
+            }
+
             if (position < messageQueue.length && messageQueue[position]?.t < nowCutoff) {
                 const message = messageQueue[position++];
-                const nextPoint = yield {...message, _: position == messageQueue.length || messageQueue[position]?.t >= nowCutoff};
+                const nextPoint = yield message;
                 now = nextPoint ? nextPoint : message.t;
             }
 

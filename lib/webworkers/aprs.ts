@@ -118,6 +118,7 @@ interface Aircraft {
     lastTime?: number;
     lastSent?: InterimPositionMessage;
     lastMoved?: number;
+    lastTick: Epoch;
 
     kf?: any; // altitude smoothing
     stationary: number; // consecutive stationary fixes
@@ -131,7 +132,7 @@ interface Aircraft {
     log: (...x) => void;
 
     // Interval handler
-    interval: NodeJS.Timeout;
+    interval?: NodeJS.Timeout;
 }
 
 interface Tracker {
@@ -407,6 +408,7 @@ async function trackGlider(task: AprsCommandTrack) {
         // Not had a message
         stationary: 0,
         ground: true,
+        lastTick: getNow(),
 
         // Setup logging
         log:
@@ -416,9 +418,7 @@ async function trackGlider(task: AprsCommandTrack) {
                   }
                 : function log() {},
 
-        messages: [],
-
-        interval: setInterval(() => processMessageQueue(aircraft), 1000)
+        messages: []
     };
 
     // Link the glider in
@@ -429,18 +429,17 @@ async function trackGlider(task: AprsCommandTrack) {
 
     // Link the tracker(s) in
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
-    await Promise.allSettled(
-        trackerList.map((id: string, index: number) => {
-            console.log('load tracker', aircraft.compno, id);
-            trackers[id] = {
-                id: id as FlarmID,
-                index,
-                aircraft,
-                db: db?.sublevel(id, {})
-            };
-            return loadPointsForTracker(trackers[id], interimQueue);
-        })
-    );
+    let index = 0;
+    for (const id of [...new Set(trackerList)]) {
+        console.log('load tracker', aircraft.compno, id);
+        trackers[id] = {
+            id: id as FlarmID,
+            index: index++,
+            aircraft,
+            db: db?.sublevel(id, {})
+        };
+        await loadPointsForTracker(trackers[id], interimQueue);
+    }
 
     // And make sure we have a channel for it
     if (!channels[task.channelName]) {
@@ -451,6 +450,7 @@ async function trackGlider(task: AprsCommandTrack) {
     aircraft[task.className + '/' + task.compno].channel = channels[task.channelName];
     aircraft.messages = interimQueue;
     console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
+    aircraft.interval = setInterval(() => processMessageQueue(aircraft), 1000);
 }
 
 function untrackGlider(task: AprsCommandUntrack) {
@@ -624,9 +624,10 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         } */
 
     // If we have been asked to resent all points then we shall do so
-    if (aircraft.lastTime && start === 0) {
+    if (start === 0 && aircraft.lastTime !== 0) {
         console.log(`processMessageQueue: resending all points for ${aircraft.compno}`);
-        aircraft.channel!.postMessage({c: aircraft.compno, t: 0});
+        aircraft.channel!.postMessage({c: aircraft.compno, t: 1, _: false, tick: true} as any);
+        aircraft.lastTime = 0;
     }
 
     let count = 0;
@@ -746,13 +747,27 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
 
         // Check for very late and log it
         aircraft.lastSent = point;
-        aircraft.lastTime = point.t;
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
         // all it does is stop it sending to the front end
-        aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: start != 0 || position == messages.length});
+        if (aircraft.compno == 'PP') {
+            console.log('PP =>', point.c, point.t);
+        }
+
+        const live = start != 0 || position == messages.length;
+        aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
     }
-    if (count > 0) {
-        console.log(aircraft.compno, 'processed ', count, position, messages.length, messages[position], from, start, to);
+    if (start == 0 || (count == 0 && realNow - aircraft.lastTick > 60)) {
+        aircraft.channel!.postMessage({
+            c: aircraft.compno, //
+            t: (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch),
+            _: true,
+            tick: true
+        } as any);
+        aircraft.lastTick = realNow;
+    }
+
+    if (count > 1) {
+        console.log(aircraft.compno, 'processed ', count, position, messages.length, messages[position]?.t, from, start, to);
     }
 }

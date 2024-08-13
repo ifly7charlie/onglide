@@ -66,6 +66,8 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
             const recentStart = score.utcStart && c.mostRecentStart[compno] != score.utcStart ? score.utcStart : undefined;
             c.mostRecentStart[compno] = score.utcStart as Epoch;
 
+            console.log(compno, 'scored @', score.t, score.live);
+
             // If we are now live we can close off the older ones
             if (score.live && !c.live[compno]) {
                 c.live[compno] = true;
@@ -82,7 +84,8 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                     }
                 }
 
-                console.log(`[${id}] ${className}/${compno}: ${c.state} - ${numLive} live, ${numRunning} running, ${numCompnos} compnos [${scoreId}]`);
+                const missing = [...allGliders.difference(new Set(Object.keys(c.live)))];
+                console.log(`[${id}] ${className}/${compno}: ${c.state} - ${numLive} live, ${numRunning} running, ${numCompnos} compnos [${scoreId}], missing ${missing.join(',')}`);
                 // if all are live
                 if (numLive == numRunning && numLive == numCompnos) {
                     if (c.state === 'aborted' || Object.values(c.optionsForCompno).some((o) => o.restartCount != 1)) {
