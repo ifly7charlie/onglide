@@ -96,6 +96,7 @@ interface Statistics {
     positionsSent: number;
     positionsSentCycles: number;
     listenerCycles: number;
+    interactingListeners: number;
     activeListeners: number;
     peakListeners: number;
 
@@ -114,7 +115,7 @@ interface Channel {
 
     activeGliders: Set<Compno>; // map of active compno
     lastSentPositions: Epoch;
-    clients: any[]; // all websockets for the channel
+    clients: OgnWebSocket[]; // all websockets for the channel
 
     broadcastChannel?: BroadcastChannel;
     scoring?: ScoringController;
@@ -206,6 +207,7 @@ interface OgnWebSocket extends WebSocket {
     ognChannel: ChannelName;
     ognPeer: string;
     isAlive: boolean;
+    isInteracting: boolean;
     connectedAt: Epoch;
 }
 
@@ -323,9 +325,15 @@ async function main() {
 
     if ('PM2_HOME' in process.env || existsSync('.docker')) {
         console.log('PM2/DOCKER: waiting for scoring to be completed...');
-        const checkScoringNotReady = () => Object.values(channels).some((c) => !c.liveScoreId);
+        const checkScoringNotReady = () => {
+            const notReady = Object.values(channels).filter((c) => !c.liveScoreId);
+            if (notReady.length) {
+                console.log(`still need ${notReady.map((c) => c.className).join(',')} to finish scoring`);
+            }
+            return !notReady.length;
+        };
         while (checkScoringNotReady()) {
-            await setTimeoutPromise(5000);
+            await setTimeoutPromise(1000);
         }
         console.log('PM2/DOCKER: starting http(s) listener');
     }
@@ -347,6 +355,8 @@ async function main() {
         } catch (e) {
             console.log(`Unable to initialise SSL "keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem"`, e);
         }
+    } else {
+        console.log(`Not initialising SSL: port: ${process.env.WEBSOCKET_PORT}, url: ${process.env.NEXT_PUBLIC_SITEURL}`);
     }
 
     // We always open an non-ssl one
@@ -378,6 +388,7 @@ async function main() {
             const channel = channels[channelName];
 
             channel.statistics.activeListeners += channel.clients.length;
+            channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.listenerCycles++;
 
             if (channel.clients.length) {
@@ -462,9 +473,9 @@ async function main() {
                 `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
             );
             console.log(
-                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${
-                    channel.statistics.peakListeners
-                }`
+                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (${(channel.statistics.interactingListeners / channel.statistics.listenerCycles).toFixed(
+                    1
+                )}, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${channel.statistics.peakListeners}`
             );
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
@@ -479,6 +490,7 @@ async function main() {
                 channel.statistics.positionsSentCycles =
                 channel.statistics.bytesSent =
                 channel.statistics.activeListeners =
+                channel.statistics.interactingListeners =
                 channel.statistics.listenerCycles =
                 channel.statistics.outOfOrderPackets =
                 channel.statistics.insertedPackets =
@@ -558,6 +570,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     positionsSentCycles: 0,
                     listenerCycles: 0,
                     activeListeners: 0,
+                    interactingListeners: 0,
                     peakListeners: 0,
                     totalViewingTime: 0
                 },
@@ -1193,6 +1206,7 @@ async function sendKeepalive(channel: Channel) {
             client.send(channel.lastKeepAliveMsg, {binary: true});
         }
         client.isAlive = false;
+        client.isInteracting = false;
         client.ping(function () {});
     });
 }
@@ -1391,6 +1405,7 @@ function setupWebSocketServer(server) {
         console.log(`connection received for ${channel} from ${ws.ognPeer} on ${address}`);
 
         ws.isAlive = true;
+        ws.isInteracting = false;
         ws.connectedAt = getNow();
         if (channel in channels) {
             channels[channel].clients.push(ws);
@@ -1408,7 +1423,9 @@ function setupWebSocketServer(server) {
             console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('error', console.error);
-        ws.on('message', () => {
+        ws.on('message', (cx) => {
+            ws.isInteracting = true;
+            console.log(cx);
             /**/
         });
 

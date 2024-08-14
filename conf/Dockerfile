@@ -1,4 +1,4 @@
-FROM node:22-slim as ognbase
+FROM node:22-slim AS ognbase
 RUN apt-get update 
 RUN apt-get install -y gnupg wget lsb-release
 RUN wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.30-1_all.deb
