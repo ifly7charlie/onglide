@@ -169,7 +169,7 @@ async function soaringSpot(deep = false) {
     // links in this code are HTTP because that is how they are returned in the JSON
     // HOWEVER! All fetches will be https because the enumeration links are all https
     const contests = (await sendSoaringSpotRequest('https://api.soaringspot.com/v1/', keys)) as any;
-    if( ! contests ) {
+    if (!contests) {
         console.log('unable to fetch contest');
         return;
     }
@@ -184,8 +184,8 @@ async function soaringSpot(deep = false) {
             await update_contest(contest, keys);
 
             // Update each class in the competition
-            for (const cclass of contest._embedded['http://api.soaringspot.com/rel/classes'].map((c)=>({...c,order:Math.random()})).sort((a,b)=>a.order-b.order)) {
-                await new Promise((r)=>setTimeout(r,10000));
+            for (const cclass of contest._embedded['http://api.soaringspot.com/rel/classes'].map((c) => ({...c, order: Math.random()})).sort((a, b) => a.order - b.order)) {
+                await new Promise((r) => setTimeout(r, 10000));
                 await update_class(cclass, keys);
             }
         }
@@ -234,12 +234,12 @@ async function update_class(compClass, keys) {
     //    await mysql_db.query(escape`update compstatus set status=':', datecode=todcode(now())`);
 
     // Now add details of pilots
-    await update_pilots(compClass._links.self.href, classid, name, keys)
-    await new Promise((r)=>setTimeout(r,5000));
+    await update_pilots(compClass._links.self.href, classid, name, keys);
+    await new Promise((r) => setTimeout(r, 5000));
 
     // Import the results
     await process_class_tasks(compClass._links.self.href, classid, name, keys);
-    await new Promise((r)=>setTimeout(r,5000));
+    await new Promise((r) => setTimeout(r, 5000));
     await process_class_results(compClass._links.self.href, classid, name, keys);
 }
 
@@ -251,7 +251,7 @@ async function update_pilots(class_url, classid, classname, keys) {
 
     // Fetch the list of pilots
     const results = await sendSoaringSpotRequest(class_url + '/contestants', keys);
-    if( ! results ) {
+    if (!results) {
         console.log(classid, 'unable to fetch contestants');
         return;
     }
@@ -320,6 +320,7 @@ async function update_pilots(class_url, classid, classname, keys) {
                 mysql, //
                 {igc_id: epilot.igc_id, compno: pilot.contestant_number?.substring(0, 4)?.trim(), class: classid, greg: pilot.aircraft_registration?.substring(0, 8)?.trim(), civil_id: epilot.civl_id}
             );
+            await new Promise((r) => setTimeout(r, Math.random() * 10_000));
         }
     }
 
@@ -395,13 +396,12 @@ async function process_class_tasks(class_url, classid, classname, keys) {
         console.log(`${classname}: unable to fetch tasks ${tasks?.message}`);
         return 0;
     }
-    const day = tasks._embedded['http://api.soaringspot.com/rel/tasks'].sort((a,b)=>a.task_date.localeCompare(b.task_date)).at(-1)
+    const day = tasks._embedded['http://api.soaringspot.com/rel/tasks'].sort((a, b) => a.task_date.localeCompare(b.task_date)).at(-1);
     // Download the task and prep pilotresult table
-    if( day ) {
-    console.log(`${classname}: date.task_date: task checks scheduled`);
+    if (day) {
+        console.log(`${classname}: date.task_date: task checks scheduled`);
         await process_day_task(day, classid, classname, keys);
-    }
-    else {
+    } else {
         console.log(`${classname}: no dates? `);
     }
 }
@@ -416,16 +416,14 @@ async function process_class_results(class_url, classid, classname, keys) {
     }
 
     let dates: string[] = [];
-    const day = results._embedded['http://api.soaringspot.com/rel/class_results'].sort((a,b)=>a.task_date.localeCompare(b.task_date)).at(-1)
-    if( day ) { 
+    const day = results._embedded['http://api.soaringspot.com/rel/class_results'].sort((a, b) => a.task_date.localeCompare(b.task_date)).at(-1);
+    if (day) {
         console.log(`${classname}: date.task_date: result checks scheduled`);
         // Update the scores for the task
         await process_day_scores(day, classid, classname, keys);
-    }
-    else {
+    } else {
         console.log(`${classname}: no result dates? `);
     }
-
 }
 
 //
@@ -793,16 +791,20 @@ async function process_day_scores(day, classid, classname, keys) {
             rows += r.affectedRows;
 
             // check the file to check tracking details
-            let {igcavailable} = (
-                await mysql_db.query(escape`SELECT igcavailable FROM pilotresult
-                                                              WHERE datecode=${toDateCode(date)} and compno=${pilot} and class=${classid}`)
-            )?.[0] || {igcavailable: 'N'};
-            if ((igcavailable || 'Y') == 'N' && row?._links?.['http://api.soaringspot.com/rel/flight']) {
-                console.log(date, pilot, igcavailable, 'checking for IGC');
-                await processIGC(classid, pilot, location.altitude, date, row._links['http://api.soaringspot.com/rel/flight']['href'], https, mysql_db, () => {
-                    soaringSpotAuthHeaders(keys);
-                });
-                doCheckForOGNMatches = true;
+            let {igcavailable, trackerid} = (
+                await mysql_db.query(escape`SELECT igcavailable, trackerid FROM pilotresult pr left outer 
+                                                   join tracker t on t.class = pr.class and t.compno = p.compno 
+                                                   WHERE pr.datecode=${toDateCode(date)} and pr.compno=${pilot} and pr.class=${classid}`)
+            )?.[0] || {igcavailable: 'Y', trackerid: 'unknown'};
+            if ((igcavailable || 'Y') == 'N' && trackerid == 'unknown' && row?._links?.['http://api.soaringspot.com/rel/flight']) {
+                console.log(date, pilot, igcavailable, 'scheduling check for IGC');
+
+                setTimeout(() => {
+                    console.log('checking IGC file for launch times', classid, date, pilot);
+                    processIGC(classid, pilot, location.altitude, date, row._links['http://api.soaringspot.com/rel/flight']['href'], https, mysql_db, () => {
+                        soaringSpotAuthHeaders(keys);
+                    }).then(() => checkForOGNMatches(classid, date, mysql_db));
+                }, randomEarlyMorningTimeDelay());
             }
         }
 
@@ -822,11 +824,6 @@ async function process_day_scores(day, classid, classname, keys) {
         }
     }
 
-    // If we processed an IGC file we should check to see if we have an OGN launch/landing match
-    if (doCheckForOGNMatches) {
-        checkForOGNMatches(classid, date, mysql_db);
-    }
-
     // Did anything get updated?
     if (rows) {
         await mysql_db.query(escape`UPDATE contestday SET results_uploaded=NOW()
@@ -838,6 +835,10 @@ async function process_day_scores(day, classid, classname, keys) {
     //    if( status == 'preliminary' ) {
     //        await db.query( escape`call daypoints(${classid})` );
     //    }
+}
+
+function randomEarlyMorningTimeDelay() {
+    return new Date().setHours(0, 0, 0) - Date.now() + (24 + Math.random()) * 6 * 3600 * 1000;
 }
 
 //
@@ -946,14 +947,19 @@ function soaringSpotAuthHeaders(keys) {
 // Fetch values from the soaringpot api
 //
 async function sendSoaringSpotRequest(url, keys): Promise<any> {
-    return fetch(url, soaringSpotAuthHeaders(keys)).then(async (res) => {
-        if (!res.ok) {
-            console.log( 'Error with soaring spot', url, res.status);
-        }
-        const result = await res.text();
-        console.log(result);
-        return JSON.parse(result);
-    }).catch((e) => { console.error(e); return null});
+    return fetch(url, soaringSpotAuthHeaders(keys))
+        .then(async (res) => {
+            if (!res.ok) {
+                console.log('Error with soaring spot', url, res.status);
+                console.log(await res.text());
+                return null;
+            }
+            return res.json();
+        })
+        .catch((e) => {
+            console.error(e);
+            return null;
+        });
 }
 
 // Get rid of the T at the front...
