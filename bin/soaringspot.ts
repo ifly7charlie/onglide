@@ -312,15 +312,16 @@ async function update_pilots(class_url, classid, classname, keys) {
             updateTrackers(compno, flarms.join(','), 'soaringspot');
         }
 
-        // Download pictures
+        // Download pictures, sometime in the next 2 minutes
         if (epilot.igc_id) {
-            await download_picture(
-                pilot.contestant_number.substring(0, 4),
-                classid,
-                mysql, //
-                {igc_id: epilot.igc_id, compno: pilot.contestant_number?.substring(0, 4)?.trim(), class: classid, greg: pilot.aircraft_registration?.substring(0, 8)?.trim(), civil_id: epilot.civl_id}
-            );
-            await new Promise((r) => setTimeout(r, Math.random() * 10_000));
+            setTimeout(() => {
+                download_picture(
+                    pilot.contestant_number.substring(0, 4),
+                    classid,
+                    mysql, //
+                    {igc_id: epilot.igc_id, compno: pilot.contestant_number?.substring(0, 4)?.trim(), class: classid, greg: pilot.aircraft_registration?.substring(0, 8)?.trim(), civil_id: epilot.civl_id}
+                );
+            }, Math.random() * 120 * 1000);
         }
     }
 
@@ -345,7 +346,7 @@ async function update_pilots(class_url, classid, classname, keys) {
 // Fetch the picture from FAI rankings
 async function download_picture(compno, classid, mysql, context) {
     // Check when it was last checked
-    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND image is not null AND unix_timestamp()-updated < 86400`))[0];
+    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND image is not null OR unix_timestamp()-updated < 86400`))[0];
 
     if (lastUpdated) {
         console.log(`not updating ${compno} picture`);
