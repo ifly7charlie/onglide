@@ -220,12 +220,33 @@ async function update_class(compClass, keys) {
 
     const name = nameRaw.replace(/[_]/gi, ' ');
 
+    const Dms = {
+        unknown: null,
+        club: 100,
+        '15_meter': 120,
+        standard: 120,
+        '20_meter': 120,
+        '18_meter': 140,
+        open: 140
+    };
+    const handicapped = {
+        unknown: 'N',
+        club: 'Y',
+        '15_meter': 'N',
+        standard: 'N',
+        '20_meter': 'Y',
+        '18_meter': 'N',
+        open: 'N'
+    };
+    const isHandicapped = handicapped[compClass.type?.toLowerCase() ?? 'unknown'] ?? handicapped['unknown'];
+    const dm = Dms[compClass.type?.toLowerCase() ?? 'unknown'] ?? Dms['unknown'];
+
     // Add to the database
     await mysql_db.query(escape`
-             INSERT INTO classes (class, classname, description, type )
-                   VALUES ( ${classid}, ${name.substr(0, 29)}, ${name}, ${compClass.type} )
+INSERT INTO classes (class, classname, description, type, handicapped, Dm )
+VALUES ( ${classid}, ${name.substr(0, 29)}, ${name}, ${compClass.type}, ${isHandicapped}, ${dm} )
                     ON DUPLICATE KEY UPDATE classname=values(classname), description=values(description),
-                                            type=values(type) `);
+type=values(type), handicapped=values(handicapped), Dm = values(Dm) `);
 
     await mysql_db.query(escape`insert ignore into compstatus (class) values ( ${classid} )`);
 
