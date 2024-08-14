@@ -22,7 +22,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
     // We need somewhere to store the unprocessed message queue
     let messageQueue: PositionMessage[] = initialPoints;
 
-    const log = compno == 'AD' ? (...a) => console.log(compno + ':', ...a) : () => {};
+    const log = compno == '3V' ? (...a) => console.log(compno + ':', ...a) : () => {};
 
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
@@ -132,7 +132,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
             //            if (position < messageQueue.length && messageQueue[position]?.t < nowCutoff) {
             const message = messageQueue[position++];
-            const nextPoint = yield message;
+            const nextPoint = yield {...message, _: position == messageQueue.length};
             if (nextPoint) {
                 position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
             }

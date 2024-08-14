@@ -730,7 +730,7 @@ interface CTrackerRow {
 
 async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
-    let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
+    let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, UPPER(trackerId) as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
                                            ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
                                              END utcStart,
@@ -803,12 +803,15 @@ async function updateTrackers(datecode: Datecode) {
                 ));
                 const channel = channels[glider.channelName];
 
+                console.log(
+                    `*> ${t.className}/${t.compno}: changed: start ${startUtcChanged}, handicap ${handicapChanged}, scores ${scoredStatusChanged}, hadTracker: ${hadTracker}, ${t.dbTrackerId}, scoredStatus:${t.scoredStatus}, scoring: ${glider.scoringConfigured}`
+                );
+
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
                         console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus} [channel ${glider.channelName}]`);
                         channel?.scoring?.clearGlider(glider.compno);
-                        const flarmIDs = t.dbTrackerId.split(',').filter((i: string) => i.match(/[0-9A-F]{6}$/i));
-                        console.log(`Stopping APRS Listener for glider ${t.className}:${t.compno} => ${flarmIDs.join(',')}`);
+                        console.log(`Stopping APRS Listener for glider ${t.className}:${t.compno} => ${t.dbTrackerId}`);
                         aprsController?.untrackGlider(t.compno, t.className, glider.channelName, t.dbTrackerId);
                     }
                     //
@@ -1064,7 +1067,7 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
                 datecode: channel.datecode,
                 competition: '1', //
                 earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
-                latestScore: channel.latestScore + 120,
+                latestScore: channel.latestScore,
                 scoreId: channel.liveScoreId
             },
             scores: {
@@ -1092,7 +1095,9 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
 async function sendScore(channel: Channel, compno: Compno, score: PilotScore, recentStart: Epoch | undefined, scoreId: string, t: Epoch | undefined) {
-    //    console.log(`${compno}: received ${score.live ? 'live' : 'replay'} score [${scoreId}] ${recentStart ? ', recently started, ' : ''}, ${d(t)}`);
+    if (compno == '3V') {
+        console.log(`${compno}: received ${score.live ? 'live' : 'replay'} score [${scoreId}] ${recentStart ? ', recently started, ' : ''}, ${d(t)}`);
+    }
 
     if (compno == '_live') {
         console.log(`${channel.className}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
@@ -1424,8 +1429,10 @@ function setupWebSocketServer(server) {
         });
         ws.on('error', console.error);
         ws.on('message', (cx) => {
-            ws.isInteracting = true;
-            console.log(cx);
+            if (cx.toString() != 'ping') {
+                ws.isInteracting = true;
+                //                console.log(cx.toString());
+            }
             /**/
         });
 

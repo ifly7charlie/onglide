@@ -123,4 +123,5 @@ lib/.#htmlhelper.js
 keys/*
 *aprs
 .env*
+db
 

@@ -1,4 +1,4 @@
-FROM node:22-slim AS ognbase
+FROM node:20-slim AS ognbase
 RUN apt-get update 
 RUN apt-get install -y gnupg wget lsb-release
 RUN wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.30-1_all.deb
@@ -41,7 +41,7 @@ RUN yarn install --production --frozen-lockfile
 
 FROM productionbase AS next
 WORKDIR /onglide
-COPY --from=nextbuildimage /onglide/.next ./.next
+COPY --from=nextbuildimage /onglide/.build ./.build
 COPY ./next.config.js ./next.config.js
 COPY ./.env ./.env
 COPY ./LICENSE ./LICENSE

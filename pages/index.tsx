@@ -61,9 +61,10 @@ const Menu = memo(
                 comp.competition.name
                     .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
                     .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
+                    .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
                     //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
                     ?.trim() || comp.competition.name
-            ).substring(0, 15) + '...';
+            ).substring(0, 13) + '...';
 
         return (
             <>
