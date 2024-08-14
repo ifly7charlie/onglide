@@ -769,6 +769,13 @@ async function process_day_scores(day, classid, classname, keys) {
 
         // If there is data from scoring then process it into the database
         if (row.status_evaluated) {
+            // check the file to check tracking details
+            let {igcavailable, trackerid} = (
+                await mysql_db.query(escape`SELECT igcavailable, trackerid FROM pilotresult pr left outer 
+                                                   join tracker t on t.class = pr.class and t.compno = pr.compno 
+                                                   WHERE pr.datecode=${toDateCode(date)} and pr.compno=${pilot} and pr.class=${classid}`)
+            )?.[0] || {igcavailable: 'Y', trackerid: 'unknown'};
+
             const r = await mysql_db.query(escape`
                            UPDATE pilotresult
                            SET
@@ -777,7 +784,7 @@ async function process_day_scores(day, classid, classname, keys) {
                              duration=COALESCE(TIMEDIFF(${convert_to_mysql(row.scored_finish)},${convert_to_mysql(row.scored_start)}),duration),
                              statuschanged = (CASE WHEN (scoredstatus = ${scoredStatus}) THEN statuschanged
                                         ELSE NOW() END),
-                             datafromscoring = "Y",
+                             datafromscoring = "Y", igcavailable = "Y",
                              scoredstatus= ${scoredStatus},
                              status = (CASE WHEN ((status = "-" or status = "S" or status="G") and ${row.scored_finish} != "") THEN "F"
                                         WHEN   ((status = "-" or status = "S" or status="G") and ${row.igc_file} != "") THEN "H"
@@ -790,12 +797,6 @@ async function process_day_scores(day, classid, classname, keys) {
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );
             rows += r.affectedRows;
 
-            // check the file to check tracking details
-            let {igcavailable, trackerid} = (
-                await mysql_db.query(escape`SELECT igcavailable, trackerid FROM pilotresult pr left outer 
-                                                   join tracker t on t.class = pr.class and t.compno = p.compno 
-                                                   WHERE pr.datecode=${toDateCode(date)} and pr.compno=${pilot} and pr.class=${classid}`)
-            )?.[0] || {igcavailable: 'Y', trackerid: 'unknown'};
             if ((igcavailable || 'Y') == 'N' && trackerid == 'unknown' && row?._links?.['http://api.soaringspot.com/rel/flight']) {
                 console.log(date, pilot, igcavailable, 'scheduling check for IGC');
 
