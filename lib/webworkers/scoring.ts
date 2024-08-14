@@ -361,8 +361,10 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
     glider.utcStart = utcStart;
     glider.scoreId = scoreId;
 
-    if (!glider || !glider.task) {
-        console.error(`unable to rescore glider ${compno}, ${config.className}: no task or glider not found`);
+    if (!glider) {
+        console.error(`unable to rescore glider ${compno}, ${config.className}: no glider found`, Object.keys(gliders));
+    } else if (!glider.task) {
+        console.error(`unable to rescore glider ${compno}, ${config.className}: no task found`);
     } else {
         scoreUpdater?.collect(compno, (glider.scoring = getScoringChain(glider, config, glider.task)), scoreId);
     }
