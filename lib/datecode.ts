@@ -1,4 +1,5 @@
 import type {Datecode} from './types';
+import {getNow} from './now';
 
 // Get a string date
 export function fromDateCode(dcodeA: string | Datecode): string {
@@ -21,4 +22,8 @@ export function toDateCode(date?: string | Date): Datecode {
     const month = (date.getUTCMonth() + 1).toString(36);
     const day = date.getUTCDate().toString(36);
     return `${year}${month}${day}`.toUpperCase() as Datecode;
+}
+
+export function getCurrentDateCode(): Datecode {
+    return toDateCode(new Date(getNow() * 1000));
 }

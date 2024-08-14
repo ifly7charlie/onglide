@@ -18,7 +18,7 @@ import {aprsParser, aprsPacket} from 'js-aprs-fap';
 import {version} from '../../package.json';
 
 // Correction factors
-import {altitudeOffsetAdjust} from '../offsets.js';
+//import {altitudeOffsetAdjust} from '../offsets.js';
 import {getElevationOffset} from '../getelevationoffset';
 //import { getOffset } from '../egm96.mjs';
 
@@ -29,7 +29,8 @@ import {Coord, point} from '@turf/helpers';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {getNow, readOnly} from '../now';
+import {getNow} from '../now';
+import {getCurrentDateCode} from '../datecode';
 
 import {PositionMessage} from '../types';
 interface InterimPositionMessage extends PositionMessage {
@@ -138,7 +139,7 @@ interface Aircraft {
 interface Tracker {
     id: FlarmID;
     index: number;
-    aircraft: Aircraft;
+    aircraftList: Aircraft[];
     db: AbstractSublevel<DB, string | Uint8Array | Buffer, string, string> | undefined;
 }
 
@@ -251,14 +252,14 @@ if (!isMainThread && parentPort) {
     startAprsListener(<AprsListenerConfig>workerData);
 }
 
-async function initDB(className: ClassName, datecode: Datecode) {
-    if (db[className + datecode]) {
-        return db[className + datecode];
+async function initDB(datecode: Datecode) {
+    if (db[datecode]) {
+        return db[datecode];
     }
 
-    const path = `${process.env.DB_PATH ?? '/tmp'}/aprs-${className}-${datecode}.db`;
+    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}.db`;
     console.log('opening points database', path);
-    const openedDb = (db[className + datecode] = new DB(path));
+    const openedDb = (db[datecode] = new DB(path));
     await openedDb.open().catch((e: any) => {
         console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
         return undefined;
@@ -266,7 +267,7 @@ async function initDB(className: ClassName, datecode: Datecode) {
 
     if (!(openedDb?.status == 'open' || openedDb?.status == 'opening')) {
         console.log(path, openedDb?.status, new Error('db status invalid'));
-        delete db[className + datecode];
+        delete db[datecode];
         return undefined;
     }
     return openedDb;
@@ -424,7 +425,7 @@ async function trackGlider(task: AprsCommandTrack) {
     // Link the glider in
     aircraft[task.className + '/' + task.compno] = aircraft;
 
-    const db = await initDB(task.className, task.datecode);
+    const db = await initDB(task.datecode);
     const interimQueue = [];
 
     // Link the tracker(s) in
@@ -432,13 +433,17 @@ async function trackGlider(task: AprsCommandTrack) {
     let index = 0;
     for (const id of [...new Set(trackerList)]) {
         console.log('load tracker', aircraft.compno, id);
-        trackers[id] = {
-            id: id as FlarmID,
-            index: index++,
-            aircraft,
-            db: db?.sublevel(id, {})
-        };
-        await loadPointsForTracker(trackers[id], interimQueue);
+        if (trackers[id]) {
+            trackers[id].aircraftList.push(aircraft);
+        } else {
+            trackers[id] = {
+                id: id as FlarmID,
+                index: index++,
+                aircraftList: [aircraft],
+                db: db?.sublevel(id, {})
+            };
+        }
+        await loadPointsForTracker(aircraft, trackers[id], interimQueue);
     }
 
     // And make sure we have a channel for it
@@ -465,8 +470,11 @@ function untrackGlider(task: AprsCommandUntrack) {
     // remove the trackers
     toRemove.trackers.forEach((t) => {
         const tracker = trackers[t];
-        tracker.db?.close();
-        delete trackers[t];
+        tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != toRemove.channel || a.compno != toRemove.compno);
+        if (!tracker.aircraftList.length) {
+            tracker.db?.close();
+            delete trackers[t];
+        }
     });
 
     clearInterval(toRemove.interval);
@@ -528,7 +536,7 @@ async function processPacket(packet: aprsPacket) {
 
     // Look it up, have we had packets for this before?
     const tracker = trackers[flarmId];
-    const aircraft = tracker?.aircraft;
+    const aircraftList = tracker?.aircraftList;
     const airfieldDistance = distance(jPoint, airfieldLocation);
     const agl = await getElevationOffset(packet.latitude, packet.longitude).then((e) => Math.round(Math.max(altitude - e, 0)));
 
@@ -537,7 +545,7 @@ async function processPacket(packet: aprsPacket) {
     }
 
     const message: InterimPositionMessage = {
-        c: aircraft ? (aircraft.compno as Compno) : (flarmId as FlarmID),
+        c: flarmId as FlarmID,
         lat: Math.round(packet!.latitude * 1000000) / 1000000,
         lng: Math.round(packet!.longitude * 1000000) / 1000000,
         a: altitude,
@@ -550,9 +558,22 @@ async function processPacket(packet: aprsPacket) {
         l: null
     };
 
+    // If we don't know the tracker we will still record it just in case
+    if (!tracker) {
+        const db = await initDB(getCurrentDateCode());
+        trackers[flarmId] = {
+            id: flarmId,
+            index: -1,
+            aircraftList: [],
+            db: db?.sublevel(flarmId, {})
+        };
+    }
+
+    tracker.db?.put([message.t, sender].join('/'), JSON.stringify(message));
+
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough
-    if (!aircraft) {
+    if (!aircraftList) {
         if (airfieldDistance < 20 && packet.altitude < airfieldElevation + 750) {
             unknownChannel.postMessage(message);
         }
@@ -560,35 +581,41 @@ async function processPacket(packet: aprsPacket) {
     }
 
     statistics.knownReceived++;
-    tracker.db?.put([message.t, sender].join('/'), JSON.stringify(message));
 
     message.j = jPoint;
 
     // Figure out where to insert (sorted by time)
-    const messageQueue = aircraft.messages;
-    const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
-    if (insertIndex != messageQueue.length) {
-        statistics.outOfOrder++;
+    for (let aircraft of aircraftList) {
+        message.c = aircraft.compno as Compno;
+        const messageQueue = aircraft.messages;
+        if ((messageQueue.at(-1)?.t ?? 0) > message.t) {
+            statistics.outOfOrder++;
+            const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
+            if (insertIndex != messageQueue.length) {
+            }
+            if (insertIndex > 0 && messageQueue[insertIndex - 1].t == message.t) {
+                statistics.duplicates++;
+            }
+            messageQueue.splice(insertIndex, 0, message);
+        } else {
+            messageQueue.push(message);
+        }
     }
-    if (insertIndex > 0 && messageQueue[insertIndex - 1].t == message.t) {
-        statistics.duplicates++;
-    }
-    messageQueue.splice(insertIndex, 0, message);
 }
 
 //
 // Read the database for all points for a specific aircraft tracker
 //
-async function loadPointsForTracker(tracker: Tracker, messageQueue: InterimPositionMessage[]) {
+async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messageQueue: InterimPositionMessage[]) {
     if (!tracker.db) {
         console.log('no database available for loading trackpoints');
         return;
     }
-    const aircraft = tracker.aircraft;
     try {
         let loaded = 0;
         for await (const [key, messageJson] of tracker.db.iterator()) {
             const message = JSON.parse(messageJson);
+            message.c = aircraft.compno; // correct competition number as it may be wrong in the db
             const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
             message.j = point([message.lat, message.lng]);
             messageQueue.splice(insertIndex, 0, message);
