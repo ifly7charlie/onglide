@@ -143,9 +143,9 @@ async function soaringSpot(deep = false) {
     if (process.env.SOARINGSPOT_CLIENT_ID && process.env.SOARINGSPOT_SECRET) {
         keys.client_id = process.env.SOARINGSPOT_CLIENT_ID;
         keys.secret = process.env.SOARINGSPOT_SECRET;
-        keys.overwrite = process.env.SOARINGSPOT_OVERWRITE || 1;
-        keys.actuals = process.env.SOARINGSPOT_ACTUALS || 1;
-        console.log('environment variable', keys);
+        keys.overwrite = parseInt(process.env.SOARINGSPOT_OVERWRITE || '0');
+        keys.actuals = parseInt(process.env.SOARINGSPOT_ACTUALS || '1');
+        //        console.log('environment variable', keys);
     } else {
         // Get the soaring spot keys from database
         keys = (
