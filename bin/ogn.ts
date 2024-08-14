@@ -742,7 +742,7 @@ async function updateTrackers(datecode: Datecode) {
     const removedGliders = _filter(gliders, (g) => {
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
-            console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue.scoredStatus}`);
+            console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
             return true; // removed or it has changed id
         }
         return g.datecode != datecode || afterSunset;
