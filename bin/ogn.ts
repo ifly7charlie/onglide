@@ -842,7 +842,9 @@ async function updateTrackers(datecode: Datecode) {
     const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
     duplicates.forEach((d: {compno: string; count: number; classes: string}) => {
         d.classes.split(',').forEach((c) => {
-            gliders[c + '_' + d.compno].duplicate = 1;
+            if (gliders[c + '_' + d.compno]) {
+                gliders[c + '_' + d.compno].duplicate = 1;
+            }
         });
     });
 }

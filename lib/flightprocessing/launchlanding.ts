@@ -12,6 +12,8 @@ import * as readline from 'readline';
 
 import {Epoch, AltitudeAgl} from '../types';
 
+import {toDateCode} from '../datecode';
+
 //
 import _groupby from 'lodash.groupby';
 import _foreach from 'lodash.foreach';
@@ -35,7 +37,7 @@ const minTestTime = 5;
 // that we can use both in soaringspot.js (on the igc file) or for the flarm
 // ID. We can then correlate the two
 // note: id could be either class+compno or flarmid
-export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl | undefined, db, type) {
+export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl = 0, db, type) {
     // Now we are going to manipulate this track to look for either launch or landing
     let track = unknownTrack[id];
 
@@ -44,7 +46,7 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
 
         // If the point is prior to the latest one we have had then we will
         // ignore it (out of order isn't unusual on OGN)
-        if (at <= lastTime) {
+        if (at && at <= lastTime) {
             return;
         }
 
@@ -63,7 +65,7 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
     }
 
     // If we don't have one for this id then create it
-    else {
+    else if (point && at) {
         unknownTrack[id] = {
             path: lineString([point, point]),
             times: [at, at],
@@ -83,7 +85,8 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
     // Check to see if it's a possible launch or landing
     let trackDistance = length(track.path, {units: 'kilometers'}); // km
     let endToEndDistance = point ? distance(track.path.geometry.coordinates[0], point, {units: 'kilometers'}) : 0;
-    let elapsed = at - track.times[0]; // seconds
+    at ??= track.times[0];
+    let elapsed = at! - track.times[0]; // seconds
     let speed = endToEndDistance / (elapsed / 3600); // kph
     let gain = agl - track.heights[0]; // m (+ gain or - loss)
 
@@ -135,7 +138,7 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
     while (elapsed > minTestTime + 1 && numberOfPoints > 3) {
         track.path.geometry.coordinates.shift();
         track.heights.shift();
-        elapsed = at - track.times.shift();
+        elapsed = at! - track.times.shift();
         numberOfPoints = track.times.length;
     }
 }
@@ -239,10 +242,11 @@ export async function processIGC(classid, compno, location, date, url, https, my
     // Used to track state and updated into the database we use the day of the month
     // because in node these could be executed in parallel
     let key = [String(date).substring(8, 11), classid, compno].join('/');
+    const dateCode = toDateCode(date);
 
     // De-escape it
-    url = url.replaceAll('&amp;', '&')
-    mysql.query(escape`UPDATE pilotresult SET igcavailable="P" WHERE datecode=todcode(${date}) and compno=${compno} and class=${classid}`);
+    url = url.replaceAll('&amp;', '&');
+    mysql.query(escape`UPDATE pilotresult SET igcavailable="P" WHERE datecode=${dateCode} and compno=${compno} and class=${classid}`);
 
     // Initiate a streaming request
     return https.get(url, getHeaders ? getHeaders() : undefined, function (response) {
@@ -251,9 +255,9 @@ export async function processIGC(classid, compno, location, date, url, https, my
         });
 
         myInterface.on('close', () => {
-            mysql.query(escape`UPDATE pilotresult SET igcavailable=${validFile ? 'P' : 'F'} WHERE datecode=todcode(${date}) and compno=${compno} and class=${classid}`);
+            mysql.query(escape`UPDATE pilotresult SET igcavailable=${validFile ? 'P' : 'F'} WHERE datecode=${dateCode} and compno=${compno} and class=${classid}`);
             if (validFile) {
-                capturePossibleLaunchLanding(key, undefined, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
+                capturePossibleLaunchLanding(key, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
                 console.log(`processed ${date} ${classid} - ${compno} successfully`);
             }
         });
