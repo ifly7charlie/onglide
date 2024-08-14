@@ -16,6 +16,7 @@ services:
         build:
             context: .
             dockerfile: ./conf/Dockerfile
+            target: next
             args:
                 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
                 NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
@@ -41,6 +42,7 @@ services:
     ogn:
         image: ghcr.io/ifly7charlie/ogn-ogn
         build:
+            target: ogn
             dockerfile: ./conf/Dockerfile
         command: node dist/bin/ogn
         platform: 'linux/amd64'
