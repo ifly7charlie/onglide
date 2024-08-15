@@ -255,7 +255,7 @@ function startAprsListener(config: AprsListenerConfig) {
             clearInterval(kaInterval);
             startAprsListener(config);
         }
-        connection.connect();
+        setTimeout(() => connection.connect(), unstableCount * 2000);
     });
 
     // Start the APRS connection
@@ -442,7 +442,7 @@ function processPacket(packet: aprsPacket) {
         return;
     }
 
-    if (td > 600) {
+    if (td > 950) {
         console.log(`${aircraft.compno}/${sender} : VERY delayed flarm packet received, ${(td / 60).toFixed(1)}  minutes old, ignoring`);
         return;
     }
