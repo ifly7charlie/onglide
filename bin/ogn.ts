@@ -730,7 +730,7 @@ interface CTrackerRow {
 
 async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
-    let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, UPPER(trackerId) as dbTrackerId, 0 duplicate, p.handicap,
+    let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
                                              p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
                                            ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
                                              END utcStart,

@@ -186,7 +186,10 @@ export class AprsController {
     }
 
     trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string) {
-        const flarmIDs = trackerIds.split(/[:,]/).filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
+        const flarmIDs = trackerIds
+            .split(/[:,]/)
+            .map((i) => i.toUpperCase())
+            .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
         console.log('TRACKGLIDER', compno, flarmIDs);
         if (flarmIDs && flarmIDs.length) {
             // Tell APRS to start listening for the flarmid
@@ -205,7 +208,10 @@ export class AprsController {
         }
     }
     untrackGlider(compno: Compno, className: ClassName, channelName: string, trackerIds: string) {
-        const flarmIDs = trackerIds.split(/[:,]/).filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
+        const flarmIDs = trackerIds
+            .split(/[:,]/)
+            .map((i) => i.toUpperCase())
+            .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
         if (flarmIDs && flarmIDs.length) {
             // Tell APRS to start listening for the flarmid
             console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
