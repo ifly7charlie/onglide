@@ -758,7 +758,7 @@ async function updateTrackers(datecode: Datecode) {
             console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
             return true; // removed or it has changed id
         }
-        return g.datecode != datecode || afterSunset;
+        return g.datecode != datecode;
     });
 
     // Now unsubsribe from each of them
@@ -812,7 +812,7 @@ async function updateTrackers(datecode: Datecode) {
                         console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus} [channel ${glider.channelName}]`);
                         channel?.scoring?.clearGlider(glider.compno);
                         console.log(`Stopping APRS Listener for glider ${t.className}:${t.compno} => ${t.dbTrackerId}`);
-                        aprsController?.untrackGlider(t.compno, t.className, glider.channelName, t.dbTrackerId);
+                        aprsController?.finishGlider(t.compno, t.className, glider.channelName);
                     }
                     //
                     else if (startUtcChanged || handicapChanged) {
@@ -834,8 +834,9 @@ async function updateTrackers(datecode: Datecode) {
                 }
 
                 // If we have a tracker for it then we need to link that as well
-                if (!hadTracker && !afterSunset && t.dbTrackerId && t.dbTrackerId != 'unknown' && (replayBase || t.scoredStatus == 'S')) {
-                    aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId);
+                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
+                    const listening = !afterSunset && t.scoredStatus == 'S';
+                    aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
                             .split(',')
@@ -1365,7 +1366,7 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
         match.dbTrackerId = flarmId;
 
         // And we should ask the flarm handler to listen for them properly
-        aprsController?.trackGlider(match.compno, match.className, datecode, channelName(match.className, datecode), flarmId);
+        aprsController?.trackGlider(match.compno, match.className, datecode, channelName(match.className, datecode), flarmId, true);
 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {

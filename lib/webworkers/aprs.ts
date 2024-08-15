@@ -57,10 +57,11 @@ export enum AprsCommandEnum {
     none,
     shutdown,
     track,
+    finish,
     untrack
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
@@ -70,6 +71,7 @@ export interface AprsCommandTrack {
     channelName: string;
     compno: string | Compno;
     datecode: Datecode;
+    receiveNewPoints: boolean;
     trackerId: string | string[];
 }
 
@@ -80,6 +82,14 @@ export interface AprsCommandUntrack {
     channelName: string;
     compno: string | Compno;
     trackerId: string | string[];
+}
+
+export interface AprsCommandFinish {
+    action: AprsCommandEnum.finish;
+
+    className: string | ClassName;
+    channelName: string;
+    compno: string | Compno;
 }
 
 // Exit
@@ -108,6 +118,7 @@ const statistics = {
     duplicates: 0,
     invalidPacket: 0,
     jumps: 0,
+    finishPoints: 0,
     server: '-not connected-'
 };
 
@@ -116,6 +127,8 @@ interface Aircraft {
     compno: string;
     className: string;
     trackers: FlarmID[];
+
+    receiveNewPoints: boolean;
 
     lastTime?: number;
     lastSent?: InterimPositionMessage;
@@ -141,6 +154,7 @@ interface Tracker {
     id: FlarmID;
     index: number;
     aircraftList: Aircraft[];
+    receiveNewPoints: boolean;
     db: AbstractSublevel<DB, string | Uint8Array | Buffer, string, string> | undefined;
 }
 
@@ -185,7 +199,7 @@ export class AprsController {
         this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config});
     }
 
-    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string) {
+    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean) {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
@@ -200,6 +214,7 @@ export class AprsController {
                 className: className,
                 channelName,
                 datecode,
+                receiveNewPoints,
                 trackerId: flarmIDs
             };
             this.worker.postMessage?.(command);
@@ -224,6 +239,16 @@ export class AprsController {
             };
             this.worker.postMessage?.(command);
         }
+    }
+    finishGlider(compno: Compno, className: ClassName, channelName: string) {
+        console.log(`Finishing APRS Listener for glider ${className}/${compno}: [${channelName}]`);
+        const command: AprsCommandFinish = {
+            action: AprsCommandEnum.finish,
+            compno: compno, //
+            className: className,
+            channelName: channelName
+        };
+        this.worker.postMessage?.(command);
     }
 }
 
@@ -252,6 +277,9 @@ if (!isMainThread && parentPort) {
                 break;
             case AprsCommandEnum.untrack:
                 untrackGlider(task);
+                break;
+            case AprsCommandEnum.finish:
+                finishGlider(task);
                 break;
         }
     });
@@ -360,12 +388,12 @@ function startAprsListener(config: AprsListenerConfig) {
             console.log(
                 `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${statistics.duplicates}, invalid: ${
                     statistics.invalidPacket
-                }, aprs server unstableCount: ${unstableCount}`
+                }, finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
             );
+            console.log(`APRS: NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
             console.log(
-                `APRS: NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s` + //
-                    statistics.delayedPackets
-                    ? `, DELAYED: average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
+                statistics.delayedPackets
+                    ? `APRS: DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
                     : ''
             );
             trackMetric('aprs.msgsReceived', statistics.msgsReceived);
@@ -381,6 +409,7 @@ function startAprsListener(config: AprsListenerConfig) {
             statistics.delayedPackets = //
             statistics.knownReceived =
             statistics.invalidPacket =
+            statistics.finishPoints =
             statistics.jumps =
                 0;
 
@@ -429,6 +458,7 @@ async function trackGlider(task: AprsCommandTrack) {
         stationary: 0,
         ground: true,
         lastTick: getNow(),
+        receiveNewPoints: task.receiveNewPoints,
 
         // Setup logging
         log:
@@ -459,11 +489,13 @@ async function trackGlider(task: AprsCommandTrack) {
         console.log('load tracker', aircraft.compno, id);
         if (trackers[id]) {
             trackers[id].aircraftList.push(aircraft);
+            trackers[id].receiveNewPoints = trackers[id].receiveNewPoints || task.receiveNewPoints;
         } else {
             trackers[id] = {
                 id: id as FlarmID,
                 index: index++,
                 aircraftList: [aircraft],
+                receiveNewPoints: task.receiveNewPoints,
                 db: db?.sublevel(id, {})
             };
         }
@@ -482,6 +514,27 @@ async function trackGlider(task: AprsCommandTrack) {
         console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
         aircraft.interval = setInterval(() => processMessageQueue(aircraft), 1000);
     }, Math.random() * 1000);
+}
+
+function finishGlider(task: AprsCommandFinish) {
+    console.log(`APRS: stopping point reception ${task.className}/${task.compno}`);
+
+    // What are we removing
+    const toFinish = aircraft[makeClassname_Compno(task)];
+    if (!toFinish) {
+        return;
+    }
+
+    toFinish.receiveNewPoints = false;
+
+    toFinish.trackers.forEach((t) => {
+        const tracker = trackers[t];
+        // If all are marked as done receving then we can stop it
+        const exclusive = tracker.aircraftList.every((a) => a.receiveNewPoints);
+        if (exclusive) {
+            tracker.receiveNewPoints = false;
+        }
+    });
 }
 
 function untrackGlider(task: AprsCommandUntrack) {
@@ -565,6 +618,7 @@ async function processPacket(packet: aprsPacket) {
             id: flarmId,
             index: -1,
             aircraftList: [],
+            receiveNewPoints: true,
             db: db ? db.sublevel(flarmId, {}) : undefined
         });
     const aircraftList = tracker?.aircraftList;
@@ -573,6 +627,10 @@ async function processPacket(packet: aprsPacket) {
 
     if (altitude > 7500) {
         return;
+    }
+
+    if (!tracker.receiveNewPoints) {
+        statistics.finishPoints++;
     }
 
     const message: InterimPositionMessage = {

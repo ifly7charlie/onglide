@@ -22,7 +22,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
     // We need somewhere to store the unprocessed message queue
     let messageQueue: PositionMessage[] = initialPoints;
 
-    const log = compno == '3V' ? (...a) => console.log(compno + ':', ...a) : () => {};
+    const log = compno == 'TJ' ? (...a) => console.log(compno + ':', ...a) : () => {};
 
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
@@ -73,10 +73,11 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         let position = 0;
         let hiccup: Epoch = 0 as Epoch;
 
-        console.log(`InOrderGenerator ${compno}: 2 ${messageQueue.length}`);
+        console.log(`${className}/${compno}: IOG started ${messageQueue.length}`);
         if (!messageQueue.length) {
             await new Promise((resolve) => resolveNotifications.push(resolve));
         }
+        console.log(`${className}/${compno}: IOG first message ${messageQueue.length}`);
 
         //
         // Replay all before we start blocking, we will flag that it's a live message
