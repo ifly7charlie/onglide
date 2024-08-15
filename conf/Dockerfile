@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7-labs 
 FROM node:20-slim AS ognbase
 RUN apt-get update 
 RUN apt-get install -y gnupg wget lsb-release
@@ -26,7 +27,7 @@ COPY ./babel-plugin-macros.config.js ./babel-plugin-macros.config.js
 COPY ./next-env.d.ts ./next-env.d.ts
 COPY ./styles ./styles
 COPY ./pages ./pages
-COPY ./lib ./lib
+COPY --exclude=webworkers --exclude=dijkstras.ts --exclude=launchlanding.ts --exclude=".#*" ./lib ./lib
 RUN yarn next build
 
 FROM buildbase AS ognbuildimage
