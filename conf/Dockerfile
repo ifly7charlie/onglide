@@ -17,6 +17,7 @@ FROM buildbase AS nextbuildimage
 WORKDIR /onglide
 ARG NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
 ARG NEXT_PUBLIC_SITEURL
+ARG NEXT_PUBLIC_WEBSOCKET_HOST
 ARG NEXT_PUBLIC_COMPETITION_DELAY
 COPY ./next.config.js ./next.config.js
 COPY ./tsconfig.json ./tsconfig.json

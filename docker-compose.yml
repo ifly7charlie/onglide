@@ -20,6 +20,7 @@ services:
             args:
                 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
                 NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
+                NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
                 NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-15}
                 MYSQL_PASSWORD: $MYSQL_PASSWORD
                 MYSQL_HOST: mysql
