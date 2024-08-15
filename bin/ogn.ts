@@ -74,7 +74,7 @@ import {getElevationOffset, getCacheSize} from '../lib/getelevationoffset';
 // handle unkownn gliders
 import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding.js';
 
-import {setSiteTz, getSiteTz} from '../lib/flightprocessing/timehelper.js';
+import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocessing/timehelper.js';
 
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
@@ -311,11 +311,7 @@ async function main() {
 
     {
         const datecode = await getDCode();
-        const sunset = Math.round(SunCalc.getTimes(new Date(getNow() * 1000), location.lat, location.lng).night.getTime() / 1000) as Epoch;
-        if (sunset != location.sunset) {
-            console.log('SUNSET: ', sunset);
-            location.sunset = sunset;
-        }
+        getSunset(datecode);
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
@@ -505,11 +501,7 @@ async function main() {
     // Update competition information
     setInterval(async function () {
         const datecode = await getDCode();
-        const sunset = Math.round(SunCalc.getTimes(new Date(getNow() * 1000), location.lat, location.lng).night.getTime() / 1000) as Epoch;
-        if (sunset != location.sunset) {
-            console.log('SUNSET: ', sunset);
-            location.sunset = sunset;
-        }
+        getSunset(datecode);
         getProposedScoreId();
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
@@ -519,6 +511,15 @@ async function main() {
 }
 
 main().then(() => console.log('Started'));
+
+function getSunset(datecode: Datecode) {
+    const localMidday = new Date(fromDateCode(datecode)).getTime() - (location.tzoffset - 12 * 3600) * 1000;
+    const sunset = Math.round(SunCalc.getTimes(new Date(localMidday), location.lat, location.lng).night.getTime() / 1000) as Epoch;
+    if (sunset != location.sunset) {
+        console.log(`Site sunset: ${d(sunset)} (site:${dateToText(sunset)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch)})`);
+        location.sunset = sunset;
+    }
+}
 
 // So we have a different channel for each date
 function channelName(className: ClassName, datecode: Datecode): ChannelName {
@@ -747,7 +748,7 @@ async function updateTrackers(datecode: Datecode) {
     let loadedGliderCount = 0;
 
     const afterSunset = getNow() > location.sunset;
-    console.log('updateTrackers:', afterSunset ? 'after sunset' : 'before sunset');
+    console.log(`updateTrackers: ${afterSunset ? 'after sunset' : 'before sunset'} ${d(getNow())} > ${d(location.sunset)}`);
 
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
     // unknowns as they won't be in the trackers pick
@@ -793,6 +794,7 @@ async function updateTrackers(datecode: Datecode) {
                 const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
                 const scoredStatusChanged = gliders[gliderKey]?.scoredStatus != t.scoredStatus;
                 const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
+                const listening = !afterSunset && t.scoredStatus == 'S';
 
                 // glider key not enough to check for datecode changes (force ignore of
                 // typescript types as we don't want the rest set yet because we need
@@ -804,7 +806,7 @@ async function updateTrackers(datecode: Datecode) {
                 const channel = channels[glider.channelName];
 
                 console.log(
-                    `*> ${t.className}/${t.compno}: changed: start ${startUtcChanged}, handicap ${handicapChanged}, scores ${scoredStatusChanged}, hadTracker: ${hadTracker}, ${t.dbTrackerId}, scoredStatus:${t.scoredStatus}, scoring: ${glider.scoringConfigured}`
+                    `*> ${t.className}/${t.compno}: changed: start ${startUtcChanged}, handicap ${handicapChanged}, scores ${scoredStatusChanged}, hadTracker: ${hadTracker}, ${t.dbTrackerId}, scoredStatus:${t.scoredStatus}, scoring: ${glider.scoringConfigured}, listening: ${listening}`
                 );
 
                 if (glider.scoringConfigured) {
@@ -835,7 +837,6 @@ async function updateTrackers(datecode: Datecode) {
 
                 // If we have a tracker for it then we need to link that as well
                 if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
-                    const listening = !afterSunset && t.scoredStatus == 'S';
                     aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
@@ -1379,13 +1380,6 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
                 .commit();
         }
     }
-}
-
-// Display a time as competition time, use 24hr clock (en-GB)
-function timeToText(t: Epoch): string {
-    if (!t) return '';
-    var cT = new Date(t * 1000);
-    return cT.toLocaleTimeString('en-GB', {timeZone: location.tz, hour: '2-digit', minute: '2-digit'});
 }
 
 //

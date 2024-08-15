@@ -207,7 +207,7 @@ export class AprsController {
         console.log('TRACKGLIDER', compno, flarmIDs);
         if (flarmIDs && flarmIDs.length) {
             // Tell APRS to start listening for the flarmid
-            console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
+            console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}] receive:${receiveNewPoints}`);
             const command: AprsCommandTrack = {
                 action: AprsCommandEnum.track,
                 compno: compno, //
