@@ -82,7 +82,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                     }
                 }
 
-                const missing = [...allGliders.difference(new Set(Object.keys(c.live)))];
+                const missing = [...allGliders].filter((compno) => !c.live[compno]);
                 console.log(`[${id}] ${className}/${compno}: ${c.state} - ${numLive} live, ${numRunning} running, ${numCompnos} compnos [${scoreId}], missing ${missing.join(',')}`);
                 // if all are live
                 if (numLive == numRunning && numLive == numCompnos) {
