@@ -183,7 +183,7 @@ import {ClassicLevel} from 'classic-level';
 import type {AbstractSublevel} from 'abstract-level';
 class DB extends ClassicLevel<string, string> {}
 let db: DB | undefined;
-let datecode: Datecode = '000' as Datecode;
+let dbDatecode: Datecode = '000' as Datecode;
 
 //
 // Start a listener
@@ -291,13 +291,14 @@ if (!isMainThread && parentPort) {
 }
 
 async function initDB(datecode: Datecode) {
-    if (db) {
+    if (db && dbDatecode == datecode) {
         return db;
     }
 
     const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}.db`;
     console.log('opening points database', path);
     const openedDb = (db = new DB(path));
+    dbDatecode = datecode;
     await openedDb.open().catch((e: any) => {
         console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
         return undefined;
@@ -475,10 +476,7 @@ async function trackGlider(task: AprsCommandTrack) {
     aircraft[task.className + '/' + task.compno] = aircraft;
 
     // Make sure we have the latest datecode for the database
-    if (task.datecode > datecode || !db) {
-        db = await initDB(task.datecode);
-        datecode = task.datecode;
-    }
+    db = await initDB(task.datecode);
 
     const interimQueue = [];
 
