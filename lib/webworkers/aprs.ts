@@ -342,7 +342,7 @@ function startAprsListener(config: AprsListenerConfig) {
             clearInterval(kaInterval);
             startAprsListener(config);
         }
-        setTimeout(() => connection.connect(), unstableCount * 1000);
+        setTimeout(() => connection.connect(), unstableCount * 2000);
     });
 
     // Start the APRS connection
