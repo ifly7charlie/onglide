@@ -331,10 +331,10 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
 
             const ts = new Uint32Array(track.t.slice().buffer);
             const indexOfOverlap = existing ? _sortedIndex(ts, existing.t[existing.posIndex - 1]) : 0;
-            if (existing) {
-                console.log(`${compno}: existing latest: ${existing?.t[existing.posIndex - 1]}, new range: ${ts[0]} to ${ts[track.posIndex - 1]}`);
-                console.log(`${compno}: existing length ${existing?.posIndex}, overlap index: ${indexOfOverlap}`);
-            }
+            //            if (existing) {
+            //                console.log(`${compno}: existing latest: ${existing?.t[existing.posIndex - 1]}, new range: ${ts[0]} to ${ts[track.posIndex - 1]}`);
+            //                console.log(`${compno}: existing length ${existing?.posIndex}, overlap index: ${indexOfOverlap}`);
+            //            }
 
             let deck: DeckData = {
                 compno: compno as Compno,
@@ -387,7 +387,7 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
             state.tracks[compno].t = deck.t[deck.posIndex - 1] as Epoch;
             initaliseVH(state.tracks[compno]);
 
-            console.log(compno, state.latestUpdate, state.tracks[compno as Compno].t, new Date(state.tracks[compno as Compno].t * 1000).toISOString());
+            //            console.log(compno, state.latestUpdate, state.tracks[compno as Compno].t, new Date(state.tracks[compno as Compno].t * 1000).toISOString());
 
             state.latestUpdate = Math.max(state.latestUpdate ?? 0, state.tracks[compno as Compno].t) as Epoch;
             return deck.trackVersion.toString(16) ?? compno;

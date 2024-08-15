@@ -246,13 +246,13 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
 
         if (isCurrentChunk(t, now)) {
             const previous = getPreviousChunk(t);
-            console.log('FOS: currentChunk', previous, onlineStart);
+            //            console.log('FOS: currentChunk', previous, onlineStart);
             if (previous > onlineStart) {
-                console.log('FOS already live when requested');
+                //                console.log('FOS already live when requested');
                 return;
             }
         }
-        console.log('FOS requesting chunk', d(requestChunk), state.loading[chunkId]);
+        //        console.log('FOS requesting chunk', d(requestChunk), state.loading[chunkId]);
         return await fetch(oldScoresUrl(className, datecode, requestChunk.toString(), state.scoreId), {signal}) //
             .then((res) => res.arrayBuffer())
             //            .then((res) => {
@@ -379,12 +379,10 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
         if (resultIndex.join(',') != resultIndex.sort().join(',')) {
             console.log(compno, ' FOS: out of order');
         }
-        if (oldIndicies.join(',') == resultIndex.join(',')) {
-            console.log(compno, 'no change! why did you fetch');
-        } else {
+        if (oldIndicies.join(',') != resultIndex.join(',')) {
             state.historical[compno] = resultScores;
-            console.log(`FOS: ${compno} result: ${resultIndex.length} idents, newIndicies ${newIndicies.length} & oldIndicies ${oldIndicies.length}`);
-            console.log('FOS:', resultIndex.map(d));
+            //            console.log(`FOS: ${compno} result: ${resultIndex.length} idents, newIndicies ${newIndicies.length} & oldIndicies ${oldIndicies.length}`);
+            //            console.log('FOS:', resultIndex.map(d));
         }
     }
     console.log(Object.keys(state.historical));
