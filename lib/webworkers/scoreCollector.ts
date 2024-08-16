@@ -107,6 +107,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                 checkIfScoreIdIsLive(scoreId);
             }
 
+            score.scoreId = scoreId;
             c.allScores[compno] = score;
             port.postMessage({compno, score, recentStart, t: score.t, scoreId});
         }
