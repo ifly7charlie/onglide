@@ -1,5 +1,5 @@
 import LatLong from './LatLong.js';
-import _sumby from 'lodash.sumby';
+import {sumBy as _sumby} from 'lodash';
 
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import nearestPointOnLine from '@turf/nearest-point-on-line';

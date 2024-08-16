@@ -19,12 +19,11 @@ import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import {getElevationOffset} from '../lib/getelevationoffset';
 // handle unkownn gliders
-import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
+//import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
 import getCountryISO2 from 'country-iso-3-to-2';
 
-import _groupby from 'lodash.groupby';
-import _forEach from 'lodash.foreach';
+import {groupBy as _groupby, forEach as _forEach} from 'lodash';
 
 // DB access
 //const db = require('../db')

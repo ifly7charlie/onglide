@@ -32,8 +32,7 @@ import {getElevationOffset} from '../lib/getelevationoffset';
 // handle unkownn gliders
 import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
-import _groupby from 'lodash.groupby';
-import _forEach from 'lodash.foreach';
+import {groupBy as _groupby, forEach as _forEach} from 'lodash';
 
 // DB access
 //const db = require('../db')
@@ -421,15 +420,14 @@ async function update_pilots(data) {
 
             if (!fainumber) {
                 fainumber = existing[0]?.fai ? existing[0].fai + 300 : ++pilotnumber;
-            }            
+            }
         }
-                await download_picture(
-                    compno,
-                    classid, //
-                    {igc_id: fainumber, compno: pilot.Contestant, class: classid, greg: pilot.Glider?.substring(0, 8)?.trim()}
-                );
+        await download_picture(
+            compno,
+            classid, //
+            {igc_id: fainumber, compno: pilot.Contestant, class: classid, greg: pilot.Glider?.substring(0, 8)?.trim()}
+        );
 
-        
         await t.query(escape`
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
