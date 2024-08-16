@@ -124,13 +124,13 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
         },
         // Clear all scoring
         reset: function () {
-            for (const compno in allGliders.keys()) {
+            for (const compno of allGliders.keys()) {
                 console.log(`[ALL] ${className}: scoreCollect reset ${compno}`);
                 this.clearGlider(compno);
             }
         },
         clearGlider: function (compno: Compno) {
-            for (const scoreId in scoreIdDetails.keys()) {
+            for (const scoreId of scoreIdDetails.keys()) {
                 const c = getScoreIdDetails(scoreId);
                 console.log(`[ALL] ${className}: scoreCollect clearGlider ${compno}: restartCount ${c.optionsForCompno[compno]?.restartCount}`);
                 if (compno in c.optionsForCompno) {
