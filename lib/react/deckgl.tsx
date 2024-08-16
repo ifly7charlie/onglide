@@ -16,6 +16,7 @@ import {distanceLineLabelStyle} from './distanceLine';
 import {selectPilotScore} from '../redux/scoresSlice';
 import {selectPilotVario, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
+import {ErrorBoundary} from 'react-error-boundary';
 
 function DeckGLOverlay(
     props: MapboxOverlayProps & {
@@ -291,66 +292,68 @@ export default function MApp(props: {
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
     return (
-        <Map //
-            initialViewState={{...props.viewport, ...viewOptions}}
-            onMove={onViewStateChange}
-            onStyleData={fixupMap}
-            mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
-            cursor={measure.enabled ? 'crosshair' : 'auto'}
-            mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
-            reuseMaps={true}
-            ref={mapRef}
-            attributionControl={false}
-        >
-            <DeckGLOverlay
-                getTooltip={toolTip}
-                onClick={onClick}
-                onDragStart={onDragStart}
-                layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
-                interleaved={true}
-            />
-            {options.constructionLines && taskGeoJSON?.Dm ? (
-                <Source type="geojson" data={taskGeoJSON.Dm} key="y">
-                    <Layer {...DmPointStyle} />
-                </Source>
-            ) : null}
-            {valid ? (
-                <Source type="geojson" id="task" key="task" data={taskGeoJSONtp}>
-                    <Layer {...turnpointStyleFlat} key="tps" />
-                    <Layer {...turnpointStyle} key="tgjp" />
-                </Source>
-            ) : null}
-            {valid ? (
-                <Source type="geojson" data={taskGeoJSON.track}>
-                    <Layer {...trackLineStyle} key="tls" />
-                </Source>
-            ) : null}
-            {selectedScore && options.constructionLines && selectedScore?.minGeoJSON ? (
-                <Source type="geojson" data={selectedScore?.minGeoJSON} key={'min_'}>
-                    <Layer {...minLineStyle} />
-                    <Layer {...distanceLineLabelStyle(minLineStyle)} />
-                </Source>
-            ) : null}
-            {selectedScore && options.constructionLines && selectedScore?.maxGeoJSON ? (
-                <Source type="geojson" data={selectedScore?.maxGeoJSON} key={'max_'}>
-                    <Layer {...maxLineStyle} />
-                    <Layer {...distanceLineLabelStyle(maxLineStyle)} />
-                </Source>
-            ) : null}
-            {selectedScore && selectedScore?.scoredGeoJSON ? (
-                <Source type="geojson" data={selectedScore.scoredGeoJSON} key={'scored_'}>
-                    <Layer key="scoredLine" {...scoredLineStyle} />
-                    <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
-                </Source>
-            ) : null}
-            <MeasureLayers key="measure" />
-            <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
-            {!map2d && <Layer key="skylayer" {...skyLayer} />}
-            {attribution}
-            {radarOverlay.layer}
-            <ScaleControl position="bottom-left" />
-            <NavigationControl showCompass showZoom visualizePitch position="bottom-left" />
-        </Map>
+        <ErrorBoundary fallback={<p>Please reload me!</p>}>
+            <Map //
+                initialViewState={{...props.viewport, ...viewOptions}}
+                onMove={onViewStateChange}
+                onStyleData={fixupMap}
+                mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+                cursor={measure.enabled ? 'crosshair' : 'auto'}
+                mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
+                reuseMaps={true}
+                ref={mapRef}
+                attributionControl={false}
+            >
+                <DeckGLOverlay
+                    getTooltip={toolTip}
+                    onClick={onClick}
+                    onDragStart={onDragStart}
+                    layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
+                    interleaved={true}
+                />
+                {options.constructionLines && taskGeoJSON?.Dm ? (
+                    <Source type="geojson" data={taskGeoJSON.Dm} key="y">
+                        <Layer {...DmPointStyle} />
+                    </Source>
+                ) : null}
+                {valid ? (
+                    <Source type="geojson" id="task" key="task" data={taskGeoJSONtp}>
+                        <Layer {...turnpointStyleFlat} key="tps" />
+                        <Layer {...turnpointStyle} key="tgjp" />
+                    </Source>
+                ) : null}
+                {valid ? (
+                    <Source type="geojson" data={taskGeoJSON.track}>
+                        <Layer {...trackLineStyle} key="tls" />
+                    </Source>
+                ) : null}
+                {selectedScore && options.constructionLines && selectedScore?.minGeoJSON ? (
+                    <Source type="geojson" data={selectedScore?.minGeoJSON} key={'min_'}>
+                        <Layer {...minLineStyle} />
+                        <Layer {...distanceLineLabelStyle(minLineStyle)} />
+                    </Source>
+                ) : null}
+                {selectedScore && options.constructionLines && selectedScore?.maxGeoJSON ? (
+                    <Source type="geojson" data={selectedScore?.maxGeoJSON} key={'max_'}>
+                        <Layer {...maxLineStyle} />
+                        <Layer {...distanceLineLabelStyle(maxLineStyle)} />
+                    </Source>
+                ) : null}
+                {selectedScore && selectedScore?.scoredGeoJSON ? (
+                    <Source type="geojson" data={selectedScore.scoredGeoJSON} key={'scored_'}>
+                        <Layer key="scoredLine" {...scoredLineStyle} />
+                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
+                    </Source>
+                ) : null}
+                <MeasureLayers key="measure" />
+                <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
+                {!map2d && <Layer key="skylayer" {...skyLayer} />}
+                {attribution}
+                {radarOverlay.layer}
+                <ScaleControl position="bottom-left" />
+                <NavigationControl showCompass showZoom visualizePitch position="bottom-left" />
+            </Map>
+        </ErrorBoundary>
     );
 }
 
