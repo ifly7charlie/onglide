@@ -19,6 +19,7 @@ WORKDIR /onglide
 ARG NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
 ARG NEXT_PUBLIC_SITEURL
 ARG NEXT_PUBLIC_WEBSOCKET_HOST
+ARG NEXT_PUBLIC_HISTORY_HOST
 ARG NEXT_PUBLIC_COMPETITION_DELAY
 COPY ./next.config.js ./next.config.js
 COPY ./tsconfig.json ./tsconfig.json
@@ -47,12 +48,12 @@ COPY --from=nextbuildimage /onglide/.build ./.build
 COPY ./next.config.js ./next.config.js
 COPY ./.env ./.env
 COPY ./LICENSE ./LICENSE
-EXPOSE 8080
+EXPOSE 3000
 
 FROM productionbase AS ogn
 WORKDIR /onglide
 COPY --from=ognbuildimage /onglide/dist .
 COPY ./.env ./.env.local
 RUN touch .docker
-EXPOSE 3000
+EXPOSE 8080
 

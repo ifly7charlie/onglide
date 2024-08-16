@@ -1507,12 +1507,11 @@ function setupOgnWebServer(req, res) {
                     //                    console.table([...Object.keys(history)].flatMap((compno) => history[compno].history.map((h) => [compno, h.t, d(h.t), h.live])));
 
                     res.setHeader('Content-Type', 'application/octet-stream');
+                    res.writeHead(200, headers);
                     if (chunkEnd == timestamp + 1) {
                         console.log('allowing caching');
                         res.setHeader('Access-Control-Max-Age', 24 * 60 * 60); // 1 day
                     }
-
-                    res.writeHead(200, headers);
                     res.write(msg, 'binary');
                     res.end(null, 'binary');
                     return;
