@@ -220,6 +220,7 @@ export interface PilotScore {
   maxDistancePoints: number[];
   /** For DH we have a specific task for the pilot */
   taskGeoJSON?: string | undefined;
+  scoreId?: string | undefined;
 }
 
 export interface PilotScore_LegsEntry {
@@ -2193,6 +2194,7 @@ function createBasePilotScore(): PilotScore {
     minDistancePoints: [],
     maxDistancePoints: [],
     taskGeoJSON: undefined,
+    scoreId: undefined,
   };
 }
 
@@ -2266,6 +2268,9 @@ export const PilotScore = {
     writer.ldelim();
     if (message.taskGeoJSON !== undefined) {
       writer.uint32(426).string(message.taskGeoJSON);
+    }
+    if (message.scoreId !== undefined) {
+      writer.uint32(442).string(message.scoreId);
     }
     return writer;
   },
@@ -2457,6 +2462,13 @@ export const PilotScore = {
 
           message.taskGeoJSON = reader.string();
           continue;
+        case 55:
+          if (tag !== 442) {
+            break;
+          }
+
+          message.scoreId = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2500,6 +2512,7 @@ export const PilotScore = {
         ? object.maxDistancePoints.map((e: any) => globalThis.Number(e))
         : [],
       taskGeoJSON: isSet(object.taskGeoJSON) ? globalThis.String(object.taskGeoJSON) : undefined,
+      scoreId: isSet(object.scoreId) ? globalThis.String(object.scoreId) : undefined,
     };
   },
 
@@ -2574,6 +2587,9 @@ export const PilotScore = {
     if (message.taskGeoJSON !== undefined) {
       obj.taskGeoJSON = message.taskGeoJSON;
     }
+    if (message.scoreId !== undefined) {
+      obj.scoreId = message.scoreId;
+    }
     return obj;
   },
 
@@ -2612,6 +2628,7 @@ export const PilotScore = {
     message.minDistancePoints = object.minDistancePoints?.map((e) => e) || [];
     message.maxDistancePoints = object.maxDistancePoints?.map((e) => e) || [];
     message.taskGeoJSON = object.taskGeoJSON ?? undefined;
+    message.scoreId = object.scoreId ?? undefined;
     return message;
   },
 };

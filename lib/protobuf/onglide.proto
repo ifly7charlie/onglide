@@ -176,6 +176,7 @@ message PilotScore {
 
     // For DH we have a specific task for the pilot
     optional string taskGeoJSON = 53;
+	optional string scoreId = 55;
 }
 
 //
