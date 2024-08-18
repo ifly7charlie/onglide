@@ -366,7 +366,7 @@ async function update_pilots(class_url, classid, classname, keys) {
 // Fetch the picture from FAI rankings
 async function download_picture(compno, classid, mysql, context) {
     // Check when it was last checked
-    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND image is not null OR unix_timestamp()-updated < 86400`))[0];
+    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND (image is not null OR unix_timestamp()-updated < 86400)`))[0];
 
     if (lastUpdated) {
         console.log(`not updating ${compno} picture`);
@@ -374,7 +374,7 @@ async function download_picture(compno, classid, mysql, context) {
     }
 
     // Find all the updater urls
-    const urls = (await mysql_db.query(escape`SELECT url FROM scoringsource WHERE type='pictureurl'`)) as {url: string}[];
+    const urls = (await mysql_db.query(escape`SELECT url FROM scoringsource WHERE type='pictureurl' order by overwrite asc`)) as {url: string}[];
     let success = false;
 
     for (const u of urls) {
