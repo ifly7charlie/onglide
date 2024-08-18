@@ -295,9 +295,11 @@ async function initDB(datecode: Datecode) {
         return db;
     }
 
+    const old = db;
+
     const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}.db`;
-    console.log('opening points database', path);
     const openedDb = (db = new DB(path));
+    console.log('opening points database', path);
     dbDatecode = datecode;
     await openedDb.open().catch((e: any) => {
         console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
@@ -309,6 +311,16 @@ async function initDB(datecode: Datecode) {
         db = undefined;
         return undefined;
     }
+
+    console.log(`changing database for ${Object.keys(trackers).length} trackers`);
+    for (const t of Object.values(trackers)) {
+        t.db = db.sublevel(t.id, {});
+    }
+
+    if (old) {
+        old.close();
+    }
+
     return openedDb;
 }
 
@@ -473,7 +485,7 @@ async function trackGlider(task: AprsCommandTrack) {
     };
 
     // Link the glider in
-    aircraft[task.className + '/' + task.compno] = aircraft;
+    aircraft[makeClassname_Compno(task)] = aircraft;
 
     // Make sure we have the latest datecode for the database
     db = await initDB(task.datecode);
@@ -506,7 +518,7 @@ async function trackGlider(task: AprsCommandTrack) {
     }
 
     // And link the broadcast channel to it
-    aircraft[task.className + '/' + task.compno].channel = channels[task.channelName];
+    aircraft[makeClassname_Compno(task)].channel = channels[task.channelName];
     aircraft.messages = interimQueue;
     setTimeout(() => {
         console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
@@ -520,6 +532,7 @@ function finishGlider(task: AprsCommandFinish) {
     // What are we removing
     const toFinish = aircraft[makeClassname_Compno(task)];
     if (!toFinish) {
+        console.log(`APRS: finishGlider can't find ${task.className}/${task.compno} in ${Object.keys(aircraft).join(',')}`);
         return;
     }
 
@@ -530,6 +543,7 @@ function finishGlider(task: AprsCommandFinish) {
         // If all are marked as done receving then we can stop it
         const exclusive = tracker.aircraftList.every((a) => a.receiveNewPoints);
         if (exclusive) {
+            console.log(`APRS: finish ${task.className}/${task.compno} stop new points for ${tracker.id}`);
             tracker.receiveNewPoints = false;
         }
     });
@@ -539,6 +553,7 @@ function untrackGlider(task: AprsCommandUntrack) {
     // What are we removing
     const toRemove = aircraft[makeClassname_Compno(task)];
     if (!toRemove) {
+        console.log(`APRS: untrackGlider can't find ${task.className}/${task.compno} in ${Object.keys(aircraft).join(',')}`);
         return;
     }
 
