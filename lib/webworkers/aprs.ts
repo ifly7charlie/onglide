@@ -457,7 +457,7 @@ async function trackGlider(task: AprsCommandTrack) {
 
         // Not had a message
         stationary: 0,
-        ground: true,
+        ground: false,
         lastTick: getNow(),
         receiveNewPoints: task.receiveNewPoints,
 
@@ -732,7 +732,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
 
     // If we have been asked to resent all points then we shall do so
     if (start === 0 && aircraft.lastTime !== 0) {
-        console.log(`processMessageQueue: resending all points for ${aircraft.compno}`);
+        console.log(`processMessageQueue: resending all points for ${aircraft.compno}, ${messages.length} points, ${messages.at(-1)?.g}`);
         aircraft.channel!.postMessage({c: aircraft.compno, t: 1, _: false, tick: true} as any);
         aircraft.lastTime = 0;
         aircraft.lastTick = 0 as Epoch;
@@ -842,6 +842,9 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
             console.log(`${point.c}: left ground @ ${point.t}`);
             aircraft.ground = false;
         }
+
+        //            console.log('FL =>', point.c, point.t, stationary, aircraft.ground);
+        //        }
 
         // If we are on the ground and we are more than 3 km from airfield location then we don't
         // want to report it. This doesn't filter initial points as you are not marked as on the ground
