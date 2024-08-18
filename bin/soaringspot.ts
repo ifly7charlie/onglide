@@ -308,7 +308,7 @@ async function update_pilots(class_url, classid, classname, keys) {
              INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
                                  compno,participating,glidertype,greg,handicap,registered,registereddt)
                   VALUES ( ${classid},
-                           ${epilot.first_name?.substring(0, 30) || ''}, ${epilot.last_name?.substring(0, 30) || ''}, ${pilot.club?.substring(0, 80) || ''}, null,
+                           ${pilot.name?.substring(0, 30) || ''}, '', ${pilot.club?.substring(0, 80) || ''}, null,
                            ${epilot.civl_id ? epilot.civl_id : epilot.igc_id}, ${epilot.nationality?.substring(0, 2) || ''},
                            ${gravatar(epilot)},
                            ${compno},
