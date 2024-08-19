@@ -324,7 +324,7 @@ async function update_pilots(class_url, classid, classname, keys) {
 
         // Make a list of the IDs, stripping anything but last 6 characters
         const flarms = flarmIds
-            .split(',')
+            .split(/,:/)
             .map((id) => id.match(/([a-f0-9]{6})$/i)?.[1])
             .filter((id) => !!id);
 
