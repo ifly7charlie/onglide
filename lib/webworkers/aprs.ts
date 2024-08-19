@@ -791,7 +791,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
                   })
                   // Quickly remove faster than 300kph Horizontal or 30m/s Vertical
                   // as they can't possible be correct
-                  .filter((point) => point.dSH < (point.s || 160) * 2 && point.dSV < 30)
+                  .filter((point) => point.dSH < (point.s || 160) * 2.3 && point.dSV < 30)
                   // Then sort them by amount of change
                   .sort((a, b) => (a.dH - a.dH > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
             : duplicates;

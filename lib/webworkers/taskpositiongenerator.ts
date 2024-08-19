@@ -494,7 +494,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             // <2  minutes -> 330kph (final glide - should we confirm height loss?)
                             // accept 50% higher with current LD for the glide in the 10 to 35 range - perhaps
                             // this should be LD to finish but we don't calculate that till end of points as it's around turnpoints...
-                            const possibleSpeed = elapsedTime > 600 ? 160 : (ld > 10 && ld < 35 ? 1.5 : 1) * (elapsedTime < 120 ? 330 : 210);
+                            const possibleSpeed = elapsedTime > 600 ? 180 : (ld > 10 && ld < 35 ? 1.5 : 1) * (elapsedTime < 120 ? 330 : 210);
 
                             // Make sure we meet the constrants
                             if (neededSpeed < possibleSpeed) {
