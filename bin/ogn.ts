@@ -784,7 +784,7 @@ async function updateTrackers(datecode: Datecode) {
     });
 
     // Now go through all the desired gliders and make sure we have linked them
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
         cTrackers
             .filter((t) => t.dbTrackerId && t.dbTrackerId != 'unknown')
             .map(async (t) => {
@@ -804,10 +804,6 @@ async function updateTrackers(datecode: Datecode) {
                     {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
                 ));
                 const channel = channels[glider.channelName];
-
-                console.log(
-                    `*> ${t.className}/${t.compno}: changed: start ${startUtcChanged}, handicap ${handicapChanged}, scores ${scoredStatusChanged}, hadTracker: ${hadTracker}, ${t.dbTrackerId}, scoredStatus:${t.scoredStatus}, scoring: ${glider.scoringConfigured}, listening: ${listening}`
-                );
 
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
@@ -846,8 +842,31 @@ async function updateTrackers(datecode: Datecode) {
                         'i'
                     );
                 }
+
+                return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: glider.scoringConfigured, listening};
             })
     );
+
+    try {
+        const success = results.filter((r) => r.status == 'fulfilled').map((f) => f.value);
+        const fr = (f) => {
+            const filtered = success.filter(f);
+            return filtered.length == success.length ? 'all' : filtered.length == 0 ? 'none' : `${filtered.map((c) => c.compno).join(',')} (${filtered.length}/${results.length})`;
+        };
+
+        console.log(
+            `${datecode}: startChanged: ${fr((s) => s.startUtcChanged)} handicapChanged: ${fr((s) => s.handicapChanged)} scoreStatusChanged: ${fr((s) => s.scoreStatusChanged)}, hadTracker: ${fr(
+                (s) => s.hadTracker
+            )} scoring: ${fr((s) => s.scoringConfigured)} listening: ${fr((s) => s.listening)}`
+        );
+
+        if (success.length != results.length) {
+            console.log('updateTrackers: exceptions thrown');
+            console.table(results.filter((r) => r.status != 'fulfilled'));
+        }
+    } catch (e) {
+        console.log(e);
+    }
 
     const newGlidersCount = Object.keys(gliders).length;
     if (removedGliders.length || updatedGliderCount || newGlidersCount != initialGliderCount) {
@@ -913,12 +932,14 @@ async function updateDDB() {
 //
 // New connection, send it a packet for each glider we are tracking
 async function sendCurrentState(client: OgnWebSocket) {
-    if (client.readyState !== WebSocket.OPEN || !client.isAlive || !channels[client.ognChannel]) {
-        console.log('unable to sendCurrentState not yet open or ! isAlive');
+    if (client.readyState !== WebSocket.OPEN) {
+        return;
+    }
+    if (!client.isAlive || !channels[client.ognChannel]) {
+        console.log(`unable to send sendCurrentState: ${client.isAlive}, ${client.ognChannel}`);
         return;
     }
 
-    console.log(client.ognChannel);
     const channel = channels[client.ognChannel];
 
     sendAllScores(channel, getNow());
@@ -927,7 +948,6 @@ async function sendCurrentState(client: OgnWebSocket) {
     sendRecentPilotTracks(channel, client);
 
     if (channel.lastKeepAliveMsg) {
-        console.log('keepalive2');
         client.send(channel.lastKeepAliveMsg, {binary: true});
     }
 }
@@ -1040,11 +1060,12 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
         } //
     ).finish();
 
-    console.log(
+    /*    console.log(
         `${channel.className}: sending scores & identifiers: live:${channel.liveScoreId}, ${channel.scoreId != channel.liveScoreId ? 'rescore ' + channel.scoreId + ' in progress ' : ''}allScores length: ${
             updatedIdentifiers!.length
         } eScore: ${d(channel.earliestScore)}, eStart: ${d(channel.earliestStart)}, lScore: ${d(channel.latestScore)} t: ${d(t ?? 0)}`
     );
+*/
 
     channel.clients.forEach((client: any) => {
         if (client.readyState === WebSocket.OPEN) {
@@ -1323,7 +1344,7 @@ function setupWebSocketServer(server) {
 
         ws.ognChannel = channel;
         ws.ognPeer = req.headers['x-forwarded-for']?.toString() ?? req.connection.remoteAddress ?? 'unknown';
-        console.log(`connection received for ${channel} from ${ws.ognPeer} on ${address}`);
+        //        console.log(`connection received for ${channel} from ${ws.ognPeer} on ${address}`);
 
         ws.isAlive = true;
         ws.isInteracting = false;
@@ -1331,7 +1352,7 @@ function setupWebSocketServer(server) {
         if (channel in channels) {
             channels[channel].clients.push(ws);
         } else {
-            console.log('Unknown channel ' + channel);
+            //            console.log('Unknown channel ' + channel);
             ws.send('reload');
             ws.isAlive = false;
         }
@@ -1341,7 +1362,7 @@ function setupWebSocketServer(server) {
         });
         ws.on('close', () => {
             ws.isAlive = false;
-            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
+            //            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('error', console.error);
         ws.on('message', (cx) => {

@@ -423,6 +423,8 @@ function startAprsListener(config: AprsListenerConfig) {
             statistics.knownReceived =
             statistics.invalidPacket =
             statistics.finishPoints =
+            statistics.outOfOrder =
+            statistics.duplicates =
             statistics.jumps =
                 0;
 
