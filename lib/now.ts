@@ -31,3 +31,7 @@ export const readOnly = process.env.REPLAY_DB ? true : process.env.OGN_READ_ONLY
 export function replay() {
     return replayBase > 0;
 }
+
+export function d(d: Epoch | number | undefined | null) {
+    return new Date(Math.min(d ?? 0, 2145916800) * 1000).toISOString();
+}

@@ -166,7 +166,7 @@ let airfieldElevation: AltitudeAgl;
 let unknownChannel: BroadcastChannel;
 
 // Mapping by class/compno to aircraft record
-const aircraft: Record<ClassName_Compno, Aircraft> = {};
+const allAircraft: Record<ClassName_Compno, Aircraft> = {};
 
 // Mapping by trackerid to aircraft record
 const trackers: Record<FlarmID, Tracker> = {};
@@ -327,7 +327,7 @@ async function initDB(datecode: Datecode) {
 //
 // Connect to the APRS Server
 function startAprsListener(config: AprsListenerConfig) {
-    if (process.env.REPLAY_DB) {
+    if (process.env.REPLAY_DB || process.env.NEXT_PUBLIC_REPLAY) {
         return;
     }
 
@@ -464,7 +464,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
 async function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
-    const aircraft: Aircraft = {
+    const glider: Aircraft = {
         compno: task.compno,
         className: task.className,
         trackers: task.trackerId as FlarmID[],
@@ -487,7 +487,7 @@ async function trackGlider(task: AprsCommandTrack) {
     };
 
     // Link the glider in
-    aircraft[makeClassname_Compno(task)] = aircraft;
+    allAircraft[makeClassname_Compno(task)] = glider;
 
     // Make sure we have the latest datecode for the database
     db = await initDB(task.datecode);
@@ -498,20 +498,20 @@ async function trackGlider(task: AprsCommandTrack) {
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
     let index = 0;
     for (const id of [...new Set(trackerList)]) {
-        console.log('load tracker', aircraft.compno, id);
+        console.log('load tracker', glider.compno, id);
         if (trackers[id]) {
-            trackers[id].aircraftList.push(aircraft);
+            trackers[id].aircraftList.push(glider);
             trackers[id].receiveNewPoints = trackers[id].receiveNewPoints || task.receiveNewPoints;
         } else {
             trackers[id] = {
                 id: id as FlarmID,
                 index: index++,
-                aircraftList: [aircraft],
+                aircraftList: [glider],
                 receiveNewPoints: task.receiveNewPoints,
                 db: db?.sublevel(id, {})
             };
         }
-        await loadPointsForTracker(aircraft, trackers[id], interimQueue);
+        await loadPointsForTracker(glider, trackers[id], interimQueue);
     }
 
     // And make sure we have a channel for it
@@ -520,11 +520,12 @@ async function trackGlider(task: AprsCommandTrack) {
     }
 
     // And link the broadcast channel to it
-    aircraft[makeClassname_Compno(task)].channel = channels[task.channelName];
-    aircraft.messages = interimQueue;
+    glider.channel = channels[task.channelName];
+    glider.messages = interimQueue;
     setTimeout(() => {
         console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
-        aircraft.interval = setInterval(() => processMessageQueue(aircraft), 1000);
+        glider.channel!.postMessage({c: glider.compno, t: 0, _: false, tick: true} as any);
+        glider.interval = setInterval(() => processMessageQueue(glider), 1000);
     }, Math.random() * 1000);
 }
 
@@ -532,9 +533,9 @@ function finishGlider(task: AprsCommandFinish) {
     console.log(`APRS: stopping point reception ${task.className}/${task.compno}`);
 
     // What are we removing
-    const toFinish = aircraft[makeClassname_Compno(task)];
+    const toFinish = allAircraft[makeClassname_Compno(task)];
     if (!toFinish) {
-        console.log(`APRS: finishGlider can't find ${task.className}/${task.compno} in ${Object.keys(aircraft).join(',')}`);
+        console.log(`APRS: finishGlider can't find ${task.className}/${task.compno} in ${Object.keys(allAircraft).join(',')}`);
         return;
     }
 
@@ -553,9 +554,9 @@ function finishGlider(task: AprsCommandFinish) {
 
 function untrackGlider(task: AprsCommandUntrack) {
     // What are we removing
-    const toRemove = aircraft[makeClassname_Compno(task)];
+    const toRemove = allAircraft[makeClassname_Compno(task)];
     if (!toRemove) {
-        console.log(`APRS: untrackGlider can't find ${task.className}/${task.compno} in ${Object.keys(aircraft).join(',')}`);
+        console.log(`APRS: untrackGlider can't find ${task.className}/${task.compno} in ${Object.keys(allAircraft).join(',')}`);
         return;
     }
 
@@ -572,7 +573,7 @@ function untrackGlider(task: AprsCommandUntrack) {
     clearInterval(toRemove.interval);
 
     // Remove the glider details
-    delete aircraft[makeClassname_Compno(task)];
+    delete allAircraft[makeClassname_Compno(task)];
     console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers}`);
 }
 
