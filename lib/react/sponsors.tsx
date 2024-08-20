@@ -27,6 +27,11 @@ export default function Sponsor(props) {
                   <img width="145" height="46" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/4e86848d-8e4e-4e19-a18a-229ef2522d6c/CrosscountryAero-1.jpg" />,
                   <img width="150" height="150" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/7b75e0da-ff81-4b3f-965b-91b08f60d9bf/AS-1.jpg" />
               ]
+            : process.env.NEXT_PUBLIC_SITEURL.startsWith('wgc')
+            ? [
+                  <img width="150" height="57" src="https://wgc2024uvalde.com/wp-content/uploads/2024/02/Soaring-Society-of-America-Logo-LG2.webp" title="SSA" />,
+                  <img width="" height="" src="https://wgc2024uvalde.com/wp-content/uploads/2024/02/logo_igc_01_cmyk_moyen.jpg" title="IGC" />
+              ]
             : [
                   <div>
                       If you would like to use onglide for your competition please ask your scorer to send the SoaringSpot API keys to setup@onglide.com
