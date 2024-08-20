@@ -3,6 +3,8 @@ import {Epoch, Datecode, ClassName, Compno, PositionMessage, InOrderGeneratorFun
 import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
 import {BroadcastChannel} from 'node:worker_threads';
 
+import {d} from '../now';
+
 //
 // This subscribes to broadcast channel and ensures that the messages
 // are returned in order, if it is unable to comply then it flags
@@ -21,8 +23,9 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
     // We need somewhere to store the unprocessed message queue
     let messageQueue: PositionMessage[] = initialPoints;
+    let messageQueueId = Math.random();
 
-    const log = compno == 'TJ' ? (...a) => console.log(compno + ':', ...a) : () => {};
+    const log = compno == '!TJ' ? (...a) => console.log(compno + ':', ...a) : () => {};
 
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
@@ -37,8 +40,10 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         }
 
         // Reset on timestamp 0
-        if (message.t == 0) {
+        if (message.t == 0 && messageQueue.length) {
+            console.log(`${message.c}: IOG: reset on t=0`);
             messageQueue = [];
+            messageQueueId = Math.random();
             return;
         }
 
@@ -47,12 +52,12 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
         // Sanity check, this should never happen
         if (messageQueue[insertIndex]?.t == message.t) {
-            console.log(`${message.c}: unexpected duplicate packet`);
+            console.log(`${message.c}: IOG: unexpected duplicate packet`);
             return;
         }
 
         if (messageQueue.length != insertIndex) {
-            console.log(message.c, message.t, 'inserting out of order', messageQueue.length, insertIndex);
+            console.log(`${message.c} IOG: ${message.t} inserting out of order ${insertIndex}/${messageQueue.length} ${d(message.t)} end: ${d(messageQueue.at(-1)?.t ?? 0)}`);
         }
 
         log(`${message.t}, live: ${message._}`);
@@ -72,6 +77,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         // How far through are we
         let position = 0;
         let hiccup: Epoch = 0 as Epoch;
+        const currentMessageQueueId = messageQueueId;
 
         console.log(`${className}/${compno}: IOG started ${messageQueue.length}`);
         if (!messageQueue.length) {
@@ -82,7 +88,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         //
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
-        while (!messageQueue[position]?._) {
+        while (!messageQueue[position]?._ && currentMessageQueueId == messageQueueId) {
             if (position == messageQueue.length) {
                 log('end of queue', position, messageQueue.length);
                 // Skip all the ticks, they shouldn't happen but don't wait forever
@@ -115,7 +121,9 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
 
         let now: Epoch = getNow();
         console.log(
-            `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date((messageQueue.at(-1)?.t ?? 0) * 1000).toISOString()}`
+            `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date(
+                (messageQueue.at(-1)?.t ?? 0) * 1000
+            ).toISOString()} <${messageQueueId},${currentMessageQueueId}>`
         );
 
         // Find the position of the message we got up to, should always be increasing but better safe than sorry
@@ -123,7 +131,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         //        let position = _sortedIndexBy(messageQueue, {t: now} as any, (o) => o.t);
 
         // Loop till we are told to stop (an exception on yield)
-        while (true) {
+        while (messageQueueId === currentMessageQueueId) {
             // If we don't have a message we should wait
             if (position == messageQueue.length) {
                 await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
@@ -139,7 +147,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
             }
         }
 
-        console.log(`Closing message loop for ${className}:${compno}`);
+        console.log(`Closing message loop for ${className}:${compno}, ${messageQueueId}<>${currentMessageQueueId}`);
     };
 
     return inOrderGenerator;
