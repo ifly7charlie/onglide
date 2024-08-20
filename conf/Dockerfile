@@ -54,6 +54,7 @@ FROM productionbase AS ogn
 WORKDIR /onglide
 COPY --from=ognbuildimage /onglide/dist .
 COPY ./.env ./.env.local
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN touch .docker
 EXPOSE 8080
 
