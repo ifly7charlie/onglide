@@ -1,6 +1,6 @@
 import {trackMetric} from '../insights';
 
-import {Epoch, ClassName, Compno, Task, TaskScoresGenerator} from '../types';
+import {Epoch, ClassName, Compno, Task, TaskScoresGenerator, PositionStatusText} from '../types';
 
 import {PilotScore} from '../protobuf/onglide';
 
@@ -11,6 +11,8 @@ import {MessagePort} from 'node:worker_threads';
 import {setTimeout} from 'timers/promises';
 
 import equal from 'fast-deep-equal';
+
+import {d} from '../now';
 
 /*
  * collect scores from a collection of different generators and post update messages
@@ -234,7 +236,7 @@ function scoreChanged(oldScore?: PilotScore, newScore?: PilotScore): boolean {
 
     // Now we know that duration or flight status must change for it to count
     if (oldScore.flightStatus != newScore.flightStatus) {
-        console.log(newScore.compno, 'fs change', newScore.flightStatus, oldScore.flightStatus);
+        console.log(`${newScore.compno}: ${PositionStatusText[oldScore.flightStatus ?? 0]} => ${PositionStatusText[newScore.flightStatus ?? 0]} @ ${d(newScore.t)}`);
         return true;
     }
 

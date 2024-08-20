@@ -104,6 +104,17 @@ export enum PositionStatus {
     Finished = 7
 }
 
+export const PositionStatusText = {
+    [PositionStatus.Unknown]: 'unknown',
+    [PositionStatus.Stationary]: 'stationary',
+    [PositionStatus.Grid]: 'grid',
+    [PositionStatus.Low]: 'low',
+    [PositionStatus.Airborne]: 'airborne',
+    [PositionStatus.Home]: 'home',
+    [PositionStatus.Landed]: 'landed',
+    [PositionStatus.Finished]: 'finished'
+};
+
 export interface EnrichedPosition extends PositionMessage {
     ps: PositionStatus;
     geoJSON?: Feature<Point>;
