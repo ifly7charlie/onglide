@@ -79,8 +79,6 @@ import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocess
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
-const d = (d) => new Date(Math.min(d ?? 0, 2145916800) * 1000).toISOString();
-
 process.setMaxListeners(15);
 
 // Where is the comp based
@@ -214,7 +212,7 @@ interface OgnWebSocket extends WebSocket {
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
 
-import {getNow, readOnly, replayBase} from '../lib/now';
+import {getNow, readOnly, replayBase, d} from '../lib/now';
 
 async function main() {
     if (error) {
@@ -471,7 +469,7 @@ async function main() {
             console.log(
                 `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (${(channel.statistics.interactingListeners / channel.statistics.listenerCycles).toFixed(
                     1
-                )}, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak ${channel.statistics.peakListeners}`
+                )}, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak avg ${channel.statistics.peakListeners.toFixed(0)}`
             );
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
