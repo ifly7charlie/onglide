@@ -1411,10 +1411,9 @@ function setupOgnWebServer(req, res) {
             switch (command) {
                 case 'scores': {
                     console.log('sending scores for ', channelName);
-                    const msg: any = channel.allScores ? OnglideWebSocketMessage.decode(channel.allScores) : {};
                     res.setHeader('Content-Type', 'application/json');
                     res.writeHead(200, headers);
-                    res.end(JSON.stringify(msg));
+                    res.end(JSON.stringify({scores: {scoreId: channel.scoreId, pilots: channel.allScores}}));
                     return;
                 }
                 case 'scorehistory': {
