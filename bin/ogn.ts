@@ -1212,7 +1212,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     // If we have a reset message
     if (message.t == 0) {
         console.log(`${message.c}: new track start received`);
-        //        initialiseDeck(message.c as Compno, glider, randomBytes(4).readUInt32BE(0));
+        initialiseDeck(message.c as Compno, glider, randomBytes(4).readUInt32BE(0));
         return;
     }
 
