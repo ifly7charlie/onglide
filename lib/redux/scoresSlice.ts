@@ -78,7 +78,7 @@ export const scoresSlice = createSlice({
             }
             // If the score id has changed then we need to reset everything historical
             if (state.scoreId != scoreId) {
-                console.log('update scoreId', scoreId, state.scoreId);
+                console.log(`update scoreId ${state.scoreId} => ${scoreId}`);
                 state.loading = {};
                 state.scoreId = scoreId;
                 state.historical = {};
@@ -273,7 +273,7 @@ export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilo
 //////////////////////////////////////////
 
 function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
-    console.log('updateScores', action.payload.scoreId, state.scoreId);
+    console.log(`updateScores live: ${state.scoreId}, received: ${action.payload.scoreId}, ${Object.keys(action.payload.pilots).join(',')}`);
     if (action.payload.scoreId != state.scoreId) {
         return;
     }
