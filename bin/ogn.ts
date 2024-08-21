@@ -215,7 +215,7 @@ interface OgnWebSocket extends WebSocket {
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
 
-import {getNow, readOnly, replayBase, d} from '../lib/now';
+import {getNow, getDelay, readOnly, replayBase, d} from '../lib/now';
 
 async function main() {
     if (error) {
@@ -285,7 +285,7 @@ async function main() {
     }
 
     location.point = point([location.lng, location.lat]);
-    location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
+    location.officialDelay = getDelay();
     location.tzoffset = parseInt(location.tzoffset as unknown as string);
 
     // Save the tz for use
@@ -535,6 +535,9 @@ async function getDCode(): Promise<Datecode> {
         : (await db.query<{datecode: Datecode}[]>('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))[0].datecode;
 }
 
+import {ClassicLevel} from 'classic-level';
+class DB extends ClassicLevel<Compno, PilotScore> {}
+
 //
 // Fetch the trackers from the database
 async function updateClasses(internalName: string, datecode: Datecode) {
@@ -594,6 +597,26 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 }
             };
             channel.scoreHistory.set(scoreId, new Map<Compno, PilotScore[]>());
+
+            // Read any old history
+            {
+                const path = `${process.env.DB_PATH ?? './db/'}/scores-${datecode}.db`;
+                const db = new DB(path);
+                await db.open().catch((e: any) => {
+                    console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
+                });
+                for await (const [compno, scoreJSON] of db.sublevel(c.class).iterator()) {
+                    const score = JSON.parse(scoreJSON);
+                    if (!channel.liveScoreId) {
+                        channel.liveScoreId = score.scoreId;
+                    }
+                    score.scoreId = channel.liveScoreId;
+                    channel.allScores[compno] = score;
+                }
+                console.log(`${c.class}: loaded ${Object.keys(channel.allScores).length} scores on id ${channel.liveScoreId}`);
+
+                await db.close();
+            }
         } else {
             // We move it to the new list
             delete channels[cname];
@@ -703,6 +726,7 @@ async function updateTasks(): Promise<void> {
 
             // If it had a task, and doesn't any longer then just stop it scoring
             if (channel.task && !updatedTask) {
+                console.log(`${channel.className}: ** clear task`);
                 channel.scoring?.clearTask();
                 channel.scoreHistory.clear();
                 channel.allScores = {};
@@ -1066,7 +1090,7 @@ async function sendAllScores(client: OgnWebSocket) {
         {
             identifiers: getIdentifiers(channel),
             scores: {
-                scoreId: channel.scoreId,
+                scoreId: channel.liveScoreId,
                 pilots: channel.allScores
             },
             t: getNow()
@@ -1124,6 +1148,19 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             if (process?.send) {
                 console.log('*** sent process ready');
                 process.send('ready');
+            }
+            try {
+                const path = `${process.env.DB_PATH ?? './db/'}/scores-${channel.datecode}.db`;
+                const db = new ClassicLevel(path);
+                await db.open();
+                const sl = db.sublevel(channel.className);
+                for (const compno in channel.allScores) {
+                    console.log(compno, channel.allScores[compno]);
+                    await sl.put(compno, JSON.stringify(channel.allScores[compno]));
+                }
+                await db.close();
+            } catch (e) {
+                console.log(e);
             }
         }
         return;

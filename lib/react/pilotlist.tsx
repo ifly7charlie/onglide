@@ -574,7 +574,6 @@ export const PilotList = memo(function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
-    live,
     setOptions,
     handicapped,
     now,
@@ -626,17 +625,6 @@ export const PilotList = memo(function PilotList({
     const toggleVisible = useCallback(() => {
         setVisible(!visible);
     }, [visible]);
-
-    if (!live) {
-        return (
-            <div style={{width: '100%'}}>
-                <div style={{margin: '0 auto', width: 'fit-content'}}>
-                    <br />
-                    <FontAwesomeIcon icon={faSpinner} spin={true} /> Rescoring...
-                </div>
-            </div>
-        );
-    }
 
     // Generate the pilot list, sorted by the correct key
     const pilotComponents = pilotList.map((pilot) => {
