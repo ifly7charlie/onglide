@@ -3,7 +3,7 @@ import {Epoch, Datecode, ClassName, Compno, PositionMessage, InOrderGeneratorFun
 import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
 import {BroadcastChannel} from 'node:worker_threads';
 
-import {d} from '../now';
+import {d, getNow} from '../now';
 
 //
 // This subscribes to broadcast channel and ensures that the messages
@@ -57,7 +57,9 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         }
 
         if (messageQueue.length != insertIndex) {
-            console.log(`${message.c} IOG: ${message.t} inserting out of order ${insertIndex}/${messageQueue.length} ${d(message.t)} end: ${d(messageQueue.at(-1)?.t ?? 0)}`);
+            console.log(
+                `${message.c} IOG: ${message.t} inserting out of order ${insertIndex}/${messageQueue.length} ${d(message.t)} now: ${d(getNow())}, end: ${d(messageQueue.at(-1)?.t ?? 0)}/${JSON.stringify(messageQueue.at(-1))}`
+            );
         }
 
         log(`${message.t}, live: ${message._}`);
@@ -120,11 +122,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         }
 
         let now: Epoch = getNow();
-        console.log(
-            `${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${new Date(now * 1000).toISOString()}, replayed to: ${new Date(
-                (messageQueue.at(-1)?.t ?? 0) * 1000
-            ).toISOString()} <${messageQueueId},${currentMessageQueueId}>`
-        );
+        console.log(`${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${d(now)}, replayed to: ${d(messageQueue.at(-1)?.t ?? 0)} <${messageQueueId},${currentMessageQueueId}>`);
 
         // Find the position of the message we got up to, should always be increasing but better safe than sorry
         // as we may have had a reset of the message
