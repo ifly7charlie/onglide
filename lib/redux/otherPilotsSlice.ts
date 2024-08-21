@@ -19,6 +19,7 @@ import type {
 } from '../types';
 
 import {makeClassname_Compno} from '../types';
+import {getNow} from '../now';
 
 import type {ClassPositions} from '../protobuf/onglide';
 
@@ -45,7 +46,7 @@ const _selectAllPositions = createSelector(
     ],
     (className: ClassName, t: Epoch | undefined, others: OtherPilotData) => {
         try {
-            const timeCutoff = (t == undefined ? Math.trunc(Date.now() / 1000) - 180 : t - 180) as Epoch;
+            const timeCutoff = (t == undefined ? Math.trunc(getNow()) - 180 : t - 180) as Epoch;
             const m = _map(others, (pos, key) => ({
                 className: key?.split('_')?.[0],
                 compno: pos.c,
