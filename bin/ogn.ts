@@ -1155,7 +1155,6 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 await db.open();
                 const sl = db.sublevel(channel.className);
                 for (const compno in channel.allScores) {
-                    console.log(compno, channel.allScores[compno]);
                     await sl.put(compno, JSON.stringify(channel.allScores[compno]));
                 }
                 await db.close();
