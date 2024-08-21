@@ -26,6 +26,10 @@ export function getNow() {
     return internalGetNow();
 }
 
+export function getDelay() {
+    return compDelay as Epoch;
+}
+
 export const readOnly = process.env.REPLAY_DB ? true : process.env.OGN_READ_ONLY == undefined ? false : !!parseInt(process.env.OGN_READ_ONLY);
 
 export function replay() {

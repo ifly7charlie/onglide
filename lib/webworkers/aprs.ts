@@ -181,6 +181,8 @@ const channels: Record<ChannelName, BroadcastChannel> = {};
 // Our persistence
 import {ClassicLevel} from 'classic-level';
 import type {AbstractSublevel} from 'abstract-level';
+import {inorderAdditionalDelay} from '../constants';
+
 class DB extends ClassicLevel<string, string> {}
 let db: DB | undefined;
 let dbDatecode: Datecode = '000' as Datecode;
@@ -649,7 +651,7 @@ async function processPacket(packet: aprsPacket) {
         statistics.finishPoints++;
     }
 
-    const message: InterimPositionMessage = {
+    const message: InterimPositionMessage & {d: number} = {
         c: flarmId as FlarmID,
         lat: Math.round(packet!.latitude * 1000000) / 1000000,
         lng: Math.round(packet!.longitude * 1000000) / 1000000,
@@ -660,7 +662,8 @@ async function processPacket(packet: aprsPacket) {
         s: (Math.round((packet.speed ?? 0) * 10) / 10) as Speed,
         f: flarmId,
         o: sender,
-        l: null
+        l: null,
+        d: td
     };
 
     if (tracker.db) {
@@ -734,7 +737,7 @@ async function restartMessageQueue(aircraft: Aircraft) {
 //
 // Note that we do not consume the message queue - it is used for scoring restarts etc
 // so all messages are kept.
-async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined = undefined, to: Epoch = getNow()) {
+async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined = undefined, to: Epoch = (getNow() - inorderAdditionalDelay) as Epoch) {
     //
     let lastSent = aircraft.lastSent;
     let messages = aircraft.messages;
@@ -892,7 +895,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {
         aircraft.channel!.postMessage({
             c: aircraft.compno, //
-            t: (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch),
+            t: (messages.length && position > 0 ? messages[Math.min(position, messages.length) - 1]?.t : undefined) || (2 as Epoch),
             _: true,
             tick: true
         } as any);

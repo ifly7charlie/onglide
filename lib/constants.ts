@@ -15,3 +15,5 @@ export const webPathBaseTimeDuration = 5 * 60;
 
 // How many minutes of scores are we batching together
 export const scoreChunkSize = 30 * 60;
+
+export const inorderAdditionalDelay = 6;
