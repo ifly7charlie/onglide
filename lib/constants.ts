@@ -11,7 +11,7 @@ export const deckPointIncrement = 2000;
 export const deckSegmentIncrement = 100;
 
 // How often to refresh the 'static download' (seconds)
-export const webPathBaseTime = 5 * 60;
+export const webPathBaseTimeDuration = 5 * 60;
 
 // How many minutes of scores are we batching together
 export const scoreChunkSize = 30 * 60;

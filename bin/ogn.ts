@@ -55,7 +55,7 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 // Launch our listener
 import {AprsController} from '../lib/webworkers/aprs';
 
-import {webPathBaseTime, scoreChunkSize} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -953,10 +953,10 @@ async function sendCurrentState(client: OgnWebSocket) {
 async function generateHistoricalTracks(channel: Channel): Promise<void> {
     // Figure out the block that preceeds us, we do it a little late to allow reconnects to use websocket only
     const now = (channel.mostRecentPosition - 30) as Epoch;
-    const base = now - webPathBaseTime; // determine the last block block
+    const base = now - webPathBaseTimeDuration; // determine the last block block
     const firstPointTime = Math.min(channel.earliestStart ?? channel.earliestScore ?? Infinity, now - 120);
 
-    if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTime) {
+    if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
         console.log(`re-generateHistoricalTracks now: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
         const toStream = reduce(
             gliders,
