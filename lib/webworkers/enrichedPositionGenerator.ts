@@ -64,6 +64,11 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             point = current.value as EnrichedPosition;
             stationary = false;
 
+            if (!point.lng) {
+                console.log(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${point}, prev: ${previousPoint}`);
+                return;
+            }
+
             // For distance calculations
             point.geoJSON = turfPoint([point.lng, point.lat]);
 

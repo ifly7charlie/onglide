@@ -131,7 +131,6 @@ interface Channel {
     latestScore: Epoch;
 
     allScores: Record<Compno, PilotScore>;
-    allScoresMsg?: Uint8Array;
 
     scoreId: string;
     proposedScoreId: string;
@@ -144,6 +143,9 @@ interface Channel {
     webPathBaseTime: Epoch;
     webPathData: Record<string, Buffer>;
     mostRecentPosition: Epoch; // last time we had something to send
+
+    // Sending helpers
+    sendBinary: (data: Uint8Array) => void;
 }
 
 let channels: Record<ChannelName, Channel> = {};
@@ -207,6 +209,7 @@ interface OgnWebSocket extends WebSocket {
     isAlive: boolean;
     isInteracting: boolean;
     connectedAt: Epoch;
+    sendBinary: (data: Uint8Array) => void;
 }
 
 // Load the current file & Get the parsed version of the configuration
@@ -585,7 +588,10 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 scoresUpdatedAt: 0 as Epoch,
                 earliestScore: Infinity as Epoch,
                 earliestStart: Infinity as Epoch,
-                latestScore: 0 as Epoch
+                latestScore: 0 as Epoch,
+                sendBinary(data: Uint8Array) {
+                    this.clients.forEach((c: OgnWebSocket) => c.sendBinary(data));
+                }
             };
             channel.scoreHistory.set(scoreId, new Map<Compno, PilotScore[]>());
         } else {
@@ -772,7 +778,6 @@ async function updateTrackers(datecode: Datecode) {
             channel.scoring?.clearGlider(g.compno);
             channel.scoreIdUpdateRequired = true; // ensure we change id even if nothing else changes - this should remove the glider from history
             delete channel.allScores[g.compno]; // remove from old scores as it's not valid any more
-            channel.allScoresMsg = undefined;
         }
     });
 
@@ -822,7 +827,9 @@ async function updateTrackers(datecode: Datecode) {
                         loadedGliderCount++; // change to flarm id
                         channel.scoring?.setInitialTrack(glider.compno, glider.handicap, glider.utcStart, [], channel.proposedScoreId, channel.task);
                         initialiseDeck(glider.compno, glider, randomBytes(4).readUInt32BE(0));
+                        glider.webPathEndPosition = 0;
                         glider.scoringConfigured = true;
+                        channel.webPathBaseTime = 0 as Epoch; // new track inbound so reset things
                         channel.scoreIdUpdateRequired = true;
                     } catch (e) {
                         console.error(e);
@@ -846,7 +853,8 @@ async function updateTrackers(datecode: Datecode) {
     );
 
     try {
-        const success = results.filter((r) => r.status == 'fulfilled').map((f) => f.value);
+        const successfulFilter = <G>(r: PromiseSettledResult<G>): r is PromiseFulfilledResult<G> => r.status == 'fulfilled';
+        const success = results.filter(successfulFilter).map((f) => f.value);
         const fr = (f) => {
             const filtered = success.filter(f);
             return filtered.length == success.length ? 'all' : filtered.length == 0 ? 'none' : `${filtered.map((c) => c.compno).join(',')} (${filtered.length}/${results.length})`;
@@ -877,8 +885,8 @@ async function updateTrackers(datecode: Datecode) {
     const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
     duplicates.forEach((d: {compno: string; count: number; classes: string}) => {
         d.classes.split(',').forEach((c) => {
-            if (gliders[c + '_' + d.compno]) {
-                gliders[c + '_' + d.compno].duplicate = 1;
+            if (gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)]) {
+                gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)].duplicate = 1;
             }
         });
     });
@@ -938,15 +946,14 @@ async function sendCurrentState(client: OgnWebSocket) {
         return;
     }
 
-    const channel = channels[client.ognChannel];
-
-    sendAllScores(channel, getNow());
+    // Ensure they have a full set of scores
+    sendAllScores(client);
 
     // Send them the GeoJSONs, they need to keep this up to date
-    sendRecentPilotTracks(channel, client);
-
+    const channel = channels[client.ognChannel];
+    client.sendBinary(await generateRecentPilotTracks(channel));
     if (channel.lastKeepAliveMsg) {
-        client.send(channel.lastKeepAliveMsg, {binary: true});
+        client.sendBinary(channel.lastKeepAliveMsg);
     }
 }
 
@@ -993,7 +1000,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
 }
 
 // Send the abbreviated track for all gliders, used when a new client connects
-async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
+async function generateRecentPilotTracks(channel: Channel) {
     // Make sure they are up to date (does nothing if they are)
     await generateHistoricalTracks(channel);
 
@@ -1003,7 +1010,7 @@ async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
             if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    const start = glider.webPathEndPosition; //Math.max(0, Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), channel.earliestStart ?? channel.earliestScore ?? 0), glider.webPathEndPosition));
+                    const start = glider.webPathEndPosition;
                     const end = p.posIndex;
                     const length = end - start;
                     if (length > 0) {
@@ -1024,10 +1031,10 @@ async function sendRecentPilotTracks(channel: Channel, client: WebSocket) {
         {}
     );
     // Send the client the current version of the tracks
-    client.send(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish(), {binary: true});
+    return OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish();
 }
 
-async function sendAllScores(channel: Channel, t: Epoch | undefined) {
+function getIdentifiers(channel: Channel) {
     [channel.earliestStart, channel.earliestScore, channel.latestScore] = Object.values(channel.allScores).reduce(
         ([earliestStart, earliestScore, latestScore], score) => [
             Math.min((score.utcStart ?? 0) < 10 ? Infinity : score.utcStart, earliestStart), //
@@ -1037,39 +1044,57 @@ async function sendAllScores(channel: Channel, t: Epoch | undefined) {
         [Infinity, Infinity, 0]
     ) as [Epoch, Epoch, Epoch];
 
-    //    console.log(`sending all scores eScore: ${d(channel.earliestScore)}, eStart: ${d(channel.earliestStart)}, lScore: ${d(channel.latestScore)} t: ${d(t ?? 0)}`);
-    //    console.table(Object.values(channel.allScores).map((s) => [s.compno, d(s.t), d(s.utcStart), d(s.utcFinish)]));
+    return {
+        className: channel.className,
+        datecode: channel.datecode,
+        competition: '1', //
+        earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
+        latestScore: channel.latestScore,
+        scoreId: channel.liveScoreId
+    };
+}
+
+async function sendAllScores(client: OgnWebSocket) {
+    const channel = channels[client.ognChannel];
+    if (!channel || client.readyState !== WebSocket.OPEN) {
+        return;
+    }
+
+    //    console.table(Object.values(channel.allScores).map((c) => [c.compno, c.t, c.flightStatus]));
 
     const updatedIdentifiers = OnglideWebSocketMessage.encode(
         {
-            identifiers: {
-                className: channel.className,
-                datecode: channel.datecode,
-                competition: '1', //
-                earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
-                latestScore: channel.latestScore,
-                scoreId: channel.liveScoreId
-            },
+            identifiers: getIdentifiers(channel),
             scores: {
                 scoreId: channel.scoreId,
                 pilots: channel.allScores
             },
-            ...(t ? {t} : {})
+            t: getNow()
         } //
     ).finish();
 
-    /*    console.log(
-        `${channel.className}: sending scores & identifiers: live:${channel.liveScoreId}, ${channel.scoreId != channel.liveScoreId ? 'rescore ' + channel.scoreId + ' in progress ' : ''}allScores length: ${
-            updatedIdentifiers!.length
-        } eScore: ${d(channel.earliestScore)}, eStart: ${d(channel.earliestStart)}, lScore: ${d(channel.latestScore)} t: ${d(t ?? 0)}`
-    );
-*/
+    // If it's after a join then only send to the one client
+    client.sendBinary(updatedIdentifiers);
+}
 
-    channel.clients.forEach((client: any) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(updatedIdentifiers, {binary: true});
-        }
-    });
+async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = false) {
+    const updatedIdentifiers = OnglideWebSocketMessage.encode(
+        {
+            identifiers: getIdentifiers(channel),
+            t: getNow(),
+            ...(includeScore
+                ? {
+                      scores: {
+                          scoreId: channel.scoreId,
+                          pilots: channel.allScores
+                      }
+                  }
+                : {})
+        } //
+    ).finish();
+
+    // If it's after a join then only send to the one client
+    channel.sendBinary(updatedIdentifiers);
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -1086,7 +1111,10 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             channel.scoreHistory.delete(channel.liveScoreId);
         }
         channel.liveScoreId = scoreId;
-        sendAllScores(channel, t);
+        channel.webPathBaseTime = 0 as Epoch; // we rescored so probably all the tracks have changed
+        sendIdentifiersToAll(channel, true);
+        console.log(`${channel.className}/${channel.datecode}: updating all tracks`);
+        channel.sendBinary(await generateRecentPilotTracks(channel));
 
         const pendingChannels = Object.values(channels).filter((c) => !c.liveScoreId);
         if (pendingChannels.length) {
@@ -1125,17 +1153,12 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         if (score.live) {
             const msg = OnglideWebSocketMessage.encode({scores: {scoreId, pilots: {[compno]: score}}}).finish();
             trackMetric(channel.className + '.scoring.bytesSent', msg.byteLength * channel.clients.length);
-            channel.clients.forEach((client: any) => {
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(msg, {binary: true});
-                }
-            });
+            channel.sendBinary(msg);
 
             // We record this as the latest we are aware of - it's possible it will be wrong as
             // we don't differentiate between the two scoreIds but it's not a history so will
             // be fixed after a rescore. It could jump between two scores as the old scoring is terminated
             channel.allScores[compno] = score;
-            channel.allScoresMsg = undefined;
         }
     }
 
@@ -1175,6 +1198,8 @@ async function sendKeepalive(channel: Channel) {
 
     // For sending the keepalive
     channel.lastKeepAliveMsg = OnglideWebSocketMessage.encode({
+        identifiers: getIdentifiers(channel),
+        t: getNow(),
         ka: {
             keepalive: true,
             at: Math.floor(now),
@@ -1202,19 +1227,32 @@ async function sendKeepalive(channel: Channel) {
 // it's complete with the vario elevation etc
 async function processAprsMessage(className: string, channel: Channel, message: PositionMessage) {
     // Lookup the glider
-    const glider = gliders[className + '_' + message.c];
+    const glider = gliders[makeClassname_Compno(channel.className, message.c as Compno)];
 
     if (!glider) {
-        console.log(`${message.c}: unexpected position ${d(message.t)}`);
+        console.log(`${className}/${message.c}: unexpected position ${d(message.t)}`);
         return;
     }
 
     // If we have a reset message
-    if (message.t == 0) {
-        console.log(`${message.c}: new track start received`);
+    if (message.t == (0 as Epoch)) {
+        console.log(`${className}/${message.c}: new track start received`);
         initialiseDeck(message.c as Compno, glider, randomBytes(4).readUInt32BE(0));
         return;
     }
+
+    // We have everything therefore we need to reset the available tracks for new connections
+    /*    if (message.t == (2 as Epoch)) {
+        console.log(`${className}/${message.c}: track up to date, setting a resend`);
+        channel.webPathBaseTime = 0 as Epoch;
+        channel.resendTracks = async () => {
+            console.log(`${channel.className}/${channel.datecode}: updating all tracks`);
+            channel.resendTracks = null; // we will shortly have done it so no need to
+            // keep this function.
+            channel.sendBinary(await generateRecentPilotTracks(channel));
+        };
+        return;
+    } */
 
     // We ignore ticks
     if ('tick' in message) {
@@ -1350,9 +1388,9 @@ function setupWebSocketServer(server) {
         if (channel in channels) {
             channels[channel].clients.push(ws);
         } else {
-            //            console.log('Unknown channel ' + channel);
             ws.send('reload');
             ws.isAlive = false;
+            return;
         }
 
         ws.on('pong', () => {
@@ -1370,6 +1408,8 @@ function setupWebSocketServer(server) {
             }
             /**/
         });
+
+        ws.sendBinary = (data: Uint8Array) => (ws.readyState == WebSocket.OPEN && ws.isAlive ? ws.send(data, {binary: true}) : undefined);
 
         // Send vario etc for all gliders we are tracking
         sendCurrentState(ws);
