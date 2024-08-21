@@ -112,11 +112,14 @@ const statistics = {
     aprsDelay: 0,
     normalPackets: 0,
     aprsDelayForDelayed: 0,
+    aprsMaxDelayForDelayed: 0,
+    aprsMinDelayForDelayed: Infinity,
     delayedPackets: 0,
     periodStart: 0,
     outOfOrder: 0,
     duplicates: 0,
     invalidPacket: 0,
+    encryptedPacket: 0,
     jumps: 0,
     finishPoints: 0,
     server: '-not connected-'
@@ -135,7 +138,7 @@ interface Aircraft {
     lastMoved?: number;
     lastTick: Epoch;
 
-    kf?: any; // altitude smoothing
+    //    kf?: any; // altitude smoothing
     stationary: number; // consecutive stationary fixes
     ground: boolean;
 
@@ -363,7 +366,14 @@ function startAprsListener(config: AprsListenerConfig) {
             if (packet && 'latitude' in packet && 'longitude' in packet && 'comment' in packet && packet.comment?.startsWith('id')) {
                 processPacket(packet).catch((e) => console.error(e));
             } else {
-                statistics.invalidPacket++;
+                const ognTracker = packet?.destCallsign || 'unknown';
+                const sender = packet?.digipeaters?.pop()?.callsign || 'unknown';
+                if (ognTracker == 'OGNTRK' && sender != 'DLY2APRS') {
+                    statistics.encryptedPacket++;
+                } else {
+                    //                    console.log(ognTracker, sender, packet?.digipeaters, packet);
+                    statistics.invalidPacket++;
+                }
             }
         } else {
             // Server keepalive
@@ -403,12 +413,14 @@ function startAprsListener(config: AprsListenerConfig) {
             console.log(
                 `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${statistics.duplicates}, invalid: ${
                     statistics.invalidPacket
-                }, finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
+                }, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
             );
-            console.log(`APRS: NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
+            console.log(`APRS: ${statistics.normalPackets} NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
             console.log(
                 statistics.delayedPackets
-                    ? `APRS: DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
+                    ? `APRS: ${statistics.delayedPackets} DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, range ${statistics.aprsMinDelayForDelayed} - ${
+                          statistics.aprsMaxDelayForDelayed
+                      }, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
                     : ''
             );
             trackMetric('aprs.msgsReceived', statistics.msgsReceived);
@@ -424,11 +436,15 @@ function startAprsListener(config: AprsListenerConfig) {
             statistics.delayedPackets = //
             statistics.knownReceived =
             statistics.invalidPacket =
+            statistics.encryptedPacket =
             statistics.finishPoints =
             statistics.outOfOrder =
             statistics.duplicates =
             statistics.jumps =
                 0;
+
+        statistics.aprsMaxDelayForDelayed = 0;
+        statistics.aprsMinDelayForDelayed = Infinity;
 
         statistics.periodStart = Date.now();
         if (unstableCount > 0) {
@@ -609,6 +625,8 @@ async function processPacket(packet: aprsPacket) {
     if (sender == 'DLY2APRS') {
         sender = packet.digipeaters?.[0]?.callsign || 'unknown';
         statistics.aprsDelayForDelayed += td;
+        statistics.aprsMaxDelayForDelayed = Math.max(statistics.aprsMaxDelayForDelayed, td);
+        statistics.aprsMinDelayForDelayed = Math.min(statistics.aprsMinDelayForDelayed, td);
         statistics.delayedPackets++;
     } else {
         statistics.aprsDelay += td;
@@ -899,8 +917,8 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
             _: true,
             tick: true
         } as any);
+        //        console.log('IOG tick:', aircraft.compno, (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch), Math.min(position, messages.length - 1), position, messages.length);
         aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
-
         if (!aircraft.lastTick) {
             console.log(`${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} f:${from} s:${start} t:${to}`);
         }
