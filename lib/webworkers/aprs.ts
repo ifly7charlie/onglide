@@ -849,7 +849,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
 
             // If we had been stationary for a while and we are low enough to be on the ground
             // then mark it as so
-            if (aircraft.stationary > 5 && point.g < 100) {
+            if (aircraft.stationary > 5 && point.g < 100 && !aircraft.ground) {
                 console.log(`${point.c}: on ground @ ${point.t}`);
                 aircraft.ground = true;
             }
