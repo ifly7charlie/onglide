@@ -416,13 +416,13 @@ function startAprsListener(config: AprsListenerConfig) {
                 }, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
             );
             console.log(`APRS: ${statistics.normalPackets} NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
-            console.log(
-                statistics.delayedPackets
-                    ? `APRS: ${statistics.delayedPackets} DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, range ${statistics.aprsMinDelayForDelayed} - ${
-                          statistics.aprsMaxDelayForDelayed
-                      }, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
-                    : ''
-            );
+            if (statistics.delayedPackets) {
+                console.log(
+                    `APRS: ${statistics.delayedPackets} DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, range ${statistics.aprsMinDelayForDelayed} - ${
+                        statistics.aprsMaxDelayForDelayed
+                    }, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
+                );
+            }
             trackMetric('aprs.msgsReceived', statistics.msgsReceived);
             trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
             trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
