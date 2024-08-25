@@ -786,7 +786,8 @@ async function process_day_scores(day, classid, classname, keys) {
         }
 
         const finished = row.scored_speed > 0;
-        const scoredStatus = finished ? 'F' : row.igc_file ? 'H' : 'S';
+        //        const scoredStatus = finished ? 'F' : row.igc_file ? 'H' : 'S';
+        const scoredStatus = finished ? 'F' : row.scored_distance > 0 ? 'H' : 'S';
 
         // If there is data from scoring then process it into the database
         if (row.status_evaluated) {
