@@ -273,7 +273,9 @@ export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilo
 //////////////////////////////////////////
 
 function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
-    console.log(`updateScores live: ${state.scoreId}, received: ${action.payload.scoreId}, ${Object.keys(action.payload.pilots).join(',')}`);
+    if (Object.keys(action.payload.pilots).length > 1) {
+        console.log(`updateScores live: ${state.scoreId}, received: ${action.payload.scoreId}, ${Object.keys(action.payload.pilots).join(',')}`);
+    }
     if (action.payload.scoreId != state.scoreId) {
         return;
     }
@@ -285,7 +287,7 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
             // If the scoreId is the current one then we will use that
             const sh = (state.historical[compno] ??= []);
             const index = _sortedIndexBy(sh, score, (x) => x.t);
-            if (index < sh.length && index >= 0) {
+            if (index < sh.length && index >= 0 && sh[index].t != score.t) {
                 console.log(compno, '***** rewind score history to ', index, sh[index].t, d(sh[index].t));
             }
             sh.splice(index, Infinity, result[compno]);
