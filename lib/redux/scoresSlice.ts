@@ -343,7 +343,7 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
         const newIndicies = newScores.map((scoreHistoryMessage) => scoreHistoryMessage.t as Epoch);
         const oldIndicies = oldScores?.map((psd) => psd.t as Epoch) ?? [];
 
-        console.log('received new score times', newIndicies.map(d).join(','));
+        //        console.log(`${compno}: received new score times ${d(newIndicies.at(0))} from ${d(newIndicies.at(-1))}`);
 
         const resultIndex = [];
         const resultScores = [];
@@ -381,9 +381,6 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
         }
         if (oldIndicies.join(',') != resultIndex.join(',')) {
             state.historical[compno] = resultScores;
-            //            console.log(`FOS: ${compno} result: ${resultIndex.length} idents, newIndicies ${newIndicies.length} & oldIndicies ${oldIndicies.length}`);
-            //            console.log('FOS:', resultIndex.map(d));
         }
     }
-    console.log(Object.keys(state.historical));
 }

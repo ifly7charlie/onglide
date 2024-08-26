@@ -1,4 +1,5 @@
 import {Epoch} from './types';
+import {toDateCode} from './datecode';
 
 const start = Math.trunc(Date.now() / 1000);
 const compDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY ? parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '10') : 10;
@@ -18,9 +19,14 @@ if (replayBase) {
         const effectiveElapsed = elapsed * multiplier;
         return (replayBase + effectiveElapsed) as Epoch;
     };
+    console.log(`Competition replay, competition time: ${getNow()} = ${new Date(getNow() * 1000).toISOString()}, replay: ${replayBase > 0}, datecode=${getReplayDatecode()}`);
 }
 
-console.log(`Competition delay: ${compDelay} seconds, competition time: ${getNow()} = ${new Date(getNow() * 1000).toISOString()}, replay: ${replayBase > 0}`);
+export function getReplayDatecode() {
+    return replay() ? toDateCode(new Date(replayBase * 1000)) : undefined;
+}
+
+console.log(`Competition delay: ${compDelay} seconds`);
 
 export function getNow() {
     return internalGetNow();

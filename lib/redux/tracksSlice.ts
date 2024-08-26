@@ -235,11 +235,11 @@ export const tracksSlice = createSlice({
     extraReducers: (builder) => {
         //
         // New class, needs to reset everything
-        builder.addCase(updateClassAction, (state, {payload: {className, scoreId}}) => {
-            if (className != state.className) {
+        builder.addCase(updateClassAction, (state, {payload: {className, scoreId, datecode}}) => {
+            if (className != state.className || datecode != state.dateCode) {
                 return {
                     className: className as ClassName,
-                    dateCode: '' as Datecode,
+                    dateCode: datecode as Datecode,
                     latestUpdate: 0 as Epoch,
                     tracks: {},
                     trackVersion: '',
@@ -247,8 +247,6 @@ export const tracksSlice = createSlice({
                     scoreId: scoreId
                 };
             }
-            // If the score id has changed then we may have incomplete tracks
-            // this should trigger a reload of the history
             if (state.scoreId != scoreId) {
                 state.scoreId = scoreId;
             }
@@ -264,9 +262,9 @@ export const tracksSlice = createSlice({
         // Http query of old tracks, load it and then load the one from websocket
         builder.addCase(fetchOldTracks.fulfilled, (state, action) => {
             if (action.payload.downloaded) {
-                _updateTracks(state, {payload: action.payload.downloaded, type: action.type});
+                _updateTracks(state, {payload: action.payload.downloaded, type: action.type, source: 'downloaded'});
             }
-            _updateTracks(state, {payload: action.payload.websocket, type: action.type});
+            _updateTracks(state, {payload: action.payload.websocket, type: action.type, source: 'websocket'});
         });
     },
     selectors: {
@@ -325,7 +323,7 @@ function _updatePositions(state: TracksSliceState, action: PayloadAction<{positi
     state.latestUpdate = Math.max(state.latestUpdate, action.payload?.t) as Epoch;
 }
 
-function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTracks>) {
+function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTracks> & {source?: string}) {
     // Inbound tracks
     //    const state = original(draft);
     const tracks = action.payload;
@@ -333,11 +331,24 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
     if (tracks.baseTime) {
         state.baseTime = tracks.baseTime as Epoch;
     }
+    console.log(
+        `track data received (${action.source ?? 'live'}): ${Object.values(tracks.pilots)
+            .map((p) => `${p.compno}:${p.t.length}`)
+            .join(',')}`
+    );
 
     // Go through all of them and update the track version while including the data if required
     state.trackVersion = Object.entries(tracks.pilots)
         .map(([compno, track]: [Compno, PilotTrack]) => {
             if (!state.tracks[compno]) {
+                if (!action.source) {
+                    // sometimes we get a point in time update out of order on websocket,
+                    // ignore it as it causes display issues and the points should already
+                    // be included in the full message. If they aren't worst case
+                    // is one missing point which is better than view artifacts. source will
+                    // not be defined on the ordinary updates
+                    return '-';
+                }
                 state.tracks[compno] = {compno: compno} as DisplayPilotTrackData;
             }
 
@@ -351,7 +362,7 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
 
             // If it's a new version of the track then we need to ignore the old one
             if (existing && existing.trackVersion != track.trackVersion) {
-                console.log(`${compno}:replacing track as version changed ${existing.trackVersion} != ${track.trackVersion}`);
+                console.log(`${compno}:replacing track as version changed ${existing.trackVersion} != ${track.trackVersion}, ${action.source}`);
                 existing = null;
             }
 

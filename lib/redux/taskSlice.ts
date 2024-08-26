@@ -10,6 +10,8 @@ import type {Datecode, ClassName, Task} from '../types';
 import type {Task as TaskProto} from '../protobuf/onglide';
 import type {Point, FeatureCollection} from 'geojson';
 
+import {d} from '../now';
+
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
 interface TaskSliceState {
@@ -34,6 +36,7 @@ export const taskSlice = createSlice({
             try {
                 state.task = payload.taskJSON ? (JSON.parse(payload.taskJSON) as Task) : undefined;
                 state.geoJSON = payload.geoJSON ? (JSON.parse(payload.geoJSON) as (typeof state)['geoJSON']) : undefined;
+                console.log(`task updated to ${state.task.details.taskid}: nostart:${d(state.task.rules.nostartutc)} [${state.task.details.hash}]`);
             } catch (e) {
                 state.task = undefined;
                 state.geoJSON = undefined;
