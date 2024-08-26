@@ -56,20 +56,20 @@ const Menu = memo(
                 : null;
 
         // Try and extract a short form of the name, only letters and spaces stop at first number
-        const shortName =
-            (
-                comp.competition.name
-                    .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
-                    .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
-                    .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
-                    .replace(/.*Sailplane Grandprix]*/gi, 'SGP')
-                    //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
-                    ?.trim() || comp.competition.name
-            ).substring(0, 13) + '...';
+        const shortNameStart = (
+            comp.competition.name
+                .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
+                .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
+                .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
+                .replace(/.*Sailplane Grandprix]*/gi, 'SGP')
+                //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
+                ?.trim() || comp.competition.name
+        ).substring(0, 13);
+        const shortName = shortNameStart + (shortNameStart.length === 13 ? '...' : '');
 
         return (
             <>
-                <Navbar bg="light" expand="lg" fixed="top">
+                <Navbar bg="light" expand="lg" fixed="top" collapseOnSelect>
                     <Navbar.Brand className="d-lg-none">
                         <FontAwesomeIcon icon={faLink} />
                         <Nbsp />
