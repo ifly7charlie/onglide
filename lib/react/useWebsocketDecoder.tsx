@@ -1,9 +1,8 @@
-import type {ClassName, Epoch, Datecode, OtherPilotData} from '../types';
-
-import {useState} from 'react';
+import type {ClassName, Epoch, Datecode} from '../types';
 
 import {useSelector, useDispatch} from '../redux';
 import {updateTracks, updatePositions, selectTrackVersion, fetchOldTracks} from '../redux/tracksSlice';
+import {updateTask} from '../redux/taskSlice';
 import {updateScores} from '../redux/scoresSlice';
 import {updateOtherPilotsPositions} from '../redux/otherPilotsSlice';
 
@@ -42,6 +41,10 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
                     dispatch(fetchOldTracks({baseTime: decoded.tracks.baseTime as Epoch, residual: decoded.tracks, className, datecode}));
                 }
                 dispatch(updateTracks(decoded.tracks));
+            }
+
+            if (decoded?.task) {
+                dispatch(updateTask(decoded.task));
             }
 
             // If we have been sent scores then merge them in,

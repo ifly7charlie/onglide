@@ -10,7 +10,7 @@ import distance from '@turf/distance';
 import {lineString, point as turfPoint} from '@turf/helpers';
 import lineChunk from '@turf/line-chunk';
 import {coordReduce} from '@turf/meta';
-import {uniqWith as _uniqWith} from 'lodash';
+import {uniqWith as _uniqWith, reduce as _reduce, map as _map} from 'lodash';
 
 import {} from '@turf/helpers';
 
@@ -35,6 +35,52 @@ export function calculateTask(task: Task) {
         preprocessSector(leg);
         sectorGeoJSON(task.legs, leg.legno);
     }
+}
+
+export function taskGeoJSON(task: Task) {
+    let geoJSON = {
+        type: 'FeatureCollection',
+        features: task.legs.reduce(
+            (features, leg) => [
+                ...features,
+                {
+                    type: 'Feature',
+                    properties: {leg: leg.legno, trigraph: leg.ntrigraph, name: leg.name, altitude: leg.altitude, r1: leg.r1},
+                    geometry: leg.geoJSON
+                }
+            ],
+            []
+        )
+    };
+
+    let trackLineGeoJSON = {
+        type: 'FeatureCollection',
+        features: _reduce(
+            task.legs,
+            (accumulate, leg, index) => {
+                if (index + 1 < task.legs.length) {
+                    accumulate.push({
+                        type: 'Feature',
+                        properties: {leg: leg.legno + 1, length: leg.length},
+                        geometry: {
+                            type: 'LineString',
+                            coordinates: [
+                                [leg.nlng, leg.nlat],
+                                [task.legs[index + 1].nlng, task.legs[index + 1].nlat]
+                            ]
+                        }
+                    });
+                }
+                return accumulate;
+            },
+            []
+        )
+    };
+
+    const taskPath = lineString(_map(task.legs, (leg) => [leg.nlng, leg.nlat]));
+    const Dm = task.rules.dm && !task.rules.aat ? {Dm: along(taskPath, task.rules.dm)} : {};
+
+    return {tp: geoJSON, track: trackLineGeoJSON, ...Dm};
 }
 
 // Between LEGS, less finish/start rings!
@@ -88,7 +134,7 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
     //    var symmetric = 0;
     var np = 9999;
     var pp = 9999;
-    let geoJSONtype = '';
+    let geoJSONtype: 'Polygon' | undefined; //| 'LineString' | undefined;
 
     const tp = task[tpno];
     const ltlg = new LatLong(tp.nlat, tp.nlng);
@@ -162,13 +208,13 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
     const to = ((_2pi + (center + a1rad)) % _2pi) as Radian;
 
     switch (turnpoint.type) {
-        case 'line':
+        /*        case 'line':
             var dltlg = ltlg.destPointRad(from, turnpoint.r1);
             polypoints = [].concat(polypoints, [dltlg.dlong(), dltlg.dlat()]);
             dltlg = ltlg.destPointRad(to, turnpoint.r1);
             polypoints = [].concat(polypoints, [dltlg.dlong(), dltlg.dlat()]);
             geoJSONtype = 'LineString';
-            break;
+            break;*/
 
         case 'sector':
             if (turnpoint.a1 != 180 && turnpoint.r2 == 0) {
@@ -234,7 +280,7 @@ export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
     }
     turnpoint.lineString = lineString(polypoints);
 
-    turnpoint.point = turfPoint([tp.nlng, tp.nlat]);
+    turnpoint.pointGeoJSON = turfPoint([tp.nlng, tp.nlat]);
     return turnpoint.geoJSON;
 }
 
@@ -301,7 +347,7 @@ export function checkIsInTP(turnpoint: TaskLeg, p: EnrichedPosition, nearestPoin
 
         // The are not in the sector and we have been asked for position
         if (nearestPoint) {
-            const r = along(lineString([p.geoJSON, turnpoint.point]), distanceRemaining);
+            const r = along(lineString([[p.lng, p.lat], turnpoint.point]), distanceRemaining);
             nearestPoint.geometry = r.geometry;
             // set dist as it is set by distanceToTPPolygon
             nearestPoint.properties = {...r.properties, t: p.t, p: p, dist: distanceRemaining};

@@ -105,6 +105,30 @@ const _selectPilotVario = createSelector(
     }
 );
 
+const _selectPilotPosition = createSelector(
+    [
+        //
+        (_state: TracksSliceState, compno: Compno, _t: Epoch | undefined) => compno,
+        (_state: TracksSliceState, _compno: Compno, t: Epoch | undefined) => t,
+        (state: TracksSliceState, compno: Compno, _t: Epoch | undefined) => state.tracks[compno]
+    ],
+    (_compno: Compno, t: Epoch | undefined, track) => {
+        if (!track?.deck) {
+            return null;
+        }
+        const posIndex = findDisplayIndex(track.deck, t);
+        return posIndex >= 0 ? {t: track.deck.t[posIndex], lng: track.deck.positions[posIndex * 3], lat: track.deck.positions[posIndex * 3 + 1]} : null;
+    },
+    {
+        memoizeOptions: {
+            resultEqualityCheck: (a, b) => a?.t === b?.t
+        },
+        argsMemoizeOptions: {
+            resultEqualityCheck: (prev, next) => prev?.t === next?.t
+        }
+    }
+);
+
 function findDisplayIndex(deck: DeckData, t: Epoch | undefined) {
     if (!t || deck.t[deck.posIndex - 1] <= t) {
         return deck.posIndex - 1;
@@ -248,6 +272,7 @@ export const tracksSlice = createSlice({
     selectors: {
         // Specific Pilot
         selectPilotVario: _selectPilotVario,
+        selectPilotPosition: _selectPilotPosition,
 
         // Everybody
         selectAllVarios: _selectAllVarios, // memoized
@@ -263,7 +288,8 @@ export const tracksSlice = createSlice({
 
 export default tracksSlice.reducer;
 export const {updateTracks, updatePositions} = tracksSlice.actions;
-export const {selectPilotVario, selectAllPositions, selectAllTracks, selectAllVarios, selectAllAGL, selectAllAverageClimb, selectTrackVersion, selectNewestBaseTime, selectLatestUpdate} = tracksSlice.selectors;
+export const {selectPilotVario, selectPilotPosition, selectAllPositions, selectAllTracks, selectAllVarios, selectAllAGL, selectAllAverageClimb, selectTrackVersion, selectNewestBaseTime, selectLatestUpdate} =
+    tracksSlice.selectors;
 
 //////////////////////////////////////////
 // Logic for updates

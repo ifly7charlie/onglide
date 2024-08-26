@@ -255,6 +255,12 @@ export class AprsController {
         };
         this.worker.postMessage?.(command);
     }
+    shutdown() {
+        const command: AprsCommandShutdown = {
+            action: AprsCommandEnum.shutdown
+        };
+        this.worker.postMessage?.(command);
+    }
 }
 
 if (!isMainThread && parentPort) {
@@ -271,6 +277,10 @@ if (!isMainThread && parentPort) {
         // If we have been asked to exit then do so
         if (task.action == AprsCommandEnum.shutdown) {
             console.log('closing worker');
+            if (db) {
+                db.close();
+                db = undefined;
+            }
             process.exit();
         }
 

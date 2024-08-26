@@ -55,14 +55,18 @@ export async function getElevationOffset(lat: number, lng: number, cb: Function 
 async function _getElevationOffset(lat, lng, cb) {
     // Checking process.env is expensive so cache this
     if (!referrer) {
-        referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
         accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+        if (!accessToken) {
+            cb(0);
+            return;
+        }
+        referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
     }
 
     // Figure out what tile it is (obvs same order as geojson)
     // see https://docs.mapbox.com/help/glossary/zoom-level/,
     // zoom 15 gives 1.8m per pixel at 40 degrees which should be fine
-    let tf = tilebelt.pointToTileFraction(lng, lat, 14);
+    let tf = tilebelt.pointToTileFraction(lng, lat, 13);
     let tile = tf.map(Math.floor);
     let domain = 'https://api.mapbox.com/v4/';
     let source = `mapbox.terrain-rgb/${tile[2]}/${tile[0]}/${tile[1]}.pngraw`;

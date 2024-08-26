@@ -25,7 +25,7 @@ import {query} from '../lib/react/db';
 import escape from 'sql-template-strings';
 import {Options} from '../lib/react/options';
 
-import {MeasureContext, useMeasure} from '../lib/react/measure';
+import {MeasureContext} from '../lib/react/measure';
 import {ClassName} from '../lib/types';
 
 import {find as _find, isEqual as _isEqual} from 'lodash';
@@ -45,8 +45,8 @@ const Menu = memo(
                               key={'navlink' + c.class}
                               eventKey={c.class}
                               onClick={() => {
-                                  Router.push('/?className=' + c.class, undefined, {shallow: true});
                                   props.setSelectedPilot(null);
+                                  Router.push('/?className=' + c.class, undefined, {shallow: true}).then(() => props.setOptions({...props.options, zoomTask: true}));
                               }}
                           >
                               {c.classname.replace(/\s+(meter|metre)/, 'm')}
@@ -62,6 +62,7 @@ const Menu = memo(
                     .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
                     .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
                     .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
+                    .replace(/.*Sailplane Grandprix]*/gi, 'SGP')
                     //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
                     ?.trim() || comp.competition.name
             ).substring(0, 13) + '...';

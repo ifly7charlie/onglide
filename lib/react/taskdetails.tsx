@@ -6,21 +6,29 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {useState} from 'react';
-import {useTask, Spinner, Error} from './loaders';
+import {useContest, Spinner, Error} from './loaders';
 
 import Collapse from 'react-bootstrap/Collapse';
 
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
+import {selectTask} from '../redux/taskSlice';
+import {useSelector} from '../redux';
+
+import type {TaskLeg} from '../types';
+
 //
 export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; fitBounds: Function}) {
-    const {data, isLoading, isError} = useTask(vc);
+    const task = useSelector((state) => selectTask(state, vc));
+    const {comp, isLoading} = useContest();
     const [open, setOpen] = useState(false);
 
-    if (isLoading) return <Spinner />;
-    if (isError) return <Error />;
+    if (isLoading || !task) {
+        return <Spinner />;
+    }
 
-    if (!data || !data.contestday) {
+    const fClass = comp.classes.find((c) => c.class == vc);
+    if (!comp || !fClass) {
         return (
             <>
                 <br style={{clear: 'both'}} />
@@ -29,32 +37,32 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; 
             </>
         );
     }
-    const fClass = data.contestday.class;
+
     let taskDescription: any = '';
-    switch (data.task.type) {
+    switch (task.details.type) {
         case 'S':
-            taskDescription = <>Speed Task: {data.task.distance}km</>;
+            taskDescription = <>Speed Task: {task.details.distance}km</>;
             break;
         case 'D':
-            taskDescription = <>Distance Handicap Task: {data.task.distance}km</>;
+            taskDescription = <>Distance Handicap Task: {task.details.distance}km</>;
             break;
         case 'E':
-            taskDescription = <>e3Glide Distance Handicap Task: {data.task.distance}km</>;
+            taskDescription = <>e3Glide Distance Handicap Task: {task.details.distance}km</>;
             break;
         case 'A':
-            if (data.task.duration.substring(1, 5) == '0:00') {
+            if (task.details.duration.substring(1, 5) == '0:00') {
                 taskDescription = <>Assigned Area Task</>;
             } else {
-                taskDescription = <>Assigned Area Task: {data.task.duration.substring(1, 5)} hours</>;
+                taskDescription = <>Assigned Area Task: {task.details.duration.substring(1, 5)} hours</>;
             }
             break;
     }
 
-    if (data.contestday.status == 'Z') {
+    if (fClass.status == 'Z') {
         taskDescription = 'Scrubbed';
     }
 
-    const classNameSentenceCased = data.classes.classname.replace(matchWords, (r) => r.toUpperCase());
+    const classNameSentenceCased = fClass.classname.replace(matchWords, (r) => r.toUpperCase());
 
     return (
         <>
@@ -75,14 +83,14 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; 
 
                 <Collapse in={open}>
                     <div id="task-collapse">
-                        <h5>{data.classes.classname}</h5>
-                        <p>{data.contestday.displaydate}</p>
-                        <Tasklegs legs={data.legs} />
+                        <h5>{fClass.classname}</h5>
+                        <p>{task.details.calendardate}</p>
+                        <Tasklegs legs={task.legs} />
 
-                        {data.contestday.notes?.length > 0 && (
+                        {task.details.info && (
                             <>
                                 <hr />
-                                <div>{data.contestday.notes}</div>
+                                <div>{task.details.info}</div>
                             </>
                         )}
                     </div>
@@ -94,7 +102,7 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; 
 });
 
 // Internal: details on the leg
-function Tasklegs(props) {
+function Tasklegs(props: {legs: TaskLeg[]}) {
     return (
         <table className="table table-condensed" style={{marginBottom: '0px'}}>
             <thead>
@@ -111,7 +119,7 @@ function Tasklegs(props) {
                         <td>
                             {leg.legno}:{leg.ntrigraph}
                         </td>
-                        <td>{leg.nname}</td>
+                        <td>{leg.name}</td>
                         <td>{leg.legno !== 0 ? leg.bearing + '° ' : ''}</td>
                         <td>{leg.legno !== 0 ? Math.round(leg.length * 10) / 10 + ' km' : ''}</td>
                         <td>{leg.r1 !== 0 ? Math.round(leg.r1 * 10) / 10 + ' km' : ''}</td>

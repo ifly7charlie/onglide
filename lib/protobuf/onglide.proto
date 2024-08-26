@@ -8,6 +8,7 @@ message OnglideWebSocketMessage {
 	optional ClassPositions positions = 6;
     optional KeepAlive ka = 4;
     optional uint32 t = 5;
+    optional Task task = 8;
 }
 
 message Identifiers {
@@ -17,7 +18,19 @@ message Identifiers {
 	optional uint32 earliestScore = 4;
 	optional uint32 latestScore = 5;
 	optional string scoreId = 6;
-}		
+}
+
+message Task {
+	optional string geoJSON = 1;
+	optional string taskJSON = 2;
+}
+/*
+message TaskGeoJson {
+	string Dm = 1;
+	string tp = 2;
+	string track = 3;
+	}*/
+
 
 message PilotTracks {
     map<string, PilotTrack> pilots = 1;
@@ -175,8 +188,10 @@ message PilotScore {
     repeated float maxDistancePoints = 61;
 
     // For DH we have a specific task for the pilot
-    optional string taskGeoJSON = 53;
-	optional string scoreId = 55;
+	//    optional string taskGeoJSON = 53;
+
+	// For rescoring
+    optional string scoreId = 55;
 }
 
 //

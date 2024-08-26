@@ -13,7 +13,7 @@ import type {Identifiers} from '../protobuf/onglide';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-interface TracksSliceState {
+interface NowSliceState {
     className: ClassName;
     datecode: Datecode;
     earliestScore: Epoch;
@@ -24,7 +24,7 @@ interface TracksSliceState {
 }
 
 // Define the initial state using that type
-const initialState: TracksSliceState = {
+const initialState: NowSliceState = {
     className: 'unknown' as ClassName,
     datecode: '' as Datecode,
     now: 0 as Epoch,

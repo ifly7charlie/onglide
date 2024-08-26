@@ -313,12 +313,12 @@ function mapScoresToDisplayScores(p: PilotScore): PilotScoreDisplay {
             ? {
                   maxGeoJSON: assembleLabeledLine(p.maxDistancePoints)
               }
-            : {}),
-        ...(p.taskGeoJSON
+            : {})
+        /*        ...(p.taskGeoJSON
             ? {
                   taskGeoJSON: JSON.parse(p.taskGeoJSON)
               }
-            : {})
+            : {}) */
     };
 }
 

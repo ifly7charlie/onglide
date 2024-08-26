@@ -7,14 +7,14 @@ import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleCont
 
 import {deckTooltip} from './decktooltip';
 
-import {useTaskGeoJSON} from './loaders';
-
-import type {Epoch, ClassName, Compno, OtherPilotData, PilotScore} from '../types';
+import type {Epoch, ClassName, Compno, Options, PilotScore} from '../types';
+import {TaskUp} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
+import {selectTaskGeoJSON, selectTask} from '../redux/taskSlice';
 import {selectPilotScore} from '../redux/scoresSlice';
-import {selectPilotVario, selectLatestUpdate} from '../redux/tracksSlice';
+import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {ErrorBoundary} from 'react-error-boundary';
 
@@ -39,8 +39,7 @@ import {MeasureLayers, useMeasure} from './measure';
 
 import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
-
-import {SortKey} from '../types';
+import buffer from '@turf/buffer';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
@@ -50,7 +49,7 @@ import {pilotsTrackLayer} from './pilotstracklayer';
 //import {turnpointLayer} from './turnpointlayer';
 
 export default function MApp(props: {
-    options: any;
+    options: Options;
     setOptions: Function; //
     follow: boolean;
     setFollow: Function;
@@ -73,7 +72,7 @@ export default function MApp(props: {
     // Score details for selected pilot
     const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
     const latestUpdate = useSelector(selectLatestUpdate);
-    const selectedVario = useSelector((state) => (selectedCompno ? selectPilotVario(state, selectedCompno, props.replayTime) : undefined));
+    const selectedPosition = useSelector((state) => (selectedCompno ? selectPilotPosition(state, selectedCompno, props.replayTime) : undefined));
 
     const isMoving = mapRef?.current?.isMoving() ?? true;
 
@@ -83,7 +82,8 @@ export default function MApp(props: {
     const mapLight = !mapStreet;
 
     // Track and Task Overlays
-    const {taskGeoJSON, isTLoading, isTError}: {taskGeoJSON: any; isTError: boolean; isTLoading: boolean} = useTaskGeoJSON(vc);
+    const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc));
+    const task = useSelector((state) => selectTask(state, vc));
 
     const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
 
@@ -92,18 +92,22 @@ export default function MApp(props: {
     const radarOverlay = RadarOverlay({options, setOptions, tz});
 
     // What task are we using on display
-    const taskGeoJSONtp = selectedScore?.taskGeoJSON || taskGeoJSON?.tp;
+    const taskGeoJSONtp = taskGeoJSON?.tp;
 
     // Get coordinates on the screen for center point of view
     const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
 
-    const npol = !taskGeoJSON?.track?.features?.[0]
-        ? null
-        : !selectedScore?.utcStart || !(selectedScore.minDistancePoints.length > 6) // still start
-        ? taskGeoJSON.track.features[0]?.geometry?.coordinates?.[0]
-        : selectedScore.utcFinish // if we are done then take last one
-        ? taskGeoJSON.track.features[taskGeoJSON.track.features.length - 1]?.geometry?.coordinates?.[1]
-        : selectedScore.minDistancePoints.slice(4, 6); // mindistance is from us so this is the next point
+    const legAdvance = task && task.rules.aat && selectedScore?.inSector && selectedScore.legs[selectedScore.currentLeg + 1]?.actual.distance > 10;
+    const effectiveLeg = selectedScore?.currentLeg + (legAdvance ? 1 : 0);
+
+    const nextPoint =
+        !task || !selectedScore
+            ? null //
+            : !selectedScore?.utcStart
+            ? task.legs[0].point // if we are before start
+            : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
+            ? task.legs.at(-1).point // or at finish or only finish left
+            : task.legs.at(effectiveLeg).point; // mindistance is from us so this is the next point
 
     // =========== FOLLOW EFFECT ===============
     //
@@ -116,19 +120,16 @@ export default function MApp(props: {
                 !map?.isMoving() &&
                 props.options.follow &&
                 follow &&
-                selectedVario?.lat && //
-                taskGeoJSON?.track?.features &&
-                !selectedScore?.inSector && // don't jump around in sector
-                selectedScore?.legs[selectedScore.currentLeg]?.actual?.distanceRemaining > 3 // or if we are close
+                selectedPosition && //
+                taskGeoJSON?.track?.features
             ) {
                 // If we are in track up mode then we will point it towards the next turnpoint
-                const lat = Math.round(selectedVario.lat * 100000) / 100000;
-                const lng = Math.round(selectedVario.lng * 100000) / 100000;
+                const lat = Math.round(selectedPosition.lat * 100000) / 100000;
+                const lng = Math.round(selectedPosition.lng * 100000) / 100000;
 
                 // Next point - if we haven't started or we have finished use the startline
 
                 // If we are user selected or we don't have a valid next point don't change anything
-                const fbearing = props.options.taskUp == 2 || !npol?.length ? props.viewport.bearing : props.options.taskUp == 1 ? bearing([lng, lat], npol, {final: false}) : 0;
 
                 const newScreenPoint = mapRef?.current?.getMap().project([lng, lat]);
 
@@ -137,24 +138,42 @@ export default function MApp(props: {
                     return Math.abs(a - b) / s > (map2d ? 0.25 : 0.1); //magic numbers are % of screen in either direction
                 };
 
-                const screenSizeX = mapRef?.current?.getMap()?._containerWidth ?? 1300,
-                    screenSizeY = mapRef?.current?.getMap()?._containerHeight ?? 500;
+                const screenSizeX = mapRef?.current?.getMap()?._containerWidth ?? 1300;
+                const screenSizeY = mapRef?.current?.getMap()?._containerHeight ?? 500;
+
+                const getBearing = (): number => {
+                    if (props.options.taskUp == TaskUp.north) {
+                        return 0;
+                    }
+                    if (props.options.taskUp == TaskUp.track) {
+                        if (
+                            !selectedScore?.inSector && // don't jump around in sector
+                            selectedScore?.legs[selectedScore.currentLeg]?.actual?.distanceRemaining > 3 && // or if we are close &&
+                            nextPoint?.length
+                        ) {
+                            return bearing([lng, lat], nextPoint, {final: false});
+                        }
+                    } // fall through to no change
+                    return props.viewport.bearing;
+                };
+
+                const fbearing = Math.round(getBearing());
 
                 if (
                     pointCheck(newScreenPoint.x, screenPoint.x, screenSizeX) ||
                     pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
-                    Math.round(fbearing) >> 3 != Math.round(props.viewport.bearing) >> 3
+                    fbearing >> 3 != Math.round(props.viewport.bearing) >> 3
                 ) {
                     mapRef?.current?.flyTo({
                         center: [lng, lat],
-                        bearing: Math.round(fbearing)
+                        bearing: fbearing
                     });
                 }
             }
         },
         follow && props.options.follow //
-            ? [selectedCompno, (props.replayTime ?? latestUpdate) >> 2, npol, props.options, isMoving, follow]
-            : [null, null, null, null, null]
+            ? [selectedCompno, selectedPosition, nextPoint, props.options, isMoving, follow]
+            : [null, null, null, null, null, null]
     );
 
     // ====== PITCH RESTRICTION FOR 2D/3D =======
@@ -180,10 +199,9 @@ export default function MApp(props: {
     // ======= ZOOM TO TASK EFFECT =========
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
-        if (options.zoomTask && taskGeoJSONtp && viewport) {
-            console.log('zoom to task', viewport);
+        if (options.zoomTask && taskGeoJSONtp) {
             try {
-                const [minLng, minLat, maxLng, maxLat] = bbox(taskGeoJSONtp);
+                const [minLng, minLat, maxLng, maxLat] = bbox(buffer(taskGeoJSONtp, 15));
                 setOptions({...options, zoomTask: false});
                 mapRef?.current?.fitBounds(
                     [
@@ -199,7 +217,7 @@ export default function MApp(props: {
                 console.error(e);
             }
         }
-    }, [options.zoomTask, taskGeoJSONtp, viewport, mapRef.current]);
+    }, [options.zoomTask, taskGeoJSONtp, vc, mapRef.current]);
 
     // ====== LOCK NORTH UP ===========
     // If we are north up then reset north on bearing change
@@ -217,7 +235,7 @@ export default function MApp(props: {
     }, [selectedCompno, selectedScore?.currentLeg, selectedScore?.utcFinish, mapLight, map2d]);
 
     // Do we have a loaded set of details?
-    const valid = !(isTLoading || isTError) && taskGeoJSON?.tp && taskGeoJSON?.track;
+    const valid = taskGeoJSON?.tp && taskGeoJSON?.track;
 
     const skyLayer: any = {
         id: 'sky',
@@ -280,6 +298,9 @@ export default function MApp(props: {
         } catch (e) {}
     }, [mapStreet, mapRef?.current]);
     useEffect(fixupMap, [mapStreet, mapRef?.current]);
+
+    // Record if this is a new load or a reload
+    useEffect(() => props.setOptions({...props.options, loadId: (props.options.loadId ?? 0) + 1}), []);
 
     // Cancel any follow
     const onDragStart = useCallback(() => {

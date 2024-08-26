@@ -39,6 +39,7 @@
         "@reduxjs/toolkit": "^2.2.5",
         "@turf/along": "^6.5.0",
         "@turf/boolean-point-in-polygon": ">=6.0.1",
+        "@turf/buffer": "^7.1.0",
         "@turf/distance": ">=6.0.1",
         "@turf/line-chunk": "^6.5.0",
         "@turf/line-intersect": "^6.5.0",

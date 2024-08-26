@@ -27,28 +27,6 @@ export function useContest() {
     };
 }
 
-//
-// Get the task details
-export function useTask(vc: ClassName) {
-    const {data, error}: {data?: any; error?: boolean} = useSWR(() => (vc ? '/api/' + vc + '/task' : null), fetcher, {refreshInterval: 5 * 60 * 1000});
-    return {
-        data: data,
-        isLoading: !error && !data,
-        isError: !!error
-    };
-}
-
-//
-// Get the GeoJSON representing the task, this includes sectors, tracklines and markers
-export function useTaskGeoJSON(vc: ClassName) {
-    const {data, error}: {data?: any; error?: boolean} = useSWR(() => '/api/' + vc + '/geoTask', fetcher, {refreshInterval: 5 * 60 * 1000});
-    return {
-        taskGeoJSON: data,
-        isTLoading: !error && !data,
-        isTError: !!error
-    };
-}
-
 export function usePilots(vc: ClassName): {pilots: API_ClassName_Pilots; isPLoading: boolean; isPError: boolean} {
     const {data, error}: {data?: any; error?: boolean} = useSWR(() => '/api/' + vc + '/pilots', fetcher, {refreshInterval: 10 * 60 * 1000});
     return {

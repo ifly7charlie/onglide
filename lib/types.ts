@@ -46,7 +46,7 @@ export interface TimeStampType {
     t: Epoch;
 }
 
-import type {Point, Feature} from 'geojson';
+import type {Point, Feature, Polygon, LineString} from 'geojson';
 
 // Where is the airfield
 export interface AirfieldLocation {
@@ -142,9 +142,10 @@ export interface TaskLeg extends TaskLegsTableRow {
     direction: 'symmetrical' | 'np' | 'pp' | 'fixed';
 
     maxR?: DistanceKM;
-    geoJSON?: any; // geoJSON for the sector
+    geoJSON?: Polygon; // geoJSON for the sector
     lineString?: any;
-    point?: any; // coordiantes of center geoJSON style
+    point?: [number, number]; // coordiantes of center geoJSON style
+    pointGeoJSON?: Feature<Point>;
     altitude?: AltitudeAMSL; // altitude of the point
     coordinates?: any; // array of geoJSON ordered points eg [ [lng,lat], [lng,lat] ]
     quickSector?: boolean; // are we simple or not?
@@ -160,9 +161,10 @@ export interface Task {
         dh?: boolean; // distance handicap
 
         handicapped?: boolean;
+        dm?: number;
     };
 
-    details: any;
+    details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance?: DistanceKM} & ClassesTableRow & ContestDayTableRow;
 
     legs: TaskLeg[];
 }
@@ -412,6 +414,12 @@ export interface ClassesTableRow {
     Dm: number | null;
 }
 
+export interface ContestDayTableRow {
+    calendardate: string;
+    info: string;
+    status: string;
+}
+
 export enum Units {
     metric = 0,
     british = 1
@@ -451,4 +459,6 @@ export interface Options {
 
     options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
     options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
+
+    loadId?: number;
 }

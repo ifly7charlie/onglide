@@ -9,7 +9,7 @@ import {initialiseInsights, trackMetric, trackAggregatedMetric} from '../lib/ins
 import http from 'node:http';
 import https from 'node:https';
 
-import {readFileSync, existsSync} from 'fs';
+import {readFileSync, existsSync, createWriteStream} from 'fs';
 
 import SunCalc from 'suncalc';
 
@@ -33,13 +33,13 @@ import mysql from 'serverless-mysql';
 import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
-import {calculateTask} from '../lib/flightprocessing/taskhelper';
+import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
 
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow} from '../lib/types';
+import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
 console.log('dev mode', dev);
 
@@ -79,7 +79,9 @@ import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocess
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
-process.setMaxListeners(15);
+let userLogStream = createWriteStream((process.env.DB_PATH ?? './db/') + 'user-log.txt', {flags: 'a'});
+
+process.setMaxListeners(35);
 
 // Where is the comp based
 let location: AirfieldLocation;
@@ -90,12 +92,15 @@ interface Statistics {
     outOfOrderPackets: number;
     insertedPackets: number;
     totalPackets: number;
+    bytesSent: number;
 
     positionsSent: number;
     positionsSentCycles: number;
-    listenerCycles: number;
-    interactingListeners: number;
-    activeListeners: number;
+    listenerCycles: number; // trackpoint sent cycles
+    statsCycles: number; // statistics reported cycles
+    visibleListeners: number; // how many have page visible in browser
+    interactingListeners: number; // how many have update options
+    activeListeners: number; // how many have received points
     peakListeners: number;
 
     totalViewingTime: number;
@@ -118,6 +123,7 @@ interface Channel {
     broadcastChannel?: BroadcastChannel;
     scoring?: ScoringController;
     task?: any; // what task are we scoring - we use this to see if anything has changed
+    geoTask?: any;
     gliderHash?: string;
 
     lastKeepAliveMsg?: any;
@@ -138,6 +144,7 @@ interface Channel {
     scoreIdUpdateRequired: boolean;
     scoresUpdatedAt: Epoch;
     scoreHistory: Map<string, Map<Compno, PilotScore[]>>;
+    scoreDb: AbstractSublevel<ClassicLevel<Compno, string>, string | Buffer | Uint8Array, string, string>;
 
     // For the web buffer
     webPathBaseTime: Epoch;
@@ -206,8 +213,11 @@ let ddb: Record<string, DDBEntry> = {};
 interface OgnWebSocket extends WebSocket {
     ognChannel: ChannelName;
     ognPeer: string;
+    isValid: boolean;
     isAlive: boolean;
+    isClosed?: boolean;
     isInteracting: boolean;
+    isVisible: boolean;
     connectedAt: Epoch;
     sendBinary: (data: Uint8Array) => void;
 }
@@ -322,7 +332,7 @@ async function main() {
 
     if ('PM2_HOME' in process.env || existsSync('.docker')) {
         console.log('PM2/DOCKER: waiting for scoring to be completed...');
-        const checkScoringNotReady = () => {
+        /*        const checkScoringNotReady = () => {
             const notReady = Object.values(channels).filter((c) => !c.liveScoreId);
             if (notReady.length) {
                 console.log(`still need ${notReady.map((c) => c.className).join(',')} to finish scoring`);
@@ -331,7 +341,7 @@ async function main() {
         };
         while (checkScoringNotReady()) {
             await setTimeoutPromise(1000);
-        }
+        } */
         console.log('PM2/DOCKER: starting http(s) listener');
     }
 
@@ -385,11 +395,10 @@ async function main() {
             const channel = channels[channelName];
 
             channel.statistics.activeListeners += channel.clients.length;
-            channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.listenerCycles++;
 
             if (channel.clients.length) {
-                if (!channel.toSend.length) {
+                if (!channel.toSend.length && now - channel.mostRecentPosition < 15) {
                     continue;
                 }
                 channel.mostRecentPosition = now;
@@ -401,18 +410,13 @@ async function main() {
                 //
                 // Metrics are helpful
                 channel.statistics.positionsSent += channel.toSend.length;
-                channel.statistics.bytesSent += channel.toSend.length * msg.byteLength;
                 channel.statistics.positionSentCycles++;
                 // We don't want to send it twice so it can go
                 channel.toSend = [];
                 channel.lastSentPositions = now;
 
                 // Send to each client and if they don't respond they will be cleaned up next time around
-                channel.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(msg, {binary: true});
-                    }
-                });
+                channel.sendBinary(msg);
                 //              }
             } else {
                 channel.toSend = [];
@@ -445,34 +449,60 @@ async function main() {
         for (const channelName in channels) {
             const channel = channels[channelName];
 
+            channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
+            channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
+
+            // Remove invalid
+            const notValid = _remove(channel.clients, (client: OgnWebSocket) => {
+                return client.isValid === false;
+            });
+
+            const closed = _remove(channel.clients, (client: OgnWebSocket) => {
+                return client.isClosed === true;
+            });
+
             // Remove any that are still marked as not alive
-            const toterminate = _remove(channel.clients, (client: any) => {
+            const notAlive = _remove(channel.clients, (client: OgnWebSocket) => {
                 return client.isAlive === false;
             });
 
-            toterminate.forEach((client) => {
-                console.log(`terminating client ${client.ognChannel} peer ${client.ognPeer}`);
-                channel.statistics.totalViewingTime += now - client.connectedAt;
-                client.terminate();
-            });
+            if (notAlive.length || notValid.length) {
+                let viewTime = 0;
+                [...notAlive, ...closed].forEach((client: OgnWebSocket) => {
+                    channel.statistics.totalViewingTime += now - client.connectedAt;
+                    viewTime += now - client.connectedAt;
+                    client.terminate();
+                });
+                notValid.forEach((client: OgnWebSocket) => {
+                    client.terminate();
+                });
+                console.log(`${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`);
+            }
 
+            // Send keep alive and reset the stats/status
             await sendKeepalive(channel);
         }
 
         //
         // Aggregate statistics
         for (const channelName in channels) {
-            const channel = channels[channelName];
+            const channel = channels[channelName as ChannelName];
 
+            channel.statistics.statsCycles++;
             channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, channel.statistics.activeListeners / channel.statistics.listenerCycles);
+
+            // We need to accumulate how much time we have had
+            const viewTime = channel.clients.reduce((total, client) => total + (now - client.connectedAt), 0);
 
             console.log(
                 `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
             );
             console.log(
-                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (${(channel.statistics.interactingListeners / channel.statistics.listenerCycles).toFixed(
-                    1
-                )}, ${Math.round(channel.statistics.totalViewingTime / 60)}m total viewing time, peak avg ${channel.statistics.peakListeners.toFixed(0)}`
+                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, interacting: ${(
+                    channel.statistics.interactingListeners / channel.statistics.statsCycles
+                ).toFixed(1)}, visible: ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round(
+                    (channel.statistics.totalViewingTime + viewTime) / 60
+                )}m total viewing time, peak avg ${channel.statistics.peakListeners.toFixed(0)}`
             );
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
@@ -511,6 +541,23 @@ async function main() {
     }, 60 * 1000);
 }
 
+process.on('SIGINT', handleExit);
+process.on('SIGHUP', handleExit);
+process.on('SIGQUIT', handleExit);
+process.on('SIGTERM', handleExit);
+
+//
+// Tidily exit if the user requests it
+// we need to stop receiving,
+// output the current data, close any databases,
+// and then kill of any timers
+async function handleExit(signal: string) {
+    console.log(`received signal: ${signal}`);
+    scoreDb?.close();
+    aprsController?.shutdown();
+    userLogStream.end();
+    setTimeout(() => process.exit(), 1000);
+}
 main().then(() => console.log('Started'));
 
 function getSunset(datecode: Datecode) {
@@ -536,12 +583,20 @@ async function getDCode(): Promise<Datecode> {
 }
 
 import {ClassicLevel} from 'classic-level';
-class DB extends ClassicLevel<Compno, PilotScore> {}
+import {AbstractSublevel} from 'abstract-level';
+let scoreDb: ClassicLevel<Compno, string> | undefined = undefined;
 
 //
 // Fetch the trackers from the database
 async function updateClasses(internalName: string, datecode: Datecode) {
     console.log(`updateClasses(${internalName}, ${datecode})`);
+
+    if (!scoreDb) {
+        const path = `${process.env.DB_PATH ?? './db/'}/scores-${internalName}.db`;
+        console.log(`opening scoreDB ${path}`);
+        scoreDb = new ClassicLevel(path);
+        await scoreDb.open().catch((e) => console.log(e));
+    }
 
     // Fetch the trackers from the database and the channel they are supposed to be in
     const classes = await db.query<{class: ClassName}[]>('SELECT class FROM compstatus');
@@ -574,10 +629,13 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     positionsSent: 0,
                     positionsSentCycles: 0,
                     listenerCycles: 0,
+                    statsCycles: 0,
                     activeListeners: 0,
                     interactingListeners: 0,
+                    visibleListeners: 0,
                     peakListeners: 0,
-                    totalViewingTime: 0
+                    totalViewingTime: 0,
+                    bytesSent: 0
                 },
                 webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
@@ -591,6 +649,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 scoresUpdatedAt: 0 as Epoch,
                 earliestScore: Infinity as Epoch,
                 earliestStart: Infinity as Epoch,
+                scoreDb: scoreDb?.sublevel(cname),
                 latestScore: 0 as Epoch,
                 sendBinary(data: Uint8Array) {
                     this.clients.forEach((c: OgnWebSocket) => c.sendBinary(data));
@@ -599,13 +658,8 @@ async function updateClasses(internalName: string, datecode: Datecode) {
             channel.scoreHistory.set(scoreId, new Map<Compno, PilotScore[]>());
 
             // Read any old history
-            {
-                const path = `${process.env.DB_PATH ?? './db/'}/scores-${datecode}.db`;
-                const db = new DB(path);
-                await db.open().catch((e: any) => {
-                    console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
-                });
-                for await (const [compno, scoreJSON] of db.sublevel(c.class).iterator()) {
+            if (channel.scoreDb) {
+                for await (const [compno, scoreJSON] of channel.scoreDb?.iterator() ?? []) {
                     const score = JSON.parse(scoreJSON);
                     if (!channel.liveScoreId) {
                         channel.liveScoreId = score.scoreId;
@@ -613,9 +667,9 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     score.scoreId = channel.liveScoreId;
                     channel.allScores[compno] = score;
                 }
-                console.log(`${c.class}: loaded ${Object.keys(channel.allScores).length} scores on id ${channel.liveScoreId}`);
-
-                await db.close();
+                console.log(`${c.class}: ${Object.keys(channel.allScores).length} scores loaded on id ${channel.liveScoreId}`);
+            } else {
+                console.log(`${c.class}: no score db`);
             }
         } else {
             // We move it to the new list
@@ -662,19 +716,25 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     // replace (do we need to close the old ones?)
     channels = newchannels;
     console.log(`Updated Channels: ${_map(channels, (c) => channelName(c.className, c.datecode)).join(',')}`);
+
+    if (!Object.keys(newchannels).length && scoreDb) {
+        console.log('closing scoredb, no channels');
+        await scoreDb.close();
+        scoreDb = undefined;
+    }
 }
 
 async function updateTasks(): Promise<void> {
     // Get the details for the task
     const getTask = async (className: ClassName, datecode: Datecode) => {
-        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch} & ClassesTableRow)[]>(escape`
-         SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped,
+        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number} & ClassesTableRow & ContestDayTableRow)[]>(escape`
+          SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped, c.Dm, cd.calendardate, cd.status, cd.info,
                CASE WHEN nostart ='00:00:00' THEN 0
                     ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
                END nostartutc
-          FROM tasks, classes c
+FROM tasks, classes c, contestday cd
           WHERE tasks.datecode= ${datecode}
-             AND tasks.class = c.class 
+             AND tasks.class = c.class AND cd.class = c.class AND cd.datecode = ${datecode}
              AND tasks.class= ${className} and tasks.flown='Y'
     `)) || {})[0];
 
@@ -697,12 +757,13 @@ async function updateTasks(): Promise<void> {
             return null;
         }
 
-        let task = {
+        let task: Task = {
             rules: {
                 grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
                 nostartutc: taskdetails.nostartutc,
                 aat: taskdetails.type == 'A',
                 dh: taskdetails.type == 'D',
+                dm: taskdetails.Dm ?? undefined,
                 handicapped: taskdetails.handicapped == 'Y'
             },
             details: taskdetails,
@@ -731,19 +792,39 @@ async function updateTasks(): Promise<void> {
                 channel.scoreHistory.clear();
                 channel.allScores = {};
                 channel.task = undefined;
+                channel.geoTask = undefined;
+                sendTask(channel, channel);
             }
 
             // We have a new task then we can start a new scoring iteration on it without
             // clearing the old one.
             if (updatedTask) {
                 channel.task = updatedTask;
+                channel.geoTask = taskGeoJSON(updatedTask);
                 console.log(`${channel.className}: ** rescore ** ${channel.scoreId} => ${channel.proposedScoreId} (task changed)`);
                 channel.scoreHistory.set(channel.proposedScoreId, new Map());
                 channel.scoring?.setTask(channel.task, channel.proposedScoreId);
                 channel.scoreIdUpdateRequired = true;
+                sendTask(channel, channel);
             }
         }
     }
+}
+
+function sendTask(sendTo: Channel | OgnWebSocket, channel: Channel) {
+    sendTo.sendBinary(
+        OnglideWebSocketMessage.encode({
+            //
+            task: {
+                ...(channel.task
+                    ? {
+                          geoJSON: JSON.stringify(channel.geoTask), //
+                          taskJSON: JSON.stringify(channel.task)
+                      }
+                    : {})
+            }
+        }).finish()
+    );
 }
 
 interface CTrackerRow {
@@ -793,10 +874,10 @@ async function updateTrackers(datecode: Datecode) {
     // Now unsubsribe from each of them
     const keyedRemoved = keyBy(removedGliders, makeClassname_Compno);
     removedGliders.forEach((g) => {
+        console.log(`${g.className}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
         if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
             aprsController?.untrackGlider(g.compno, g.className, g.channelName, g.dbTrackerId);
         }
-        console.log(`${g.className}:${g.compno} terminating scoring as no flarm ids found [channel ${g.channelName}]`);
         const channel = channels[g.channelName];
         if (channel) {
             channel.scoring?.clearGlider(g.compno);
@@ -834,9 +915,9 @@ async function updateTrackers(datecode: Datecode) {
 
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
-                        console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus} [channel ${glider.channelName}]`);
-                        channel?.scoring?.clearGlider(glider.compno);
-                        console.log(`Stopping APRS Listener for glider ${t.className}:${t.compno} => ${t.dbTrackerId}`);
+                        //                        console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus} [channel ${glider.channelName}]`);
+                        //                        channel?.scoring?.clearGlider(glider.compno);
+                        console.log(`Finishing APRS Listener for glider ${t.className}:${t.compno} => ${t.dbTrackerId}`);
                         aprsController?.finishGlider(t.compno, t.className, glider.channelName);
                     }
                     //
@@ -973,8 +1054,9 @@ async function sendCurrentState(client: OgnWebSocket) {
     // Ensure they have a full set of scores
     sendAllScores(client);
 
-    // Send them the GeoJSONs, they need to keep this up to date
     const channel = channels[client.ognChannel];
+    // Send the current task
+    sendTask(client, channel);
     client.sendBinary(await generateRecentPilotTracks(channel));
     if (channel.lastKeepAliveMsg) {
         client.sendBinary(channel.lastKeepAliveMsg);
@@ -1125,10 +1207,6 @@ async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = fa
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
 async function sendScore(channel: Channel, compno: Compno, score: PilotScore, recentStart: Epoch | undefined, scoreId: string, t: Epoch | undefined) {
-    if (compno == '3V') {
-        console.log(`${compno}: received ${score.live ? 'live' : 'replay'} score [${scoreId}] ${recentStart ? ', recently started, ' : ''}, ${d(t)}`);
-    }
-
     if (compno == '_live') {
         console.log(`${channel.className}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
         if (channel.liveScoreId != scoreId) {
@@ -1150,14 +1228,9 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 process.send('ready');
             }
             try {
-                const path = `${process.env.DB_PATH ?? './db/'}/scores-${channel.datecode}.db`;
-                const db = new ClassicLevel(path);
-                await db.open();
-                const sl = db.sublevel(channel.className);
                 for (const compno in channel.allScores) {
-                    await sl.put(compno, JSON.stringify(channel.allScores[compno]));
+                    await channel.scoreDb?.put(compno, JSON.stringify(channel.allScores[compno]));
                 }
-                await db.close();
             } catch (e) {
                 console.log(e);
             }
@@ -1188,6 +1261,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         // Score from Live packets (either end of rescore or end of current score)
         if (score.live) {
             const msg = OnglideWebSocketMessage.encode({scores: {scoreId, pilots: {[compno]: score}}}).finish();
+            channel.statistics.bytesSent += channel.clients.length * msg.byteLength;
             trackMetric(channel.className + '.scoring.bytesSent', msg.byteLength * channel.clients.length);
             channel.sendBinary(msg);
 
@@ -1195,6 +1269,9 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             // we don't differentiate between the two scoreIds but it's not a history so will
             // be fixed after a rescore. It could jump between two scores as the old scoring is terminated
             channel.allScores[compno] = score;
+            channel.scoreDb?.put(compno, JSON.stringify(score)).catch((e) => {
+                console.log(`error saving score ${compno}, ${e}`);
+            });
         }
     }
 
@@ -1235,7 +1312,7 @@ async function sendKeepalive(channel: Channel) {
     // For sending the keepalive
     channel.lastKeepAliveMsg = OnglideWebSocketMessage.encode({
         identifiers: getIdentifiers(channel),
-        t: getNow(),
+        t: now,
         ka: {
             keepalive: true,
             at: Math.floor(now),
@@ -1254,6 +1331,7 @@ async function sendKeepalive(channel: Channel) {
         }
         client.isAlive = false;
         client.isInteracting = false;
+        client.isVisible = false;
         client.ping(function () {});
     });
 }
@@ -1306,16 +1384,15 @@ async function processAprsMessage(className: string, channel: Channel, message: 
         channel.statistics.outOfOrderPackets++;
     } else {
         // If the packet isn't delayed then we should send it out over our websocket
-        if (!message.l) {
+        if (message._) {
             // Buffer the message they get batched every second
             channel.toSend.push(message);
 
             // how many gliders are we tracking for this channel
             channel.activeGliders.add(message.c as Compno);
         }
+        channel.statistics.totalPackets++;
     }
-
-    channel.statistics.totalPackets++;
 }
 
 // If we don't know the glider then we need to figure out who it is and make sure we
@@ -1408,44 +1485,64 @@ function setupWebSocketServer(server) {
     wss.on('connection', (ws: OgnWebSocket, req: IncomingMessage) => {
         if (!req.url?.length) {
             ws.isAlive = false;
+            ws.isValid = false;
+            ws.isClosed = false;
             return;
         }
 
         // Strip leading /
-        const channel = req.url.substring(1, req.url.length) as ChannelName;
+        const channelName = req.url.substring(1, req.url.length) as ChannelName;
 
-        ws.ognChannel = channel;
+        ws.ognChannel = channelName;
         ws.ognPeer = req.headers['x-forwarded-for']?.toString() ?? req.connection.remoteAddress ?? 'unknown';
         //        console.log(`connection received for ${channel} from ${ws.ognPeer} on ${address}`);
 
         ws.isAlive = true;
+        ws.isValid = true;
+        ws.isClosed = false;
         ws.isInteracting = false;
         ws.connectedAt = getNow();
-        if (channel in channels) {
-            channels[channel].clients.push(ws);
+        if (channelName in channels) {
+            channels[channelName].clients.push(ws);
         } else {
             ws.send('reload');
             ws.isAlive = false;
+            ws.isValid = false;
             return;
         }
 
         ws.on('pong', () => {
+            //            console.log('pong');
             ws.isAlive = true;
         });
         ws.on('close', () => {
             ws.isAlive = false;
-            //            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
+            ws.isClosed = true;
+            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('error', console.error);
         ws.on('message', (cx) => {
-            if (cx.toString() != 'ping') {
-                ws.isInteracting = true;
-                //                console.log(cx.toString());
+            try {
+                const msg = JSON.parse(cx.toString());
+                if ('v' in msg) {
+                    ws.isVisible = !!msg.v;
+                } else if ('compno' in msg) {
+                    ws.isInteracting = true;
+                    userLogStream.write(new Date().toISOString() + ':' + channelName + ':' + cx.toString() + '\n');
+                }
+            } catch (e) {
+                /**/
             }
-            /**/
         });
 
-        ws.sendBinary = (data: Uint8Array) => (ws.readyState == WebSocket.OPEN && ws.isAlive ? ws.send(data, {binary: true}) : undefined);
+        const channel = channels[channelName];
+        ws.sendBinary = (data: Uint8Array) => {
+            if (ws.readyState == WebSocket.OPEN && ws.isAlive && channel) {
+                channel.statistics.bytesSent += data.byteLength;
+                return ws.send(data, {binary: true});
+            }
+            return undefined;
+        };
 
         // Send vario etc for all gliders we are tracking
         sendCurrentState(ws);
