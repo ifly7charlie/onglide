@@ -39,6 +39,7 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
 
                 if (oldChecksums != newChecksums || oldChecksums == '') {
                     dispatch(fetchOldTracks({baseTime: decoded.tracks.baseTime as Epoch, residual: decoded.tracks, className, datecode}));
+                    return;
                 }
                 dispatch(updateTracks(decoded.tracks));
             }
