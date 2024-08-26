@@ -1076,7 +1076,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
             (result, glider, compno) => {
                 if (glider.className == channel.className) {
                     const p = glider.deck;
-                    if (p) {
+                    if (p && p.posIndex > 2) {
                         const start = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 1), 0);
                         const end = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), now), p.posIndex - 1), 0);
                         const length = end - start;
@@ -1093,6 +1093,8 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                             };
                         }
                         glider.webPathEndPosition = end;
+                    } else {
+                        glider.webPathEndPosition = 0;
                     }
                 }
                 return result;
