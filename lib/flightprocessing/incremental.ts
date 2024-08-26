@@ -64,6 +64,9 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
             return false;
         }
         initialiseDeck(glider.compno, glider, 0);
+        if (!glider.deck) {
+            return false;
+        }
     } else {
         // If not first point then make sure we are in order!
         lastTime = glider.deck.t[glider.deck.posIndex - 1];
@@ -110,7 +113,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     } else {
         const previousSegmentStart = deck.indices[deck.segmentIndex - 1];
         // If the gap is too long then we need to start the next segment as well
-        if (point.t - lastTime > gapLength) {
+        if (point.t - lastTime! > gapLength) {
             // If we have only one point in the previous segment then we should duplicate it
             if (previousSegmentStart == deck.posIndex - 1) {
                 // add it to the previous segment so there are two points in it, it's not a line
@@ -125,7 +128,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
                 pushPoint([point.lng, point.lat, point.a], point.g, point.t);
                 deck.segmentIndex++;
             }
-            deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
+            deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime!));
         }
     }
 
