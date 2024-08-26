@@ -1076,9 +1076,9 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
             (result, glider, compno) => {
                 if (glider.className == channel.className) {
                     const p = glider.deck;
-                    if (p && p.posIndex > 2) {
-                        const start = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 1), 0);
-                        const end = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), now), p.posIndex - 1), 0);
+                    if (p) {
+                        const start = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
+                        const end = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
                         const length = end - start;
                         console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                         if (length) {
