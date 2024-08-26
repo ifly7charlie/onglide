@@ -444,6 +444,7 @@ function startAprsListener(config: AprsListenerConfig) {
             statistics.aprsDelay =
             statistics.aprsDelayForDelayed =
             statistics.delayedPackets = //
+            statistics.normalPackets =
             statistics.knownReceived =
             statistics.invalidPacket =
             statistics.encryptedPacket =
