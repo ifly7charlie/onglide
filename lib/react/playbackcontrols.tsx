@@ -137,7 +137,7 @@ const PlaybackControls = ({
     }
 
     return (
-        <SliderContainer>
+        <SliderContainer class="d-lg-inline d-none">
             <Widget>
                 <BoxBefore>
                     <TinyText>{formatTimes(earliestScore)}</TinyText>
