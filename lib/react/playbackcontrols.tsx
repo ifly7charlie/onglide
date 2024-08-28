@@ -7,7 +7,7 @@ import Slider from '@mui/material/Slider';
 import {useSelector, useDispatch} from '../redux';
 import {fetchOldScores} from '../redux/scoresSlice';
 import {selectLatestUpdate} from '../redux/tracksSlice';
-import {selectOnline} from '../redux/nowSlice';
+import {selectOnline, selectClassName, selectDatecode, selectScoreId} from '../redux/nowSlice';
 
 const Widget = styled('div')(({theme}) => ({
     padding: 24,
@@ -79,8 +79,6 @@ const sliderOffline = {
 import type {TZ, Epoch, Datecode, ClassName} from '../types';
 
 const PlaybackControls = ({
-    datecode,
-    className,
     earliestScore,
     latestScore,
     live,
@@ -89,13 +87,11 @@ const PlaybackControls = ({
     tz
 }: //
 {
-    datecode: Datecode;
-    className: ClassName;
     earliestScore: Epoch;
     latestScore: Epoch;
-    replayTime: Epoch;
+    replayTime: Epoch | undefined;
     live: boolean;
-    setReplayTime: (t: Epoch) => void;
+    setReplayTime: (t: Epoch | undefined) => void;
     tz: TZ;
 }) => {
     function formatDuration(value: number) {
@@ -105,6 +101,9 @@ const PlaybackControls = ({
     }
 
     // Only update every 16 seconds (1<<4==16)
+    const className = useSelector(selectClassName);
+    const datecode = useSelector(selectDatecode);
+    const scoreId = useSelector(selectScoreId);
     const latestTrackUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4); // from tracks
     const replayEndTime = !live ? latestTrackUpdate : latestScore;
 
@@ -122,13 +121,14 @@ const PlaybackControls = ({
         [dispatch, replayEndTime, className, datecode]
     );
 
-    function formatTimes(t) {
-        // Figure out what the local language is for international date strings
-        //        const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
+    // If we change class/date we need to make sure the replay is loaded for this time
+    // otherwise the score box will be empty
+    React.useEffect(() => {
+        doSetTime(replayTime);
+    }, [className, scoreId]);
 
-        // And then produce a string to display it locally
+    function formatTimes(t) {
         const dt = new Date(t * 1000);
-        //        const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((t + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
         return `${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})}`;
     }
 
@@ -166,9 +166,8 @@ const PlaybackControls = ({
 export default React.memo(
     PlaybackControls,
     (a, b) =>
-        a.className == b.className && //
-        a.earliestScore == b.earliestScore &&
+        a.earliestScore == b.earliestScore && //
         a.latestScore == b.latestScore &&
         a.live == b.live &&
-        a.replayTime >> 4 == b.replayTime >> 4
+        (a.replayTime ?? 0) >> 4 == (b.replayTime ?? 0) >> 4
 );

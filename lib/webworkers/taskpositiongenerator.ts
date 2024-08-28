@@ -410,8 +410,8 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     // assuming advance. AAT is longer otherwise a brief pop out will ignore points after
                     // however need to cope with short legs (control points for example)
                     else {
-                        log(`setting a advance`, JSON.stringify(legStatus));
-                        log(point);
+                        //                        log(`setting a advance`, JSON.stringify(legStatus));
+                        log(`setting a advance`, point);
                         //                    log(status);
                         status.recentLegAdvance = status.currentLeg;
                         status.currentLeg++;

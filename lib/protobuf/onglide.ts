@@ -132,7 +132,11 @@ export interface PilotScoreLeg {
     | undefined;
   /** Scores */
   handicapped?: SpeedDist | undefined;
-  actual?: SpeedDist | undefined;
+  actual?:
+    | SpeedDist
+    | undefined;
+  /** considered points, only dev mode */
+  convexHull: number[];
 }
 
 export interface Wind {
@@ -1576,6 +1580,7 @@ function createBasePilotScoreLeg(): PilotScoreLeg {
     inPenalty: undefined,
     handicapped: undefined,
     actual: undefined,
+    convexHull: [],
   };
 }
 
@@ -1617,6 +1622,11 @@ export const PilotScoreLeg = {
     if (message.actual !== undefined) {
       SpeedDist.encode(message.actual, writer.uint32(98).fork()).ldelim();
     }
+    writer.uint32(106).fork();
+    for (const v of message.convexHull) {
+      writer.float(v);
+    }
+    writer.ldelim();
     return writer;
   },
 
@@ -1711,6 +1721,23 @@ export const PilotScoreLeg = {
 
           message.actual = SpeedDist.decode(reader, reader.uint32());
           continue;
+        case 13:
+          if (tag === 109) {
+            message.convexHull.push(reader.float());
+
+            continue;
+          }
+
+          if (tag === 106) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.convexHull.push(reader.float());
+            }
+
+            continue;
+          }
+
+          break;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1734,6 +1761,9 @@ export const PilotScoreLeg = {
       inPenalty: isSet(object.inPenalty) ? globalThis.Boolean(object.inPenalty) : undefined,
       handicapped: isSet(object.handicapped) ? SpeedDist.fromJSON(object.handicapped) : undefined,
       actual: isSet(object.actual) ? SpeedDist.fromJSON(object.actual) : undefined,
+      convexHull: globalThis.Array.isArray(object?.convexHull)
+        ? object.convexHull.map((e: any) => globalThis.Number(e))
+        : [],
     };
   },
 
@@ -1775,6 +1805,9 @@ export const PilotScoreLeg = {
     if (message.actual !== undefined) {
       obj.actual = SpeedDist.toJSON(message.actual);
     }
+    if (message.convexHull?.length) {
+      obj.convexHull = message.convexHull;
+    }
     return obj;
   },
 
@@ -1801,6 +1834,7 @@ export const PilotScoreLeg = {
     message.actual = (object.actual !== undefined && object.actual !== null)
       ? SpeedDist.fromPartial(object.actual)
       : undefined;
+    message.convexHull = object.convexHull?.map((e) => e) || [];
     return message;
   },
 };

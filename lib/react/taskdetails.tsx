@@ -1,7 +1,7 @@
 //
 // The turnpoint list
 //
-import {memo} from 'react';
+import {memo, useMemo} from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
@@ -12,23 +12,31 @@ import Collapse from 'react-bootstrap/Collapse';
 
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
-import {selectTask} from '../redux/taskSlice';
+import {selectTask, selectHasTask} from '../redux/taskSlice';
 import {useSelector} from '../redux';
 
-import type {TaskLeg} from '../types';
+import type {TaskLeg, ClassName, TZ} from '../types';
+import {fromDateCode} from '../datecode';
 
 //
-export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; fitBounds: Function}) {
+export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: ClassName; fitBounds: Function; tz: TZ}) {
     const task = useSelector((state) => selectTask(state, vc));
+    const hasTask = useSelector((state) => selectHasTask(state, vc));
     const {comp, isLoading} = useContest();
     const [open, setOpen] = useState(false);
 
-    if (isLoading || !task) {
+    const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
+    // And then produce a string to display it locally
+    const fClass = comp.classes.find((c) => c.class == vc);
+    const dateString = useMemo(() => {
+        const date = task?.details?.calendardate ?? fClass?.datecode ? fromDateCode(fClass.datecode) : null;
+        return date ? `${new Date(date).toLocaleDateString(lang, {day: 'numeric', month: 'short'})}` : '';
+    }, [lang, tz, task?.details?.calendardate]);
+
+    if (isLoading || !hasTask) {
         return <Spinner />;
     }
 
-    const fClass = comp.classes.find((c) => c.class == vc);
-    if (!comp || !fClass) {
         return (
             <>
                 <br style={{clear: 'both'}} />
@@ -85,6 +93,7 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; 
                     <div id="task-collapse">
                         <h5>{fClass.classname}</h5>
                         <p>{task.details.calendardate}</p>
+                        <p>{task?.details?.nostart != '00:00:00' ? `Start open ${task.details.nostart.substring(0, 5)}` : ''}</p>
                         <Tasklegs legs={task.legs} />
 
                         {task.details.info && (

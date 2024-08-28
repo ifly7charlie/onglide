@@ -209,8 +209,8 @@ export const OgnFeed = memo(
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
         useEffect(() => {
-            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime, visible: !document?.hidden}));
-        }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, document?.hidden, selectedCompno, sendMessage]); //
+            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime}));
+        }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, selectedCompno, sendMessage]); //
 
         return (
             <>
@@ -239,7 +239,7 @@ export const OgnFeed = memo(
                                 <br />
                             </>
                         )}
-                        <TaskDetails vc={vc} fitBounds={fitBounds} />
+                        <TaskDetails vc={vc} fitBounds={fitBounds} tz={tz} />
                         {connectionStatus}
                         {valid && connected ? (
                             <PilotList
@@ -257,8 +257,6 @@ export const OgnFeed = memo(
                         ) : null}
                         {valid && connected ? (
                             <PlaybackControls //
-                                className={vc}
-                                datecode={datecode}
                                 {...availableScores}
                                 replayTime={replayTime}
                                 setReplayTime={setReplayTime}
@@ -303,7 +301,7 @@ function formatTimes(t, tz: TZ) {
     const dt = new Date(t * 1000);
     const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((t + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
     return (
-        `<a href='#' title='competition time'>${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a>` + //
+        `<a href='#' title='competition time'>${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
         `<a href='#' title='your time'>${dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`
     );
 }

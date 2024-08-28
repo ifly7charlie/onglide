@@ -56,13 +56,14 @@ export const nowSlice = createSlice({
             state.earliestScore = payload.earliestScore as Epoch;
             state.latestScore = payload.latestScore as Epoch;
             state.onlineStart = payload.t as Epoch;
-            state.liveScoreId = payload.scoreId;
+            state.liveScoreId = payload.scoreId ?? '';
         });
     },
     selectors: {
         selectNow: (state) => state.now,
         selectClassName: (state) => state.className,
         selectDatecode: (state) => state.datecode,
+        selectScoreId: (state) => state.liveScoreId,
         selectAvailableScoreTimes: (state) => ({earliestScore: state.earliestScore, latestScore: state.latestScore, live: !!state.liveScoreId}),
         selectOnline: (state) => state.onlineStart
     }
@@ -70,4 +71,4 @@ export const nowSlice = createSlice({
 
 export default nowSlice.reducer;
 export const {updateNow, offline} = nowSlice.actions;
-export const {selectNow, selectClassName, selectDatecode, selectAvailableScoreTimes, selectOnline} = nowSlice.selectors;
+export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectAvailableScoreTimes, selectOnline} = nowSlice.selectors;

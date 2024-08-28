@@ -111,6 +111,9 @@ message PilotScoreLeg {
 	// Scores
     optional SpeedDist handicapped = 11;
     optional SpeedDist actual = 12;
+
+	// considered points, only dev mode
+	repeated float convexHull = 13; // [packed= true];
 }
 
 message Wind {

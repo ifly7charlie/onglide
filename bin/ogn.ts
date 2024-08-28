@@ -79,7 +79,7 @@ import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocess
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
-let userLogStream = createWriteStream((process.env.DB_PATH ?? './db/') + 'user-log.txt', {flags: 'a'});
+let userLogStream: WriteStream | null = null;
 
 process.setMaxListeners(35);
 
@@ -117,7 +117,7 @@ interface Channel {
     toSend: PositionMessage[]; // messages waiting to be sent
 
     activeGliders: Set<Compno>; // map of active compno
-    lastSentPositions: Epoch;
+    lastSentPositions: Epoch; // last time a positio message (empty of contents)n was sent comp time
     clients: OgnWebSocket[]; // all websockets for the channel
 
     broadcastChannel?: BroadcastChannel;
@@ -324,6 +324,7 @@ async function main() {
         const datecode = await getDCode();
         getSunset(datecode);
         getProposedScoreId();
+        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${datecode}.txt`, {flags: 'a'});
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
@@ -398,16 +399,18 @@ async function main() {
             channel.statistics.listenerCycles++;
 
             if (channel.clients.length) {
-                if (!channel.toSend.length && now - channel.mostRecentPosition < 15) {
-                    continue;
+                // We don't need to send empty packets but we should
+                // occasionally as it keeps socket alive
+                if (!channel.toSend.length) {
+                    if (now - channel.lastSentPositions < 15) {
+                        continue;
+                    }
+                } else {
+                    // if we sent an actual coordinate then this will ensure
+                    // that the webPathData is regenerated
+                    channel.mostRecentPosition = now;
                 }
-                channel.mostRecentPosition = now;
 
-                // Send if we have an update or if it's been 30 seconds since we last sent one
-                //                if (channel.toSend.length || (now - channel.lastSentPositions ?? 0) > 30) {
-                // Encode all the changes, we only keep latest per glider if multiple received
-                // there shouldn't be multiple!
-                //
                 // Metrics are helpful
                 channel.statistics.positionsSent += channel.toSend.length;
                 channel.statistics.positionSentCycles++;
@@ -532,6 +535,11 @@ async function main() {
     // Update competition information
     setInterval(async function () {
         const datecode = await getDCode();
+        const oldStream = userLogStream;
+        userLogStream = null;
+        oldStream?.end(() => {
+            userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${datecode}.txt`, {flags: 'a'});
+        });
         getSunset(datecode);
         getProposedScoreId();
         await updateClasses(internalName, datecode);
@@ -555,7 +563,7 @@ async function handleExit(signal: string) {
     console.log(`received signal: ${signal}`);
     scoreDb?.close();
     aprsController?.shutdown();
-    userLogStream.end();
+    userLogStream?.end();
     setTimeout(() => process.exit(), 1000);
 }
 main().then(() => console.log('Started'));
@@ -584,6 +592,7 @@ async function getDCode(): Promise<Datecode> {
 
 import {ClassicLevel} from 'classic-level';
 import {AbstractSublevel} from 'abstract-level';
+import {WriteStream} from 'node:fs';
 let scoreDb: ClassicLevel<Compno, string> | undefined = undefined;
 
 //
@@ -616,8 +625,8 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 clients: [],
                 launching: false,
                 activeGliders: new Set(),
-                lastSentPositions: 0 as Epoch,
                 toSend: [],
+                lastSentPositions: 0 as Epoch,
                 className: c.class,
                 datecode: datecode,
                 gliderHash: '',
@@ -637,6 +646,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     totalViewingTime: 0,
                     bytesSent: 0
                 },
+                // Info on what has been sent via https
                 webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
                 webPathData: {},
@@ -1070,7 +1080,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
     const firstPointTime = Math.min(channel.earliestStart ?? channel.earliestScore ?? Infinity, now - 120);
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
-        console.log(`re-generateHistoricalTracks now: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
+        console.log(`generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
         const toStream = reduce(
             gliders,
             (result, glider, compno) => {
@@ -1080,7 +1090,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                         const start = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
                         const end = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
                         const length = end - start;
-                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
+                        //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                         if (length) {
                             result[glider.compno] = {
                                 compno: glider.compno,
@@ -1530,7 +1540,7 @@ function setupWebSocketServer(server) {
                     ws.isVisible = !!msg.v;
                 } else if ('compno' in msg) {
                     ws.isInteracting = true;
-                    userLogStream.write(new Date().toISOString() + ':' + channelName + ':' + cx.toString() + '\n');
+                    userLogStream?.write(new Date().toISOString() + ':' + channelName + ':' + cx.toString() + '\n');
                 }
             } catch (e) {
                 /**/
@@ -1595,13 +1605,11 @@ function setupOgnWebServer(req, res) {
                     const chunkEnd = chunkStart + scoreChunkSize; // 30 minute chunks
                     const scoreId = pScoreId.substring(1); // has leading '/' from url regex
                     const d = (d) => new Date(d * 1000).toISOString();
-                    console.log(`FOS: request for ${d(timestamp)} ${d(chunkStart)}=>${d(chunkEnd)} [${scoreId}]`);
 
                     const history: Record<Compno, {history: PilotScore[]}> = {};
                     let scoreCount = 0;
                     for (const [compno, scores] of channel.scoreHistory.get(scoreId) ?? []) {
                         const preceeding = scores.findLast((score) => score.t < chunkStart);
-                        console.log(compno, 'preceeding score', preceeding?.t, d(preceeding?.t ?? 0));
                         history[compno] = {
                             history: [
                                 ...(preceeding ? [preceeding] : []), // oldest one before the chunk so we have everybody
@@ -1611,21 +1619,18 @@ function setupOgnWebServer(req, res) {
                         scoreCount += history[compno].history.length;
                     }
 
-                    console.log('filtered history length', scoreCount);
                     const msg: any = ClassScoreHistory.encode({
                         className: channel.className,
                         datecode: '', // we need to use undefined otherwise it will die
                         pilots: history
                     }).finish();
 
-                    console.log(`sending scorehistory ${channelName} ${scoreCount} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)}`);
-                    //                    console.table([...Object.keys(history)].flatMap((compno) => history[compno].history.map((h) => [compno, h.t, d(h.t), h.live])));
+                    const cacheTtl = chunkEnd == timestamp + 1 ? 24 * 60 * 60 : 60;
 
+                    console.log(`${channelName}: sending scorehistory ${scoreCount} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)} [${scoreId}] ${cacheTtl}s cache ttl`);
                     headers['Content-Type'] = 'application/octet-stream';
-                    if (chunkEnd == timestamp + 1) {
-                        console.log('allowing caching');
-                        headers['Access-Control-Max-Age'] = 24 * 60 * 60; // 1 day
-                    }
+                    headers['Access-Control-Max-Age'] = cacheTtl; // 1 day
+                    headers['Cache-Control'] = `public, max-age=${cacheTtl}, immutable, stale-while-revalidate=${cacheTtl}`;
                     res.writeHead(200, headers);
                     res.write(msg, 'binary');
                     res.end(null, 'binary');
@@ -1633,7 +1638,7 @@ function setupOgnWebServer(req, res) {
                 }
 
                 case 'tracks': {
-                    console.log(`sending historical data ${timestamp} ${new Date(timestamp * 1000).toISOString()} [current: ${channel.webPathBaseTime}]`);
+                    console.log(`${channelName}: sending historical data ${timestamp} ${new Date(timestamp * 1000).toISOString()} [current: ${channel.webPathBaseTime}]`);
                     if (channel.webPathData[timestamp]) {
                         headers['Content-Type'] = 'application/octet-stream';
                         res.writeHead(200, headers);

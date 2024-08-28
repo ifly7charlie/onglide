@@ -237,6 +237,7 @@ export interface CalculatedTaskLegStatus extends TaskLegStatus {
         point: BasePositionMessage;
         start?: BasePositionMessage;
     };
+    convexHull?: number[];
 }
 
 export interface CalculatedTaskStatus extends TaskStatus {

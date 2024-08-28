@@ -3,11 +3,11 @@
 import {useCallback, useMemo, useRef, useEffect} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 
-import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl} from 'react-map-gl';
+import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl';
 
 import {deckTooltip} from './decktooltip';
 
-import type {Epoch, ClassName, Compno, Options, PilotScore} from '../types';
+import type {Epoch, ClassName, Compno, Options, PilotScore, TZ} from '../types';
 import {TaskUp} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
@@ -17,6 +17,8 @@ import {selectPilotScore} from '../redux/scoresSlice';
 import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {ErrorBoundary} from 'react-error-boundary';
+
+import {assembleHullLine} from './hullLine';
 
 function DeckGLOverlay(
     props: MapboxOverlayProps & {
@@ -56,14 +58,14 @@ export default function MApp(props: {
     vc: ClassName;
     selectedCompno: Compno;
     setSelectedCompno: (compno: Compno) => void;
-    tz: string;
+    tz: TZ;
     viewport: any;
     setViewport: Function;
     status: string; // status line
     replayTime: Epoch;
 }) {
     // For remote updating of the map
-    const mapRef = useRef(null);
+    const mapRef = useRef<MapRef | null>(null);
     const measure = useMeasure();
 
     // So we get some type info
@@ -89,7 +91,7 @@ export default function MApp(props: {
 
     // Rain Radar
     const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
-    const radarOverlay = RadarOverlay({options, setOptions, tz});
+    const radarOverlay = RadarOverlay({options, tz});
 
     // What task are we using on display
     const taskGeoJSONtp = taskGeoJSON?.tp;
@@ -98,7 +100,6 @@ export default function MApp(props: {
     const screenPoint = useMemo(() => mapRef?.current?.getMap().project([props.viewport.longitude, props.viewport.latitude]) ?? {x: 0, y: 0}, [props.viewport]);
 
     const legAdvance = task && task.rules.aat && selectedScore?.inSector && selectedScore.legs[selectedScore.currentLeg + 1]?.actual.distance > 10;
-    const effectiveLeg = selectedScore?.currentLeg + (legAdvance ? 1 : 0);
 
     const nextPoint =
         !task || !selectedScore
@@ -106,8 +107,24 @@ export default function MApp(props: {
             : !selectedScore?.utcStart
             ? task.legs[0].point // if we are before start
             : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
-            ? task.legs.at(-1).point // or at finish or only finish left
-            : task.legs.at(effectiveLeg).point; // mindistance is from us so this is the next point
+            ? task.legs.at(-1)?.point // or at finish or only finish left
+            : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0))?.point; // mindistance is from us so this is the next point
+
+    const handleKeyPress = useCallback(
+        (e) => {
+            if (e.key == 'Escape' && measure && measure.enabled) {
+                measure.toggle?.();
+            }
+        },
+        [measure]
+    );
+
+    useEffect(() => {
+        document.addEventListener('keydown', handleKeyPress);
+        return () => {
+            document.removeEventListener('keydown', handleKeyPress);
+        };
+    }, [handleKeyPress]);
 
     // =========== FOLLOW EFFECT ===============
     //
@@ -118,6 +135,7 @@ export default function MApp(props: {
 
             if (
                 !map?.isMoving() &&
+                !measure.enabled &&
                 props.options.follow &&
                 follow &&
                 selectedPosition && //
@@ -138,8 +156,8 @@ export default function MApp(props: {
                     return Math.abs(a - b) / s > (map2d ? 0.25 : 0.1); //magic numbers are % of screen in either direction
                 };
 
-                const screenSizeX = mapRef?.current?.getMap()?._containerWidth ?? 1300;
-                const screenSizeY = mapRef?.current?.getMap()?._containerHeight ?? 500;
+                const screenSizeX = mapRef?.current?.getMap()?.getContainer().offsetWidth ?? 1300;
+                const screenSizeY = mapRef?.current?.getMap()?.getContainer().offsetHeight ?? 500;
 
                 const getBearing = (): number => {
                     if (props.options.taskUp == TaskUp.north) {
@@ -148,7 +166,7 @@ export default function MApp(props: {
                     if (props.options.taskUp == TaskUp.track) {
                         if (
                             !selectedScore?.inSector && // don't jump around in sector
-                            selectedScore?.legs[selectedScore.currentLeg]?.actual?.distanceRemaining > 3 && // or if we are close &&
+                            (selectedScore?.legs[selectedScore.currentLeg]?.actual?.distanceRemaining ?? 0) > 3 && // or if we are close &&
                             nextPoint?.length
                         ) {
                             return bearing([lng, lat], nextPoint, {final: false});
@@ -160,9 +178,10 @@ export default function MApp(props: {
                 const fbearing = Math.round(getBearing());
 
                 if (
-                    pointCheck(newScreenPoint.x, screenPoint.x, screenSizeX) ||
-                    pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
-                    fbearing >> 3 != Math.round(props.viewport.bearing) >> 3
+                    newScreenPoint &&
+                    (pointCheck(newScreenPoint.x, screenPoint.x, screenSizeX) ||
+                        pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
+                        fbearing >> 3 != Math.round(props.viewport.bearing) >> 3)
                 ) {
                     mapRef?.current?.flyTo({
                         center: [lng, lat],
@@ -348,17 +367,27 @@ export default function MApp(props: {
                         <Layer {...trackLineStyle} key="tls" />
                     </Source>
                 ) : null}
-                {selectedScore && options.constructionLines && selectedScore?.minGeoJSON ? (
-                    <Source type="geojson" data={selectedScore?.minGeoJSON} key={'min_'}>
-                        <Layer {...minLineStyle} />
-                        <Layer {...distanceLineLabelStyle(minLineStyle)} />
-                    </Source>
-                ) : null}
-                {selectedScore && options.constructionLines && selectedScore?.maxGeoJSON ? (
-                    <Source type="geojson" data={selectedScore?.maxGeoJSON} key={'max_'}>
-                        <Layer {...maxLineStyle} />
-                        <Layer {...distanceLineLabelStyle(maxLineStyle)} />
-                    </Source>
+                {selectedScore && options.constructionLines ? (
+                    <>
+                        {selectedScore.minGeoJSON ? (
+                            <Source type="geojson" data={selectedScore.minGeoJSON} key={'min_'}>
+                                <Layer {...minLineStyle} />
+                                <Layer {...distanceLineLabelStyle(minLineStyle)} />
+                            </Source>
+                        ) : null}
+                        {selectedScore.maxGeoJSON ? (
+                            <Source type="geojson" data={selectedScore.maxGeoJSON} key={'max_'}>
+                                <Layer {...maxLineStyle} />
+                                <Layer {...distanceLineLabelStyle(maxLineStyle)} />
+                            </Source>
+                        ) : null}
+                        {selectedScore.legs && task?.rules?.aat ? (
+                            <Source type="geojson" data={assembleHullLine(selectedScore.legs)} key={'hull_'}>
+                                <Layer {...hullLineStyle} />
+                                <Layer {...hullPointStyle} />
+                            </Source>
+                        ) : null}
+                    </>
                 ) : null}
                 {selectedScore && selectedScore?.scoredGeoJSON ? (
                     <Source type="geojson" data={selectedScore.scoredGeoJSON} key={'scored_'}>
@@ -370,7 +399,7 @@ export default function MApp(props: {
                 <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
                 {!map2d && <Layer key="skylayer" {...skyLayer} />}
                 {attribution}
-                {radarOverlay.layer}
+                {!props.replayTime ? radarOverlay.layer : null}
                 <ScaleControl position="bottom-left" />
                 <NavigationControl showCompass showZoom visualizePitch position="bottom-left" />
             </Map>
@@ -408,6 +437,25 @@ const maxLineStyle: LayerProps = {
         'line-width': 4,
         'line-opacity': 0.7,
         'line-dasharray': [2, 1]
+    }
+};
+const hullPointStyle: LayerProps = {
+    id: 'hullPoint',
+    type: 'circle',
+    paint: {
+        'circle-color': '#00f',
+        'circle-radius': 4,
+        'circle-opacity': 0.3
+    }
+};
+const hullLineStyle: LayerProps = {
+    id: 'hullLine',
+    type: 'line',
+    paint: {
+        'line-color': '#00f',
+        'line-width': 2,
+        'line-opacity': 0.6,
+        'line-dasharray': [4, 1]
     }
 };
 

@@ -19,12 +19,14 @@ interface TaskSliceState {
     datecode: Datecode;
     geoJSON?: {tp: FeatureCollection; track: FeatureCollection; Dm: Point} | undefined;
     task?: Task | undefined;
+    taskReceived: boolean;
 }
 
 // Define the initial state using that type
 const initialState: TaskSliceState = {
     className: 'unknown' as ClassName,
-    datecode: '' as Datecode
+    datecode: '' as Datecode,
+    taskReceived: false
 };
 
 export const taskSlice = createSlice({
@@ -36,7 +38,8 @@ export const taskSlice = createSlice({
             try {
                 state.task = payload.taskJSON ? (JSON.parse(payload.taskJSON) as Task) : undefined;
                 state.geoJSON = payload.geoJSON ? (JSON.parse(payload.geoJSON) as (typeof state)['geoJSON']) : undefined;
-                console.log(`task updated to ${state.task.details.taskid}: nostart:${d(state.task.rules.nostartutc)} [${state.task.details.hash}]`);
+                state.taskReceived = true;
+                console.log(`task updated to ${state.task?.details.taskid}: nostart:${d(state.task?.rules?.nostartutc)} [${state.task?.details?.hash}]`);
             } catch (e) {
                 state.task = undefined;
                 state.geoJSON = undefined;
@@ -52,10 +55,12 @@ export const taskSlice = createSlice({
                 state.datecode = payload.datecode as Datecode;
                 state.task = undefined;
                 state.geoJSON = undefined;
+                state.taskReceived = false;
             }
         });
     },
     selectors: {
+        selectHasTask: (state, vc: ClassName) => (state.className == vc ? state.taskReceived : false),
         selectTask: (state, vc: ClassName) => (state.className == vc ? state.task : undefined),
         selectTaskGeoJSON: (state, vc: ClassName) => (state.className == vc ? state.geoJSON : undefined)
     }
@@ -63,4 +68,4 @@ export const taskSlice = createSlice({
 
 export default taskSlice.reducer;
 export const {updateTask} = taskSlice.actions;
-export const {selectTask, selectTaskGeoJSON} = taskSlice.selectors;
+export const {selectTask, selectTaskGeoJSON, selectHasTask} = taskSlice.selectors;

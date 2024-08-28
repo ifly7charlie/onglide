@@ -107,13 +107,16 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // 3. the exit from the TP (ie startLine)
             const legTime = (leg) => (leg.entryTimeStamp && (leg?.point?.t || 0) > 10000 ? leg?.point?.t : null) || leg.entryTimeStamp || leg.exitTimeStamp || 0;
 
+            leg.convexHull ??= [];
+
             // Proper turnpoint - startPoint doesn't count
             if (previousLeg) {
                 const sl: PilotScoreLeg = (score.legs[leg.legno] = {
                     legno: leg.legno,
                     time: legTime(previousLeg),
                     estimatedStart: previousLeg?.estimatedTurn ? true : false,
-                    estimatedEnd: leg.estimatedTurn ? true : false
+                    estimatedEnd: leg.estimatedTurn ? true : false,
+                    convexHull: !leg.convexHull?.length ? [] : leg.convexHull
                 });
 
                 // Figure out actuals for the leg/copy them over
@@ -156,7 +159,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             else {
                 score.legs[leg.legno] = {
                     legno: leg.legno,
-                    time: leg.point?.t || leg.exitTimeStamp
+                    time: leg.point?.t || leg.exitTimeStamp || 0,
+                    convexHull: []
                 };
             }
 

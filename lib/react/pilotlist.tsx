@@ -641,12 +641,12 @@ export const PilotList = memo(function PilotList({
     });
 
     // Output the whole of the pilots list component
-    return (
+    return pilotList?.length ? (
         <>
             <Sorting setSort={setSort} sortOrder={order} visible={visible} toggleVisible={toggleVisible} handicapped={handicapped || false} />
             <Collapse in={visible}>
                 <ul className="pilots">{pilotComponents}</ul>
             </Collapse>
         </>
-    );
+    ) : null;
 });

@@ -125,7 +125,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
                 // Did we generate from penalty points (used to reset convex hull above)
                 aatLeg.penaltyPoints = points == leg.penaltyPoints;
-                log('AATLEG', aatLeg, points.length);
+                //                log('AATLEG', aatLeg, points.length);
 
                 // Are we missing some from the convexhull?
                 if (aatLeg.lengthConvexHullGeneratedAt < points.length) {
@@ -165,6 +165,8 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     aatLeg.convexHull = newConvexHull;
                     aatLeg.lengthConvexHullGeneratedAt = points.length;
                 }
+                leg.convexHull = aatLeg.convexHull.flatMap((c) => [c.lng, c.lat]);
+                leg.convexHull.push(...leg.convexHull.slice(0, 2));
             }
 
             log(
@@ -213,7 +215,6 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             const convexHull = aatLegStatus[taskStatus.currentLeg].convexHull;
                             // Unlink constructed distance as we can't use it - would be better to wait to link I think
                             for (const point of convexHull) {
-                                log('remove chpoint', point.t);
                                 tempGraph.removeVertex(point);
                             }
 
@@ -242,7 +243,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                 }
                                 // Link each point in the sector to any point later in time - I think it's safe
                                 // to use convex hull as it's the furthest extent. Also link that to next point (fakePoint)
-                                let valid = false;
+                                //                                let valid = false;
                                 for (const firstSectorPoint of chForward) {
                                     const ls = lineString([
                                         [firstSectorPoint.lng, firstSectorPoint.lat],
@@ -251,9 +252,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
                                     const lsDistance = length(ls);
 
-                                    for (const secondSectorPoint of chReversed) {
+                                    let valid = false;
+                                    for (let secondSectorPoint of chReversed) {
                                         if (firstSectorPoint.t >= secondSectorPoint.t) {
-                                            break;
+                                            if (valid) {
+                                                break;
+                                            }
+                                            secondSectorPoint = taskStatus.lastProcessedPoint!;
                                         }
                                         const distScoredOnLine = Math.max(lsDistance - distHaversine(secondSectorPoint, fakePoint), 0);
                                         if (distScoredOnLine > 0) {
@@ -273,14 +278,15 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                             valid = true;
                                         }
                                     }
+                                    //                                    if (!valid) {
+                                    //                                    for (const firstSectorPoint of chForward) {
+                                    // use
+                                    //                                        tempGraph.addLink(firstSectorPoint, fakePoint, (1000 - distHaversine(firstSectorPoint, fakePoint)) as DistanceKM);
+                                    //tempGraph.addLink(firstSectorPoint, fakePoint, 1000 as DistanceKM);
+                                    //                                    }
+                                    //                                    }
                                 }
                                 // If we didn't find a 'change of direction towards next sector' then we need to link all the points to next TP directly
-                                if (!valid) {
-                                    for (const firstSectorPoint of chForward) {
-                                        //                                        tempGraph.addLink(firstSectorPoint, fakePoint, (1000 - distHaversine(firstSectorPoint, fakePoint)) as DistanceKM);
-                                        tempGraph.addLink(firstSectorPoint, fakePoint, 1000 as DistanceKM);
-                                    }
-                                }
                             }
                         } else if (taskStatus.closestSectorPoint) {
                             for (const ppoint of aatPreviousLeg.convexHull) {
