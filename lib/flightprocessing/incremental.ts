@@ -148,32 +148,21 @@ export function calculateVario(deck: DeckData, index: number) {
         start--;
     }
 
-    let v = {gainXsecond: 0, lossXsecond: 0} as VarioData;
-
     // Add them up
-    let previousAlt = deck.positions[start * 3 + 2];
-    let initialAlt = previousAlt;
-    for (let c = start; c < index; c++) {
-        const altitude = deck.positions[c * 3 + 2];
-        if (previousAlt !== undefined) {
-            let diff = altitude - previousAlt;
-            if (diff > 0) v.gainXsecond += diff;
-            if (diff < 0) v.lossXsecond -= diff;
-        }
-        previousAlt = altitude;
-    }
+    const total = deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2];
+    const Xperiod = (t - deck.t[start]) as Epoch;
 
     // The total and the average, along with misc status values
-    v.total = previousAlt - initialAlt;
-    v.Xperiod = (t - deck.t[start]) as Epoch;
-    v.average = Math.round((v.total * 10) / v.Xperiod) / 10;
-    v.lng = deck.positions[index * 3];
-    v.lat = deck.positions[index * 3 + 1];
-    v.agl = deck.agl[index];
-    v.altitude = previousAlt;
-    v.t = t as Epoch;
-
-    return v;
+    return {
+        total,
+        Xperiod,
+        average: Math.round((total * 10) / Xperiod) / 10,
+        //lng: deck.positions[index * 3],
+        //lat: deck.positions[index * 3 + 1],
+        agl: deck.agl[index],
+        altitude: deck.positions[start * 3 + 2],
+        t: t as Epoch
+    };
 }
 
 // Calculate vario for the specific index

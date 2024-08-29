@@ -142,7 +142,7 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
             id="climb"
             title="vario" //
             main={{value: !isNaN(convertedClimb[0]) ? convertedClimb[0] : null, icon: howMuchClimb, units: convertedClimb[1]}}
-            data1={{value: convertHeight(vario.gainXsecond + vario.lossXsecond, units)[0], units: units ? 'ft' : 'm', icon: vario?.average >= 0 ? solid('cloud-upload') : solid('cloud-arrow-down')}}
+            data1={{value: convertHeight(vario.total, units)[0], units: units ? 'ft' : 'm', icon: vario?.average >= 0 ? solid('cloud-upload') : solid('cloud-arrow-down')}}
             data2={{value: vario.Xperiod, units: 'sec', icon: solid('hourglass-half')}}
         />
     ) : null;
