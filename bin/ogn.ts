@@ -1530,7 +1530,7 @@ function setupWebSocketServer(server) {
         ws.on('close', () => {
             ws.isAlive = false;
             ws.isClosed = true;
-            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
+            //            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('error', console.error);
         ws.on('message', (cx) => {
