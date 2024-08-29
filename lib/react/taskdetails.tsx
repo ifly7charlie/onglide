@@ -37,19 +37,19 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
         return <Spinner />;
     }
 
+    if (!comp || !fClass || !task) {
         return (
             <>
-                <br style={{clear: 'both'}} />
-                <br style={{clear: 'both'}} />
-                <h4>No task</h4>
+                <h5>{dateString}: No task</h5>
             </>
         );
     }
 
     let taskDescription: any = '';
+    console.log('TD:', task.details);
     switch (task.details.type) {
         case 'S':
-            taskDescription = <>Speed Task: {task.details.distance}km</>;
+            taskDescription = <>{task.details.distance}km Speed Task</>;
             break;
         case 'D':
             taskDescription = <>Distance Handicap Task: {task.details.distance}km</>;
@@ -59,14 +59,14 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
             break;
         case 'A':
             if (task.details.duration.substring(1, 5) == '0:00') {
-                taskDescription = <>Assigned Area Task</>;
+                taskDescription = <>Assigned Area</>;
             } else {
-                taskDescription = <>Assigned Area Task: {task.details.duration.substring(1, 5)} hours</>;
+                taskDescription = <>{task.details.duration.substring(1, 5)} hour Assigned Area Task</>;
             }
             break;
     }
 
-    if (fClass.status == 'Z') {
+    if (task.details.status == 'Z') {
         taskDescription = 'Scrubbed';
     }
 
@@ -76,7 +76,7 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
         <>
             <div className={'d-lg-inline d-none'}>
                 <h5 style={{fontSize: '1.2vw'}}>
-                    {classNameSentenceCased} {taskDescription}
+                    {dateString}: {taskDescription}
                     <span className="sorting" style={{fontSize: 'medium'}}>
                         <button title="Zoom to task" onClick={fitBounds as any}>
                             <FontAwesomeIcon icon={solid('magnifying-glass-location')} />
@@ -91,8 +91,6 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
 
                 <Collapse in={open}>
                     <div id="task-collapse">
-                        <h5>{fClass.classname}</h5>
-                        <p>{task.details.calendardate}</p>
                         <p>{task?.details?.nostart != '00:00:00' ? `Start open ${task.details.nostart.substring(0, 5)}` : ''}</p>
                         <Tasklegs legs={task.legs} />
 
