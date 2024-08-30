@@ -235,7 +235,12 @@ function HandicappedDistanceComponent({score}: {score: PilotScore}) {
             title="distance" //
             main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped distance done'}}
             data1={{value: score.actual.taskDistance, units: 'km', icon: solid('right-from-bracket'), description: 'actual distance done'}}
-            data2={{value: score.actual.distanceRemaining ?? score.actual.minPossible, units: 'km', icon: solid('right-to-bracket'), description: 'actual minimum distance remaining'}}
+            data2={{
+                value: !score.utcFinish ? score.handicapped.distanceRemaining ?? score.handicapped.minPossible : undefined,
+                units: 'km',
+                icon: solid('right-to-bracket'),
+                description: 'handicapped minimum distance remaining'
+            }}
         />
     );
 }
@@ -247,7 +252,7 @@ function ActualDistanceComponent({score}: {score: PilotScore}) {
             id="distance"
             title="distance" //
             main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual distance done'}}
-            data1={{value: score.actual.distanceRemaining ?? score.actual.minPossible, units: 'km', icon: solid('right-to-bracket'), description: 'actual minimum distance remaining'}}
+            data1={{value: !score.utcFinish ? score.actual.distanceRemaining ?? score.actual.minPossible : undefined, units: 'km', icon: solid('right-to-bracket'), description: 'actual minimum distance remaining'}}
         />
     );
 }
