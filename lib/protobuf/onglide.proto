@@ -176,6 +176,9 @@ message PilotScore {
     optional SpeedDist actual = 10;
     optional SpeedDist handicapped = 11;
 
+	// Home (partial data only, and actuals only)
+	optional SpeedDist home = 62; // how many km to home
+	
     // Leg details
     uint32 currentLeg = 37;
     map<uint32,PilotScoreLeg> legs = 36;

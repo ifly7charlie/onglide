@@ -282,13 +282,14 @@ const HandicappedGRComponent = memo(function HandicappedGRComponent({handicapped
     );
 });
 
-const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {actualGrRemaining: number}) {
+const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining, homeGr}: {actualGrRemaining: number; homeGr: number}) {
     return (
         <SummaryComponent
             width="100px"
             id="gr"
             title="L/D" //
             main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
+            data1={{value: homeGr < 999 ? homeGr : '∞', units: ':1', icon: solid('home'), description: 'L/D to home'}}
         />
     );
 });
@@ -333,7 +334,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
         hasHandicappedResults ? (
             <HandicappedGRComponent handicappedGrRemaining={score.handicapped.grRemaining} actualGrRemaining={score.actual.grRemaining} />
         ) : (
-            <ActualGRComponent actualGrRemaining={score.actual.grRemaining} />
+            <ActualGRComponent actualGrRemaining={score.actual.grRemaining} homeGr={score.home?.grRemaining} />
         )
     ) : null;
 

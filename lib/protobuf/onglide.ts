@@ -216,6 +216,10 @@ export interface PilotScore {
   handicapped?:
     | SpeedDist
     | undefined;
+  /** Home (partial data only, and actuals only) */
+  home?:
+    | SpeedDist
+    | undefined;
   /** Leg details */
   currentLeg: number;
   legs: { [key: number]: PilotScoreLeg };
@@ -2315,6 +2319,7 @@ function createBasePilotScore(): PilotScore {
     flightStatus: undefined,
     actual: undefined,
     handicapped: undefined,
+    home: undefined,
     currentLeg: 0,
     legs: {},
     stats: undefined,
@@ -2366,6 +2371,9 @@ export const PilotScore = {
     }
     if (message.handicapped !== undefined) {
       SpeedDist.encode(message.handicapped, writer.uint32(90).fork()).ldelim();
+    }
+    if (message.home !== undefined) {
+      SpeedDist.encode(message.home, writer.uint32(498).fork()).ldelim();
     }
     if (message.currentLeg !== 0) {
       writer.uint32(296).uint32(message.currentLeg);
@@ -2498,6 +2506,13 @@ export const PilotScore = {
 
           message.handicapped = SpeedDist.decode(reader, reader.uint32());
           continue;
+        case 62:
+          if (tag !== 498) {
+            break;
+          }
+
+          message.home = SpeedDist.decode(reader, reader.uint32());
+          continue;
         case 37:
           if (tag !== 296) {
             break;
@@ -2611,6 +2626,7 @@ export const PilotScore = {
       flightStatus: isSet(object.flightStatus) ? globalThis.Number(object.flightStatus) : undefined,
       actual: isSet(object.actual) ? SpeedDist.fromJSON(object.actual) : undefined,
       handicapped: isSet(object.handicapped) ? SpeedDist.fromJSON(object.handicapped) : undefined,
+      home: isSet(object.home) ? SpeedDist.fromJSON(object.home) : undefined,
       currentLeg: isSet(object.currentLeg) ? globalThis.Number(object.currentLeg) : 0,
       legs: isObject(object.legs)
         ? Object.entries(object.legs).reduce<{ [key: number]: PilotScoreLeg }>((acc, [key, value]) => {
@@ -2674,6 +2690,9 @@ export const PilotScore = {
     if (message.handicapped !== undefined) {
       obj.handicapped = SpeedDist.toJSON(message.handicapped);
     }
+    if (message.home !== undefined) {
+      obj.home = SpeedDist.toJSON(message.home);
+    }
     if (message.currentLeg !== 0) {
       obj.currentLeg = Math.round(message.currentLeg);
     }
@@ -2729,6 +2748,7 @@ export const PilotScore = {
     message.handicapped = (object.handicapped !== undefined && object.handicapped !== null)
       ? SpeedDist.fromPartial(object.handicapped)
       : undefined;
+    message.home = (object.home !== undefined && object.home !== null) ? SpeedDist.fromPartial(object.home) : undefined;
     message.currentLeg = object.currentLeg ?? 0;
     message.legs = Object.entries(object.legs ?? {}).reduce<{ [key: number]: PilotScoreLeg }>((acc, [key, value]) => {
       if (value !== undefined) {

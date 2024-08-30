@@ -1,6 +1,8 @@
-import {Compno, PositionStatus, AltitudeAgl, BasePositionMessage, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task, DistanceKM, SpeedKPH} from '../types';
+import type {Compno, AltitudeAgl, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task, DistanceKM, SpeedKPH} from '../types';
+import {PositionStatus} from '../types';
 
 import {PilotScore, PilotScoreLeg, SpeedDist} from '../protobuf/onglide';
+import {distHaversineRaw} from '../flightprocessing/taskhelper';
 
 //
 function copyPick(d, o, ...props) {
@@ -234,6 +236,12 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 const finishAlt = task.legs[task.legs.length - 1].altitude ?? 0;
                 doGrCalc(score.actual, item.lastProcessedPoint.a - finishAlt);
                 doGrCalc(score.handicapped, item.lastProcessedPoint.a - finishAlt);
+            if (item.lastProcessedPoint) {
+                score.home = {
+                    taskDistance: score.actual.distance ?? 0,
+                    distanceRemaining: item.lastProcessedPoint ? distHaversineRaw([item.lastProcessedPoint.lng, item.lastProcessedPoint.lat], finishLeg.point!) : 0
+                };
+                doGrCalc(score.home, item.lastProcessedPoint.a - finishAlt);
             }
         }
 
