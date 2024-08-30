@@ -10,11 +10,10 @@ export const recentTrackLength = 240; // seconds of recent track to show
 export const deckPointIncrement = 2000;
 export const deckSegmentIncrement = 100;
 
-// How long to delay track to ensure we aren't missing packets
-export const inOrderDelay = 10;
-
 // How often to refresh the 'static download' (seconds)
-export const webPathBaseTime = 5 * 60;
+export const webPathBaseTimeDuration = 5 * 60;
 
 // How many minutes of scores are we batching together
 export const scoreChunkSize = 30 * 60;
+
+export const inorderAdditionalDelay = 6;

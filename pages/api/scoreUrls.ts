@@ -1,11 +1,13 @@
 import {query, mysqlEnd} from '../../lib/react/db';
 import escape from 'sql-template-strings';
 
+import {replay, getNow} from '../../lib/now';
+
 export default async function taskHandler(req, res) {
     const classes = await query(
-        process.env.REPLAY
+        replay()
             ? escape`
-         SELECT c.class, c.classname, c.description, todcode(from_unixtime(${process.env.REPLAY})) datecode, cs.status, handicapped, notes
+SELECT c.class, c.classname, c.description, todcode(from_unixtime(${getNow()})) datecode, cs.status, handicapped, notes
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
             : escape`
          SELECT c.class, c.classname, c.description, cs.datecode, cs.status, handicapped, notes

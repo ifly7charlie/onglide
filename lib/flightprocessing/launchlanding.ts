@@ -15,9 +15,7 @@ import {Epoch, AltitudeAgl} from '../types';
 import {toDateCode} from '../datecode';
 
 //
-import _groupby from 'lodash.groupby';
-import _foreach from 'lodash.foreach';
-import {reduce as _reduce} from 'lodash';
+import {reduce as _reduce, groupBy as _groupby, forEach as _foreach} from 'lodash';
 
 // Keep track of the unknowns
 var unknownTrack = {};

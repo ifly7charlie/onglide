@@ -20,12 +20,12 @@ import {LRUCache} from 'lru-cache';
 
 const options = {
     max: 3600,
-    dispose: function (key, n) {
-        console.log('flushed ' + key + ' from cache');
-    },
+    //    dispose: function (key, n) {
+    //        console.log('flushed ' + key + ' from cache');
+    //    },
     updateAgeOnGet: true,
     allowStale: true,
-    ttl: 72 * 3600 * 1000
+    ttl: 24 * 3600 * 1000
 };
 
 const cache = new LRUCache(options);
@@ -43,17 +43,30 @@ export function getCacheSize(): number {
 //       point at the same time and do more work.  It won't cause it to fail it just wastes CPU and
 //       memory as we keep fetching the same item
 //
-export async function getElevationOffset(lat, lng, cb) {
+export async function getElevationOffset(lat: number, lng: number): Promise<number>;
+export async function getElevationOffset(lat: number, lng: number, cb: Function): Promise<void>;
+export async function getElevationOffset(lat: number, lng: number, cb: Function | undefined = undefined) {
+    if (!cb) {
+        return new Promise<number>((r) => _getElevationOffset(lat, lng, r));
+    }
+    return _getElevationOffset(lat, lng, cb);
+}
+
+async function _getElevationOffset(lat, lng, cb) {
     // Checking process.env is expensive so cache this
     if (!referrer) {
-        referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
         accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+        if (!accessToken) {
+            cb(0);
+            return;
+        }
+        referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
     }
 
     // Figure out what tile it is (obvs same order as geojson)
     // see https://docs.mapbox.com/help/glossary/zoom-level/,
     // zoom 15 gives 1.8m per pixel at 40 degrees which should be fine
-    let tf = tilebelt.pointToTileFraction(lng, lat, 14);
+    let tf = tilebelt.pointToTileFraction(lng, lat, 13);
     let tile = tf.map(Math.floor);
     let domain = 'https://api.mapbox.com/v4/';
     let source = `mapbox.terrain-rgb/${tile[2]}/${tile[0]}/${tile[1]}.pngraw`;
@@ -82,7 +95,7 @@ export async function getElevationOffset(lat, lng, cb) {
     if (!pixels) {
         // Make sure we don't fetch same thing twice at the same time
         if (url in pending) {
-            console.log('queued elevation request');
+            //            console.log('queued elevation request');
             pending[url].push(cb);
             return;
         } else {
@@ -104,7 +117,7 @@ export async function getElevationOffset(lat, lng, cb) {
         }
 
         // Go and get the URL
-        fetch(url, {headers: {Referer: referrer}})
+        fetch(url, {headers: {Referer: referrer!}})
             .then((res) => {
                 if (res.status != 200) {
                     throw `MapBox API returns ${res.status}: ${res.statusText}, ensure "${referrer}" is in the allowed ACL`;

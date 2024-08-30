@@ -1,5 +1,6 @@
 import {query, mysqlEnd} from '../../lib/react/db';
 import escape from 'sql-template-strings';
+import {replay, getReplayDatecode} from '../../lib/now';
 
 export default async function competitionHandler(req, res) {
     const competition = await query(
@@ -21,9 +22,9 @@ export default async function competitionHandler(req, res) {
     }
 
     const classes = await query(
-        process.env.REPLAY
+        replay()
             ? escape`
-         SELECT c.class, c.classname, c.description, todcode(from_unixtime(${process.env.REPLAY})) datecode, cs.status, handicapped, notes
+         SELECT c.class, c.classname, c.description, ${getReplayDatecode()} datecode, cs.status, handicapped, notes
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
             : escape`
          SELECT c.class, c.classname, c.description, cs.datecode, cs.status, handicapped, notes

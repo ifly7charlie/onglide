@@ -1,6 +1,7 @@
 import {configureStore} from '@reduxjs/toolkit';
 
 import tracksSlice from '../redux/tracksSlice';
+import taskSlice from '../redux/taskSlice';
 import nowSlice from '../redux/nowSlice';
 import scoresSlice from '../redux/scoresSlice';
 import otherPilotsSlice from '../redux/otherPilotsSlice';
@@ -9,6 +10,7 @@ import otherPilotsSlice from '../redux/otherPilotsSlice';
 
 const store = configureStore({
     reducer: {
+        task: taskSlice,
         tracks: tracksSlice,
         scores: scoresSlice,
         otherPilots: otherPilotsSlice,

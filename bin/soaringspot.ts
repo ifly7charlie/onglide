@@ -17,12 +17,11 @@ import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import {getElevationOffset} from '../lib/getelevationoffset';
 // handle unkownn gliders
-import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
+import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
 import {toDateCode} from '../lib/datecode';
 
-import _groupby from 'lodash.groupby';
-import _forEach from 'lodash.foreach';
+import {groupBy as _groupby, forEach as _forEach} from 'lodash';
 
 // DB access
 //const db = require('../db')
@@ -143,9 +142,9 @@ async function soaringSpot(deep = false) {
     if (process.env.SOARINGSPOT_CLIENT_ID && process.env.SOARINGSPOT_SECRET) {
         keys.client_id = process.env.SOARINGSPOT_CLIENT_ID;
         keys.secret = process.env.SOARINGSPOT_SECRET;
-        keys.overwrite = process.env.SOARINGSPOT_OVERWRITE || 1;
-        keys.actuals = process.env.SOARINGSPOT_ACTUALS || 1;
-        console.log('environment variable', keys);
+        keys.overwrite = parseInt(process.env.SOARINGSPOT_OVERWRITE || '0');
+        keys.actuals = parseInt(process.env.SOARINGSPOT_ACTUALS || '1');
+        //        console.log('environment variable', keys);
     } else {
         // Get the soaring spot keys from database
         keys = (
@@ -325,7 +324,7 @@ async function update_pilots(class_url, classid, classname, keys) {
 
         // Make a list of the IDs, stripping anything but last 6 characters
         const flarms = flarmIds
-            .split(',')
+            .split(/[,:]/)
             .map((id) => id.match(/([a-f0-9]{6})$/i)?.[1])
             .filter((id) => !!id);
 
@@ -367,7 +366,7 @@ async function update_pilots(class_url, classid, classname, keys) {
 // Fetch the picture from FAI rankings
 async function download_picture(compno, classid, mysql, context) {
     // Check when it was last checked
-    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND image is not null OR unix_timestamp()-updated < 86400`))[0];
+    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND (image is not null OR unix_timestamp()-updated < 86400)`))[0];
 
     if (lastUpdated) {
         console.log(`not updating ${compno} picture`);
@@ -375,7 +374,7 @@ async function download_picture(compno, classid, mysql, context) {
     }
 
     // Find all the updater urls
-    const urls = (await mysql_db.query(escape`SELECT url FROM scoringsource WHERE type='pictureurl'`)) as {url: string}[];
+    const urls = (await mysql_db.query(escape`SELECT url FROM scoringsource WHERE type='pictureurl' order by overwrite asc`)) as {url: string}[];
     let success = false;
 
     for (const u of urls) {
@@ -787,7 +786,8 @@ async function process_day_scores(day, classid, classname, keys) {
         }
 
         const finished = row.scored_speed > 0;
-        const scoredStatus = finished ? 'F' : row.igc_file ? 'H' : 'S';
+        //        const scoredStatus = finished ? 'F' : row.igc_file ? 'H' : 'S';
+        const scoredStatus = finished ? 'F' : row.scored_distance > 0 ? 'H' : 'S';
 
         // If there is data from scoring then process it into the database
         if (row.status_evaluated) {

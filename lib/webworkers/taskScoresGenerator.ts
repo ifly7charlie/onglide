@@ -1,6 +1,8 @@
-import {Compno, PositionStatus, AltitudeAgl, BasePositionMessage, Epoch, TimeStampType, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task, DistanceKM, SpeedKPH} from '../types';
+import type {Compno, AltitudeAgl, TaskScoresGenerator, CalculatedTaskGenerator, CalculatedTaskLegStatus, Task, DistanceKM, SpeedKPH} from '../types';
+import {PositionStatus} from '../types';
 
 import {PilotScore, PilotScoreLeg, SpeedDist} from '../protobuf/onglide';
+import {distHaversineRaw} from '../flightprocessing/taskhelper';
 
 //
 function copyPick(d, o, ...props) {
@@ -107,13 +109,16 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // 3. the exit from the TP (ie startLine)
             const legTime = (leg) => (leg.entryTimeStamp && (leg?.point?.t || 0) > 10000 ? leg?.point?.t : null) || leg.entryTimeStamp || leg.exitTimeStamp || 0;
 
+            leg.convexHull ??= [];
+
             // Proper turnpoint - startPoint doesn't count
             if (previousLeg) {
                 const sl: PilotScoreLeg = (score.legs[leg.legno] = {
                     legno: leg.legno,
                     time: legTime(previousLeg),
                     estimatedStart: previousLeg?.estimatedTurn ? true : false,
-                    estimatedEnd: leg.estimatedTurn ? true : false
+                    estimatedEnd: leg.estimatedTurn ? true : false,
+                    convexHull: !leg.convexHull?.length ? [] : leg.convexHull
                 });
 
                 // Figure out actuals for the leg/copy them over
@@ -156,7 +161,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             else {
                 score.legs[leg.legno] = {
                     legno: leg.legno,
-                    time: leg.point?.t || leg.exitTimeStamp
+                    time: leg.point?.t || leg.exitTimeStamp || 0,
+                    convexHull: []
                 };
             }
 
@@ -168,10 +174,10 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     score.scoredPoints.push(leg.point.lng, leg.point.lat, sl.actual?.distance || 0, sl.handicapped?.distance || 0);
                 }
                 if (!score.utcFinish) {
-                    if (leg.minPossible) {
+                    if (leg.minPossible && leg.legno >= item.currentLeg - (item.inSector ? 0 : 1)) {
                         score.minDistancePoints.push(leg.minPossible.point.lng, leg.minPossible.point.lat, sl.actual?.minPossible || 0, sl.handicapped?.minPossible || 0);
                     }
-                    if (leg.maxPossible) {
+                    if (leg.maxPossible && leg.legno >= item.currentLeg - 1) {
                         score.maxDistancePoints.push(leg.maxPossible.point.lng, leg.maxPossible.point.lat, sl.actual?.maxPossible || 0, sl.handicapped?.maxPossible || 0);
                     }
                     //                    if (item.closestSectorPoint) {
@@ -216,20 +222,29 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         // Speeds only appropriate at some points in the flight
         // If we haven't landed out or come home without a finish
         // and don't start reporting them too quickly
-        if (
-            item.flightStatus != PositionStatus.Landed &&
-            (item.utcFinish || item.flightStatus != PositionStatus.Home) && //
-            (task.rules.grandprixstart || (duration > 60 * 7.5 && score.actual.taskDistance > 10))
-        ) {
-            doSpeedCalc(score.actual, 0, duration);
-            doSpeedCalc(score.handicapped, 0, duration);
-            //
-            // Calculate overall speed and remaining GR if there is a need for one
-            score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
-            if (!item.utcFinish && item.lastProcessedPoint?.a) {
-                const finishAlt = task.legs[task.legs.length - 1].altitude ?? 0;
-                doGrCalc(score.actual, item.lastProcessedPoint.a - finishAlt);
-                doGrCalc(score.handicapped, item.lastProcessedPoint.a - finishAlt);
+        if (item.flightStatus != PositionStatus.Landed && (item.utcFinish || item.flightStatus != PositionStatus.Home)) {
+            const finishLeg = task.legs[task.legs.length - 1];
+            const finishAlt = finishLeg.altitude ?? 0;
+
+            if (task.rules.grandprixstart || (duration > 60 * 7.5 && score.actual.taskDistance > 10)) {
+                doSpeedCalc(score.actual, 0, duration);
+                doSpeedCalc(score.handicapped, 0, duration);
+                //
+                // Calculate overall speed and remaining GR if there is a need for one
+                score.actual.taskSpeed = Math.round(score.actual.taskDistance / (duration / 36000)) / 10;
+                if (!item.utcFinish && item.lastProcessedPoint?.a) {
+                    doGrCalc(score.actual, item.lastProcessedPoint.a - finishAlt);
+                    doGrCalc(score.handicapped, item.lastProcessedPoint.a - finishAlt);
+                }
+            }
+
+            // Calculate the GR to home
+            if (item.lastProcessedPoint) {
+                score.home = {
+                    taskDistance: score.actual.distance ?? 0,
+                    distanceRemaining: item.lastProcessedPoint ? distHaversineRaw([item.lastProcessedPoint.lng, item.lastProcessedPoint.lat], finishLeg.point!) : 0
+                };
+                doGrCalc(score.home, item.lastProcessedPoint.a - finishAlt);
             }
         }
 

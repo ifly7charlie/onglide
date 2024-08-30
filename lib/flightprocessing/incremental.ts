@@ -24,7 +24,6 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
         segmentIndex: 1,
         trackVersion
     };
-    glider.vario = {min: Infinity, max: 0} as VarioData;
 }
 
 //
@@ -64,10 +63,14 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
             return false;
         }
         initialiseDeck(glider.compno, glider, 0);
+        if (!glider.deck) {
+            return false;
+        }
     } else {
         // If not first point then make sure we are in order!
         lastTime = glider.deck.t[glider.deck.posIndex - 1];
         if (point.t < lastTime) {
+            //            console.log(glider.compno, point.t, '<', lastTime);
             return false;
         }
     }
@@ -109,7 +112,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     } else {
         const previousSegmentStart = deck.indices[deck.segmentIndex - 1];
         // If the gap is too long then we need to start the next segment as well
-        if (point.t - lastTime > gapLength) {
+        if (point.t - lastTime! > gapLength) {
             // If we have only one point in the previous segment then we should duplicate it
             if (previousSegmentStart == deck.posIndex - 1) {
                 // add it to the previous segment so there are two points in it, it's not a line
@@ -124,7 +127,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
                 pushPoint([point.lng, point.lat, point.a], point.g, point.t);
                 deck.segmentIndex++;
             }
-            deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime));
+            deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime!));
         }
     }
 
@@ -135,57 +138,33 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
 }
 
 // Calculate vario for the specific index
-export function calculateVario(deck: DeckData, index: number) {
+export function calculateVario(deck: DeckData, tNow: Epoch, index: number): VarioData {
     const t = deck.t[index];
 
     // Find 40 seconds
     let start = index;
-    while (start > 0 && t - deck.t[start] < 40) {
+    while (start > 1 && t - deck.t[start - 1] < 40) {
         start--;
     }
 
-    let v = {gainXsecond: 0, lossXsecond: 0} as VarioData;
-
     // Add them up
-    let previousAlt = deck.positions[start * 3 + 2];
-    let initialAlt = previousAlt;
-    for (let c = start; c < index; c++) {
-        const altitude = deck.positions[c * 3 + 2];
-        if (previousAlt !== undefined) {
-            let diff = altitude - previousAlt;
-            if (diff > 0) v.gainXsecond += diff;
-            if (diff < 0) v.lossXsecond -= diff;
-        }
-        previousAlt = altitude;
-    }
+    const total = deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2];
+    const Xperiod = (t - deck.t[start]) as Epoch;
 
     // The total and the average, along with misc status values
-    v.total = previousAlt - initialAlt;
-    v.Xperiod = (t - deck.t[start]) as Epoch;
-    v.average = Math.round((v.total * 10) / v.Xperiod) / 10;
-    v.lng = deck.positions[index * 3];
-    v.lat = deck.positions[index * 3 + 1];
-    v.agl = deck.agl[index];
-    v.altitude = previousAlt;
-    v.t = t as Epoch;
-
-    return v;
+    return {
+        valid: Xperiod && tNow - t < 40,
+        total,
+        Xperiod,
+        average: Math.round((total * 10) / Xperiod) / 10,
+        agl: deck.agl[index],
+        altitude: deck.positions[start * 3 + 2],
+        t: t as Epoch
+    };
 }
 
 // Calculate vario for the specific index
-export function calculateAverage(deck: DeckData, index: number) {
-    const t = deck.t[index];
-
-    // Find 40 seconds
-    let start = index;
-    while (start > 0 && t - deck.t[start] < 40) {
-        start--;
-    }
-
-    if (start == index) {
-        return null;
-    }
-
-    // Add them up
-    return Math.round((10 * (deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2])) / (t - deck.t[start])) / 10;
+export function calculateAverage(deck: DeckData, tNow: Epoch, index: number) {
+    const v = calculateVario(deck, tNow, index);
+    return v.valid ? v.average : null;
 }

@@ -15,6 +15,11 @@ export function timeToText(t: Epoch): string {
     return dt.toLocaleTimeString('en-GB', {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'});
 }
 
+export function dateToText(t: Epoch): string {
+    const dt = new Date(t * 1000);
+    return dt.toLocaleString('en-GB', {timeZone: tz, dateStyle: 'medium', timeStyle: 'medium'});
+}
+
 export function durationToText(elapsed: Epoch): string {
     var hours = Math.trunc(elapsed / 3600);
     var mins: string | number = Math.trunc((elapsed / 60) % 60);

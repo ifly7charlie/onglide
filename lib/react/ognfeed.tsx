@@ -89,7 +89,7 @@ export const OgnFeed = memo(
         notes: string;
     }) {
         const {pilots, isPLoading} = usePilots(vc);
-        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
+        //        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
         const [follow, setFollow] = useState(false);
@@ -112,18 +112,14 @@ export const OgnFeed = memo(
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
 
-        useEffect(() => {
-            if (socketUrl != proposedUrl(vc, datecode)) {
-                setSocketUrl(proposedUrl(vc, datecode));
-            }
-        }, [vc, datecode, !!socketUrl]);
+        const socketUrl = useMemo(() => proposedUrl(vc, datecode), [vc, datecode]);
 
         // We are using a webSocket to update our data here
         const {sendMessage} = useWebSocket(socketUrl, {
-            reconnectAttempts: 15,
+            reconnectAttempts: 40,
             reconnectInterval: (lastAttemptNumber: number) => {
                 mergeWsStatus({retry: lastAttemptNumber + 1});
-                return (1 << Math.max(lastAttemptNumber, 4)) * 1000 + Math.random() * 1200;
+                return (lastAttemptNumber < 4 ? 0.75 : lastAttemptNumber < 15 ? 4 : lastAttemptNumber) * (1 + Math.random()) * 1000;
             },
             retryOnError: true,
             shouldReconnect: () => true,
@@ -135,11 +131,12 @@ export const OgnFeed = memo(
                 if (lastMessage.data === 'reload') {
                     // Force a page reload
                     const currentReloadCount = parseInt((router.query?.reloaded as string) ?? '0');
-                    console.log('reloading', currentReloadCount, (1 << currentReloadCount) * 1000);
-                    const newParams = {
-                        query: {...router.query, reloaded: currentReloadCount + 1}
-                    };
-                    setTimeout(() => router.replace(newParams), (1 << currentReloadCount) * 1000);
+                    if (currentReloadCount == 0) {
+                        const newParams = {
+                            query: {...router.query, reloaded: currentReloadCount + 1}
+                        };
+                        setTimeout(() => router.replace(newParams), 30000 * Math.random());
+                    }
                 } else {
                     decoder(lastMessage.data);
                 }
@@ -153,20 +150,21 @@ export const OgnFeed = memo(
             },
             onReconnectStop: (_numAttempts) => mergeWsStatus({listeners: 0, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'closed'}), // clear status as offline
             heartbeat: {
-                timeout: 30_000,
-                interval: 13_000
+                message: () => JSON.stringify({v: document?.hidden ? 0 : 1}),
+                timeout: 31000,
+                interval: 10000
             }
         });
 
         // Do we have a loaded set of details?
         const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
-        const connected = wsStatus.state == 'open' || (wsStatus.state == 'retry' && (wsStatus.retry ?? 0) < 2);
+        const connected = wsStatus.state == 'open' || (wsStatus.state == 'retry' && (wsStatus.retry ?? 0) < 16);
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
                 connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
-                retry: (wsStatus.retry ?? 0) < 2 && wsStatus.at ? null : [(wsStatus.at ? 'Rec' : 'C') + 'onnecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
-                closed: ['Connection to tracking is closed, please reload to reconnect', <FontAwesomeIcon icon={solid('link-slash')} />]
+                retry: (wsStatus.retry ?? 0) < 16 ? null : ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
+                closed: ['Connection to tracking is closed, please change the selected class to retry', <FontAwesomeIcon icon={solid('link-slash')} />]
             }[wsStatus.state ?? 'open'];
 
             console.log('last timestamp on status change', wsStatus.at, connectionStatusO?.[0]);
@@ -211,8 +209,8 @@ export const OgnFeed = memo(
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
         useEffect(() => {
-            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', options}));
-        }, [options, selectedCompno, sendMessage]);
+            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime}));
+        }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, selectedCompno, sendMessage]); //
 
         return (
             <>
@@ -227,6 +225,7 @@ export const OgnFeed = memo(
                         setOptions={setOptions}
                         tz={tz}
                         replayTime={replayTime}
+                        setReplayTime={setReplayTime}
                         viewport={viewport}
                         setViewport={setViewport}
                         selectedCompno={selectedCompno}
@@ -241,7 +240,7 @@ export const OgnFeed = memo(
                                 <br />
                             </>
                         )}
-                        <TaskDetails vc={vc} fitBounds={fitBounds} />
+                        <TaskDetails vc={vc} fitBounds={fitBounds} tz={tz} />
                         {connectionStatus}
                         {valid && connected ? (
                             <PilotList
@@ -259,8 +258,6 @@ export const OgnFeed = memo(
                         ) : null}
                         {valid && connected ? (
                             <PlaybackControls //
-                                className={vc}
-                                datecode={datecode}
                                 {...availableScores}
                                 replayTime={replayTime}
                                 setReplayTime={setReplayTime}
@@ -305,7 +302,7 @@ function formatTimes(t, tz: TZ) {
     const dt = new Date(t * 1000);
     const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((t + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
     return (
-        `<a href='#' title='competition time'>${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a>` + //
+        `<a href='#' title='competition time'>${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
         `<a href='#' title='your time'>${dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`
     );
 }

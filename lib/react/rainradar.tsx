@@ -4,24 +4,23 @@
 
 import {useEffect, useState} from 'react';
 //import Source from '../lib/source';
-import {Source, Layer} from 'react-map-gl';
-import {useRouter} from 'next/router';
+import {Source, Layer, LayerProps} from 'react-map-gl';
 
-import _maxby from 'lodash.maxby';
+import {maxBy as _maxby} from 'lodash';
+import type {Options, TZ} from '../types';
 
-export function RadarOverlay({options, tz, setOptions}) {
-    const [radarTileURL, setURL] = useState();
-    const [radarTime, setTime] = useState();
-    const router = useRouter();
+export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
+    const [radarTileURL, setURL] = useState<string>();
+    const [radarTime, setTime] = useState<string>();
 
     useEffect(() => {
-        let timer = undefined;
+        let timer: NodeJS.Timeout | undefined = undefined;
 
         function loadRadar() {
             clearTimeout(timer);
+            setURL(undefined);
+            setTime(undefined);
             if (options.rainRadar) {
-                setURL(undefined);
-                setTime(undefined);
                 fetch('https://api.rainviewer.com/public/weather-maps.json', {
                     credentials: 'omit'
                 })
@@ -33,7 +32,7 @@ export function RadarOverlay({options, tz, setOptions}) {
                     })
                     .then((res) => {
                         try {
-                            return res?.json();
+                            return res ? res?.json() : null;
                         } catch (e) {
                             console.log(e);
                             return null;
@@ -47,6 +46,7 @@ export function RadarOverlay({options, tz, setOptions}) {
                     })
                     .then((apiData) => {
                         if (!apiData) {
+                            console.log(new Date(), 'no radar data, will try again in two minutes');
                             timer = setTimeout(() => {
                                 loadRadar();
                             }, 60000);
@@ -69,7 +69,6 @@ export function RadarOverlay({options, tz, setOptions}) {
 
                         // Figure out when to run next, API updates in 10 minutes
                         const interval = parseInt(apiData?.generated) + 600 - Date.now() / 1000;
-                        //						console.log( "next radar check in ", interval, "seconds", Date.now()/1000 );
                         timer = setTimeout(() => {
                             loadRadar();
                         }, Math.max(interval || 0, 60) * 1000);
@@ -84,7 +83,7 @@ export function RadarOverlay({options, tz, setOptions}) {
         }
         loadRadar();
         return () => clearTimeout(timer);
-    }, [options.rainRadarAdvance]);
+    }, [options.rainRadarAdvance, options.rainRadar]);
 
     // If it's to be displayed then make sure it is
     // note this is also used for refreshing the display - we will briefly set URL and Time to undefined
@@ -93,16 +92,7 @@ export function RadarOverlay({options, tz, setOptions}) {
     // the raster source layer is unable to update tiles, and the fact that react-mapbox-gl doesn't
     // know anything about rasters so doesn't deal with it either
     if (options.rainRadar && radarTileURL && radarTime) {
-        //		console.log( new Date(), 'new radar tile', radarTileURL, radarTime );
-        if (window) {
-            const nextRadar = (options.rainRadarAdvance + 1) % 4;
-            window.advanceRadar = () => {
-                setOptions({...options, rainRadarAdvance: nextRadar});
-                setURL(undefined);
-                setTime(undefined);
-            };
-        }
-        const attribution = `<a href="https://www.rainviewer.com/">Rain Viewer</a> @ <a href='#'  onclick="advanceRadar()">${radarTime}</a>`;
+        const attribution = `<a href="https://www.rainviewer.com/">Rain Viewer</a> @ <a href='#' title='competition time for weather radar'>${radarTime}</a>`;
         return {
             attribution: attribution,
             key: 'rainradar',
@@ -121,13 +111,13 @@ export function RadarOverlay({options, tz, setOptions}) {
     }
 }
 
-let rainviewerLayer = {
+let rainviewerLayer: LayerProps = {
     id: 'rainRadar',
     type: 'raster',
     paint: {
         'raster-opacity': 0.6
-    },
-    source: 'raster',
-    minzoom: 0,
-    maxzoom: 12
+    }
+    //    source: 'rainmap'
+    //    minzoom: 0,
+    //    maxzoom: 12
 };

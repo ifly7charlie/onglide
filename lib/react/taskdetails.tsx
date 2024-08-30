@@ -1,66 +1,82 @@
 //
 // The turnpoint list
 //
-import {memo} from 'react';
+import {memo, useMemo} from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {useState} from 'react';
-import {useTask, Spinner, Error} from './loaders';
+import {useContest, Spinner, Error} from './loaders';
 
 import Collapse from 'react-bootstrap/Collapse';
 
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
+import {selectTask, selectHasTask} from '../redux/taskSlice';
+import {useSelector} from '../redux';
+
+import type {TaskLeg, ClassName, TZ} from '../types';
+import {fromDateCode} from '../datecode';
+
 //
-export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; fitBounds: Function}) {
-    const {data, isLoading, isError} = useTask(vc);
+export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: ClassName; fitBounds: Function; tz: TZ}) {
+    const task = useSelector((state) => selectTask(state, vc));
+    const hasTask = useSelector((state) => selectHasTask(state, vc));
+    const {comp, isLoading} = useContest();
     const [open, setOpen] = useState(false);
 
-    if (isLoading) return <Spinner />;
-    if (isError) return <Error />;
+    const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
+    // And then produce a string to display it locally
+    const fClass = comp.classes.find((c) => c.class == vc);
+    const dateString = useMemo(() => {
+        const date = task?.details?.calendardate ?? fClass?.datecode ? fromDateCode(fClass.datecode) : null;
+        return date ? `${new Date(date).toLocaleDateString(lang, {day: 'numeric', month: 'short'})}` : '';
+    }, [lang, tz, task?.details?.calendardate]);
 
-    if (!data || !data.contestday) {
+    if (isLoading || !hasTask) {
+        return <Spinner />;
+    }
+
+    if (!comp || !fClass || !task) {
         return (
             <>
-                <br style={{clear: 'both'}} />
-                <br style={{clear: 'both'}} />
-                <h4>No task</h4>
+                <h5>{dateString}: No task</h5>
             </>
         );
     }
-    const fClass = data.contestday.class;
+
     let taskDescription: any = '';
-    switch (data.task.type) {
+    console.log('TD:', task.details);
+    switch (task.details.type) {
         case 'S':
-            taskDescription = <>Speed Task: {data.task.distance}km</>;
+            taskDescription = <>{task.details.distance}km Speed Task</>;
             break;
         case 'D':
-            taskDescription = <>Distance Handicap Task: {data.task.distance}km</>;
+            taskDescription = <>Distance Handicap Task: {task.details.distance}km</>;
             break;
         case 'E':
-            taskDescription = <>e3Glide Distance Handicap Task: {data.task.distance}km</>;
+            taskDescription = <>e3Glide Distance Handicap Task: {task.details.distance}km</>;
             break;
         case 'A':
-            if (data.task.duration.substring(1, 5) == '0:00') {
-                taskDescription = <>Assigned Area Task</>;
+            if (task.details.duration.substring(1, 5) == '0:00') {
+                taskDescription = <>Assigned Area</>;
             } else {
-                taskDescription = <>Assigned Area Task: {data.task.duration.substring(1, 5)} hours</>;
+                taskDescription = <>{task.details.duration.substring(1, 5)} hour Assigned Area Task</>;
             }
             break;
     }
 
-    if (data.contestday.status == 'Z') {
+    if (task.details.status == 'Z') {
         taskDescription = 'Scrubbed';
     }
 
-    const classNameSentenceCased = data.classes.classname.replace(matchWords, (r) => r.toUpperCase());
+    const classNameSentenceCased = fClass.classname.replace(matchWords, (r) => r.toUpperCase());
 
     return (
         <>
             <div className={'d-lg-inline d-none'}>
                 <h5 style={{fontSize: '1.2vw'}}>
-                    {classNameSentenceCased} {taskDescription}
+                    {dateString}: {taskDescription}
                     <span className="sorting" style={{fontSize: 'medium'}}>
                         <button title="Zoom to task" onClick={fitBounds as any}>
                             <FontAwesomeIcon icon={solid('magnifying-glass-location')} />
@@ -75,14 +91,13 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; 
 
                 <Collapse in={open}>
                     <div id="task-collapse">
-                        <h5>{data.classes.classname}</h5>
-                        <p>{data.contestday.displaydate}</p>
-                        <Tasklegs legs={data.legs} />
+                        <p>{task?.details?.nostart != '00:00:00' ? `Start open ${task.details.nostart.substring(0, 5)}` : ''}</p>
+                        <Tasklegs legs={task.legs} />
 
-                        {data.contestday.notes?.length > 0 && (
+                        {task.details.info && (
                             <>
                                 <hr />
-                                <div>{data.contestday.notes}</div>
+                                <div>{task.details.info}</div>
                             </>
                         )}
                     </div>
@@ -94,7 +109,7 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds}: {vc: any; 
 });
 
 // Internal: details on the leg
-function Tasklegs(props) {
+function Tasklegs(props: {legs: TaskLeg[]}) {
     return (
         <table className="table table-condensed" style={{marginBottom: '0px'}}>
             <thead>
@@ -111,7 +126,7 @@ function Tasklegs(props) {
                         <td>
                             {leg.legno}:{leg.ntrigraph}
                         </td>
-                        <td>{leg.nname}</td>
+                        <td>{leg.name}</td>
                         <td>{leg.legno !== 0 ? leg.bearing + '° ' : ''}</td>
                         <td>{leg.legno !== 0 ? Math.round(leg.length * 10) / 10 + ' km' : ''}</td>
                         <td>{leg.r1 !== 0 ? Math.round(leg.r1 * 10) / 10 + ' km' : ''}</td>

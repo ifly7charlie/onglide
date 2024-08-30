@@ -64,6 +64,11 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             point = current.value as EnrichedPosition;
             stationary = false;
 
+            if (!point.lng) {
+                console.log(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${point}, prev: ${previousPoint}`);
+                return;
+            }
+
             // For distance calculations
             point.geoJSON = turfPoint([point.lng, point.lat]);
 
@@ -97,7 +102,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                     // And enough elapsed time
                     if (point.t - previousPoint.t > 60) {
                         // And if it's at home or somewhere else
-                        if (distance(point.geoJSON, airfield.point!) < 2) {
+                        if (distance(point.geoJSON, airfield.point!) < 3) {
                             point.ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
                         } else {
                             point.ps = PositionStatus.Landed;

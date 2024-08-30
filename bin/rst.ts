@@ -27,9 +27,7 @@ import {getElevationOffset} from '../lib/getelevationoffset.js';
 // handle unkownn gliders
 import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding.js';
 
-import _groupby from 'lodash.groupby';
-import _forEach from 'lodash.foreach';
-import _reduce from 'lodash.reduce';
+import {groupBy as _groupby, forEach as _forEach, reduce as _reduce} from 'lodash';
 
 // DB access
 import escape from 'sql-template-strings';

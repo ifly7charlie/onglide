@@ -46,7 +46,7 @@ export interface TimeStampType {
     t: Epoch;
 }
 
-import type {Point, Feature} from 'geojson';
+import type {Point, Feature, Polygon, LineString} from 'geojson';
 
 // Where is the airfield
 export interface AirfieldLocation {
@@ -85,8 +85,7 @@ export interface PositionMessage extends BasePositionMessage {
     g: AltitudeAgl; // agl
     b?: Bearing; // course
     s?: Speed; // speed
-    f?: string; // sender & id receiver
-    l?: boolean | null; // is late
+    l?: boolean | null; // picked
     _?: boolean; // live
 }
 
@@ -104,6 +103,17 @@ export enum PositionStatus {
     Landed = 6,
     Finished = 7
 }
+
+export const PositionStatusText = {
+    [PositionStatus.Unknown]: 'unknown',
+    [PositionStatus.Stationary]: 'stationary',
+    [PositionStatus.Grid]: 'grid',
+    [PositionStatus.Low]: 'low',
+    [PositionStatus.Airborne]: 'airborne',
+    [PositionStatus.Home]: 'home',
+    [PositionStatus.Landed]: 'landed',
+    [PositionStatus.Finished]: 'finished'
+};
 
 export interface EnrichedPosition extends PositionMessage {
     ps: PositionStatus;
@@ -132,9 +142,10 @@ export interface TaskLeg extends TaskLegsTableRow {
     direction: 'symmetrical' | 'np' | 'pp' | 'fixed';
 
     maxR?: DistanceKM;
-    geoJSON?: any; // geoJSON for the sector
+    geoJSON?: Polygon; // geoJSON for the sector
     lineString?: any;
-    point?: any; // coordiantes of center geoJSON style
+    point?: [number, number]; // coordiantes of center geoJSON style
+    pointGeoJSON?: Feature<Point>;
     altitude?: AltitudeAMSL; // altitude of the point
     coordinates?: any; // array of geoJSON ordered points eg [ [lng,lat], [lng,lat] ]
     quickSector?: boolean; // are we simple or not?
@@ -150,9 +161,10 @@ export interface Task {
         dh?: boolean; // distance handicap
 
         handicapped?: boolean;
+        dm?: number;
     };
 
-    details: any;
+    details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance?: DistanceKM} & ClassesTableRow & ContestDayTableRow;
 
     legs: TaskLeg[];
 }
@@ -190,7 +202,7 @@ export interface TaskStatus extends TimeStampType {
     inSector: boolean;
     inPenalty: boolean;
 
-    closestToNext?: DistanceKM; // closest point to next sector (dist)
+    closestDistanceToNext?: DistanceKM; // closest point to next sector (dist)
     closestToNextSectorPoint?: BasePositionMessage; // positionmessage
     closestSectorPoint?: BasePositionMessage; // point on next sector that matches above
 
@@ -225,6 +237,7 @@ export interface CalculatedTaskLegStatus extends TaskLegStatus {
         point: BasePositionMessage;
         start?: BasePositionMessage;
     };
+    convexHull?: number[];
 }
 
 export interface CalculatedTaskStatus extends TaskStatus {
@@ -274,19 +287,12 @@ export interface VarioData {
     altitude: AltitudeAMSL; // current
     agl: AltitudeAgl;
 
-    lat: number;
-    lng: number;
-
-    min: AltitudeAgl; // after start min/max
-    max: AltitudeAgl;
-
-    lossXsecond: number; // loss in period
-    gainXsecond: number; // gain in period
     total: number; // total loss / gain
     average: number; // average of total/Xperiod
     Xperiod: Epoch; // period
 
     t: Epoch; // when was this updated
+    valid: boolean;
 }
 
 export type SortKey =
@@ -325,7 +331,6 @@ export interface DisplayPilotTrackData extends PilotTrackData {
 export interface PilotTrackData {
     compno: Compno;
     deck?: DeckData;
-    vario?: VarioData;
     t?: Epoch;
 }
 
@@ -402,6 +407,12 @@ export interface ClassesTableRow {
     Dm: number | null;
 }
 
+export interface ContestDayTableRow {
+    calendardate: string;
+    info: string;
+    status: string;
+}
+
 export enum Units {
     metric = 0,
     british = 1
@@ -441,4 +452,6 @@ export interface Options {
 
     options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
     options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
+
+    loadId?: number;
 }

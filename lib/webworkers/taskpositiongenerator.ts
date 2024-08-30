@@ -65,7 +65,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             startFound: false,
             startConfirmed: false,
             currentLeg: 0,
-            closestToNext: Infinity as DistanceKM,
+            closestDistanceToNext: Infinity as DistanceKM,
             inSector: false,
             inPenalty: false,
             pointsProcessed: status?.pointsProcessed || 0,
@@ -129,13 +129,13 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
             // We pass ticks through and then do nothing more
             if (isTick(current.value)) {
-                const progress = (status?.closestToNext ?? 0) - (lastTickStatus?.closestToNext ?? 0);
+                const progress = (status?.closestDistanceToNext ?? 0) - (lastTickStatus?.closestDistanceToNext ?? 0);
                 let ok =
-                    !lastTickStatus?.closestToNext ||
-                    lastTickStatus.closestToNext > 0 ||
+                    !lastTickStatus?.closestDistanceToNext ||
+                    lastTickStatus.closestDistanceToNext > 0 ||
                     status.flightStatus != lastTickStatus.flightStatus ||
                     status.currentLeg != lastTickStatus.currentLeg ||
-                    (progress < 0 && -progress / lastTickStatus.closestToNext / lastTickStatus.closestToNext > 0.1) || // 10% of remaining distance at least
+                    (progress < 0 && -progress / lastTickStatus.closestDistanceToNext / lastTickStatus.closestDistanceToNext > 0.1) || // 10% of remaining distance at least
                     (task.rules.aat && (status.inPenalty || status.inSector));
 
                 if (ok) {
@@ -194,7 +194,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // do nothing,
                 if (point.t < task.rules.nostartutc - 10) {
                     if (point._) {
-                        await setTimeout(Math.min((task.rules.nostartutc - 10 - point.t) * 1000, 10 * sleepInterval));
+                        await setTimeout(Math.min((task.rules.nostartutc - 10 - point.t) * 1000, sleepInterval));
                     }
                     continue;
                 }
@@ -203,7 +203,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // ignore before - this can happen if scored into soaringspot
                 if (status.utcStart && point.t < status.utcStart) {
                     if (point._) {
-                        await setTimeout(Math.min((status.utcStart - point.t - 10) * 1000, 10 * sleepInterval));
+                        await setTimeout(Math.min((status.utcStart - point.t - 10) * 1000, sleepInterval));
                     }
                     continue;
                 }
@@ -283,7 +283,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     log(`re-entry of AAT sector ${status.recentLegAdvance} at ${point.t}, ${distFromPrevious}`);
                     status.currentLeg = status.recentLegAdvance;
                     legStatus = status.legs[status.currentLeg];
-                    status.closestToNext = Infinity as DistanceKM;
+                    status.closestDistanceToNext = Infinity as DistanceKM;
                     possibleAdvances = [];
                     delete status.closestToNextSectorPoint;
                 } else if (distFromPrevious > Math.min(task.legs[status.currentLeg]?.length * 0.1, 10)) {
@@ -304,8 +304,8 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
             // If this point is closer to the sector than the last one then save it away so we can
             // check for doglegs
-            if (!inSector && !inPenalty && distanceRemaining < status.closestToNext) {
-                status.closestToNext = (Math.round(distanceRemaining * 10) / 10) as DistanceKM;
+            if (!inSector && !inPenalty && distanceRemaining < status.closestDistanceToNext) {
+                status.closestDistanceToNext = (Math.round(distanceRemaining * 10) / 10) as DistanceKM;
                 status.closestToNextSectorPoint = simplifyPoint(point);
                 nearestSectorPoint.properties.t = point.t;
                 closestSectorPoint = _clonedeep(nearestSectorPoint);
@@ -333,7 +333,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status._ = true;
 
                     // Nowhere else to go
-                    status.closestToNext = Infinity as DistanceKM;
+                    status.closestDistanceToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
                     // we are done scoring at this point so we can close the iterator and
                     // return the status
@@ -368,7 +368,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     log('* next tp:' + status.currentLeg + '/' + inSector + ',' + legStatus.legno);
                 }
                 legStatus.exitTimeStamp = point.t;
-                status.closestToNext = Infinity as DistanceKM;
+                status.closestDistanceToNext = Infinity as DistanceKM;
                 possibleAdvances = [];
                 delete status.closestToNextSectorPoint;
             }
@@ -401,7 +401,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (!inPenalty && !inSector) {
                     if (!task.rules.aat) {
                         status.currentLeg++;
-                        status.closestToNext = Infinity as DistanceKM;
+                        status.closestDistanceToNext = Infinity as DistanceKM;
                         possibleAdvances = [];
                         delete status.closestToNextSectorPoint;
                     }
@@ -410,13 +410,13 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     // assuming advance. AAT is longer otherwise a brief pop out will ignore points after
                     // however need to cope with short legs (control points for example)
                     else {
-                        log(`setting a advance`, JSON.stringify(legStatus));
-                        log(point);
+                        //                        log(`setting a advance`, JSON.stringify(legStatus));
+                        log(`setting a advance`, point);
                         //                    log(status);
                         status.recentLegAdvance = status.currentLeg;
                         status.currentLeg++;
                         legStatus = status.legs[status.currentLeg];
-                        status.closestToNext = Infinity as DistanceKM;
+                        status.closestDistanceToNext = Infinity as DistanceKM;
                         possibleAdvances = [];
                         delete status.closestToNextSectorPoint;
                     }
@@ -494,7 +494,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             // <2  minutes -> 330kph (final glide - should we confirm height loss?)
                             // accept 50% higher with current LD for the glide in the 10 to 35 range - perhaps
                             // this should be LD to finish but we don't calculate that till end of points as it's around turnpoints...
-                            const possibleSpeed = elapsedTime > 600 ? 160 : (ld > 10 && ld < 35 ? 1.5 : 1) * (elapsedTime < 120 ? 330 : 210);
+                            const possibleSpeed = elapsedTime > 600 ? 180 : (ld > 10 && ld < 35 ? 1.5 : 1) * (elapsedTime < 120 ? 330 : 210);
 
                             // Make sure we meet the constrants
                             if (neededSpeed < possibleSpeed) {
@@ -526,7 +526,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 }
 
                 // Or are they are further away now,
-                if (possibleAdvances.length && distanceRemaining > status.closestToNext + Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, 2)) {
+                if (possibleAdvances.length && distanceRemaining > status.closestDistanceToNext + Math.min(task.legs[status.currentLeg + 1]?.length * 0.1, 2)) {
                     // We pick the advance based on - lowest ld
                     const advanceChosen = possibleAdvances.sort((paA, paB) => paA.ld - paB.ld)[0];
                     log(
@@ -551,7 +551,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status.currentLeg++;
 
                     // It's possible this should setup the closest to next correctly based on the backtrack
-                    status.closestToNext = Infinity as DistanceKM;
+                    status.closestDistanceToNext = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
 
                     possibleAdvances = [];
@@ -570,7 +570,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (task.rules.aat) {
                     await setTimeout((status.inSector ? 2 : 1) * sleepInterval); // less often for in sector aat
                 } else {
-                    await setTimeout(Math.max((Math.min(status.closestToNext ?? Infinity, 25) / 25) * sleepInterval, 5000)); //
+                    await setTimeout(Math.max((Math.min(status.closestDistanceToNext ?? Infinity, 25) / 25) * sleepInterval, 5000)); //
                 }
             }
         } catch (e) {

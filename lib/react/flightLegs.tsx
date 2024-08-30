@@ -54,10 +54,10 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
         if (!l) {
             return null;
         }
-        if (l.maxPossible && l.minPossible && Math.trunc(l.minPossible) != Math.round(l.maxPossible)) {
+        if (l.maxPossible && l.minPossible && Math.round(l.minPossible) != Math.round(l.maxPossible)) {
             return (
                 <td style={{fontSize: 'small'}} key="mp_dr">
-                    {Math.trunc(l.minPossible)}-{Math.round(l.maxPossible)}
+                    {Math.round(l.minPossible)}-{Math.round(l.maxPossible)}
                     <br />
                     {l.distanceRemaining}
                 </td>

@@ -13,7 +13,7 @@ import type {Identifiers} from '../protobuf/onglide';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 
-interface TracksSliceState {
+interface NowSliceState {
     className: ClassName;
     datecode: Datecode;
     earliestScore: Epoch;
@@ -24,7 +24,7 @@ interface TracksSliceState {
 }
 
 // Define the initial state using that type
-const initialState: TracksSliceState = {
+const initialState: NowSliceState = {
     className: 'unknown' as ClassName,
     datecode: '' as Datecode,
     now: 0 as Epoch,
@@ -56,13 +56,14 @@ export const nowSlice = createSlice({
             state.earliestScore = payload.earliestScore as Epoch;
             state.latestScore = payload.latestScore as Epoch;
             state.onlineStart = payload.t as Epoch;
-            state.liveScoreId = payload.scoreId;
+            state.liveScoreId = payload.scoreId ?? '';
         });
     },
     selectors: {
         selectNow: (state) => state.now,
         selectClassName: (state) => state.className,
         selectDatecode: (state) => state.datecode,
+        selectScoreId: (state) => state.liveScoreId,
         selectAvailableScoreTimes: (state) => ({earliestScore: state.earliestScore, latestScore: state.latestScore, live: !!state.liveScoreId}),
         selectOnline: (state) => state.onlineStart
     }
@@ -70,4 +71,4 @@ export const nowSlice = createSlice({
 
 export default nowSlice.reducer;
 export const {updateNow, offline} = nowSlice.actions;
-export const {selectNow, selectClassName, selectDatecode, selectAvailableScoreTimes, selectOnline} = nowSlice.selectors;
+export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectAvailableScoreTimes, selectOnline} = nowSlice.selectors;

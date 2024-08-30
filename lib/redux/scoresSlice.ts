@@ -78,7 +78,7 @@ export const scoresSlice = createSlice({
             }
             // If the score id has changed then we need to reset everything historical
             if (state.scoreId != scoreId) {
-                console.log('update scoreId', scoreId, state.scoreId);
+                console.log(`update scoreId ${state.scoreId} => ${scoreId}`);
                 state.loading = {};
                 state.scoreId = scoreId;
                 state.historical = {};
@@ -240,25 +240,17 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
         const requestChunk = getChunk(t, now);
         const chunkId = requestChunk.toString();
         if (state.loading[chunkId] != requestId) {
-            //            console.log('FOS chunk already requested', d(requestChunk), state.loading[requestChunk.toString()]);
             return;
         }
 
         if (isCurrentChunk(t, now)) {
             const previous = getPreviousChunk(t);
-            console.log('FOS: currentChunk', previous, onlineStart);
             if (previous > onlineStart) {
-                console.log('FOS already live when requested');
                 return;
             }
         }
-        console.log('FOS requesting chunk', d(requestChunk), state.loading[chunkId]);
         return await fetch(oldScoresUrl(className, datecode, requestChunk.toString(), state.scoreId), {signal}) //
             .then((res) => res.arrayBuffer())
-            //            .then((res) => {
-            //                console.log('FOS: got data', d(requestChunk), res.byteLength);
-            //                return res;
-            //            })
             .then(async (ab) => ({data: ClassScoreHistory.decode(new Uint8Array(ab)), chunkId}))
             .catch((e) => void console.error('FOS:', e));
     }
@@ -273,7 +265,9 @@ export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilo
 //////////////////////////////////////////
 
 function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
-    console.log('updateScores', action.payload.scoreId, state.scoreId);
+    if (Object.keys(action.payload.pilots).length > 1) {
+        console.log(`updateScores live: ${state.scoreId}, received: ${action.payload.scoreId}, ${Object.keys(action.payload.pilots).join(',')}`);
+    }
     if (action.payload.scoreId != state.scoreId) {
         return;
     }
@@ -285,7 +279,7 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
             // If the scoreId is the current one then we will use that
             const sh = (state.historical[compno] ??= []);
             const index = _sortedIndexBy(sh, score, (x) => x.t);
-            if (index < sh.length && index >= 0) {
+            if (index < sh.length && index >= 0 && sh[index].t != score.t) {
                 console.log(compno, '***** rewind score history to ', index, sh[index].t, d(sh[index].t));
             }
             sh.splice(index, Infinity, result[compno]);
@@ -313,12 +307,12 @@ function mapScoresToDisplayScores(p: PilotScore): PilotScoreDisplay {
             ? {
                   maxGeoJSON: assembleLabeledLine(p.maxDistancePoints)
               }
-            : {}),
-        ...(p.taskGeoJSON
+            : {})
+        /*        ...(p.taskGeoJSON
             ? {
                   taskGeoJSON: JSON.parse(p.taskGeoJSON)
               }
-            : {})
+            : {}) */
     };
 }
 
@@ -343,10 +337,8 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
         const newIndicies = newScores.map((scoreHistoryMessage) => scoreHistoryMessage.t as Epoch);
         const oldIndicies = oldScores?.map((psd) => psd.t as Epoch) ?? [];
 
-        console.log('received new score times', newIndicies.map(d).join(','));
-
-        const resultIndex = [];
-        const resultScores = [];
+        const resultIndex: Epoch[] = [];
+        const resultScores: PilotScoreDisplay[] = [];
 
         let oldIndex = 0;
         let newIndex = 0;
@@ -362,16 +354,13 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
                 if (o == n) {
                     newIndex++;
                 }
-            } else if (!o || n < o) {
+            } else if (!o || n! < o) {
                 // end of old or new is older
                 const ns = newScores.at(newIndex);
                 // take from the new score if it's there, otherwise it's a reference to one we have decoded
                 // so use that instead
-                if (!ns) {
-                    console.log('FOS merge fail', compno, o, n, newScores.length, oldScores.length);
-                }
-                resultScores.push(mapScoresToDisplayScores(ns));
-                resultIndex.push(n);
+                resultScores.push(mapScoresToDisplayScores(ns!));
+                resultIndex.push(n!);
                 newIndex++;
             }
         }
@@ -379,13 +368,8 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
         if (resultIndex.join(',') != resultIndex.sort().join(',')) {
             console.log(compno, ' FOS: out of order');
         }
-        if (oldIndicies.join(',') == resultIndex.join(',')) {
-            console.log(compno, 'no change! why did you fetch');
-        } else {
+        if (oldIndicies.join(',') != resultIndex.join(',')) {
             state.historical[compno] = resultScores;
-            console.log(`FOS: ${compno} result: ${resultIndex.length} idents, newIndicies ${newIndicies.length} & oldIndicies ${oldIndicies.length}`);
-            console.log('FOS:', resultIndex.map(d));
         }
     }
-    console.log(Object.keys(state.historical));
 }

@@ -24,8 +24,8 @@ const defaultOptions: Options = {
     follow: true,
     zoomTask: true,
     sortKey: 'auto',
-    showOthers: true,
-    fullPaths: PathLength.recent,
+    showOthers: false,
+    fullPaths: PathLength.selectedFull,
     options2d: {taskUp: TaskUp.north, mapType: MapType.street, follow: true},
     options3d: {taskUp: TaskUp.track, mapType: MapType.satellite, follow: true}
 };

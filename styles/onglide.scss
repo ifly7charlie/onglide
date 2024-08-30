@@ -73,16 +73,22 @@ body {
 
     .resultsOverlay {
         left: 0px;
-        height: 90px;
-        width: 100vw;
+        width: 100%;
         overflow-x: auto;
         overflow-y: hidden;
         position: relative;
-        margin-top: 12px;
         z-index: 20;
         clear: both;
         background-color: rgba(255, 255, 255, 0.7);
         //        background-color: red;
+        margin-top: 14px;
+    }
+
+    .connectionStatus {
+        display: block;
+        //        width: 9%;
+        margin-top: 8px;
+        margin-left: 1%;
     }
 
     .sorting {
@@ -154,20 +160,6 @@ body {
     }
 }
 
-@include media-breakpoint-down(lg) {
-    .resultsOverlay {
-        height: 95px;
-        margin-top: 14px;
-    }
-
-    .connectionStatus {
-        display: block;
-        width: 100%;
-        margin-top: 8px;
-        margin-left: 10px;
-    }
-}
-
 @include media-breakpoint-up(lg) {
     .resultsOverlay {
         top: 75px;
@@ -217,7 +209,7 @@ body {
     }
 
     ul.status {
-        width: 115%;
+        width: 105%;
         list-style-type: none;
         padding-left: 0px;
         padding-right: 0px;
@@ -534,6 +526,10 @@ td.small img {
     overflow-y: clip;
     flex-grow: 1.5;
     align-self: center;
+}
+
+.old {
+    opacity: 0.5;
 }
 
 .summarycomponent .data-icon,

@@ -18,6 +18,7 @@ export interface OnglideWebSocketMessage {
   positions?: ClassPositions | undefined;
   ka?: KeepAlive | undefined;
   t?: number | undefined;
+  task?: Task | undefined;
 }
 
 export interface Identifiers {
@@ -27,6 +28,11 @@ export interface Identifiers {
   earliestScore?: number | undefined;
   latestScore?: number | undefined;
   scoreId?: string | undefined;
+}
+
+export interface Task {
+  geoJSON?: string | undefined;
+  taskJSON?: string | undefined;
 }
 
 export interface PilotTracks {
@@ -126,7 +132,11 @@ export interface PilotScoreLeg {
     | undefined;
   /** Scores */
   handicapped?: SpeedDist | undefined;
-  actual?: SpeedDist | undefined;
+  actual?:
+    | SpeedDist
+    | undefined;
+  /** considered points, only dev mode */
+  convexHull: number[];
 }
 
 export interface Wind {
@@ -206,6 +216,10 @@ export interface PilotScore {
   handicapped?:
     | SpeedDist
     | undefined;
+  /** Home (partial data only, and actuals only) */
+  home?:
+    | SpeedDist
+    | undefined;
   /** Leg details */
   currentLeg: number;
   legs: { [key: number]: PilotScoreLeg };
@@ -218,8 +232,7 @@ export interface PilotScore {
   scoredPoints: number[];
   minDistancePoints: number[];
   maxDistancePoints: number[];
-  /** For DH we have a specific task for the pilot */
-  taskGeoJSON?: string | undefined;
+  /** For rescoring */
   scoreId?: string | undefined;
 }
 
@@ -269,6 +282,7 @@ function createBaseOnglideWebSocketMessage(): OnglideWebSocketMessage {
     positions: undefined,
     ka: undefined,
     t: undefined,
+    task: undefined,
   };
 }
 
@@ -291,6 +305,9 @@ export const OnglideWebSocketMessage = {
     }
     if (message.t !== undefined) {
       writer.uint32(40).uint32(message.t);
+    }
+    if (message.task !== undefined) {
+      Task.encode(message.task, writer.uint32(66).fork()).ldelim();
     }
     return writer;
   },
@@ -344,6 +361,13 @@ export const OnglideWebSocketMessage = {
 
           message.t = reader.uint32();
           continue;
+        case 8:
+          if (tag !== 66) {
+            break;
+          }
+
+          message.task = Task.decode(reader, reader.uint32());
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -361,6 +385,7 @@ export const OnglideWebSocketMessage = {
       positions: isSet(object.positions) ? ClassPositions.fromJSON(object.positions) : undefined,
       ka: isSet(object.ka) ? KeepAlive.fromJSON(object.ka) : undefined,
       t: isSet(object.t) ? globalThis.Number(object.t) : undefined,
+      task: isSet(object.task) ? Task.fromJSON(object.task) : undefined,
     };
   },
 
@@ -384,6 +409,9 @@ export const OnglideWebSocketMessage = {
     if (message.t !== undefined) {
       obj.t = Math.round(message.t);
     }
+    if (message.task !== undefined) {
+      obj.task = Task.toJSON(message.task);
+    }
     return obj;
   },
 
@@ -406,6 +434,7 @@ export const OnglideWebSocketMessage = {
       : undefined;
     message.ka = (object.ka !== undefined && object.ka !== null) ? KeepAlive.fromPartial(object.ka) : undefined;
     message.t = object.t ?? undefined;
+    message.task = (object.task !== undefined && object.task !== null) ? Task.fromPartial(object.task) : undefined;
     return message;
   },
 };
@@ -547,6 +576,80 @@ export const Identifiers = {
     message.earliestScore = object.earliestScore ?? undefined;
     message.latestScore = object.latestScore ?? undefined;
     message.scoreId = object.scoreId ?? undefined;
+    return message;
+  },
+};
+
+function createBaseTask(): Task {
+  return { geoJSON: undefined, taskJSON: undefined };
+}
+
+export const Task = {
+  encode(message: Task, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.geoJSON !== undefined) {
+      writer.uint32(10).string(message.geoJSON);
+    }
+    if (message.taskJSON !== undefined) {
+      writer.uint32(18).string(message.taskJSON);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): Task {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTask();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.geoJSON = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.taskJSON = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): Task {
+    return {
+      geoJSON: isSet(object.geoJSON) ? globalThis.String(object.geoJSON) : undefined,
+      taskJSON: isSet(object.taskJSON) ? globalThis.String(object.taskJSON) : undefined,
+    };
+  },
+
+  toJSON(message: Task): unknown {
+    const obj: any = {};
+    if (message.geoJSON !== undefined) {
+      obj.geoJSON = message.geoJSON;
+    }
+    if (message.taskJSON !== undefined) {
+      obj.taskJSON = message.taskJSON;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Task>, I>>(base?: I): Task {
+    return Task.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<Task>, I>>(object: I): Task {
+    const message = createBaseTask();
+    message.geoJSON = object.geoJSON ?? undefined;
+    message.taskJSON = object.taskJSON ?? undefined;
     return message;
   },
 };
@@ -1481,6 +1584,7 @@ function createBasePilotScoreLeg(): PilotScoreLeg {
     inPenalty: undefined,
     handicapped: undefined,
     actual: undefined,
+    convexHull: [],
   };
 }
 
@@ -1522,6 +1626,11 @@ export const PilotScoreLeg = {
     if (message.actual !== undefined) {
       SpeedDist.encode(message.actual, writer.uint32(98).fork()).ldelim();
     }
+    writer.uint32(106).fork();
+    for (const v of message.convexHull) {
+      writer.float(v);
+    }
+    writer.ldelim();
     return writer;
   },
 
@@ -1616,6 +1725,23 @@ export const PilotScoreLeg = {
 
           message.actual = SpeedDist.decode(reader, reader.uint32());
           continue;
+        case 13:
+          if (tag === 109) {
+            message.convexHull.push(reader.float());
+
+            continue;
+          }
+
+          if (tag === 106) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.convexHull.push(reader.float());
+            }
+
+            continue;
+          }
+
+          break;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1639,6 +1765,9 @@ export const PilotScoreLeg = {
       inPenalty: isSet(object.inPenalty) ? globalThis.Boolean(object.inPenalty) : undefined,
       handicapped: isSet(object.handicapped) ? SpeedDist.fromJSON(object.handicapped) : undefined,
       actual: isSet(object.actual) ? SpeedDist.fromJSON(object.actual) : undefined,
+      convexHull: globalThis.Array.isArray(object?.convexHull)
+        ? object.convexHull.map((e: any) => globalThis.Number(e))
+        : [],
     };
   },
 
@@ -1680,6 +1809,9 @@ export const PilotScoreLeg = {
     if (message.actual !== undefined) {
       obj.actual = SpeedDist.toJSON(message.actual);
     }
+    if (message.convexHull?.length) {
+      obj.convexHull = message.convexHull;
+    }
     return obj;
   },
 
@@ -1706,6 +1838,7 @@ export const PilotScoreLeg = {
     message.actual = (object.actual !== undefined && object.actual !== null)
       ? SpeedDist.fromPartial(object.actual)
       : undefined;
+    message.convexHull = object.convexHull?.map((e) => e) || [];
     return message;
   },
 };
@@ -2186,6 +2319,7 @@ function createBasePilotScore(): PilotScore {
     flightStatus: undefined,
     actual: undefined,
     handicapped: undefined,
+    home: undefined,
     currentLeg: 0,
     legs: {},
     stats: undefined,
@@ -2193,7 +2327,6 @@ function createBasePilotScore(): PilotScore {
     scoredPoints: [],
     minDistancePoints: [],
     maxDistancePoints: [],
-    taskGeoJSON: undefined,
     scoreId: undefined,
   };
 }
@@ -2239,6 +2372,9 @@ export const PilotScore = {
     if (message.handicapped !== undefined) {
       SpeedDist.encode(message.handicapped, writer.uint32(90).fork()).ldelim();
     }
+    if (message.home !== undefined) {
+      SpeedDist.encode(message.home, writer.uint32(498).fork()).ldelim();
+    }
     if (message.currentLeg !== 0) {
       writer.uint32(296).uint32(message.currentLeg);
     }
@@ -2266,9 +2402,6 @@ export const PilotScore = {
       writer.float(v);
     }
     writer.ldelim();
-    if (message.taskGeoJSON !== undefined) {
-      writer.uint32(426).string(message.taskGeoJSON);
-    }
     if (message.scoreId !== undefined) {
       writer.uint32(442).string(message.scoreId);
     }
@@ -2373,6 +2506,13 @@ export const PilotScore = {
 
           message.handicapped = SpeedDist.decode(reader, reader.uint32());
           continue;
+        case 62:
+          if (tag !== 498) {
+            break;
+          }
+
+          message.home = SpeedDist.decode(reader, reader.uint32());
+          continue;
         case 37:
           if (tag !== 296) {
             break;
@@ -2455,13 +2595,6 @@ export const PilotScore = {
           }
 
           break;
-        case 53:
-          if (tag !== 426) {
-            break;
-          }
-
-          message.taskGeoJSON = reader.string();
-          continue;
         case 55:
           if (tag !== 442) {
             break;
@@ -2493,6 +2626,7 @@ export const PilotScore = {
       flightStatus: isSet(object.flightStatus) ? globalThis.Number(object.flightStatus) : undefined,
       actual: isSet(object.actual) ? SpeedDist.fromJSON(object.actual) : undefined,
       handicapped: isSet(object.handicapped) ? SpeedDist.fromJSON(object.handicapped) : undefined,
+      home: isSet(object.home) ? SpeedDist.fromJSON(object.home) : undefined,
       currentLeg: isSet(object.currentLeg) ? globalThis.Number(object.currentLeg) : 0,
       legs: isObject(object.legs)
         ? Object.entries(object.legs).reduce<{ [key: number]: PilotScoreLeg }>((acc, [key, value]) => {
@@ -2511,7 +2645,6 @@ export const PilotScore = {
       maxDistancePoints: globalThis.Array.isArray(object?.maxDistancePoints)
         ? object.maxDistancePoints.map((e: any) => globalThis.Number(e))
         : [],
-      taskGeoJSON: isSet(object.taskGeoJSON) ? globalThis.String(object.taskGeoJSON) : undefined,
       scoreId: isSet(object.scoreId) ? globalThis.String(object.scoreId) : undefined,
     };
   },
@@ -2557,6 +2690,9 @@ export const PilotScore = {
     if (message.handicapped !== undefined) {
       obj.handicapped = SpeedDist.toJSON(message.handicapped);
     }
+    if (message.home !== undefined) {
+      obj.home = SpeedDist.toJSON(message.home);
+    }
     if (message.currentLeg !== 0) {
       obj.currentLeg = Math.round(message.currentLeg);
     }
@@ -2583,9 +2719,6 @@ export const PilotScore = {
     }
     if (message.maxDistancePoints?.length) {
       obj.maxDistancePoints = message.maxDistancePoints;
-    }
-    if (message.taskGeoJSON !== undefined) {
-      obj.taskGeoJSON = message.taskGeoJSON;
     }
     if (message.scoreId !== undefined) {
       obj.scoreId = message.scoreId;
@@ -2615,6 +2748,7 @@ export const PilotScore = {
     message.handicapped = (object.handicapped !== undefined && object.handicapped !== null)
       ? SpeedDist.fromPartial(object.handicapped)
       : undefined;
+    message.home = (object.home !== undefined && object.home !== null) ? SpeedDist.fromPartial(object.home) : undefined;
     message.currentLeg = object.currentLeg ?? 0;
     message.legs = Object.entries(object.legs ?? {}).reduce<{ [key: number]: PilotScoreLeg }>((acc, [key, value]) => {
       if (value !== undefined) {
@@ -2627,7 +2761,6 @@ export const PilotScore = {
     message.scoredPoints = object.scoredPoints?.map((e) => e) || [];
     message.minDistancePoints = object.minDistancePoints?.map((e) => e) || [];
     message.maxDistancePoints = object.maxDistancePoints?.map((e) => e) || [];
-    message.taskGeoJSON = object.taskGeoJSON ?? undefined;
     message.scoreId = object.scoreId ?? undefined;
     return message;
   },

@@ -50,12 +50,13 @@ async function run() {
                 const msg = array[index];
                 const packet = parser.parseaprs(msg);
                 if (packet) {
-                    if (timestamp && packet.timestamp != timestamp) {
+                    if (timestamp && packet.timestamp > timestamp) {
                         console.log(index, array[index], timestamp, new Date(timestamp * 1000).toISOString());
                         break;
                     }
                     timestamp = packet.timestamp || 0;
-                    socket.write(array[index++] + '\n');
+                    console.log(timestamp);
+                    socket.write(array[index++] + '\r\n');
                 }
             }
 

@@ -1,4 +1,5 @@
-FROM node:18-slim as ognbase
+# syntax=docker/dockerfile:1.7-labs 
+FROM node:20-slim AS ognbase
 RUN apt-get update 
 RUN apt-get install -y gnupg wget lsb-release
 RUN wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.30-1_all.deb
@@ -17,6 +18,9 @@ FROM buildbase AS nextbuildimage
 WORKDIR /onglide
 ARG NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
 ARG NEXT_PUBLIC_SITEURL
+ARG NEXT_PUBLIC_WEBSOCKET_HOST
+ARG NEXT_PUBLIC_HISTORY_HOST
+ARG NEXT_PUBLIC_COMPETITION_DELAY
 COPY ./next.config.js ./next.config.js
 COPY ./tsconfig.json ./tsconfig.json
 COPY ./.babelrc ./.babelrc
@@ -24,16 +28,17 @@ COPY ./babel-plugin-macros.config.js ./babel-plugin-macros.config.js
 COPY ./next-env.d.ts ./next-env.d.ts
 COPY ./styles ./styles
 COPY ./pages ./pages
-COPY ./lib ./lib
+COPY ./app ./app
+COPY ./public ./public
+COPY --exclude=webworkers --exclude=dijkstras.ts --exclude=launchlanding.ts --exclude=".#*" ./lib ./lib
 RUN yarn next build
 
 FROM buildbase AS ognbuildimage
 WORKDIR /onglide
-RUN apt install -y protobuf-compiler
 COPY ./tsconfig-bin.json ./tsconfig-bin.json
 COPY ./bin ./bin
 COPY ./lib ./lib
-RUN yarn build
+RUN yarn build:tsc
 
 FROM ognbase AS productionbase
 WORKDIR /onglide
@@ -45,14 +50,13 @@ COPY --from=nextbuildimage /onglide/.build ./.build
 COPY ./next.config.js ./next.config.js
 COPY ./.env ./.env
 COPY ./LICENSE ./LICENSE
-EXPOSE 8080
-CMD node bin/ogn.js
+EXPOSE 3000
 
 FROM productionbase AS ogn
 WORKDIR /onglide
 COPY --from=ognbuildimage /onglide/dist .
 COPY ./.env ./.env.local
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN touch .docker
-EXPOSE 3000
-
+EXPOSE 8080
 

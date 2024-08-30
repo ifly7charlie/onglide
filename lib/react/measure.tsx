@@ -13,6 +13,7 @@ export interface MeasureOptions {
     enabled: boolean;
     click?: React.MouseEventHandler<HTMLButtonElement>;
     toggle?: () => void;
+    reset?: () => void;
 }
 
 const measureContext = createContext<MeasureOptions>({enabled: false, features: []});
@@ -42,7 +43,14 @@ export function MeasureContext({children}) {
         setFeatures([]);
     };
 
-    return <measureContext.Provider value={{enabled, features, click, toggle}}>{children}</measureContext.Provider>;
+    const reset = () => {
+        if (!features.length) {
+            setEnabled(false);
+        }
+        setFeatures([]);
+    };
+
+    return <measureContext.Provider value={{enabled, features, click, toggle, reset}}>{children}</measureContext.Provider>;
 }
 
 export function useMeasure() {
