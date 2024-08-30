@@ -63,6 +63,7 @@ export default function MApp(props: {
     setViewport: Function;
     status: string; // status line
     replayTime: Epoch;
+    setReplayTime: (t: Epoch | undefined) => void;
 }) {
     // For remote updating of the map
     const mapRef = useRef<MapRef | null>(null);
@@ -112,11 +113,27 @@ export default function MApp(props: {
 
     const handleKeyPress = useCallback(
         (e) => {
-            if (e.key == 'Escape' && measure && measure.enabled) {
-                measure.toggle?.();
+            switch (e.key) {
+                /*                case 'ArrowLeft':
+                    if (props.replayTime) {
+                        props.setReplayTime((props.replayTime - 60) as Epoch);
+                        e.preventDefault();
+                    }
+                    break;
+                case 'ArrowRight':
+                    if (props.replayTime) {
+                        props.setReplayTime((props.replayTime + 60) as Epoch);
+                        e.preventDefault();
+                    }
+                    break; */
+                case 'Escape':
+                    if (measure && measure.enabled) {
+                        measure.toggle?.();
+                    }
+                    break;
             }
         },
-        [measure]
+        [measure, props.replayTime]
     );
 
     useEffect(() => {
