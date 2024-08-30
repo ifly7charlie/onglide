@@ -24,7 +24,6 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
         segmentIndex: 1,
         trackVersion
     };
-    glider.vario = {min: Infinity, max: 0} as VarioData;
 }
 
 //
@@ -139,12 +138,12 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
 }
 
 // Calculate vario for the specific index
-export function calculateVario(deck: DeckData, index: number) {
+export function calculateVario(deck: DeckData, tNow: Epoch, index: number): VarioData {
     const t = deck.t[index];
 
     // Find 40 seconds
     let start = index;
-    while (start > 0 && t - deck.t[start] < 40) {
+    while (start > 1 && t - deck.t[start - 1] < 40) {
         start--;
     }
 
@@ -154,11 +153,10 @@ export function calculateVario(deck: DeckData, index: number) {
 
     // The total and the average, along with misc status values
     return {
+        valid: Xperiod && tNow - t < 40,
         total,
         Xperiod,
         average: Math.round((total * 10) / Xperiod) / 10,
-        //lng: deck.positions[index * 3],
-        //lat: deck.positions[index * 3 + 1],
         agl: deck.agl[index],
         altitude: deck.positions[start * 3 + 2],
         t: t as Epoch
@@ -166,19 +164,7 @@ export function calculateVario(deck: DeckData, index: number) {
 }
 
 // Calculate vario for the specific index
-export function calculateAverage(deck: DeckData, index: number) {
-    const t = deck.t[index];
-
-    // Find 40 seconds
-    let start = index;
-    while (start > 0 && t - deck.t[start] < 40) {
-        start--;
-    }
-
-    if (start == index) {
-        return null;
-    }
-
-    // Add them up
-    return Math.round((10 * (deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2])) / (t - deck.t[start])) / 10;
+export function calculateAverage(deck: DeckData, tNow: Epoch, index: number) {
+    const v = calculateVario(deck, tNow, index);
+    return v.valid ? v.average : null;
 }

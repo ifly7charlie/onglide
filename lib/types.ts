@@ -287,19 +287,12 @@ export interface VarioData {
     altitude: AltitudeAMSL; // current
     agl: AltitudeAgl;
 
-    lat: number;
-    lng: number;
-
-    min: AltitudeAgl; // after start min/max
-    max: AltitudeAgl;
-
-    lossXsecond: number; // loss in period
-    gainXsecond: number; // gain in period
     total: number; // total loss / gain
     average: number; // average of total/Xperiod
     Xperiod: Epoch; // period
 
     t: Epoch; // when was this updated
+    valid: boolean;
 }
 
 export type SortKey =
@@ -338,7 +331,6 @@ export interface DisplayPilotTrackData extends PilotTrackData {
 export interface PilotTrackData {
     compno: Compno;
     deck?: DeckData;
-    vario?: VarioData;
     t?: Epoch;
 }
 

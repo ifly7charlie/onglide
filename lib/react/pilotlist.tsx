@@ -1,5 +1,5 @@
 // What do we need to render the bootstrap part of the page
-import {memo} from 'react';
+import {memo, useMemo} from 'react';
 import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
@@ -29,6 +29,8 @@ import {sortKeyEqualityCheck, sortOrders, type AllNormalDisplayKeys} from '../re
 // Helpers for sorting pilot list
 import {nextSortOrder, getValidSortOrder} from './pilot-sorting';
 import {displayHeight, convertHeight, convertClimb} from './displayunits';
+
+import {offlineTime} from '../constants';
 
 function isoCountryCodeToFlagEmoji(country: string) {
     return String.fromCodePoint(...[...country].map((c) => c.charCodeAt(0) + 0x1f1a5));
@@ -137,7 +139,7 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
 
     const convertedClimb = convertClimb(vario?.average ?? 0, units);
 
-    return vario ? (
+    return vario?.valid ? (
         <SummaryComponent
             id="climb"
             title="vario" //
@@ -145,7 +147,13 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
             data1={{value: convertHeight(vario.total, units)[0], units: units ? 'ft' : 'm', icon: vario?.average >= 0 ? solid('cloud-upload') : solid('cloud-arrow-down')}}
             data2={{value: vario.Xperiod, units: 'sec', icon: solid('hourglass-half')}}
         />
-    ) : null;
+    ) : (
+        <SummaryComponent
+            id="climb"
+            title="vario" //
+            main={{value: null, icon: solid('signal'), units: ''}}
+        />
+    );
 }
 
 const StartComponent = memo(function StartComponent({
@@ -281,21 +289,29 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining}: {
 });
 
 export const Details = memo(function Details({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) {
-    if (!pilot) {
+    let competitionDelay = useMemo(() => {
+        if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
+            return (
+                <a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
+                    <span style={{color: 'grey'}}>
+                        &nbsp;+&nbsp;
+                        <FontAwesomeIcon icon={solid('clock-rotate-left')} size="sm" />
+                        &nbsp;{OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
+                    </span>
+                </a>
+            );
+        }
         return null;
-    }
+    }, []);
 
     // Get vario for specific time
     const vario = useSelector((state) => selectPilotVario(state, compno, replayTime));
     const score = useSelector((state) => selectPilotScore(state, compno, replayTime));
     const latestUpdate = useSelector(selectLatestUpdate);
 
-    // Simplify displaying units
-    const altitude = vario?.altitude ? (
-        <span style={{float: 'right', paddingTop: '3px'}}>
-            Altitude {displayHeight(vario.altitude, units)} (AGL {displayHeight(vario.agl, units)})
-        </span>
-    ) : null;
+    if (!pilot) {
+        return null;
+    }
 
     const hasHandicappedResults = !!score?.handicapped;
 
@@ -329,8 +345,27 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
         );
     }
 
+    // Check at render if we are up to date or not, delay calculated in sorting which
+    // gets updated regularily
+    const delay = (replayTime ?? latestUpdate ?? Infinity) - (vario?.t || 0);
+    const uptodate = delay < 45;
+    const old = delay > offlineTime && score && score.flightStatus != PositionStatus.Home && score.flightStatus != PositionStatus.Finished && score.flightStatus != PositionStatus.Landed;
+
     // Figure out what to show based on the db status
     let flightDetails = null;
+    const statusClassName = old ? 'status old' : 'status';
+
+    // Simplify displaying units
+    const altitude = vario?.altitude ? (
+        <span style={{float: 'right', paddingTop: '3px'}}>
+            {old ? (
+                <>
+                    <FontAwesomeIcon icon={faSignal} />{' '}
+                </>
+            ) : null}
+            Altitude {displayHeight(vario.altitude, units)} (AGL {displayHeight(vario.agl, units)})
+        </span>
+    ) : null;
 
     if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
         flightDetails = <></>;
@@ -341,7 +376,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
             flightDetails = (
                 <div>
                     No start reported yet
-                    <ul className="status">
+                    <ul className={statusClassName}>
                         <ClimbComponent vario={vario} units={!!units} />
                     </ul>
                 </div>
@@ -350,7 +385,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
     } else if (score?.utcFinish) {
         flightDetails = (
             <>
-                <ul className="status">
+                <ul className={statusClassName}>
                     {speed}
                     {score?.taskTimeRemaining ? distance : null}
                     {times}
@@ -363,7 +398,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
             flightDetails = (
                 <div>
                     Landed out
-                    <ul className="status">{distance}</ul>
+                    <ul className={statusClassName}>{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
             );
@@ -371,14 +406,14 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
             flightDetails = (
                 <div>
                     Landed back
-                    <ul className="status">{distance}</ul>
+                    <ul className={statusClassName}>{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
             );
         } else {
             flightDetails = (
                 <>
-                    <ul className="status">
+                    <ul className={statusClassName}>
                         <ClimbComponent vario={vario} units={!!units} />
                         {speed}
                         {distance}
@@ -390,11 +425,6 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
             );
         }
     }
-
-    // Check at render if we are up to date or not, delay calculated in sorting which
-    // gets updated regularily
-    const delay = latestUpdate - vario?.t || Infinity;
-    const uptodate = delay < 45;
 
     // Are we in coverage or not, keyed off uptodate
     const ognCoverage = score?.utcFinish ? (
@@ -428,7 +458,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
                     <>
                         <FontAwesomeIcon icon={solid('triangle-exclamation')} />
                         &nbsp;
-                        {(vario?.lat || 0) > 0 ? <>&gt;1 hour ago</> : <>No tracking yet</>}
+                        {vario ? <>&gt;1 hour ago</> : <>No tracking yet</>}
                     </>
                 )}
                 {process.env.NODE_ENV == 'development' && score ? ', ' + delayToText(latestUpdate - score?.t) + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
@@ -445,18 +475,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
             </div>
         ) : null;
 
-    let competitionDelay: any = '';
-    if (process.env.NEXT_PUBLIC_COMPETITION_DELAY && (uptodate || vario?.lat)) {
-        competitionDelay = (
-            <a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
-                <span style={{color: 'grey'}}>
-                    &nbsp;+&nbsp;
-                    <FontAwesomeIcon icon={solid('clock-rotate-left')} size="sm" />
-                    &nbsp;{OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
-                </span>
-            </a>
-        );
-    }
+    const className = uptodate ? 'details' : 'details old';
 
     return (
         <div className="details" style={{paddingTop: '5px'}}>
@@ -469,7 +488,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
                 <br className="largeScreen" />
                 <span style={{fontSize: '80%'}}>
                     {ognCoverage}
-                    {competitionDelay}
+                    {uptodate || vario ? competitionDelay : null}
                     <span>{altitude}</span>
                 </span>
             </h6>

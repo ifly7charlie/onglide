@@ -209,7 +209,7 @@ body {
     }
 
     ul.status {
-        width: 115%;
+        width: 105%;
         list-style-type: none;
         padding-left: 0px;
         padding-right: 0px;
@@ -526,6 +526,10 @@ td.small img {
     overflow-y: clip;
     flex-grow: 1.5;
     align-self: center;
+}
+
+.old {
+    opacity: 0.5;
 }
 
 .summarycomponent .data-icon,

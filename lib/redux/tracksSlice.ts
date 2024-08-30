@@ -59,13 +59,14 @@ const initialState: TracksSliceState = {
 };
 
 // Data for vario display
-const _selectAllVarios = createSelector(
+/*const _selectAllVarios = createSelector(
     [
         //
         (_state: TracksSliceState, t: Epoch | undefined) => t,
-        (state: TracksSliceState, _t: Epoch | undefined) => state.tracks
+        (state: TracksSliceState, _t: Epoch | undefined) => state.tracks,
+        (state: TracksSliceState) => state.latestUpdate
     ],
-    (t: Epoch | undefined, tracks: TrackData | undefined): Record<Compno, VarioData | null> =>
+    (t: Epoch | undefined, tracks: TrackData | undefined, now: Epoch | undefined): Record<Compno, VarioData | null> =>
         _reduce(
             tracks,
             (result, track, compno) => {
@@ -73,27 +74,29 @@ const _selectAllVarios = createSelector(
                     result[compno] = null;
                 } else {
                     const posIndex = findDisplayIndex(track.deck, t);
-                    result[compno] = posIndex >= 0 && t - track.deck.t[posIndex] < 120 ? calculateVario(track.deck, posIndex) : null;
+                    result[compno] = posIndex >= 0 ? calculateVario(track.deck, t ?? now ?? (0 as Epoch), posIndex) : null;
                 }
                 return result;
             },
             {} as Record<Compno, VarioData | undefined>
         )
 );
+*/
 
 const _selectPilotVario = createSelector(
     [
         //
         (_state: TracksSliceState, compno: Compno, _t: Epoch | undefined) => compno,
         (_state: TracksSliceState, _compno: Compno, t: Epoch | undefined) => t,
-        (state: TracksSliceState, compno: Compno, _t: Epoch | undefined) => state.tracks[compno]
+        (state: TracksSliceState, compno: Compno, _t: Epoch | undefined) => state.tracks[compno],
+        (state: TracksSliceState) => state.latestUpdate
     ],
-    (_compno: Compno, t: Epoch | undefined, track) => {
+    (_compno: Compno, t: Epoch | undefined, track, now: Epoch | undefined) => {
         if (!track?.deck) {
             return null;
         }
         const posIndex = findDisplayIndex(track.deck, t);
-        return posIndex >= 0 && (t === undefined || t - track.deck.t[posIndex] < 60) ? calculateVario(track.deck, posIndex) : null;
+        return posIndex >= 0 ? calculateVario(track.deck, t ?? now ?? (0 as Epoch), posIndex) : null;
     },
     {
         memoizeOptions: {
@@ -154,7 +157,7 @@ const _selectAllAverageClimb = createSelector(
                     result[compno] = null;
                 } else {
                     const posIndex = findDisplayIndex(track.deck, t);
-                    result[compno] = posIndex >= 0 && (t ?? now ?? 0) - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, posIndex) : null;
+                    result[compno] = posIndex >= 0 && (t ?? now ?? 0) - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, t ?? now ?? (0 as Epoch), posIndex) : null;
                 }
                 return result;
             },
@@ -273,7 +276,7 @@ export const tracksSlice = createSlice({
         selectPilotPosition: _selectPilotPosition,
 
         // Everybody
-        selectAllVarios: _selectAllVarios, // memoized
+        //        selectAllVarios: _selectAllVarios, // memoized
         selectAllAverageClimb: _selectAllAverageClimb,
         selectAllPositions: _selectAllPositions, // memoized
         selectAllAGL: _selectAllAGL,
@@ -286,7 +289,7 @@ export const tracksSlice = createSlice({
 
 export default tracksSlice.reducer;
 export const {updateTracks, updatePositions} = tracksSlice.actions;
-export const {selectPilotVario, selectPilotPosition, selectAllPositions, selectAllTracks, selectAllVarios, selectAllAGL, selectAllAverageClimb, selectTrackVersion, selectNewestBaseTime, selectLatestUpdate} =
+export const {selectPilotVario, selectPilotPosition, selectAllPositions, selectAllTracks, /*selectAllVarios,*/ selectAllAGL, selectAllAverageClimb, selectTrackVersion, selectNewestBaseTime, selectLatestUpdate} =
     tracksSlice.selectors;
 
 //////////////////////////////////////////
