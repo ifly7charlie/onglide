@@ -1264,7 +1264,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 shid.set(compno, (sh = []));
             }
             const index = _sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
-            if (index < sh.length && index >= 0) {
+            if (index < sh.length - 1 && index >= 0) {
                 console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[index].t)} sh:[${index}/${sh.length}]`);
             }
             sh.splice(index, Infinity, score);
