@@ -345,6 +345,9 @@ export default function MApp(props: {
         }
     }, [setFollow, follow]);
 
+    // If we are on last leg of AAT then we stop showing construction lines
+    const lastLeg = task?.rules?.aat && selectedScore?.currentLeg == task?.legs?.length - 1;
+
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
@@ -386,16 +389,16 @@ export default function MApp(props: {
                 ) : null}
                 {selectedScore && options.constructionLines ? (
                     <>
-                        {selectedScore.minGeoJSON ? (
-                            <Source type="geojson" data={selectedScore.minGeoJSON} key={'min_'}>
-                                <Layer {...minLineStyle} />
-                                <Layer {...distanceLineLabelStyle(minLineStyle)} />
+                        {selectedScore.minGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={selectedScore.minGeoJSON} key={'min_'} id={'min'}>
+                                <Layer {...distanceLineLabelStyle(minLineStyle)} beforeId={'scored_line'} />
+                                <Layer {...minLineStyle} beforeId={'minpossible_label'} />
                             </Source>
                         ) : null}
-                        {selectedScore.maxGeoJSON ? (
-                            <Source type="geojson" data={selectedScore.maxGeoJSON} key={'max_'}>
-                                <Layer {...maxLineStyle} />
-                                <Layer {...distanceLineLabelStyle(maxLineStyle)} />
+                        {selectedScore.maxGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={selectedScore.maxGeoJSON} key={'max_'} id={'max'}>
+                                <Layer {...distanceLineLabelStyle(maxLineStyle)} beforeId={'scored_line'} />
+                                <Layer {...maxLineStyle} beforeId={'maxpossible_label'} />
                             </Source>
                         ) : null}
                         {selectedScore.legs && task?.rules?.aat ? (
@@ -406,12 +409,10 @@ export default function MApp(props: {
                         ) : null}
                     </>
                 ) : null}
-                {selectedScore && selectedScore?.scoredGeoJSON ? (
-                    <Source type="geojson" data={selectedScore.scoredGeoJSON} key={'scored_'}>
-                        <Layer key="scoredLine" {...scoredLineStyle} />
-                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle)} />
-                    </Source>
-                ) : null}
+                <Source type="geojson" data={selectedScore?.scoredGeoJSON} key={'scored_'} id={'scored'}>
+                    <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: selectedScore?.scoredGeoJSON ? 'visible' : 'none'}}} />
+                    <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, !!selectedScore?.scoredGeoJSON)} />
+                </Source>
                 <MeasureLayers key="measure" />
                 <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
                 {!map2d && <Layer key="skylayer" {...skyLayer} />}
@@ -426,7 +427,7 @@ export default function MApp(props: {
 
 // scored track for selected pilot
 const scoredLineStyle: LayerProps = {
-    id: 'scored',
+    id: 'scored_line',
     type: 'line',
     paint: {
         'line-color': '#0f0',

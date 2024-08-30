@@ -22,13 +22,13 @@ export function assembleLabeledLine(points: number[]) {
     return featureCollection(lines);
 }
 
-export const distanceLineLabelStyle = (source: LayerProps): LayerProps => {
-    return {
+export const distanceLineLabelStyle = (source: LayerProps, visible?: boolean | undefined): LayerProps => {
+    return <LayerProps>{
         id: source.id + '_label',
         type: 'symbol',
         //        source: source,
         paint: {
-            'text-color': '#000',
+            'text-color': visible === undefined ? '#222' : '#000',
             'text-halo-blur': 1,
             'text-halo-width': 2,
             'text-halo-color': '#fff'
@@ -42,7 +42,8 @@ export const distanceLineLabelStyle = (source: LayerProps): LayerProps => {
             //            'text-halo-blur': 2,
             //            'text-halo-width': 3,
             //'text-halo-color': '#fff',
-            'text-size': 12
-        } as any
+            'text-size': visible === undefined ? 12 : 15,
+            visibility: visible == false ? 'none' : 'visible'
+        }
     };
 };
