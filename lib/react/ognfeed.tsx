@@ -225,6 +225,7 @@ export const OgnFeed = memo(
                         setOptions={setOptions}
                         tz={tz}
                         replayTime={replayTime}
+                        setReplayTime={setReplayTime}
                         viewport={viewport}
                         setViewport={setViewport}
                         selectedCompno={selectedCompno}
