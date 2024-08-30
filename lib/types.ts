@@ -202,7 +202,7 @@ export interface TaskStatus extends TimeStampType {
     inSector: boolean;
     inPenalty: boolean;
 
-    closestToNext?: DistanceKM; // closest point to next sector (dist)
+    closestDistanceToNext?: DistanceKM; // closest point to next sector (dist)
     closestToNextSectorPoint?: BasePositionMessage; // positionmessage
     closestSectorPoint?: BasePositionMessage; // point on next sector that matches above
 

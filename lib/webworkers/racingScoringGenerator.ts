@@ -51,10 +51,10 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             compno = taskStatus.compno;
 
             // Make sure the task position or time has changed
-            if (!isTick(taskStatus) && lastClosestToNext === taskStatus.closestToNext && lastTime === taskStatus.t) {
+            if (!isTick(taskStatus) && lastClosestToNext === taskStatus.closestDistanceToNext && lastTime === taskStatus.t) {
                 continue;
             }
-            lastClosestToNext = taskStatus.closestToNext;
+            lastClosestToNext = taskStatus.closestDistanceToNext;
             lastTime = taskStatus.t;
 
             taskStatus.distance = 0 as DistanceKM;
@@ -93,13 +93,13 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             const currentLeg = taskStatus.legs[taskStatus.currentLeg];
             log(taskStatus);
             if (!taskStatus.inSector && !taskStatus.inPenalty && taskStatus.closestToNextSectorPoint) {
-                currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestToNext) * 10) / 10) as DistanceKM;
+                currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
                 taskStatus.distance = (Math.round((taskStatus.distance + currentLeg.distance) * 10) / 10) as DistanceKM;
                 currentLeg.point = taskStatus.closestToNextSectorPoint;
                 // figure out where the scored point is
                 const scoredTo = along(
                     lineString([task.legs[taskStatus.currentLeg].point, task.legs[taskStatus.currentLeg - 1].point]), //
-                    Math.min(Math.max(taskStatus.closestToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length)
+                    Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length)
                 );
                 [currentLeg.point.lng, currentLeg.point.lat] = scoredTo.geometry.coordinates;
             }
@@ -158,12 +158,13 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 try {
                     // Then add from where we are to the end of the task
                     taskStatus.distanceRemaining = 0 as DistanceKM;
-                    taskStatus.minPossible = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, (leg, distance, point) => {
+                    taskStatus.minPossible = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, true, (leg, distance, point) => {
                         taskStatus.legs[leg].minPossible = {distance, point};
                         taskStatus.distanceRemaining = (taskStatus.distanceRemaining + distance) as DistanceKM;
                     });
                     taskStatus.legs[taskStatus.currentLeg].minPossible!.start = taskStatus.lastProcessedPoint;
                 } catch (e) {
+                    console.log(e);
                     // Lazy, should really confirm everything is valid ;)
                 }
             }
