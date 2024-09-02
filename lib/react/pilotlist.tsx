@@ -484,7 +484,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
     const className = uptodate ? 'details' : 'details old';
 
     return (
-        <div className="details" style={{paddingTop: '5px'}}>
+        <div className="pilotdetails">
             {flag}
             <h6 style={{width: '100%'}}>
                 {pilot.compno}:<b>{pilot.name}</b>

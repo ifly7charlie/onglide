@@ -16,9 +16,10 @@ const Widget = styled('div')(({theme}) => ({
     width: '85%',
     maxWidth: '100%',
     margin: 'auto',
+    marginBottom: 8,
     position: 'relative',
     zIndex: 1,
-    backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.4)',
+    backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.8)',
     backdropFilter: 'blur(40px)'
 }));
 
@@ -29,7 +30,7 @@ const TinyText = styled(Typography)({
     letterSpacing: 0.2
 });
 
-const SliderContainer = styled(Box)({width: '100%', overflow: 'hidden'});
+const SliderContainer = styled(Box)({width: '100%', overflow: 'hidden', bottom: '0'});
 
 const BoxAfter = styled(Box)({
     display: 'flex',
@@ -137,7 +138,7 @@ const PlaybackControls = ({
     }
 
     return (
-        <SliderContainer className="d-lg-inline d-none">
+        <SliderContainer>
             <Widget>
                 <BoxBefore>
                     <TinyText>{formatTimes(earliestScore)}</TinyText>

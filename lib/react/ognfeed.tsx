@@ -256,21 +256,23 @@ export const OgnFeed = memo(
                                 handicapped={handicapped}
                             />
                         ) : null}
-                        {valid && connected ? (
-                            <PlaybackControls //
-                                {...availableScores}
-                                replayTime={replayTime}
-                                setReplayTime={setReplayTime}
-                                tz={tz}
-                            />
-                        ) : null}
                     </div>
                 </div>
-                {selectedCompno ? ( //
-                    <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
-                ) : (
-                    <Sponsors at={wsStatus.at} />
-                )}
+                <div className="details" style={{paddingTop: '5px'}}>
+                    {valid && connected && (replayTime || !selectedCompno) ? (
+                        <PlaybackControls //
+                            {...availableScores}
+                            replayTime={replayTime}
+                            setReplayTime={setReplayTime}
+                            tz={tz}
+                        />
+                    ) : null}
+                    {selectedCompno ? ( //
+                        <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
+                    ) : (
+                        <Sponsors at={wsStatus.at} />
+                    )}
+                </div>
             </>
         );
     },

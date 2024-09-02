@@ -48,7 +48,7 @@ export default function Sponsor(props) {
     const currentSponsor = useMemo(() => sponsorList[Math.trunc(props.at / 60) % sponsorList.length], [Math.trunc(props.at / 60)]);
 
     return (
-        <div className="details sponsor">
+        <div className="sponsor">
             <span style={{padding: '2px', border: '5px solid white'}}>{currentSponsor}</span>
         </div>
     );
