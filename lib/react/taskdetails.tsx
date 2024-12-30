@@ -3,7 +3,8 @@
 //
 import {memo, useMemo} from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
+
+import {faMagnifyingGlassLocation, faTasks, faCaretUp, faCaretDown} from '@fortawesome/free-solid-svg-icons';
 
 import {useState} from 'react';
 import {useContest, Spinner, Error} from './loaders';
@@ -79,12 +80,12 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
                     {dateString}: {taskDescription}
                     <span className="sorting" style={{fontSize: 'medium'}}>
                         <button title="Zoom to task" onClick={fitBounds as any}>
-                            <FontAwesomeIcon icon={solid('magnifying-glass-location')} />
+                            <FontAwesomeIcon icon={faMagnifyingGlassLocation} />
                         </button>
                         &nbsp;
                         <button className="d-lg-inline d-none" onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
-                            <FontAwesomeIcon icon={solid('tasks')} size="sm" />
-                            <FontAwesomeIcon icon={open ? solid('caret-up') : solid('caret-down')} size="sm" />
+                            <FontAwesomeIcon icon={faTasks} size="sm" />
+                            <FontAwesomeIcon icon={open ? faCaretUp : faCaretDown} size="sm" />
                         </button>
                     </span>
                 </h5>

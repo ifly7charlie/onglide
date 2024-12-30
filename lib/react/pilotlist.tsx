@@ -2,8 +2,41 @@
 import {memo, useMemo} from 'react';
 import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
-import {faSpinner} from '@fortawesome/free-solid-svg-icons';
+import {
+    faBackward,
+    faBatteryFull,
+    faBatteryThreeQuarters,
+    faBatteryHalf,
+    faBatteryQuarter,
+    faBatteryEmpty,
+    faCircleArrowUp,
+    faCircleArrowDown,
+    faCircleArrowRight,
+    faCirclePause,
+    faClock,
+    faClockRotateLeft,
+    faCloudArrowDown,
+    faCloudUpload,
+    faCow,
+    faHistory,
+    faHome,
+    faHourglassStart,
+    faHourglassHalf,
+    faHourglassEnd,
+    faHouse,
+    faPaperPlane,
+    faQuestion, //
+    faRightFromBracket,
+    faRightToBracket,
+    faSignal,
+    faSpinner,
+    faSquareCheck,
+    faStopwatch,
+    faTachometerAlt,
+    faTriangleExclamation,
+    faTrophy,
+    IconDefinition
+} from '@fortawesome/free-solid-svg-icons';
 
 import {TZ, Compno, Units, PilotScore, VarioData, ScoreData, TrackData, Epoch, PositionStatus, Options, SortKey} from '../types';
 
@@ -35,8 +68,6 @@ import {offlineTime} from '../constants';
 function isoCountryCodeToFlagEmoji(country: string) {
     return String.fromCodePoint(...[...country].map((c) => c.charCodeAt(0) + 0x1f1a5));
 }
-
-import {faCloudArrowUp, faCow, faHouse, faCirclePause, faPaperPlane, faSignal, faClock, faTrophy, IconDefinition} from '@fortawesome/free-solid-svg-icons';
 
 const icons: IconDefinition[] = [
     faSignal, // Unknown = 0,
@@ -131,11 +162,11 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
 function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
     const howMuchClimb = vario //
         ? vario.average > 0.2
-            ? solid('circle-arrow-up')
+            ? faCircleArrowUp
             : vario.average < -0.2
-            ? solid('circle-arrow-down')
-            : solid('circle-arrow-right')
-        : solid('question');
+            ? faCircleArrowDown
+            : faCircleArrowRight
+        : faQuestion;
 
     const convertedClimb = convertClimb(vario?.average ?? 0, units);
 
@@ -144,14 +175,14 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
             id="climb"
             title="vario" //
             main={{value: !isNaN(convertedClimb[0]) ? convertedClimb[0] : null, icon: howMuchClimb, units: convertedClimb[1]}}
-            data1={{value: convertHeight(vario.total, units)[0], units: units ? 'ft' : 'm', icon: vario?.average >= 0 ? solid('cloud-upload') : solid('cloud-arrow-down')}}
-            data2={{value: vario.Xperiod, units: 'sec', icon: solid('hourglass-half')}}
+            data1={{value: convertHeight(vario.total, units)[0], units: units ? 'ft' : 'm', icon: vario?.average >= 0 ? faCloudUpload : faCloudArrowDown}}
+            data2={{value: vario.Xperiod, units: 'sec', icon: faHourglassHalf}}
         />
     ) : (
         <SummaryComponent
             id="climb"
             title="vario" //
-            main={{value: null, icon: solid('signal'), units: ''}}
+            main={{value: null, icon: faSignal, units: ''}}
         />
     );
 }
@@ -171,9 +202,9 @@ const StartComponent = memo(function StartComponent({
     tz: TZ;
 }) {
     const [endTime, description, icon] = utcFinish
-        ? [OptionalTime(' ', utcFinish, tz), 'finish time', solid('hourglass-end')] //
+        ? [OptionalTime(' ', utcFinish, tz), 'finish time', faHourglassEnd] //
         : taskTimeRemaining
-        ? [OptionalDuration('', taskTimeRemaining), 'remaining time', solid('history')]
+        ? [OptionalDuration('', taskTimeRemaining), 'remaining time', faHistory]
         : ['', 'finish time', null];
 
     const duration = OptionalDuration('+', taskDuration as Epoch).split(':');
@@ -183,8 +214,8 @@ const StartComponent = memo(function StartComponent({
             id="times"
             title="times" //
             width="130px"
-            main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: solid('stopwatch'), description: 'elapsed time'}}
-            data1={{value: OptionalTime('', utcStart, tz), icon: solid('hourglass-start'), description: 'start time'}}
+            main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: faStopwatch, description: 'elapsed time'}}
+            data1={{value: OptionalTime('', utcStart, tz), icon: faHourglassStart, description: 'start time'}}
             data2={{value: endTime, icon, description: description}}
         />
     );
@@ -204,8 +235,8 @@ const HandicappedSpeedComponent = memo(function HandicappedSpeedComponent({
         <SummaryComponent
             id="speed"
             title="speed" //
-            main={{value: handicappedTaskSpeed, units: 'kph', icon: utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped speed'}}
-            data1={{value: actualTaskSpeed, units: 'kph', icon: solid('tachometer-alt'), description: 'actual speed'}}
+            main={{value: handicappedTaskSpeed, units: 'kph', icon: utcFinish ? faTrophy : faPaperPlane, description: 'handicapped speed'}}
+            data1={{value: actualTaskSpeed, units: 'kph', icon: faTachometerAlt, description: 'actual speed'}}
         />
     );
 });
@@ -222,7 +253,7 @@ const ActualSpeedComponent = memo(function ActualSpeedComponent({
             width="100px"
             id="speed"
             title="speed" //
-            main={{value: actualTaskSpeed, units: 'kph', icon: utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual speed'}}
+            main={{value: actualTaskSpeed, units: 'kph', icon: utcFinish ? faTrophy : faPaperPlane, description: 'actual speed'}}
         />
     );
 });
@@ -233,12 +264,12 @@ function HandicappedDistanceComponent({score}: {score: PilotScore}) {
             width="100px"
             id="hdistance"
             title="distance" //
-            main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'handicapped distance done'}}
-            data1={{value: score.actual.taskDistance, units: 'km', icon: solid('right-from-bracket'), description: 'actual distance done'}}
+            main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'handicapped distance done'}}
+            data1={{value: score.actual.taskDistance, units: 'km', icon: faRightFromBracket, description: 'actual distance done'}}
             data2={{
                 value: !score.utcFinish ? score.handicapped.distanceRemaining ?? score.handicapped.minPossible : undefined,
                 units: 'km',
-                icon: solid('right-to-bracket'),
+                icon: faRightToBracket,
                 description: 'handicapped minimum distance remaining'
             }}
         />
@@ -251,23 +282,23 @@ function ActualDistanceComponent({score}: {score: PilotScore}) {
             width="100px"
             id="distance"
             title="distance" //
-            main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? solid('trophy') : solid('paper-plane'), description: 'actual distance done'}}
-            data1={{value: !score.utcFinish ? score.actual.distanceRemaining ?? score.actual.minPossible : undefined, units: 'km', icon: solid('right-to-bracket'), description: 'actual minimum distance remaining'}}
+            main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'actual distance done'}}
+            data1={{value: !score.utcFinish ? score.actual.distanceRemaining ?? score.actual.minPossible : undefined, units: 'km', icon: faRightToBracket, description: 'actual minimum distance remaining'}}
         />
     );
 }
 
 function grBattery(gr: number): any {
     if (gr > 100) {
-        return solid('battery-quarter');
+        return faBatteryQuarter;
     } else if (gr > 75) {
-        return solid('battery-half');
+        return faBatteryHalf;
     } else if (gr > 40) {
-        return solid('battery-three-quarters');
+        return faBatteryThreeQuarters;
     } else if (gr > 1) {
-        return solid('battery-full');
+        return faBatteryFull;
     }
-    return solid('battery-empty');
+    return faBatteryEmpty;
 }
 
 const HandicappedGRComponent = memo(function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
@@ -289,7 +320,7 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining, ho
             id="gr"
             title="L/D" //
             main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
-            data1={{value: homeGr < 999 ? homeGr : '∞', units: ':1', icon: solid('home'), description: 'L/D to home'}}
+            data1={{value: homeGr < 999 ? homeGr : '∞', units: ':1', icon: faHome, description: 'L/D to home'}}
         />
     );
 });
@@ -301,7 +332,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
                 <a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                     <span style={{color: 'grey'}}>
                         &nbsp;+&nbsp;
-                        <FontAwesomeIcon icon={solid('clock-rotate-left')} size="sm" />
+                        <FontAwesomeIcon icon={faClockRotateLeft} size="sm" />
                         &nbsp;{OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
                     </span>
                 </a>
@@ -438,7 +469,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
     ) : replayTime ? (
         <span>
             &nbsp;
-            <FontAwesomeIcon icon={solid('backward')} />
+            <FontAwesomeIcon icon={faBackward} />
             &nbsp;
             {OptionalTime('', replayTime, tz)}
             {process.env.NODE_ENV == 'development' && score ? OptionalTime(',', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
@@ -447,7 +478,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
         <span>
             &nbsp;
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
-                <FontAwesomeIcon icon={regular('square-check')} /> {Math.round(delay)}s delay
+                <FontAwesomeIcon icon={faSquareCheck} /> {Math.round(delay)}s delay
                 {process.env.NODE_ENV == 'development' && score ? ', ' + Math.round(latestUpdate - score?.t) + 's delay' + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
             </a>
         </span>
@@ -457,12 +488,12 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
             <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage" className="tooltipicon">
                 {(delay || Infinity) < 3600 ? (
                     <>
-                        <FontAwesomeIcon icon={solid('spinner')} spin />
+                        <FontAwesomeIcon icon={faSpinner} spin />
                         &nbsp; Last point {delayToText(delay)} ago
                     </>
                 ) : (
                     <>
-                        <FontAwesomeIcon icon={solid('triangle-exclamation')} />
+                        <FontAwesomeIcon icon={faTriangleExclamation} />
                         &nbsp;
                         {vario ? <>&gt;1 hour ago</> : <>No tracking yet</>}
                     </>
@@ -539,7 +570,7 @@ function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
     if (displayIcon == 'nosignal') {
         return (
             <span className="pilotstatus">
-                <FontAwesomeIcon icon={solid('spinner')} spin={true} />
+                <FontAwesomeIcon icon={faSpinner} spin={true} />
             </span>
         );
     }

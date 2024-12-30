@@ -20,8 +20,7 @@ import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as
 import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {solid} from '@fortawesome/fontawesome-svg-core/import.macro';
-//import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
+import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
@@ -162,9 +161,9 @@ export const OgnFeed = memo(
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
-                connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
-                retry: (wsStatus.retry ?? 0) < 16 ? null : ['Connecting to live feed...', <FontAwesomeIcon icon={solid('spinner')} spin />],
-                closed: ['Connection to tracking is closed, please change the selected class to retry', <FontAwesomeIcon icon={solid('link-slash')} />]
+                connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={faSpinner} spin />],
+                retry: (wsStatus.retry ?? 0) < 16 ? null : ['Connecting to live feed...', <FontAwesomeIcon icon={faSpinner} spin />],
+                closed: ['Connection to tracking is closed, please change the selected class to retry', <FontAwesomeIcon icon={faLinkSlash} />]
             }[wsStatus.state ?? 'open'];
 
             console.log('last timestamp on status change', wsStatus.at, connectionStatusO?.[0]);

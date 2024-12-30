@@ -1,6 +1,5 @@
 import {memo} from 'react';
 import {TooltipIcon} from './htmlhelper';
-import {solid, regular} from '@fortawesome/fontawesome-svg-core/import.macro';
 
 import {PilotScore, PilotScoreLeg, Epoch, PositionStatus, TZ} from '../types';
 
@@ -17,6 +16,18 @@ import ButtonGroup from 'react-bootstrap/ButtonGroup';
 
 import Button from 'react-bootstrap/Button';
 
+import {
+    //
+    faCow,
+    faHouse,
+    faHourglassStart,
+    faLocationCrosshairs,
+    faPaperPlane,
+    faSignal,
+    faSquareCheck,
+    faTrophy
+} from '@fortawesome/free-solid-svg-icons';
+
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
 export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: any; units: boolean; tz: TZ}) {
@@ -29,22 +40,22 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
     const legIcon = (leg) => {
         if (leg.legno == score.currentLeg) {
             if (score.utcFinish) {
-                return <TooltipIcon icon={solid('trophy')} tooltip="Finished!" />;
+                return <TooltipIcon icon={faTrophy} tooltip="Finished!" />;
             } else if (score.flightStatus == PositionStatus.Landed) {
-                return <TooltipIcon icon={solid('cow')} tooltip="Landout on leg" />;
+                return <TooltipIcon icon={faCow} tooltip="Landout on leg" />;
             } else if (score.flightStatus == PositionStatus.Home) {
-                return <TooltipIcon icon={solid('house')} tooltip="Returned home" />;
+                return <TooltipIcon icon={faHouse} tooltip="Returned home" />;
             } else if (score.inSector || score.inPenalty) {
-                return <TooltipIcon icon={solid('location-crosshairs')} tooltip="plane in sector" fade style={{animationDuration: '10s'}} />;
+                return <TooltipIcon icon={faLocationCrosshairs} tooltip="plane in sector" fade style={{animationDuration: '10s'}} />;
             }
-            return <TooltipIcon icon={solid('paper-plane')} tooltip="plane still heading to sector" fade style={{animationDuration: '10s'}} />;
+            return <TooltipIcon icon={faPaperPlane} tooltip="plane still heading to sector" fade style={{animationDuration: '10s'}} />;
         }
         if (leg.legno > score.currentLeg) {
-            return <TooltipIcon icon={solid('hourglass-start')} tooltip="leg not started yet" size="xs" />;
+            return <TooltipIcon icon={faHourglassStart} tooltip="leg not started yet" size="xs" />;
         } else if (leg.estimatedStart || leg.estimatedEnd) {
-            return <TooltipIcon icon={solid('signal')} tooltip={`warning: estimated ${leg.estimatedStart ? 'leg start ' : ''}${leg.estimatedEnd ? 'leg end' : ''} due to coverage issue`} />;
+            return <TooltipIcon icon={faSignal} tooltip={`warning: estimated ${leg.estimatedStart ? 'leg start ' : ''}${leg.estimatedEnd ? 'leg end' : ''} due to coverage issue`} />;
         }
-        return <TooltipIcon icon={regular('square-check')} tooltip="leg completed" />;
+        return <TooltipIcon icon={faSquareCheck} tooltip="leg completed" />;
     };
 
     const accessor = viewOptions.hcapped ? (l: PilotScoreLeg | PilotScore) => l?.handicapped : (l: PilotScoreLeg | PilotScore) => l?.actual;
