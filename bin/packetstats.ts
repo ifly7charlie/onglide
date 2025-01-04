@@ -25,9 +25,24 @@ async function run() {
         return undefined;
     }
 
+    const trackers: Record<string, {c: string; earliest: number; latest: number; count: number}> = {};
+
     for await (const [key, messageJson] of db.iterator()) {
-        console.log(key, messageJson);
+        const msg = JSON.parse(messageJson);
+
+        const tracker = (trackers[msg.c] ??= {c: msg.c, earliest: msg.t, latest: msg.t, count: 0});
+        tracker.count++;
+        tracker.latest = msg.t;
     }
+
+    console.table(
+        Object.values(trackers).map((t) => ({
+            ...t, //
+            earliest: new Date(t.earliest * 1000).toISOString(),
+            latest: new Date(t.latest * 1000).toISOString(),
+            pps: t.latest - t.earliest ? (t.count / (t.latest - t.earliest)).toFixed(1) + 'msg/sec' : '-'
+        }))
+    );
 
     db.close();
 }
