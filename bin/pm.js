@@ -192,8 +192,6 @@ async function doIt() {
                         autorestart: true,
                         wait_ready: true,
                         listen_timeout: 240000,
-                        exec_mode: 'cluster',
-                        instances: 1,
                         log_date_format: 'YYYY-MM-DD HH:mm:ss Z'
                     });
                 }
