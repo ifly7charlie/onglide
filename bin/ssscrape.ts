@@ -519,10 +519,10 @@ async function process_day_task(day, classid, classname) {
         // and add a new one
         .query(
             escape`
-          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, hash )
+          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, nostart, hash )
              VALUES ( ${dateCode}, ${classid},
                       'N', ${day.task_type},
-                      ${duration}, ${tasktype}, 'B', ${hash} )`
+                      ${duration}, ${tasktype}, 'B', '00:00:00', ${hash} )`
         )
 
         // This query is a built one as we have to have it all as one string :( darn transactions

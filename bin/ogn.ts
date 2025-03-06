@@ -739,7 +739,7 @@ async function updateTasks(): Promise<void> {
     const getTask = async (className: ClassName, datecode: Datecode) => {
         const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number} & ClassesTableRow & ContestDayTableRow)[]>(escape`
           SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped, c.Dm, cd.calendardate, cd.status, cd.info,
-               CASE WHEN nostart ='00:00:00' THEN 0
+CASE WHEN COALESCE(nostart,'00:00:00') ='00:00:00' THEN 0
                     ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
                END nostartutc
 FROM tasks, classes c, contestday cd
@@ -882,7 +882,6 @@ async function updateTrackers(datecode: Datecode) {
     });
 
     // Now unsubsribe from each of them
-    const keyedRemoved = keyBy(removedGliders, makeClassname_Compno);
     removedGliders.forEach((g) => {
         console.log(`${g.className}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
         if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
@@ -1177,8 +1176,6 @@ async function sendAllScores(client: OgnWebSocket) {
     if (!channel || client.readyState !== WebSocket.OPEN) {
         return;
     }
-
-    //    console.table(Object.values(channel.allScores).map((c) => [c.compno, c.t, c.flightStatus]));
 
     const updatedIdentifiers = OnglideWebSocketMessage.encode(
         {
