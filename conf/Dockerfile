@@ -23,12 +23,10 @@ ARG NEXT_PUBLIC_HISTORY_HOST
 ARG NEXT_PUBLIC_COMPETITION_DELAY
 COPY ./next.config.js ./next.config.js
 COPY ./tsconfig.json ./tsconfig.json
-COPY ./.babelrc ./.babelrc
-COPY ./babel-plugin-macros.config.js ./babel-plugin-macros.config.js
 COPY ./next-env.d.ts ./next-env.d.ts
 COPY ./styles ./styles
 COPY ./pages ./pages
-COPY ./app ./app
+#COPY ./app ./app
 COPY ./public ./public
 COPY --exclude=webworkers --exclude=dijkstras.ts --exclude=launchlanding.ts --exclude=".#*" ./lib ./lib
 RUN yarn next build
