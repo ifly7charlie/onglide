@@ -701,7 +701,7 @@ async function processPacket(packet: aprsPacket) {
 
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough
-    if (!aircraftList) {
+    if (!aircraftList.length) {
         if (airfieldDistance < 20 && packet.altitude < airfieldElevation + 750) {
             unknownChannel.postMessage(message);
         }
