@@ -109,7 +109,7 @@ async function doIt() {
         let keys = (
             await mysql_db.query(escape`
               SELECT *
-                FROM scoringsource`)
+                FROM scoringsource where type != 'pictureurl'`)
         )[0];
 
         if (!keys || !keys.type) {
