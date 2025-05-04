@@ -312,7 +312,7 @@ async function initDB(datecode: Datecode) {
 
     const old = db;
 
-    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}.db`;
+    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}-${workerData.competition}.db`;
     const openedDb = (db = new DB(path));
     console.log('opening points database', path);
     dbDatecode = datecode;
