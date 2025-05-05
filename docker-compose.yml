@@ -22,7 +22,7 @@ services:
                 NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
                 NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
                 NEXT_PUBLIC_HISTORY_HOST: $NEXT_PUBLIC_HISTORY_HOST
-                NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-900}
+                NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-0}
                 MYSQL_PASSWORD: $MYSQL_PASSWORD
                 MYSQL_HOST: mysql
                 MYSQL_USER: root
@@ -32,16 +32,17 @@ services:
         depends_on:
             mysql:
                 condition: service_healthy
+#        ports:
+#            - 3000:3000
         environment:
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
             MYSQL_DATABASE: ogn
             NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
-            NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-900}
+            NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-0}
             NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
-            NEXT_PUBLIC_HISTORY_HOST: $NEXT_PUBLIC_HISTORY_HOST
-            NEXT_SCORE_REFRESH_INTERVAL: ${NEXT_SCORE_REFRESH_INTERVAL:-60000}
+            NEXT_PUBLIC_HISTORY_HOST: ${NEXT_PUBLIC_HISTORY_HOST:-${NEXT_PUBLIC_WEBSOCKET_HOST}}
         restart: always
     ogn:
         image: ghcr.io/ifly7charlie/ogn-ogn
@@ -62,8 +63,8 @@ services:
             NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: $NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
             NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
             NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-900}
-            NEXT_SCORE_REFRESH_INTERVAL: ${NEXT_SCORE_REFRESH_INTERVAL:-60000}
-            API_HOSTNAME: next:3000
+#        ports:
+#            - 8080:8080
         volumes:
             - ./db:/onglide/db
             - ./keys:/onglide/keys

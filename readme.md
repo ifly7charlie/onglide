@@ -67,6 +67,10 @@ eg:
 ROBOCONTROL_URL=https://dunstable.robocontrol.com/api/flarm
 ```
 
+#### Running without Apache container
+
+If you do not want to use the Apache container to forward traffic you will need to adjust the docker-compose to expose port `3000` from `next` and port `8080` from `ogn`, and set the .env file `NEXT_PUBLIC_WEBSOCKET_HOST` to point at the `ogn` container port 8080.  The apache container uses rewrite to map these for you.
+
 ### RST
 
 ### scraping soaringspot (not recommended for hosting competitions but useful for testing)
