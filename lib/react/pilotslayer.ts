@@ -31,7 +31,7 @@ function faToData(f: any, compno: Compno, selected: boolean) {
 let getIcon = memoize(
     function getIcon(compno: Compno, selectedCompno: Compno | undefined) {
         return {
-            id: compno == selectedCompno ? 'S' + compno : compno,
+            id: compno == selectedCompno ? 'S/' + compno : compno,
             url: compno == selectedCompno ? faToData(faLocationPin, compno, true) : faToData(faLocationPin, compno, false),
             width: 128,
             height: 128,
@@ -39,7 +39,7 @@ let getIcon = memoize(
             mask: false
         };
     },
-    (c: Compno, s: Compno | undefined) => c + (s ?? '')
+    (c: Compno, s: Compno | undefined) => c + '/' + (s ?? '')
 );
 
 export function pilotsLayer(selectedCompno: Compno, setSelectedCompno: (compno: Compno) => void, now: Epoch) {
