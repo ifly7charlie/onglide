@@ -13,7 +13,7 @@ let PNG = require('pngjs').PNG;
 
 // Track duplicate requests for the same time and service them together from one response
 let pending = [];
-let referrer = undefined;
+let referrer : undefined | null | string  = undefined;
 let accessToken = undefined;
 
 import {LRUCache} from 'lru-cache';
@@ -54,7 +54,7 @@ export async function getElevationOffset(lat: number, lng: number, cb: Function 
 
 async function _getElevationOffset(lat, lng, cb) {
     // Checking process.env is expensive so cache this
-    if (!referrer) {
+    if (referrer === undefined) {
         accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
         if (!accessToken) {
             cb(0);
@@ -62,6 +62,11 @@ async function _getElevationOffset(lat, lng, cb) {
         }
         referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
     }
+
+	if( referrer === null ) {
+		cb(0);
+		return;
+	}
 
     // Figure out what tile it is (obvs same order as geojson)
     // see https://docs.mapbox.com/help/glossary/zoom-level/,
@@ -120,7 +125,12 @@ async function _getElevationOffset(lat, lng, cb) {
         fetch(url, {headers: {Referer: referrer!}})
             .then((res) => {
                 if (res.status != 200) {
-                    throw `MapBox API returns ${res.status}: ${res.statusText}, ensure "${referrer}" is in the allowed ACL`;
+					const oldReferrer = referrer;
+					if( res.status == 401 ) {
+						referrer = null;
+					}
+                    throw `MapBox API returns ${res.status}: ${res.statusText}, ensure "${oldReferrer}" is in the allowed ACL`;
+						
                 } else {
                     return res.arrayBuffer();
                 }
