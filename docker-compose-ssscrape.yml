@@ -1,9 +1,10 @@
 services:
     mysql:
-        image: mysql:8-oracle
-        command: --mysql-native-password=ON --lower-case-table-names=2
+        image: mariadb:11
+        command: --lower-case-table-names=2 --sql-mode=""
         healthcheck:
-            test: mysql ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
+#            test: mariadb-admin ping -u root -p ${MYSQL_PASSWORD}
+            test: mariadb ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
             interval: 10s
             timeout: 10s
             retries: 10
@@ -31,8 +32,8 @@ services:
         depends_on:
             mysql:
                 condition: service_healthy
-#        ports:
-#            - 3000:3000
+        ports:
+            - 3000:3000
         environment:
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
@@ -47,7 +48,7 @@ services:
         build:
             target: ogn
             dockerfile: ./conf/Dockerfile
-        command: node dist/bin/ogn
+        command: node bin/ogn
         platform: 'linux/amd64'
         depends_on:
             mysql:
@@ -62,8 +63,8 @@ services:
             NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
             NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-0}
             API_HOSTNAME: next:3000
-#        ports:
-#            - 8080:8080
+        ports:
+            - 8080:8080
         volumes:
             - ./db:/onglide/db
             - ./keys:/onglide/keys
@@ -71,7 +72,7 @@ services:
         image: ghcr.io/ifly7charlie/ogn-soaringspot
         build:
             dockerfile: ./conf/Dockerfile
-        command: node dist/bin/ssscrape.js
+        command: node bin/ssscrape.js
         platform: 'linux/amd64'
         depends_on:
             mysql:

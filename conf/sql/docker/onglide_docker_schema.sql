@@ -366,28 +366,6 @@ CREATE TABLE `movements` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
--- Table structure for table `trackpoints`
---
-
-DROP TABLE IF EXISTS `trackpoints`;
-CREATE TABLE `trackpoints` (
-  `compno` char(4) NOT NULL,
-  `class` char(15) NOT NULL,
-  `datecode` char(3) NOT NULL,
-  `lat` float NOT NULL,
-  `lng` float NOT NULL,
-  `altitude` int(11) NOT NULL,
-  `agl` int(11) NOT NULL,
-  `t` int(11) NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
-  `bearing` int(11) DEFAULT NULL,
-  `speed` float DEFAULT NULL,
-  `station` char(25) DEFAULT NULL,
-  PRIMARY KEY (`datecode`,`class`,`t`,`compno`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-
-
---
 -- Table structure for table `sectortypes`
 --
 
