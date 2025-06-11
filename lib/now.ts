@@ -43,5 +43,5 @@ export function replay() {
 }
 
 export function d(d: Epoch | number | undefined | null) {
-    return new Date(Math.min(d ?? 0, 2145916800) * 1000).toISOString();
+    return isNaN(d) ? '-NAN-' : new Date(Math.max(0,Math.min(d ?? 0, 2145916800)) * 1000).toISOString();
 }
