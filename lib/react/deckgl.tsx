@@ -409,10 +409,11 @@ export default function MApp(props: {
                         ) : null}
                     </>
                 ) : null}
+				{selectedScore ? (
                 <Source type="geojson" data={selectedScore?.scoredGeoJSON} key={'scored_'} id={'scored'}>
                     <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: selectedScore?.scoredGeoJSON ? 'visible' : 'none'}}} />
                     <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, !!selectedScore?.scoredGeoJSON)} />
-                </Source>
+					</Source>) : null }
                 <MeasureLayers key="measure" />
                 <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
                 {!map2d && <Layer key="skylayer" {...skyLayer} />}

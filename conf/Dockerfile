@@ -42,7 +42,7 @@ FROM ognbase AS productionbase
 WORKDIR /onglide
 RUN yarn install --production --frozen-lockfile
 
-FROM productionbase AS next
+FROM productionbase AS ogn-next
 WORKDIR /onglide
 COPY --from=nextbuildimage /onglide/.build ./.build
 COPY ./next.config.js ./next.config.js
@@ -50,11 +50,15 @@ COPY ./.env ./.env
 COPY ./LICENSE ./LICENSE
 EXPOSE 3000
 
-FROM productionbase AS ogn
+FROM productionbase AS ogn-ogn
 WORKDIR /onglide
 COPY --from=ognbuildimage /onglide/dist .
 COPY ./.env ./.env.local
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN touch .docker
 EXPOSE 8080
+
+FROM ogn-ogn AS ogn-soaringspot
+RUN touch .docker
+
 

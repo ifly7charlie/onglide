@@ -1292,10 +1292,30 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         glider.webPathEndPosition = 0;
         channel.webPathBaseTime = 0 as Epoch;
         glider.scoredStart = score.utcStart as Epoch;
-        channel.earliestStart = Object.values(gliders)
-            .filter((glider) => glider.className == channel.className)
-            .reduce((min, glider) => Math.min(min, glider.scoredStart ?? Infinity) as Epoch, Infinity as Epoch);
+
+        const channelGliders = Object.values(gliders).filter((glider) => glider.className == channel.className && glider.dbTrackerId && glider.dbTrackerId != 'unknown');
+
+        channel.earliestStart = channelGliders.reduce((min, glider) => Math.min(min, glider.scoredStart ?? Infinity) as Epoch, Infinity as Epoch);
+
         console.log(`${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
+
+        const mcs = channelGliders.reduce((all, glider) => {
+			if( glider.scoredStart ) {
+				const ti = Math.trunc(glider.scoredStart / 300) * 300;
+				all[ti] = (all[ti] ?? 0) + 1;
+			}
+            return all;
+        }, {} as Record<number, number>);
+
+        const likelyA = Object.keys(mcs)
+            .sort((a, b) => mcs[a] - mcs[b])
+            .filter((a) => mcs[a] > channelGliders.length / 2)
+        const likely = Object.keys(mcs)
+            .sort((a, b) => mcs[a] - mcs[b])
+            .filter((a) => mcs[a] > channelGliders.length / 2)?.[0];
+
+        console.log(`${channel.className} likely GP start ${d(Number(likely))}`);
+		console.table(mcs);
     }
 
     if (glider && glider.scoredFinish != (score.utcFinish as Epoch)) {
