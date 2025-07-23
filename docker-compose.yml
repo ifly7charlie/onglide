@@ -12,7 +12,7 @@ services:
         volumes:
             - ./conf/sql/docker:/docker-entrypoint-initdb.d
     ogn-next:
-        image: ghcr.io/ifly7charlie/ogn-next:${DOCKER_TAG:-latest}
+        image: ogn-next:${DOCKER_TAG:-latest}
         build:
             context: .
             dockerfile: ./conf/Dockerfile
@@ -45,7 +45,7 @@ services:
             NEXT_PUBLIC_HISTORY_HOST: ${NEXT_PUBLIC_HISTORY_HOST:-${NEXT_PUBLIC_WEBSOCKET_HOST}}
         restart: always
     ogn-ogn:
-        image: ghcr.io/ifly7charlie/ogn-ogn:${DOCKER_TAG:-latest}
+        image: ogn-ogn:${DOCKER_TAG:-latest}
         build:
             target: ogn-ogn
             dockerfile: ./conf/Dockerfile
@@ -69,7 +69,7 @@ services:
             - ./db:/onglide/db
             - ./keys:/onglide/keys
     ogn-soaringspot:
-        image: ghcr.io/ifly7charlie/ogn-soaringspot:${DOCKER_TAG:-latest}
+        image: ogn-soaringspot:${DOCKER_TAG:-latest}
         build:
             dockerfile: ./conf/Dockerfile
             target: ogn-soaringspot
@@ -90,7 +90,7 @@ services:
             SOARINGSPOT_OVERWRITE: ${SOARINGSPOT_OVERWRITE:-1}
             SOARINGSPOT_ACTUALS: ${SOARINGSPOT_ACTUALS:-1}
     ogn-apache:
-        image: ghcr.io/ifly7charlie/ogn-apache:${DOCKER_TAG:-latest}
+        image: ogn-apache:${DOCKER_TAG:-latest}
         platform: 'linux/amd64'
         build:
             context: ./conf/apache
