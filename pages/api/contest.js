@@ -21,13 +21,20 @@ export default async function competitionHandler(req, res) {
         return;
     }
 
+    let datecode = undefined;
+    if (!getReplayDatecode()) {
+        datecode = (await query(escape`SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1`))?.[0]?.datecode;
+    } else {
+        datecode = getReplayDatecode();
+    }
+
     const classes = await query(
         replay()
             ? escape`
          SELECT c.class, c.classname, c.description, ${getReplayDatecode()} datecode, cs.status, handicapped, notes
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
             : escape`
-         SELECT c.class, c.classname, c.description, cs.datecode, cs.status, handicapped, notes
+         SELECT c.class, c.classname, c.description, ${datecode} datecode, cs.status, handicapped, notes
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
     );
 
