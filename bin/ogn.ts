@@ -903,7 +903,7 @@ async function updateTrackers(datecode: Datecode) {
     // Now go through all the desired gliders and make sure we have linked them
     const results = await Promise.allSettled(
         cTrackers
-            .filter((t) => t.dbTrackerId && t.dbTrackerId != 'unknown')
+            .filter((t) => t.dbTrackerId)
             .map(async (t) => {
                 const gliderKey = makeClassname_Compno(t);
 
