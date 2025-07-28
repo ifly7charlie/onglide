@@ -185,23 +185,38 @@ export default function CombinePage(props) {
                     options={props.options}
                     setOptions={props.setOptions}
                 />
-                <div className="resizingContainer">
-                    <Provider store={store}>
-                        <OgnFeed
-                            vc={className as ClassName} //
-                            tz={props.tz}
-                            datecode={selectedClass ? selectedClass.datecode : '07C'}
-                            selectedCompno={selectedCompno}
-                            setSelectedCompno={setSelectedCompno}
-                            viewport={viewport}
-                            setViewport={setViewport}
-                            options={props.options}
-                            setOptions={props.setOptions}
-                            handicapped={selectedClass?.handicapped == 'Y'}
-                            notes={selectedClass?.notes}
-                        />
-                    </Provider>
-                </div>
+                {selectedClass?.datecode ? (
+                    <div className="resizingContainer">
+                        <Provider store={store}>
+                            <OgnFeed
+                                vc={className as ClassName} //
+                                tz={props.tz}
+                                datecode={selectedClass.datecode}
+                                selectedCompno={selectedCompno}
+                                setSelectedCompno={setSelectedCompno}
+                                viewport={viewport}
+                                setViewport={setViewport}
+                                options={props.options}
+                                setOptions={props.setOptions}
+                                handicapped={selectedClass?.handicapped == 'Y'}
+                                notes={selectedClass?.notes}
+                            />
+                        </Provider>
+                    </div>
+                ) : (
+                    <div
+                        className="resizingContainer"
+                        style={{
+                            display: 'flex',
+                            justifyContent: 'center', // horizontal
+                            alignItems: 'center', // vertical
+                            width: '100%', // or fixed width
+                            height: '100vh' // or fixed height
+                        }}
+                    >
+                        No tasks yet
+                    </div>
+                )}
             </MeasureContext>
         </>
     );
