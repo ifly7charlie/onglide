@@ -29,8 +29,6 @@ export default function Sponsor(props) {
               ]
             : process.env.NEXT_PUBLIC_SITEURL.startsWith('wgc')
             ? [
-                  <img width="150" height="57" src="https://wgc2024uvalde.com/wp-content/uploads/2024/02/Soaring-Society-of-America-Logo-LG2.webp" title="SSA" />,
-                  <img width="" height="" src="https://wgc2024uvalde.com/wp-content/uploads/2024/02/logo_igc_01_cmyk_moyen.jpg" title="IGC" />
               ]
             : [
                   <div>

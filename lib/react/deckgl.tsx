@@ -81,8 +81,8 @@ export default function MApp(props: {
 
     // Map display style
     const map2d = options.map2d;
-    const mapStreet = !options.mapType;
-    const mapLight = !mapStreet;
+    const mapStreet = !!options.mapType;
+    const mapLight = mapStreet;
 
     // Track and Task Overlays
     const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc));
@@ -327,9 +327,9 @@ export default function MApp(props: {
         try {
             const map = mapRef?.current?.getMap();
             if (map) {
-                map.setLayoutProperty('satellite', 'visibility', !mapStreet ? 'none' : 'visible');
-                map.setLayoutProperty('background', 'visibility', !mapStreet ? 'none' : 'visible');
-                map.setLayoutProperty('contour-line', 'visible', !mapStreet ? 'none' : 'visible');
+                map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
+                map.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
+                map.setLayoutProperty('contour-line', 'visible', mapStreet ? 'none' : 'visible');
             }
         } catch (e) {}
     }, [mapStreet, mapRef?.current]);
@@ -409,11 +409,12 @@ export default function MApp(props: {
                         ) : null}
                     </>
                 ) : null}
-				{selectedScore ? (
-                <Source type="geojson" data={selectedScore?.scoredGeoJSON} key={'scored_'} id={'scored'}>
-                    <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: selectedScore?.scoredGeoJSON ? 'visible' : 'none'}}} />
-                    <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, !!selectedScore?.scoredGeoJSON)} />
-					</Source>) : null }
+                {selectedScore ? (
+                    <Source type="geojson" data={selectedScore?.scoredGeoJSON} key={'scored_'} id={'scored'}>
+                        <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: selectedScore?.scoredGeoJSON ? 'visible' : 'none'}}} />
+                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, !!selectedScore?.scoredGeoJSON)} />
+                    </Source>
+                ) : null}
                 <MeasureLayers key="measure" />
                 <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
                 {!map2d && <Layer key="skylayer" {...skyLayer} />}
@@ -551,7 +552,7 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
                 'line-color': mapLight ? 'darkgrey' : 'white',
                 'line-width': ['case', ['==', !selectedPilot, true], 15, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 15, 6],
                 'line-opacity': 1,
-                'line-pattern': mapLight ? 'oneway-large' : 'oneway-white-large'
+                'line-pattern': !mapLight ? 'oneway-large' : 'oneway-white-large' //the white one is actually orange
             }
         },
         {
@@ -620,6 +621,7 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
 }
 
 function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): LayerProps[] {
+    console.log('tps2d', mapLight);
     return [
         {
             // Track line
@@ -629,7 +631,7 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): 
                 'line-color': mapLight ? 'black' : 'pink',
                 'line-width': ['case', ['==', !selectedPilot, true], 20, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 20, 10],
                 'line-opacity': 1,
-                'line-pattern': mapLight ? 'oneway-large' : 'oneway-white-large'
+                'line-pattern': !mapLight ? 'oneway-large' : 'oneway-white-large' //the white one is actually orange
             }
         },
         {
@@ -637,7 +639,7 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): 
             id: 'tp',
             type: 'fill',
             paint: {
-                'fill-opacity': 0.25,
+                'fill-opacity': 0.5,
                 'fill-color': [
                     'case',
                     ['==', !selectedPilot, true],

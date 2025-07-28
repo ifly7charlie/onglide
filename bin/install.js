@@ -271,7 +271,7 @@ async function main() {
     ];
 
     const mresponse = await prompts(mquestions, {onCancel});
-
+/*
     console.log('\nUpdating .env.local');
 
     let envFile = `MYSQL_HOST=${response.dbhost}
@@ -305,7 +305,7 @@ NEXT_PUBLIC_SITEURL=${wsresponse.url}
         console.log(err);
         process.exit();
     });
-
+*/
     console.log('Updating Soaring Spot Keys');
     // Update the database with the soaring spot key
     await mysql

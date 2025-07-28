@@ -16,20 +16,26 @@ let pending = [];
 let referrer : undefined | null | string  = undefined;
 let accessToken = undefined;
 
+    let cacheHit = 0;
+    let cacheMiss = 0;
+    
 import {LRUCache} from 'lru-cache';
 
 const options = {
-    max: 3600,
+    max: 40000,
     //    dispose: function (key, n) {
     //        console.log('flushed ' + key + ' from cache');
     //    },
     updateAgeOnGet: true,
     allowStale: true,
-    ttl: 24 * 3600 * 1000
+    ttl: 72 * 3600 * 1000
 };
 
 const cache = new LRUCache(options);
-
+setInterval(()=> {
+        console.log(`tile cache hit ${cacheHit}, miss ${cacheMiss}, ${cacheMiss ? cacheHit/cacheMiss : 0}%, ${cache.size}/${cache.max} items`);
+}, 60_000);
+    
 //    module.exports = function(tk) {
 //      return function(p, cb) {
 
@@ -71,7 +77,7 @@ async function _getElevationOffset(lat, lng, cb) {
     // Figure out what tile it is (obvs same order as geojson)
     // see https://docs.mapbox.com/help/glossary/zoom-level/,
     // zoom 15 gives 1.8m per pixel at 40 degrees which should be fine
-    let tf = tilebelt.pointToTileFraction(lng, lat, 13);
+    let tf = tilebelt.pointToTileFraction(lng, lat, 12);
     let tile = tf.map(Math.floor);
     let domain = 'https://api.mapbox.com/v4/';
     let source = `mapbox.terrain-rgb/${tile[2]}/${tile[0]}/${tile[1]}.pngraw`;
@@ -121,6 +127,8 @@ async function _getElevationOffset(lat, lng, cb) {
             delete pending[url];
         }
 
+    cacheMiss++;
+
         // Go and get the URL
         fetch(url, {headers: {Referer: referrer!}})
             .then((res) => {
@@ -145,6 +153,7 @@ async function _getElevationOffset(lat, lng, cb) {
                 delete pending[url];
             });
     } else {
+    cacheHit++;
         cb(pixelsToElevation(pixels));
     }
 }

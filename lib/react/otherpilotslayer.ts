@@ -43,7 +43,7 @@ export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolea
             return i.b ? i.b : 0;
         }, */
 
-        getColor: mapLight ? [64, 64, 192, 255] : [255, 255, 255, 255],
+        getColor: !mapLight ? [64, 64, 192, 255] : [255, 255, 255, 255],
 
         getIcon: () => ({
             id: 'other',
