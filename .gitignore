@@ -120,8 +120,10 @@ out/
 
 lib/.#htmlhelper.js
 
-keys/*
 *aprs
 .env*
-db
 
+# data files
+keys/*
+db
+mariadb

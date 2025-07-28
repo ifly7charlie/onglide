@@ -1,18 +1,22 @@
 # syntax=docker/dockerfile:1.7-labs 
 FROM node:20-slim AS ognbase
-RUN apt-get update 
-RUN apt-get install -y gnupg wget lsb-release
-RUN wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.30-1_all.deb
 ENV DEBIAN_FRONTEND=noninteractive
-RUN dpkg -i mysql-apt-config_0.8.30-1_all.deb
-RUN apt-get update
-RUN apt-get install -y mysql-community-client
+RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lib,target=/var/lib/apt,sharing=locked \
+    --mount=type=cache,id=debconf,target=/var/cache/debconf,sharing=locked apt-get update && \
+	 apt-get install -y gnupg wget lsb-release && \
+     wget -c https://dev.mysql.com/get/mysql-apt-config_0.8.30-1_all.deb && \
+     dpkg -i mysql-apt-config_0.8.30-1_all.deb && \
+     apt-get update && \
+     apt-get install -y mysql-community-client
 WORKDIR /onglide
-COPY ./package.json ./
-COPY ./yarn.lock ./
 
 FROM ognbase AS buildbase
-RUN yarn install --frozen-lockfile
+#RUN --mount=type=cache,target=/usr/local/share/.cache yarn install --frozen-lockfile
+COPY ./package.json ./
+COPY ./yarn.lock ./
+RUN --mount=type=tmpfs,target=/tmp/.ycache,size=3g  yarn install --frozen-lockfile  --cache-folder /tmp/.ycache
+#RUN yarn install --frozen-lockfile
 
 FROM buildbase AS nextbuildimage
 WORKDIR /onglide
@@ -29,6 +33,8 @@ COPY ./pages ./pages
 #COPY ./app ./app
 COPY ./public ./public
 COPY --exclude=webworkers --exclude=dijkstras.ts --exclude=launchlanding.ts --exclude=".#*" ./lib ./lib
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN yarn next build
 
 FROM buildbase AS ognbuildimage
@@ -40,17 +46,23 @@ RUN yarn build:tsc
 
 FROM ognbase AS productionbase
 WORKDIR /onglide
-RUN yarn install --production --frozen-lockfile
+COPY ./package.json ./
+COPY ./yarn.lock ./
+RUN --mount=type=tmpfs,target=/tmp/.ycache,size=3g  yarn install --frozen-lockfile --production --cache-folder /tmp/.ycache
 
-FROM productionbase AS ogn-next
+FROM ognbase AS next
 WORKDIR /onglide
-COPY --from=nextbuildimage /onglide/.build ./.build
-COPY ./next.config.js ./next.config.js
-COPY ./.env ./.env
+COPY --from=nextbuildimage /onglide/.next/standalone ./
+COPY --from=nextbuildimage /onglide/.next/server ./.next/server
+COPY --from=nextbuildimage /onglide/.next/static ./.next/static
+COPY --from=nextbuildimage /onglide/public ./public
+#COPY ./next.config.js ./next.config.js
+#COPY ./.env ./.env
 COPY ./LICENSE ./LICENSE
 EXPOSE 3000
+CMD ["node", "server.js" ]
 
-FROM productionbase AS ogn-ogn
+FROM productionbase AS ogn
 WORKDIR /onglide
 COPY --from=ognbuildimage /onglide/dist .
 COPY ./.env ./.env.local
@@ -58,7 +70,7 @@ ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN touch .docker
 EXPOSE 8080
 
-FROM ogn-ogn AS ogn-soaringspot
+FROM ogn AS soaringspot
 RUN touch .docker
 
 

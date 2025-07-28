@@ -1,9 +1,10 @@
 services:
     mysql:
-        image: mysql:8-oracle
-        command: --mysql-native-password=ON --lower-case-table-names=2
+        image: mariadb:11
+        command: --lower-case-table-names=2 --sql-mode=""
         healthcheck:
-            test: mysql ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
+#            test: mariadb-admin ping -u root -p ${MYSQL_PASSWORD}
+            test: mariadb ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
             interval: 10s
             timeout: 10s
             retries: 10
@@ -11,30 +12,38 @@ services:
             MYSQL_ROOT_PASSWORD: '$MYSQL_PASSWORD'
         volumes:
             - ./conf/sql/docker:/docker-entrypoint-initdb.d
-    ogn-next:
-        image: ogn-next:${DOCKER_TAG:-latest}
+            - ./mariadb/${DOCKER_TAG}:/var/lib/mysql
+    next:
+        image: next:${DOCKER_TAG:-latest}
         build:
             context: .
             dockerfile: ./conf/Dockerfile
-            target: ogn-next
+            target: next
             args:
+                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
                 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
                 NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
                 NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
                 NEXT_PUBLIC_HISTORY_HOST: $NEXT_PUBLIC_HISTORY_HOST
                 NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-0}
+                NEXT_PUBLIC_REPLAY: ${NEXT_PUBLIC_REPLAY}
                 MYSQL_PASSWORD: $MYSQL_PASSWORD
                 MYSQL_HOST: mysql
                 MYSQL_USER: root
                 MYSQL_DATABASE: ogn
-        command: yarn next start
+#        command: yarn next start
         platform: 'linux/amd64'
         depends_on:
             mysql:
                 condition: service_healthy
-#        ports:
-#            - 3000:3000
+        ports:
+            - 3000:3000
+        networks:
+            default:
+                aliases:
+                    - next
         environment:
+            ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -43,43 +52,58 @@ services:
             NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-0}
             NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
             NEXT_PUBLIC_HISTORY_HOST: ${NEXT_PUBLIC_HISTORY_HOST:-${NEXT_PUBLIC_WEBSOCKET_HOST}}
+            NEXT_PUBLIC_REPLAY: ${NEXT_PUBLIC_REPLAY}
         restart: always
-    ogn-ogn:
-        image: ogn-ogn:${DOCKER_TAG:-latest}
+    ogn:
+        image: ogn:${DOCKER_TAG:-latest}
         build:
-            target: ogn-ogn
+            target: ogn
             dockerfile: ./conf/Dockerfile
-        command: node dist/bin/ogn
+            args:
+                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+        command: node bin/ogn
         platform: 'linux/amd64'
         depends_on:
             mysql:
                 condition: service_healthy
         restart: always
         environment:
+            ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+            DOCKER_TAG: ${DOCKER_TAG}   
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
             MYSQL_DATABASE: ogn
             NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: $NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
             NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
-            NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY:-900}
+            NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY}
+            NEXT_PUBLIC_REPLAY: ${NEXT_PUBLIC_REPLAY}
+            API_HOSTNAME: next:3000
 #        ports:
 #            - 8080:8080
+        networks:
+            default:
+                aliases:
+                    - ogn
         volumes:
             - ./db:/onglide/db
             - ./keys:/onglide/keys
-    ogn-soaringspot:
-        image: ogn-soaringspot:${DOCKER_TAG:-latest}
+    soaringspot:
+        image: soaringspot:${DOCKER_TAG:-latest}
         build:
             dockerfile: ./conf/Dockerfile
-            target: ogn-soaringspot
-        command: node dist/bin/soaringspot
+            target: soaringspot
+            args:
+                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+        command: node bin/soaringspot
         platform: 'linux/amd64'
         depends_on:
             mysql:
                 condition: service_healthy
         restart: always
         environment:
+            ENV_FILE:  ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+            DOCKER_TAG: ${DOCKER_TAG}   
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -87,24 +111,27 @@ services:
             NEXT_PUBLIC_SITEURL: $NEXT_PUBLIC_SITEURL
             SOARINGSPOT_CLIENT_ID: $SOARINGSPOT_CLIENT_ID
             SOARINGSPOT_SECRET: ${SOARINGSPOT_SECRET?SoaringSpot Secret not set}
-            SOARINGSPOT_OVERWRITE: ${SOARINGSPOT_OVERWRITE:-1}
             SOARINGSPOT_ACTUALS: ${SOARINGSPOT_ACTUALS:-1}
-    ogn-apache:
-        image: ogn-apache:${DOCKER_TAG:-latest}
+    apache:
+        image: apache:${DOCKER_TAG:-latest}
         platform: 'linux/amd64'
         build:
             context: ./conf/apache
-            target: ogn-apache
+            target: apache
         restart: always
-        command: httpd-foreground -D${ONGLIDE_SSL-NO_ONGLIDE_SSL}
+        command: httpd-foreground -DONGLIDE_SSL
         tty: true
         stdin_open: true
         depends_on:
-            - ogn-next
-            - ogn-ogn
+            - next
+            - ogn
         ports:
-            - 8080:80
-            - 8443:8443
+            - 80:8080
+            - 443:8443
+        volumes:
+            - ./keys:/etc/md
         environment:
             NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL?URL for the site is not set}
+            NEXT_PUBLIC_WEBSOCKET_HOST: ${NEXT_PUBLIC_WEBSOCKET_HOST-}
+            ONGLIDE_SSL: 1
             SERVER_ADMIN: $SERVER_ADMIN

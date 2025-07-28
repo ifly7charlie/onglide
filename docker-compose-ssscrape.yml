@@ -12,12 +12,14 @@ services:
             MYSQL_ROOT_PASSWORD: '$MYSQL_PASSWORD'
         volumes:
             - ./conf/sql/docker:/docker-entrypoint-initdb.d
-    next:
+    ogn-next:
+        image: ogn-next:${DOCKER_TAG:-latest}
         build:
             context: .
             dockerfile: ./conf/Dockerfile
-            target: next
+            target: ogn-next
             args:
+                ENV_FILE:  ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
                 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
                 NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
                 NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
@@ -36,6 +38,7 @@ services:
         ports:
             - 3000:3000
         environment:
+            ENV_FILE:  ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -46,9 +49,10 @@ services:
             NEXT_PUBLIC_HISTORY_HOST: ${NEXT_PUBLIC_HISTORY_HOST:-${NEXT_PUBLIC_WEBSOCKET_HOST}}
             NEXT_PUBLIC_REPLAY: ${NEXT_PUBLIC_REPLAY}
         restart: always
-    ogn:
+    ogn-ogn:
+        image: ogn-ogn:${DOCKER_TAG:-latest}
         build:
-            target: ogn
+            target: ogn-ogn
             dockerfile: ./conf/Dockerfile
         command: node bin/ogn
         platform: 'linux/amd64'
@@ -57,6 +61,8 @@ services:
                 condition: service_healthy
         restart: always
         environment:
+            ENV_FILE:  ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+            DOCKER_TAG: ${DOCKER_TAG}   
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -71,17 +77,20 @@ services:
         volumes:
             - ./db:/onglide/db
             - ./keys:/onglide/keys
-    soaringspot:
-        image: ghcr.io/ifly7charlie/ogn-soaringspot
+    ogn-soaringspot:
+        image: ogn-soaringspot:${DOCKER_TAG:-latest}
         build:
             dockerfile: ./conf/Dockerfile
-        command: node bin/ssscrape.js
+            target: ogn-soaringspot
+        command: node bin/soaringspot
         platform: 'linux/amd64'
         depends_on:
             mysql:
                 condition: service_healthy
         restart: always
         environment:
+            ENV_FILE:  ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+            DOCKER_TAG: ${DOCKER_TAG}   
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -90,17 +99,19 @@ services:
             SOARINGSPOT_URL: ${SOARINGSPOT_URL?SoaringSpot URL not set}
             SOARINGSPOT_OVERWRITE: ${SOARINGSPOT_OVERWRITE:-1}
             SOARINGSPOT_ACTUALS: ${SOARINGSPOT_ACTUALS:-1}
-    apache:
+    ogn-apache:
+        image: ogn-apache:${DOCKER_TAG:-latest}
         platform: 'linux/amd64'
         build:
             context: ./conf/apache
+            target: ogn-apache
         restart: always
         command: httpd-foreground -D${ONGLIDE_SSL-NO_ONGLIDE_SSL}
         tty: true
         stdin_open: true
         depends_on:
-            - next
-            - ogn
+            - ogn-next
+            - ogn-ogn
         ports:
             - 8080:80
             - 8443:8443

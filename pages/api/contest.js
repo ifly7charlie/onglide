@@ -17,7 +17,7 @@ export default async function competitionHandler(req, res) {
     if (!competition[0]) {
         res.setHeader('Cache-Control', 'public, s-maxage=10, stale-while-revalidate=30');
         res.status(404).end();
-        console.log(competition.error);
+        console.log('unable to access competition in db');
         return;
     }
 
