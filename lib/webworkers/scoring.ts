@@ -66,7 +66,7 @@ import {getNow} from '../now';
 //     process
 //
 
-export type scoreCallback = (message: {compno: Compno; score: PilotScore; recentStart: Epoch | undefined; t: Epoch | undefined; scoreId: string}) => void;
+export type scoreCallback = (message: {compno: Compno; score: PilotScore; recentStart: Epoch | undefined; t: Epoch | undefined; scoreId: string; migrateFrom?: string}) => void;
 
 export interface ScoringConfig {
     className: ClassName;

@@ -700,7 +700,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // Prep for scoring
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
-            channel.scoring.hookScore(({compno, score, recentStart, t, scoreId}) => sendScore(channel, compno, score, recentStart, scoreId, t));
+            channel.scoring.hookScore(({compno, score, recentStart, t, scoreId, migrateFrom}) => sendScore(channel, compno, score, recentStart, scoreId, t, migrateFrom));
         }
     }
 
@@ -903,7 +903,7 @@ async function updateTrackers(datecode: Datecode) {
     // Now go through all the desired gliders and make sure we have linked them
     const results = await Promise.allSettled(
         cTrackers
-            .filter((t) => t.dbTrackerId)
+            .filter((t) => t.dbTrackerId )
             .map(async (t) => {
                 const gliderKey = makeClassname_Compno(t);
 
@@ -1043,6 +1043,7 @@ async function updateDDB() {
             forEach(ddb, function (entry) {
                 entry.registration = entry?.registration?.replace(/[^A-Z0-9]/i, '');
             });
+            console.log('ddb entries:', Object.keys(ddb).length)
         })
         .catch((e) => {
             console.log('unable to fetch ddb', e);
@@ -1215,7 +1216,7 @@ async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = fa
 // We need to fetch and repeat the scores for each class, enriched with vario information
 // This means SWR doesn't need to timed reload which will help with how well the site redisplays
 // information
-async function sendScore(channel: Channel, compno: Compno, score: PilotScore, recentStart: Epoch | undefined, scoreId: string, t: Epoch | undefined) {
+async function sendScore(channel: Channel, compno: Compno, score: PilotScore, recentStart: Epoch | undefined, scoreId: string, t: Epoch | undefined, migrateFrom: string) {
     if (compno == '_live') {
         console.log(`${channel.className}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
         if (channel.liveScoreId != scoreId) {
@@ -1250,6 +1251,19 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
     // Check if it's a scoreId that is active, if not we don't do anything with it
     // one is rescore and one is live they may be the same
     if (channel.scoreId == scoreId || channel.liveScoreId == scoreId) {
+
+        // If it's a migration of historical scores then we need to copy all of them because
+        // the history is not stored in the scoreCollector
+        if( migrateFrom ) {
+            let shidFrom = channel.scoreHistory.get(migrateFrom);
+            let shidTo = channel.scoreHistory.get(scoreId);
+            if (!shidTo) {
+                channel.scoreHistory.set(scoreId, (shidTo = new Map()));
+            }
+            let shCompno = shidFrom?.get(compno);
+            shidTo.set(compno, shCompno ?? []);
+        }
+        
         // Historical scores
         if (t) {
             let shid = channel.scoreHistory.get(scoreId);
@@ -1459,6 +1473,8 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
 
         if (!Object.keys(matches).length) {
             unknownTrackers[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
+            console.log(unknownTrackers[flarmId].message);
+            console.table(gliders);
             return;
         }
 
@@ -1625,6 +1641,7 @@ function setupOgnWebServer(req, res) {
 
                     const history: Record<Compno, {history: PilotScore[]}> = {};
                     let scoreCount = 0;
+                    let glidersWithScores = 0;
                     for (const [compno, scores] of channel.scoreHistory.get(scoreId) ?? []) {
                         const preceeding = scores.findLast((score) => score.t < chunkStart);
                         history[compno] = {
@@ -1634,6 +1651,7 @@ function setupOgnWebServer(req, res) {
                             ]
                         };
                         scoreCount += history[compno].history.length;
+                        glidersWithScores += history[compno].history.length ? 1 : 0;
                     }
 
                     const msg: any = ClassScoreHistory.encode({
@@ -1644,7 +1662,7 @@ function setupOgnWebServer(req, res) {
 
                     const cacheTtl = chunkEnd == timestamp + 1 ? 24 * 60 * 60 : 60;
 
-                    console.log(`${channelName}: sending scorehistory ${scoreCount} = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)} [${scoreId}] ${cacheTtl}s cache ttl`);
+                    console.log(`${channelName}: sending scorehistory ${timestamp}: ${scoreCount} scores, ${glidersWithScores} gliders = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)} [${scoreId}] ${cacheTtl}s cache ttl`);
                     headers['Content-Type'] = 'application/octet-stream';
                     headers['Access-Control-Max-Age'] = cacheTtl; // 1 day
                     headers['Cache-Control'] = `public, max-age=${cacheTtl}, immutable, stale-while-revalidate=${cacheTtl}`;
