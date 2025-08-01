@@ -235,8 +235,14 @@ export default function MApp(props: {
     // ======= ZOOM TO TASK EFFECT =========
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
-        if (options.zoomTask && taskGeoJSONtp) {
+        if (options.zoomTask && taskGeoJSONtp && mapRef?.current) {
             try {
+                const canvas = mapRef?.current?.getCanvasContainer();
+                const rect = canvas?.getBoundingClientRect() ?? {width: 0};
+
+                const overlayWidth = Math.max(Math.trunc(rect.width * 0.3), 275);
+                const offset = rect.width >= 992 ? {padding: {right: overlayWidth, left: 10}} : {};
+
                 const [minLng, minLat, maxLng, maxLat] = bbox(buffer(taskGeoJSONtp, 15));
                 setOptions({...options, zoomTask: false});
                 mapRef?.current?.fitBounds(
@@ -245,6 +251,7 @@ export default function MApp(props: {
                         [maxLng, maxLat]
                     ],
                     {
+                        ...offset,
                         pitch: map2d ? 0 : 70,
                         bearing: 0 // north up
                     }
