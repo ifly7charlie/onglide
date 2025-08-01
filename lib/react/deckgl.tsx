@@ -241,7 +241,7 @@ export default function MApp(props: {
                 const rect = canvas?.getBoundingClientRect() ?? {width: 0};
 
                 const overlayWidth = Math.max(Math.trunc(rect.width * 0.3), 275);
-                const offset = rect.width >= 992 ? {padding: {right: overlayWidth, left: 10}} : {};
+                const offset = rect.width >= 992 ? {padding: {right: overlayWidth, left: 10, top: 10, bottom: 10}} : {};
 
                 const [minLng, minLat, maxLng, maxLat] = bbox(buffer(taskGeoJSONtp, 15));
                 setOptions({...options, zoomTask: false});
