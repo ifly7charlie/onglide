@@ -273,25 +273,38 @@ async function main() {
 
     const checkReady = async (): Promise<boolean> => {
         // Location comes from the competition table in the database
-        location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset FROM competition LIMIT 1'))?.[0];
+        location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset, start, end FROM competition LIMIT 1'))?.[0];
 
         if (!location) {
             console.error('no competition entry in the database, please confirm soaringspot integration is working');
+            console.table(await db.query<any[]>('SELECT * FROM competition'));
+            return false;
+        }
+
+        if (!(await db.query<any[]>('SELECT * FROM compstatus'))?.length || !(await db.query<any[]>('SELECT * FROM classes'))?.length) {
+            console.error('no classes configured');
             return false;
         }
 
         if (!replayBase && !(await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))?.[0]?.datecode) {
-            console.error('no current date found for competition');
-            console.table(await db.query<any[]>('SELECT * FROM compstatus'));
-            console.table(await db.query<any[]>('SELECT * FROM competition'));
-            console.table(await db.query<any[]>('SELECT * FROM classes'));
-            return false;
+            console.warn('no current date found for competition');
+
+            const currentExpectedDateCode = await getDCode();
+            if (toDateCode(new Date(location.start)) > currentExpectedDateCode || toDateCode(new Date(location.end)) < currentExpectedDateCode) {
+                console.error(
+                    `Today  ${currentExpectedDateCode}/${fromDateCode(currentExpectedDateCode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
+                        location.end
+                    } and no task configured - not tracking`
+                );
+                return false;
+            }
+            console.info(`Today  ${currentExpectedDateCode}/${fromDateCode(currentExpectedDateCode)} is inside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${location.end}`);
         }
         return true;
     };
 
     while (!(await checkReady())) {
-        await setTimeoutPromise(30000);
+        await setTimeoutPromise(60000);
     }
 
     location.point = point([location.lng, location.lat]);
@@ -324,7 +337,8 @@ async function main() {
         const datecode = await getDCode();
         getSunset(datecode);
         getProposedScoreId();
-        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${datecode}.txt`, {flags: 'a'});
+        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${internalName}-${datecode}.txt`, {flags: 'a'});
+        aprsController?.datecode(datecode);
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
@@ -542,6 +556,7 @@ async function main() {
         });
         getSunset(datecode);
         getProposedScoreId();
+        aprsController?.datecode(datecode);
         await updateClasses(internalName, datecode);
         await updateTrackers(datecode);
         await updateTasks();
@@ -585,9 +600,13 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
 //
 // Get current date code
 async function getDCode(): Promise<Datecode> {
-    return replayBase //
-        ? toDateCode(new Date(replayBase * 1000))
-        : (await db.query<{datecode: Datecode}[]>('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))[0].datecode;
+    if (replayBase) {
+        return;
+        toDateCode(new Date(replayBase * 1000));
+    }
+
+    const local9am = Date.now() - (location.tzoffset - 9 * 3600) * 1000;
+    return toDateCode(new Date(local9am));
 }
 
 import {ClassicLevel} from 'classic-level';
@@ -903,7 +922,7 @@ async function updateTrackers(datecode: Datecode) {
     // Now go through all the desired gliders and make sure we have linked them
     const results = await Promise.allSettled(
         cTrackers
-            .filter((t) => t.dbTrackerId )
+            .filter((t) => t.dbTrackerId)
             .map(async (t) => {
                 const gliderKey = makeClassname_Compno(t);
 
@@ -1043,7 +1062,7 @@ async function updateDDB() {
             forEach(ddb, function (entry) {
                 entry.registration = entry?.registration?.replace(/[^A-Z0-9]/i, '');
             });
-            console.log('ddb entries:', Object.keys(ddb).length)
+            console.log('ddb entries:', Object.keys(ddb).length);
         })
         .catch((e) => {
             console.log('unable to fetch ddb', e);
@@ -1251,10 +1270,9 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
     // Check if it's a scoreId that is active, if not we don't do anything with it
     // one is rescore and one is live they may be the same
     if (channel.scoreId == scoreId || channel.liveScoreId == scoreId) {
-
         // If it's a migration of historical scores then we need to copy all of them because
         // the history is not stored in the scoreCollector
-        if( migrateFrom ) {
+        if (migrateFrom) {
             let shidFrom = channel.scoreHistory.get(migrateFrom);
             let shidTo = channel.scoreHistory.get(scoreId);
             if (!shidTo) {
@@ -1263,7 +1281,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             let shCompno = shidFrom?.get(compno);
             shidTo.set(compno, shCompno ?? []);
         }
-        
+
         // Historical scores
         if (t) {
             let shid = channel.scoreHistory.get(scoreId);
@@ -1314,22 +1332,22 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         console.log(`${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
 
         const mcs = channelGliders.reduce((all, glider) => {
-			if( glider.scoredStart ) {
-				const ti = Math.trunc(glider.scoredStart / 300) * 300;
-				all[ti] = (all[ti] ?? 0) + 1;
-			}
+            if (glider.scoredStart) {
+                const ti = Math.trunc(glider.scoredStart / 300) * 300;
+                all[ti] = (all[ti] ?? 0) + 1;
+            }
             return all;
         }, {} as Record<number, number>);
 
         const likelyA = Object.keys(mcs)
             .sort((a, b) => mcs[a] - mcs[b])
-            .filter((a) => mcs[a] > channelGliders.length / 2)
+            .filter((a) => mcs[a] > channelGliders.length / 2);
         const likely = Object.keys(mcs)
             .sort((a, b) => mcs[a] - mcs[b])
             .filter((a) => mcs[a] > channelGliders.length / 2)?.[0];
 
         console.log(`${channel.className} likely GP start ${d(Number(likely))}`);
-		console.table(mcs);
+        console.table(mcs);
     }
 
     if (glider && glider.scoredFinish != (score.utcFinish as Epoch)) {
@@ -1662,7 +1680,11 @@ function setupOgnWebServer(req, res) {
 
                     const cacheTtl = chunkEnd == timestamp + 1 ? 24 * 60 * 60 : 60;
 
-                    console.log(`${channelName}: sending scorehistory ${timestamp}: ${scoreCount} scores, ${glidersWithScores} gliders = ${msg.length} bytes covering ${d(chunkStart)} - ${d(chunkEnd)} [${scoreId}] ${cacheTtl}s cache ttl`);
+                    console.log(
+                        `${channelName}: sending scorehistory ${timestamp}: ${scoreCount} scores, ${glidersWithScores} gliders = ${msg.length} bytes covering ${d(chunkStart)} - ${d(
+                            chunkEnd
+                        )} [${scoreId}] ${cacheTtl}s cache ttl`
+                    );
                     headers['Content-Type'] = 'application/octet-stream';
                     headers['Access-Control-Max-Age'] = cacheTtl; // 1 day
                     headers['Cache-Control'] = `public, max-age=${cacheTtl}, immutable, stale-while-revalidate=${cacheTtl}`;

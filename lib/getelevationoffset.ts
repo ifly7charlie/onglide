@@ -13,12 +13,12 @@ let PNG = require('pngjs').PNG;
 
 // Track duplicate requests for the same time and service them together from one response
 let pending = [];
-let referrer : undefined | null | string  = undefined;
+let referrer: undefined | null | string = undefined;
 let accessToken = undefined;
 
-    let cacheHit = 0;
-    let cacheMiss = 0;
-    
+let cacheHit = 0;
+let cacheMiss = 0;
+
 import {LRUCache} from 'lru-cache';
 
 const options = {
@@ -32,10 +32,10 @@ const options = {
 };
 
 const cache = new LRUCache(options);
-setInterval(()=> {
-        console.log(`tile cache hit ${cacheHit}, miss ${cacheMiss}, ${cacheMiss ? cacheHit/cacheMiss : 0}%, ${cache.size}/${cache.max} items`);
+setInterval(() => {
+    console.log(`tile cache hit ${cacheHit}, miss ${cacheMiss}, ${cacheMiss ? cacheHit / cacheMiss : 0}%, ${cache.size}/${cache.max} items`);
 }, 60_000);
-    
+
 //    module.exports = function(tk) {
 //      return function(p, cb) {
 
@@ -69,10 +69,10 @@ async function _getElevationOffset(lat, lng, cb) {
         referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
     }
 
-	if( referrer === null ) {
-		cb(0);
-		return;
-	}
+    if (referrer === null) {
+        cb(0);
+        return;
+    }
 
     // Figure out what tile it is (obvs same order as geojson)
     // see https://docs.mapbox.com/help/glossary/zoom-level/,
@@ -127,18 +127,17 @@ async function _getElevationOffset(lat, lng, cb) {
             delete pending[url];
         }
 
-    cacheMiss++;
+        cacheMiss++;
 
         // Go and get the URL
         fetch(url, {headers: {Referer: referrer!}})
             .then((res) => {
                 if (res.status != 200) {
-					const oldReferrer = referrer;
-					if( res.status == 401 ) {
-						referrer = null;
-					}
+                    const oldReferrer = referrer;
+                    if (res.status === 401 || res.status === 403) {
+                        referrer = null;
+                    }
                     throw `MapBox API returns ${res.status}: ${res.statusText}, ensure "${oldReferrer}" is in the allowed ACL`;
-						
                 } else {
                     return res.arrayBuffer();
                 }
@@ -153,7 +152,7 @@ async function _getElevationOffset(lat, lng, cb) {
                 delete pending[url];
             });
     } else {
-    cacheHit++;
+        cacheHit++;
         cb(pixelsToElevation(pixels));
     }
 }

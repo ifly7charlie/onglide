@@ -133,11 +133,10 @@ overwrites{hostname} = 0;
 */
 
 async function update_class() {
+    const tzoffset = parseInt((await mysql_db.query(escape`SELECT tzoffset FROM competition`))[0]?.tzoffset || '0');
 
-    const tzoffset = parseInt((await mysql_db.query(escape`SELECT tzoffset FROM competition`))[0]?.tzoffset||'0');
+    console.log(`using datecode ${toDateCode(new Date(Date.now() + tzoffset * 1000))}, offset ${tzoffset}`);
 
-    console.log(`using datecode ${toDateCode(new Date(Date.now()+(tzoffset*1000)))}, offset ${tzoffset}`);
-    
     // Add to the database
     await mysql_db.query(escape`
              INSERT INTO classes (class, classname, description, type )
@@ -149,7 +148,7 @@ async function update_class() {
 
     // Make sure we have rows for each day and that compstatus is correct
     //    await mysql.query( escape`call contestdays()`);
-    await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode(new Date(Date.now()+(tzoffset*1000)))}`);
+    await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode(new Date(Date.now() + tzoffset * 1000))}`);
 }
 
 //

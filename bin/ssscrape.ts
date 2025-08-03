@@ -834,7 +834,7 @@ async function update_contest(contest_name, dates, site_name, url) {
          UPDATE competition SET start = from_unixtime(${Date.parse(matches[1] + ' UTC') / 1000}),
                                   end = from_unixtime(${Date.parse(matches[2] + ' UTC') / 1000}),
                                   countrycode = 'UK',
-                                  name = ${contest_name.substring(0,40)}`);
+                                  name = ${contest_name.substring(0, 40)}`);
     }
 
     // If we have a location then update

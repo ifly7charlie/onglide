@@ -271,7 +271,7 @@ async function main() {
     ];
 
     const mresponse = await prompts(mquestions, {onCancel});
-/*
+    /*
     console.log('\nUpdating .env.local');
 
     let envFile = `MYSQL_HOST=${response.dbhost}

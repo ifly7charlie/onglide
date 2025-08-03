@@ -56,6 +56,8 @@ export interface AirfieldLocation {
     sunset: Epoch;
     lat: number;
     lng: number;
+    start: string;
+    end: string;
     officialDelay: Epoch;
     altitude?: AltitudeAMSL;
     point?: Feature<Point>;

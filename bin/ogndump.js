@@ -60,12 +60,12 @@ async function main() {
     let count = 0;
 
     // Connect to the APRS server
-  let connection = new ISSocket(`onglidedump v1`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
+    let connection = new ISSocket(`onglidedump v1`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
     //    let parser = new aprsParser();
 
     // Handle a connect
     connection.on('connect', () => {
-connection.sendLogin();
+        connection.sendLogin();
         connection.sendLine(`# onglide ${CALLSIGN} testing`);
     });
 

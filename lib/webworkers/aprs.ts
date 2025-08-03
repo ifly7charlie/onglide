@@ -58,10 +58,11 @@ export enum AprsCommandEnum {
     shutdown,
     track,
     finish,
-    untrack
+    untrack,
+    datecode
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandDatecode;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
@@ -97,6 +98,11 @@ export interface AprsCommandShutdown {
     action: AprsCommandEnum.shutdown;
 }
 
+export interface AprsCommandDatecode {
+    action: AprsCommandEnum.datecode;
+    datecode: Datecode;
+}
+
 export interface AprsListenerConfig {
     competition: string;
     location: {
@@ -109,6 +115,7 @@ export interface AprsListenerConfig {
 const statistics = {
     msgsReceived: 0,
     knownReceived: 0,
+    unknownReceived: 0,
     aprsDelay: 0,
     normalPackets: 0,
     aprsDelayForDelayed: 0,
@@ -255,6 +262,13 @@ export class AprsController {
         };
         this.worker.postMessage?.(command);
     }
+    datecode(datecode: Datecode) {
+        const command: AprsCommandDatecode = {
+            action: AprsCommandEnum.datecode,
+            datecode
+        };
+        this.worker.postMessage?.(command);
+    }
     shutdown() {
         const command: AprsCommandShutdown = {
             action: AprsCommandEnum.shutdown
@@ -295,6 +309,9 @@ if (!isMainThread && parentPort) {
                 break;
             case AprsCommandEnum.finish:
                 finishGlider(task);
+                break;
+            case AprsCommandEnum.datecode:
+                setupDatecode(task);
                 break;
         }
     });
@@ -421,9 +438,9 @@ function startAprsListener(config: AprsListenerConfig) {
         if (statistics.periodStart) {
             console.log(period);
             console.log(
-                `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs, ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${statistics.duplicates}, invalid: ${
-                    statistics.invalidPacket
-                }, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
+                `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs (${statistics.unknownReceived} unknown), ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${
+                    statistics.duplicates
+                }, invalid: ${statistics.invalidPacket}, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
             );
             console.log(`APRS: ${statistics.normalPackets} NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
             if (statistics.delayedPackets) {
@@ -491,6 +508,12 @@ function startAprsListener(config: AprsListenerConfig) {
     }, 1 * 60 * 1000);
 }
 
+async function setupDatecode(config: AprsCommandDatecode) {
+    // Make sure we have the latest datecode for the database
+    console.log(`APRS: capturing tracks for ${config.datecode}`);
+    db = await initDB(config.datecode);
+}
+
 async function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
     const glider: Aircraft = {
@@ -519,7 +542,9 @@ async function trackGlider(task: AprsCommandTrack) {
     allAircraft[makeClassname_Compno(task)] = glider;
 
     // Make sure we have the latest datecode for the database
-    db = await initDB(task.datecode);
+    if (!db) {
+        db = await initDB(task.datecode);
+    }
 
     const interimQueue = [];
 
@@ -703,6 +728,7 @@ async function processPacket(packet: aprsPacket) {
     // airfield channel if it's close enough
     if (!aircraftList.length) {
         if (airfieldDistance < 20 && packet.altitude < airfieldElevation + 750) {
+            statistics.unknownReceived++;
             unknownChannel.postMessage(message);
         }
         return;

@@ -41,7 +41,7 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
     if (!comp || !fClass || !task) {
         return (
             <>
-                <h5>{dateString}: No task</h5>
+                <h5>{dateString}: No task Configured</h5>
             </>
         );
     }
