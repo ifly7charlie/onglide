@@ -605,8 +605,21 @@ async function getDCode(): Promise<Datecode> {
         toDateCode(new Date(replayBase * 1000));
     }
 
-    const local9am = Date.now() - (location.tzoffset - 9 * 3600) * 1000;
-    return toDateCode(new Date(local9am));
+    const now = new Date(); 
+    const nowLocalMs = now.getTime() + location.tzoffset * 1000;
+    
+    const local10am = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        10, 0, 0, 0 // 10:00:00.000 local time
+    );
+    if( nowLocalMs < local10am.getTime() ) {
+        local10am.setDate(local10am.getDate()-1)
+    }
+    const utcTime = local10am.getTime() - location.tzoffset * 1000;
+    console.log('DateCode at 10am local:', utcTime, new Date(utcTime).toISOString());
+    return toDateCode(new Date(utcTime));
 }
 
 import {ClassicLevel} from 'classic-level';
