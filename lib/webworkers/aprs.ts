@@ -44,7 +44,7 @@ import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, C
 
 // APRS connection
 let connection;
-const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern4.glidernet.org'];
+const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern5.glidernet.org'];
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
@@ -376,7 +376,7 @@ function startAprsListener(config: AprsListenerConfig) {
     getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
 
     // Connect to the APRS server
-    connection = new ISSocket(`onglide ${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
+    connection = new ISSocket(`onglide ${config.competition.substring(0,6)}/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
     let parser = new aprsParser();
 
     // Handle a connect
