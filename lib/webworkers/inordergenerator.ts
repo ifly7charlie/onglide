@@ -87,22 +87,14 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         const currentMessageQueueId = messageQueueId;
 
         console.log(`${className}/${compno}: IOG started ${messageQueue.length}`);
-        if (!messageQueue.length) {
-            await new Promise((resolve) => resolveNotifications.push(resolve));
-        }
-        console.log(`${className}/${compno}: IOG first message ${messageQueue.length}`);
 
         //
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
-        while (!messageQueue[position]?._ && currentMessageQueueId == messageQueueId) {
+        while ((!messageQueue.length || !messageQueue[position]?._) && currentMessageQueueId == messageQueueId) {
             if (position == messageQueue.length) {
-                log('end of queue', position, messageQueue.length);
-                // Skip all the ticks, they shouldn't happen but don't wait forever
-                let count = 0;
-                for (; count < 10 && (await new Promise<boolean>((resolve) => resolveNotifications.push(resolve))); count++) {}
-                log(` more messages found... ${count} waits`);
-                // don't process it now as we need the while clause to evaluate the _
+                log(`${className}/${compno}: end of queue ${position} of ${messageQueue.length} messages, waiting...`);
+                await new Promise((resolve) => resolveNotifications.push(resolve));
                 continue;
             }
 
@@ -117,7 +109,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
                     hiccup = message.t;
                     const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
                     if (nextPoint) {
-                        log(`rewind to ${nextPoint} (hiccup)`);
+                        log(`${className}/${compno}: rewind to ${nextPoint} (hiccup)`);
 
                         for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
                         continue;
