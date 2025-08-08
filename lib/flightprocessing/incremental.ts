@@ -1,5 +1,3 @@
-import {sortedIndex as _sortedIndex} from 'lodash';
-
 import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants';
 
 import {Compno, PositionMessage, PilotTrackData, DisplayPilotTrackData, Epoch, DeckData, VarioData} from '../types';
@@ -7,7 +5,7 @@ import {PilotPosition} from '../protobuf/onglide';
 
 // Helper fro resizing TypedArrays so we don't end up with them being huge
 export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
-    let c = new allocator(b);
+  let c = new allocator(Math.max(b,a.length));
     c.set(a);
     return c;
 }
@@ -36,7 +34,6 @@ export function generateIndices(deck: DeckData, glider: PilotTrackData) {
     let lastTime = deck.t[0];
     if (!deck.indices) {
         deck.indices = new Uint32Array(deckSegmentIncrement);
-        deck.tr = new Uint32Array(deckPointIncrement);
     }
     deck.indices[0] = 0;
     deck.segmentIndex = 1;
@@ -150,13 +147,14 @@ export function calculateVario(deck: DeckData, tNow: Epoch, index: number): Vari
     // Add them up
     const total = deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2];
     const Xperiod = (t - deck.t[start]) as Epoch;
+    const valid = Xperiod > 0 && tNow - t < 40;
 
     // The total and the average, along with misc status values
     return {
-        valid: Xperiod && tNow - t < 40,
+        valid,
         total,
         Xperiod,
-        average: Math.round((total * 10) / Xperiod) / 10,
+        average: Xperiod > 0 ? Math.round((total * 10) / Xperiod) / 10 : 0,
         agl: deck.agl[index],
         altitude: deck.positions[start * 3 + 2],
         t: t as Epoch

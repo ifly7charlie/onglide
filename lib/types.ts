@@ -278,7 +278,6 @@ export interface DeckData {
     indices?: Uint32Array;
     agl: Int16Array;
     t: Uint32Array;
-    tr?: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
     segmentIndex?: number;
