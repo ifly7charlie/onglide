@@ -1647,6 +1647,44 @@ function setupOgnWebServer(req, res) {
         return;
     }
 
+    if (req?.url == '/status/overview') {
+        console.log('request for status - ok');
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(200, headers);
+
+        const replacer = (key, value) => {
+            switch(key) {
+            case 'scoreHistory':
+            case 'scoreDb':
+            case 'broadcastChannel':
+            case 'deck':
+            case 'flarmIdRegex':
+            case 'geoTask':
+            case 'coordinates':
+            case 'pointGeoJSON':
+            case 'geoJSON':
+            case 'linestring':
+            case 'lineString':
+            case 'lastKeepAliveMsg':
+            case 'scoredPoints':
+            case 'minDistancePoints':
+            case 'maxDistancePoints':
+            case 'webPathData': return undefined;
+
+            case 'dbTrackerId': return (typeof value === 'string' || value instanceof String) ? value.split(',').length : 'invalid';
+
+                // Size of some arrays
+            case 'clients': return Array.isArray(value) ? value.length : undefined;
+            }
+            return value;
+        }
+        
+        res.end(JSON.stringify({channels: channels ,
+                                gliders,
+                                unknownTrackers}, replacer));
+        return;
+    }
+
     // explict score request
     const [valid, command, channelName, timestampString, pScoreId]: string[] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\/[0-9.]+|)(\.bin|)$/i) || [false, '', '', '', ''];
     const timestamp = parseInt(timestampString);
