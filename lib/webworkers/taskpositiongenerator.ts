@@ -18,7 +18,7 @@ import {
     EnrichedPositionGenerator,
     EnrichedPosition,
     AltitudeAMSL,
-    isTick,
+    isEnrichedTick,
     NearestSectorPoint
 } from '../types';
 
@@ -128,7 +128,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             status.compno = current.value.c as Compno;
 
             // We pass ticks through and then do nothing more
-            if (isTick(current.value)) {
+            if (isEnrichedTick(current.value)) {
                 // Copy any changes to flight status across
                 status.flightStatus = current.value.ps;
                 // Now see if things have changed

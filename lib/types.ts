@@ -75,6 +75,13 @@ export interface TickMessage extends TimeStampType {
     _?: boolean;
 }
 
+export function isEnrichedTick(m: any): m is EnrichedTickMessage {
+    return 'tick' in m && 'ps' in m;
+}
+export interface EnrichedTickMessage extends TickMessage {
+    ps: PositionStatus;
+}
+
 export interface BasePositionMessage extends TimeStampType {
     lat: number;
     lng: number;
