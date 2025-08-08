@@ -129,6 +129,9 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
             // We pass ticks through and then do nothing more
             if (isTick(current.value)) {
+                // Copy any changes to flight status across
+                status.flightStatus = current.value.ps;
+                // Now see if things have changed
                 const progress = (status?.closestDistanceToNext ?? 0) - (lastTickStatus?.closestDistanceToNext ?? 0);
                 let ok =
                     !lastTickStatus?.closestDistanceToNext ||
