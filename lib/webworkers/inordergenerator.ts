@@ -18,20 +18,27 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
     // that is not asynchronous. Once we have achieved this
     // all the rest of the logic can simply be reading from the
     // generator
-    type ResolveNotificationFunction = (boolean) => void;
+    type ResolveNotificationFunction = (arg0: boolean) => void;
     let resolveNotifications: ResolveNotificationFunction[] = [];
 
     // We need somewhere to store the unprocessed message queue
     let messageQueue: PositionMessage[] = initialPoints;
     let messageQueueId = Math.random();
 
-    const log = compno == '!TJ' ? (...a) => console.log(compno + ':', ...a) : () => {};
+    const log = compno == '!TJ' ? (...a: any[]) => console.log(compno + ':', ...a) : () => {};
 
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
     // channel to simplify things
     const channelName = (className + datecode).toUpperCase();
     const broadcastChannel = new BroadcastChannel(channelName);
+
+    const resolveAll = () => {
+        const toNotify = resolveNotifications.slice();
+        resolveNotifications.length = 0;
+        toNotify.forEach((resolveFunction) => resolveFunction(false));
+    };
+
     broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => {
         // Get the message, and make sure it's for us
         let message = ev.data as PositionMessage;
@@ -67,9 +74,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         // Actually insert the point into the array
         messageQueue.splice(insertIndex, 0, message);
 
-        const toNotify = resolveNotifications.slice();
-        resolveNotifications.length = 0;
-        toNotify.forEach((resolveFunction) => resolveFunction(false));
+        resolveAll();
     };
 
     // Generate the next item in the sequence this will block until
@@ -132,12 +137,31 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         while (messageQueueId === currentMessageQueueId) {
             // If we don't have a message we should wait
             if (position == messageQueue.length) {
+                // We will tick on empty queue with the current real time this flushes out
+                // landouts
+                const nextPoint = yield {c: compno, _: true, tick: true, t: getNow()};
+                if (nextPoint) {
+                    // If scoring needs us to rewind we can do that immediately
+                    position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
+                    continue;
+                }
+
+                // Otherwise we will wait for next message, or until a timeout has occurred
+                // this may be less than 5 minutes as there can be more than one iterator on an IOG
+                // but it's unlikely
+                const timeout = setTimeout(() => resolveAll(), 300_000);
                 await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
+                clearTimeout(timeout);
+
+                // If we don't have a real message then we can reloop which will cause another tick
+                if (position == messageQueue.length) {
+                    continue;
+                }
             }
 
             log(` normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
 
-            //            if (position < messageQueue.length && messageQueue[position]?.t < nowCutoff) {
+            // If we have a real message then process it
             const message = messageQueue[position++];
             const nextPoint = yield {...message, _: position == messageQueue.length};
             if (nextPoint) {
