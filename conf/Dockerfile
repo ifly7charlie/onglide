@@ -12,11 +12,10 @@ RUN --mount=type=cache,id=apt-cache,target=/var/cache/apt,sharing=locked \
 WORKDIR /onglide
 
 FROM ognbase AS buildbase
-#RUN --mount=type=cache,target=/usr/local/share/.cache yarn install --frozen-lockfile
 COPY ./package.json ./
 COPY ./yarn.lock ./
-RUN --mount=type=tmpfs,target=/tmp/.ycache,size=3g  yarn install --frozen-lockfile  --cache-folder /tmp/.ycache
-#RUN yarn install --frozen-lockfile
+RUN --mount=type=cache,target=/tmp/.cache yarn install --frozen-lockfile --cache-folder /tmp/.ycache
+
 
 FROM buildbase AS nextbuildimage
 WORKDIR /onglide
@@ -48,7 +47,7 @@ FROM ognbase AS productionbase
 WORKDIR /onglide
 COPY ./package.json ./
 COPY ./yarn.lock ./
-RUN --mount=type=tmpfs,target=/tmp/.ycache,size=3g  yarn install --frozen-lockfile --production --cache-folder /tmp/.ycache
+RUN --mount=type=cache,target=/tmp/.cache yarn install --frozen-lockfile --production --cache-folder /tmp/.ycache
 
 FROM ognbase AS next
 WORKDIR /onglide
@@ -60,12 +59,14 @@ COPY --from=nextbuildimage /onglide/public ./public
 #COPY ./.env ./.env
 COPY ./LICENSE ./LICENSE
 EXPOSE 3000
+ENV HOSTNAME="0.0.0.0"
 CMD ["node", "server.js" ]
 
 FROM productionbase AS ogn
 WORKDIR /onglide
 COPY --from=ognbuildimage /onglide/dist .
-COPY ./.env ./.env.local
+ARG ENV_FILE
+COPY ./${ENV_FILE:-.env} ./.env.local
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN touch .docker
 EXPOSE 8080
