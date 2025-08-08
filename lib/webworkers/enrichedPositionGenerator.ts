@@ -5,7 +5,7 @@
  *
  */
 
-import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator, isTick} from '../types';
+import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, AirfieldLocation, InOrderGenerator, isTick, DistanceKM} from '../types';
 
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
@@ -27,6 +27,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
     let stationary: boolean | null = null;
     let airborneFound: boolean = false;
+    let ridgeRunningDistance: DistanceKM = 0 as DistanceKM;
 
     let nextArg: Epoch | void = void false; // we may be asked to rewind and if we are then we should do so by passing this into iterator.next
 
@@ -49,6 +50,16 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                     nextArg = yield {ps: PositionStatus.Unknown, ...current.value};
                     continue;
                 } else {
+                    // Check to see if it's close to the ground and has been absent for a while, this
+                    // most likely indicates a landout
+                    if (previousPoint && previousPoint.ps == PositionStatus.Airborne && ridgeRunningDistance < 2) {
+                        const gapLength = current.value.t - previousPoint.t;
+                        if ((gapLength > 60 && previousPoint.g < 10) || (gapLength > 120 && previousPoint.g < 25) || (gapLength > 240 && previousPoint.g < 50)) {
+                            previousPoint.ps = PositionStatus.Landed;
+                            stationary = true;
+                        }
+                    }
+
                     // if (current.value.t - previousPoint.t > 120) {
                     // If we have had a point then we should report tick but with that status
                     nextArg = yield {ps: previousPoint.ps, ...current.value};
@@ -109,10 +120,15 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                         }
                     }
                     stationary = true;
+                } else {
+                    // If we are close to the ground but moving then treat it as ridge running
+                    // so we don't land them out by accident
+                    ridgeRunningDistance = (ridgeRunningDistance + distanceFromLast) as DistanceKM;
                 }
             } else if (point.g > 150) {
                 point.ps = PositionStatus.Airborne;
                 airborneFound = true;
+                ridgeRunningDistance = 0 as DistanceKM;
             }
 
             // We don't forward points from grid or home, but we always want to forward
