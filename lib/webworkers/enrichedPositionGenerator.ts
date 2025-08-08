@@ -52,15 +52,18 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                 } else {
                     // Check to see if it's close to the ground and has been absent for a while, this
                     // most likely indicates a landout
-                    if (previousPoint && previousPoint.ps == PositionStatus.Airborne) {
+                    let ps = previousPoint.ps;
+                    if (ps == PositionStatus.Airborne) {
                         const gapLength = current.value.t - previousPoint.t;
                         log(`epg: ${previousPoint.c} checking for landout on tick gap:${gapLength} agl: ${previousPoint.g} rrd: ${ridgeRunningDistance}`);
                         if ((gapLength > 60 && previousPoint.g < 10) || (gapLength > 120 && previousPoint.g < 25) || (gapLength > 240 && previousPoint.g < 50)) {
                             if (distance(previousPoint.geoJSON!, airfield.point!) < 3) {
-                                previousPoint.ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
+                                ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
+                                log(`epg: ${previousPoint.c} home/grid: ${ps}`);
                                 stationary = true;
-                            } else if (ridgeRunningDistance < 2) {
-                                previousPoint.ps = PositionStatus.Landed;
+                            } else if (ridgeRunningDistance < 2.5) {
+                                log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance}`);
+                                ps = PositionStatus.Landed;
                                 stationary = true;
                             } else {
                                 log(`epg: ${previousPoint.c} not landing out due to rrd: ${ridgeRunningDistance}`);
@@ -70,7 +73,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
                     // if (current.value.t - previousPoint.t > 120) {
                     // If we have had a point then we should report tick but with that status
-                    nextArg = yield {ps: previousPoint.ps, ...current.value};
+                    nextArg = yield {ps, ...current.value};
                     continue;
                 } //else {
                 // don't tick too often and don't try and process a tick as it has no coordinates
