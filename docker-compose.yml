@@ -16,6 +16,7 @@ services:
         volumes:
             - ./conf/sql/docker:/docker-entrypoint-initdb.d
             - ./mariadb/${DOCKER_TAG}:/var/lib/mysql
+
     next:
         image: next:${DOCKER_TAG:-latest}
         build:
@@ -23,7 +24,7 @@ services:
             dockerfile: ./conf/Dockerfile
             target: next
             args:
-                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+                ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
                 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
                 NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
                 NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
@@ -39,17 +40,17 @@ services:
             mysql:
                 condition: service_healthy
         networks:
-		    traefik-net:
-			app-net:
+            traefik-net:
+            app-net:
         labels:
-            - "traefik.enable=true"
-            - "traefik.http.routers.${DOCKER_TAG}.rule=Host(`${NEXT_PUBLIC_SITEURL}`)"
-            - "traefik.http.routers.${DOCKER_TAG}.entrypoints=websecure"
-            - "traefik.http.routers.${DOCKER_TAG}.tls.certresolver=leresolver"
-            - "traefik.http.services.${DOCKER_TAG}.loadbalancer.server.port=3000"
-            - "traefik.docker.network=traefik_net"
+            - 'traefik.enable=true'
+            - 'traefik.http.routers.${DOCKER_TAG}.rule=Host(`${NEXT_PUBLIC_SITEURL}`)'
+            - 'traefik.http.routers.${DOCKER_TAG}.entrypoints=websecure'
+            - 'traefik.http.routers.${DOCKER_TAG}.tls.certresolver=leresolver'
+            - 'traefik.http.services.${DOCKER_TAG}.loadbalancer.server.port=3000'
+            - 'traefik.docker.network=traefik_net'
         environment:
-            ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+            ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -66,7 +67,7 @@ services:
             target: ogn
             dockerfile: ./conf/Dockerfile
             args:
-                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+                ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
         command: node bin/ogn
         platform: 'linux/amd64'
         depends_on:
@@ -74,8 +75,8 @@ services:
                 condition: service_healthy
         restart: always
         environment:
-            ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
-            DOCKER_TAG: ${DOCKER_TAG}   
+            ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
+            DOCKER_TAG: ${DOCKER_TAG}
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -91,16 +92,16 @@ services:
                 aliases:
                     - ogn
         labels:
-            - "traefik.enable=true"
-            - "traefik.http.routers.${DOCKER_TAG}-ws.rule=Host(`${NEXT_PUBLIC_WEBSOCKET_HOST}`)"
-            - "traefik.http.routers.${DOCKER_TAG}-ws.entrypoints=websecure"
-            - "traefik.http.routers.${DOCKER_TAG}-ws.tls.certresolver=leresolver"
-            - "traefik.http.services.${DOCKER_TAG}-ws.loadbalancer.server.port=8080"
-            - "traefik.http.routers.${DOCKER_TAG}-history.rule=Host(`${NEXT_PUBLIC_SITEURL}`) && PathPrefix(`/tracks`) || Host(`${NEXT_PUBLIC_SITEURL}`) && PathPrefix(`/scorehistory`)"
-            - "traefik.http.routers.${DOCKER_TAG}-history.entrypoints=websecure"
-            - "traefik.http.routers.${DOCKER_TAG}-history.tls.certresolver=leresolver"
-            - "traefik.http.services.${DOCKER_TAG}-history.loadbalancer.server.port=8080"
-            - "traefik.docker.network=traefik_net"
+            - 'traefik.enable=true'
+            - 'traefik.http.routers.${DOCKER_TAG}-ws.rule=Host(`${NEXT_PUBLIC_WEBSOCKET_HOST}`)'
+            - 'traefik.http.routers.${DOCKER_TAG}-ws.entrypoints=websecure'
+            - 'traefik.http.routers.${DOCKER_TAG}-ws.tls.certresolver=leresolver'
+            - 'traefik.http.services.${DOCKER_TAG}-ws.loadbalancer.server.port=8080'
+            - 'traefik.http.routers.${DOCKER_TAG}-history.rule=Host(`${NEXT_PUBLIC_SITEURL}`) && PathPrefix(`/tracks`) || Host(`${NEXT_PUBLIC_SITEURL}`) && PathPrefix(`/scorehistory`)'
+            - 'traefik.http.routers.${DOCKER_TAG}-history.entrypoints=websecure'
+            - 'traefik.http.routers.${DOCKER_TAG}-history.tls.certresolver=leresolver'
+            - 'traefik.http.services.${DOCKER_TAG}-history.loadbalancer.server.port=8080'
+            - 'traefik.docker.network=traefik_net'
         volumes:
             - ./db:/onglide/db
             - ./keys:/onglide/keys
@@ -110,7 +111,7 @@ services:
             dockerfile: ./conf/Dockerfile
             target: soaringspot
             args:
-                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+                ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
         command: node bin/soaringspot
         platform: 'linux/amd64'
         depends_on:
@@ -120,8 +121,8 @@ services:
         networks:
             - app-net
         environment:
-            ENV_FILE:  ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
-            DOCKER_TAG: ${DOCKER_TAG}   
+            ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
+            DOCKER_TAG: ${DOCKER_TAG}
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
