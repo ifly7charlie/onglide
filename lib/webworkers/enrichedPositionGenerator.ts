@@ -52,16 +52,19 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                 } else {
                     // Check to see if it's close to the ground and has been absent for a while, this
                     // most likely indicates a landout
-                    if (previousPoint && previousPoint.ps == PositionStatus.Airborne && ridgeRunningDistance < 2) {
+                    if (previousPoint && previousPoint.ps == PositionStatus.Airborne) {
                         const gapLength = current.value.t - previousPoint.t;
-                        log(`epg: ${previousPoint.c} checking for landout on tick gap:${gapLength} agl: ${previousPoint.g}`);
+                        log(`epg: ${previousPoint.c} checking for landout on tick gap:${gapLength} agl: ${previousPoint.g} rrd: ${ridgeRunningDistance}`);
                         if ((gapLength > 60 && previousPoint.g < 10) || (gapLength > 120 && previousPoint.g < 25) || (gapLength > 240 && previousPoint.g < 50)) {
                             if (distance(previousPoint.geoJSON!, airfield.point!) < 3) {
                                 previousPoint.ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
-                            } else {
+                                stationary = true;
+                            } else if (ridgeRunningDistance < 2) {
                                 previousPoint.ps = PositionStatus.Landed;
+                                stationary = true;
+                            } else {
+                                log(`epg: ${previousPoint.c} not landing out due to rrd: ${ridgeRunningDistance}`);
                             }
-                            stationary = true;
                         }
                     }
 
