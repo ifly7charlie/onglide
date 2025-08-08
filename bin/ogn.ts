@@ -640,11 +640,37 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     }
 
     // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await db.query<{class: ClassName}[]>('SELECT class FROM compstatus');
+    const classes = await db.query<{class: ClassName; datecode: Datecode}[]>('SELECT class, datecode FROM compstatus');
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
     for (const c of classes) {
+        // Check if we are not same as configured in db (ie from scoring)
+        if (datecode !== c.datecode) {
+            // Before competition start
+            if (!c.datecode) {
+                if (toDateCode(new Date(location.start)) > datecode) {
+                    console.error(
+                        `${c.class}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
+                            location.end
+                        } and no task configured - not tracking`
+                    );
+                    continue;
+                }
+            }
+            // after competition end
+            else {
+                if (toDateCode(new Date(location.end)) < datecode) {
+                    console.error(
+                        `${c.class}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
+                            location.end
+                        } and no task configured - not tracking`
+                    );
+                    continue;
+                }
+            }
+        }
+
         const cname = channelName(c.class, datecode);
         let channel: Channel = channels[cname];
 
