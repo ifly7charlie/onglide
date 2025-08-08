@@ -265,7 +265,7 @@ export type InOrderGenerator = AsyncGenerator<PositionMessage | TickMessage, voi
 export type InOrderGeneratorFunction = (getNow: () => Epoch) => InOrderGenerator;
 
 // Figure out what is happening in the flight
-export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition | TickMessage, void, Epoch | void>;
+export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition | EnrichedTickMessage, void, Epoch | void>;
 
 // Figure out where in a task somebody is
 export type TaskStatusGenerator = AsyncGenerator<TaskStatus, void, void>;
