@@ -529,6 +529,23 @@ async function setupDatecode(config: AprsCommandDatecode) {
 
 async function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
+
+    // Check if already tracking...
+    const existingTracker = allAircraft[makeClassname_Compno(task)];
+    if (existingTracker) {
+        console.log(`${task.compno}: closing existing tracker entry ${existingTracker.trackers.join(',')}`);
+        // remove the trackers
+        existingTracker.trackers.forEach((t) => {
+            const tracker = trackers[t];
+            tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != existingTracker.channel || a.compno != existingTracker.compno);
+            if (!tracker.aircraftList.length) {
+                tracker.db?.close();
+                delete trackers[t];
+            }
+        });
+        clearInterval(existingTracker.interval);
+    }
+
     const glider: Aircraft = {
         compno: task.compno,
         className: task.className,
