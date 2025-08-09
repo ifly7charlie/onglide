@@ -15,16 +15,17 @@ function svgToDataURL(svg: string) {
 }
 
 function faToData(f: any, compno: Compno, selected: boolean) {
+    const size = compno.length > 3 ? 160 : 210;
     return !selected
         ? svgToDataURL(`\
 <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="black" stroke="#000" viewBox="0 0 ${f.icon[0]} ${f.icon[1]}">
 <path fill="white" stroke="#070f" stroke-width="20" d="${f.icon[4]}"/>
-<text x="50%" y="44%" dominant-baseline="middle" text-anchor="middle" fill="black" font-size="210">${compno}</text>    
+<text x="50%" y="44%" dominant-baseline="middle" text-anchor="middle" fill="black" font-size="${size}">${compno}</text>    
 </svg>`)
         : svgToDataURL(`\
 <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="black" stroke="#000" viewBox="0 0 ${f.icon[0]} ${f.icon[1]}">
 <path fill="white" stroke="#f0f" stroke-width="30" d="${f.icon[4]}"/>
-<text x="50%" y="44%" dominant-baseline="middle" text-anchor="middle" fill="#f0f" font-size="210">${compno}</text>    
+<text x="50%" y="44%" dominant-baseline="middle" text-anchor="middle" fill="#f0f" font-size="${size}">${compno}</text>    
 </svg>`);
 }
 
