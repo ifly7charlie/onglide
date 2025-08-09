@@ -1,6 +1,7 @@
 import {query, mysqlEnd} from '../../lib/react/db';
 import escape from 'sql-template-strings';
-import {replay, getReplayDatecode} from '../../lib/now';
+import {getNow} from '../../lib/now';
+import {toDateCode} from '../../lib/datecode';
 
 export default async function competitionHandler(req, res) {
     const competition = await query(
@@ -21,19 +22,27 @@ export default async function competitionHandler(req, res) {
         return;
     }
 
-    let datecode = undefined;
-    if (!getReplayDatecode()) {
-        datecode = (await query(escape`SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1`))?.[0]?.datecode;
-    } else {
-        datecode = getReplayDatecode();
+    const tzoffset = competition[0].tzoffset;
+    const now = new Date(getNow() * 1000);
+    const nowLocalMs = now.getTime() + tzoffset * 1000;
+
+    const local10am = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+        10,
+        0,
+        0,
+        0 // 10:00:00.000 local time
+    );
+    if (nowLocalMs < local10am.getTime()) {
+        local10am.setDate(local10am.getDate() - 1);
     }
+    const utcTime = local10am.getTime() - tzoffset * 1000;
+    const datecode = toDateCode(new Date(utcTime));
 
     const classes = await query(
-        replay()
-            ? escape`
-         SELECT c.class, c.classname, c.description, ${getReplayDatecode()} datecode, cs.status, handicapped, notes
-           FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
-            : escape`
+        escape`
          SELECT c.class, c.classname, c.description, ${datecode} datecode, cs.status, handicapped, notes
            FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
     );
