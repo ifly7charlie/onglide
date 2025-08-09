@@ -359,7 +359,7 @@ export default function MApp(props: {
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
     return (
-        <ErrorBoundary fallback={<p>Please reload me!</p>}>
+        <ErrorBoundary fallback={<p style={{marginTop: 100}}>Please reload me!</p>}>
             <Map //
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}
