@@ -211,7 +211,18 @@ export class AprsController {
         this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config});
     }
 
-    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean) {
+    validateGlider(trackerIds: string): boolean {
+        if (!trackerIds || trackerIds == 'unknown') {
+            return false;
+        }
+        const flarmIDs = trackerIds
+            .split(/[:,]/)
+            .map((i) => i.toUpperCase())
+            .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
+        return flarmIDs && flarmIDs.length > 0;
+    }
+
+    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
@@ -230,10 +241,12 @@ export class AprsController {
                 trackerId: flarmIDs
             };
             this.worker.postMessage?.(command);
-        } else {
-            console.log(`not tracking ${className}:${compno} => ${flarmIDs}`);
+            return true;
         }
+        console.log(`not tracking ${className}:${compno} => ${flarmIDs}`);
+        return false;
     }
+
     untrackGlider(compno: Compno, className: ClassName, channelName: string, trackerIds: string) {
         const flarmIDs = trackerIds
             .split(/[:,]/)
@@ -376,7 +389,7 @@ function startAprsListener(config: AprsListenerConfig) {
     getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
 
     // Connect to the APRS server
-    connection = new ISSocket(`onglide ${config.competition.substring(0,6)}/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
+    connection = new ISSocket(`onglide ${config.competition.substring(0, 6)}/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
     let parser = new aprsParser();
 
     // Handle a connect
@@ -781,10 +794,6 @@ async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messag
     }
 }
 
-async function restartMessageQueue(aircraft: Aircraft) {
-    processMessageQueue(aircraft, 0 as Epoch, getNow());
-}
-
 //
 // This iterates through the queue on a regular basis and deals with each point
 // it also ensures time order and is where you can perform filtering for positioning
@@ -792,26 +801,17 @@ async function restartMessageQueue(aircraft: Aircraft) {
 //
 // Note that we do not consume the message queue - it is used for scoring restarts etc
 // so all messages are kept.
-async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined = undefined, to: Epoch = (getNow() - inorderAdditionalDelay) as Epoch) {
+async function processMessageQueue(aircraft: Aircraft) {
     //
     let lastSent = aircraft.lastSent;
     let messages = aircraft.messages;
-    const start = from ?? ((aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch);
+    const start = (aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch;
     const realNow = getNow();
+    const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
     let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
-    /*    if (position < messages.length) {
-        console.log(
-            `processMessageQueue ${aircraft.compno}: t: ${lastSent?.t} < [${start}-${to}...rn:${realNow}], p: ${position} < ${messages.length}, m: ${messages.at(position)?.t ?? 'no message'}, lm: ${messages.at(-1)?.t}`
-        );
-        } */
-
-    // If we have been asked to resent all points then we shall do so
-    if (start === 0 && aircraft.lastTime !== 0) {
-        console.log(`processMessageQueue: resending all points for ${aircraft.compno}, ${messages.length} points, ${messages.at(-1)?.g}`);
-        aircraft.channel!.postMessage({c: aircraft.compno, t: 1, _: false, tick: true} as any);
-        aircraft.lastTime = 0;
-        aircraft.lastTick = 0 as Epoch;
+    if (aircraft.compno == 'AS') {
+        console.log(`PMQ: ${aircraft.compno}:  ls: ${lastSent}, m: ${messages.length}, s:${start}, p: ${position}`);
     }
 
     let count = 0;
@@ -940,10 +940,6 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
         // all it does is stop it sending to the front end
-        if (aircraft.compno == 'RP') {
-            console.log('RP =>', point.c, point.t);
-        }
-
         const live = start != 0 || position == messages.length;
         aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
     }
@@ -954,14 +950,14 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
             _: true,
             tick: true
         } as any);
-        //        console.log('IOG tick:', aircraft.compno, (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch), Math.min(position, messages.length - 1), position, messages.length);
+        console.log('PMQ tick:', aircraft.compno, (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch), Math.min(position, messages.length - 1), position, messages.length);
         aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
         if (!aircraft.lastTick) {
-            console.log(`${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} f:${from} s:${start} t:${to}`);
+            console.log(`PMQ: ${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} s:${start} t:${to}`);
         }
     }
 
     if (count > 1) {
-        console.log(`${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, f:${from} s:${start} t:${to}`);
+        console.log(`${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, s:${start} t:${to}`);
     }
 }
