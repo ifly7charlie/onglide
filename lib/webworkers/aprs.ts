@@ -227,24 +227,20 @@ export class AprsController {
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
             .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
-        console.log('TRACKGLIDER', compno, flarmIDs);
-        if (flarmIDs && flarmIDs.length) {
-            // Tell APRS to start listening for the flarmid
-            console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}] receive:${receiveNewPoints}`);
-            const command: AprsCommandTrack = {
-                action: AprsCommandEnum.track,
-                compno: compno, //
-                className: className,
-                channelName,
-                datecode,
-                receiveNewPoints,
-                trackerId: flarmIDs
-            };
-            this.worker.postMessage?.(command);
-            return true;
-        }
-        console.log(`not tracking ${className}:${compno} => ${flarmIDs}`);
-        return false;
+
+        // Tell APRS to start listening for the flarmid
+        console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}] receive:${receiveNewPoints}`);
+        const command: AprsCommandTrack = {
+            action: AprsCommandEnum.track,
+            compno: compno, //
+            className: className,
+            channelName,
+            datecode,
+            receiveNewPoints,
+            trackerId: flarmIDs
+        };
+        this.worker.postMessage?.(command);
+        return true;
     }
 
     untrackGlider(compno: Compno, className: ClassName, channelName: string, trackerIds: string) {
@@ -252,18 +248,17 @@ export class AprsController {
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
             .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
-        if (flarmIDs && flarmIDs.length) {
-            // Tell APRS to start listening for the flarmid
-            console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
-            const command: AprsCommandUntrack = {
-                action: AprsCommandEnum.untrack,
-                compno: compno, //
-                className: className,
-                channelName: channelName,
-                trackerId: flarmIDs
-            };
-            this.worker.postMessage?.(command);
-        }
+
+        // Tell APRS to start listening for the flarmid
+        console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
+        const command: AprsCommandUntrack = {
+            action: AprsCommandEnum.untrack,
+            compno: compno, //
+            className: className,
+            channelName: channelName,
+            trackerId: flarmIDs
+        };
+        this.worker.postMessage?.(command);
     }
     finishGlider(compno: Compno, className: ClassName, channelName: string) {
         console.log(`Finishing APRS Listener for glider ${className}/${compno}: [${channelName}]`);
@@ -443,82 +438,84 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // And every minute we need to confirm the APRS
     // connection has had some traffic
-    const kaInterval = setInterval(function () {
-        // Log and reset statistics
-        const period = (Date.now() - statistics.periodStart) / 1000;
+    const kaInterval = setInterval(
+        function () {
+            // Log and reset statistics
+            const period = (Date.now() - statistics.periodStart) / 1000;
 
-        // Into insights
-        if (statistics.periodStart) {
-            console.log(period);
-            console.log(
-                `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs (${statistics.unknownReceived} unknown), ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${
-                    statistics.duplicates
-                }, invalid: ${statistics.invalidPacket}, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
-            );
-            console.log(`APRS: ${statistics.normalPackets} NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
-            if (statistics.delayedPackets) {
+            // Into insights
+            if (statistics.periodStart) {
                 console.log(
-                    `APRS: ${statistics.delayedPackets} DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, range ${statistics.aprsMinDelayForDelayed} - ${
-                        statistics.aprsMaxDelayForDelayed
-                    }, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
+                    `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs (${statistics.unknownReceived} unknown), ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${
+                        statistics.duplicates
+                    }, invalid: ${statistics.invalidPacket}, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
                 );
-            }
-            trackMetric('aprs.msgsReceived', statistics.msgsReceived);
-            trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
-            trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
-            trackMetric('aprs.server', parseInt(APRSSERVER.match(/([0-9])/)?.[0] || '99'));
-            trackMetric('aprs.jumps', statistics.jumps);
-        }
-
-        statistics.msgsReceived =
-            statistics.aprsDelay =
-            statistics.aprsDelayForDelayed =
-            statistics.delayedPackets = //
-            statistics.normalPackets =
-            statistics.knownReceived =
-            statistics.invalidPacket =
-            statistics.encryptedPacket =
-            statistics.finishPoints =
-            statistics.outOfOrder =
-            statistics.duplicates =
-            statistics.jumps =
-                0;
-
-        statistics.aprsMaxDelayForDelayed = 0;
-        statistics.aprsMinDelayForDelayed = Infinity;
-
-        statistics.periodStart = Date.now();
-        if (unstableCount > 0) {
-            unstableCount--;
-        }
-        trackMetric('aprs.unstableCount', unstableCount);
-
-        // send a keepalive
-        console.log('sending keepalive', `# ${config.competition}`);
-        try {
-            // Send APRS keep alive or we will get dumped
-            connection.sendLine(`# ${config.competition}`);
-        } catch (x) {
-            console.log('unable to send keepalive', x);
-            connection.valid = false;
-        }
-
-        // Re-establish the APRS connection if we haven't had anything in
-        if (!connection.valid) {
-            console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
-            connection.disconnect(() => {
-                unstableCount += 2;
-                if (unstableCount > 5) {
-                    console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
-                    clearInterval(kaInterval);
-                    startAprsListener(config);
-                    trackMetric('aprs.restart', 1);
+                console.log(`APRS: ${statistics.normalPackets} NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
+                if (statistics.delayedPackets) {
+                    console.log(
+                        `APRS: ${statistics.delayedPackets} DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, range ${statistics.aprsMinDelayForDelayed} - ${
+                            statistics.aprsMaxDelayForDelayed
+                        }, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
+                    );
                 }
-                connection.connect();
-            });
-        }
-        connection.valid = false;
-    }, 1 * 60 * 1000);
+                trackMetric('aprs.msgsReceived', statistics.msgsReceived);
+                trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
+                trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
+                trackMetric('aprs.server', parseInt(APRSSERVER.match(/([0-9])/)?.[0] || '99'));
+                trackMetric('aprs.jumps', statistics.jumps);
+            }
+
+            statistics.msgsReceived =
+                statistics.aprsDelay =
+                statistics.aprsDelayForDelayed =
+                statistics.delayedPackets = //
+                statistics.normalPackets =
+                statistics.knownReceived =
+                statistics.invalidPacket =
+                statistics.encryptedPacket =
+                statistics.finishPoints =
+                statistics.outOfOrder =
+                statistics.duplicates =
+                statistics.jumps =
+                    0;
+
+            statistics.aprsMaxDelayForDelayed = 0;
+            statistics.aprsMinDelayForDelayed = Infinity;
+
+            statistics.periodStart = Date.now();
+            if (unstableCount > 0) {
+                unstableCount--;
+            }
+            trackMetric('aprs.unstableCount', unstableCount);
+
+            // send a keepalive
+            console.log('sending keepalive', `# ${config.competition}`);
+            try {
+                // Send APRS keep alive or we will get dumped
+                connection.sendLine(`# ${config.competition}`);
+            } catch (x) {
+                console.log('unable to send keepalive', x);
+                connection.valid = false;
+            }
+
+            // Re-establish the APRS connection if we haven't had anything in
+            if (!connection.valid) {
+                console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
+                connection.disconnect(() => {
+                    unstableCount += 2;
+                    if (unstableCount > 5) {
+                        console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+                        clearInterval(kaInterval);
+                        startAprsListener(config);
+                        trackMetric('aprs.restart', 1);
+                    }
+                    connection.connect();
+                });
+            }
+            connection.valid = false;
+        },
+        1 * 60 * 1000
+    );
 }
 
 async function setupDatecode(config: AprsCommandDatecode) {
