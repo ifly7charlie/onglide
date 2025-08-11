@@ -1012,7 +1012,7 @@ async function updateTrackers(datecode: Datecode) {
                 }
 
                 // If we have a tracker for it then we need to link that as well
-                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
+                if (!hadTracker) { // && t.dbTrackerId && t.dbTrackerId != 'unknown') {
                     aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
