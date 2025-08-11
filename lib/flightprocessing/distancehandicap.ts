@@ -7,7 +7,11 @@ import {calculateTask} from './taskhelper';
 import _clonedeep from 'lodash.clonedeep';
 
 // Make a copy of the task reduced for the specified handicap
-export function adjustDistanceHandicapTask(task: Task, handicap: number): Task {
+export function adjustDistanceHandicapTask(task: Task, handicap: number | undefined): Task {
+    if (!handicap) {
+        return task;
+    }
+
     // Make a new array for it
     var newTask = _clonedeep(task);
 
