@@ -69,10 +69,29 @@ async function runScore(datecode, className, compno: Compno, handicap) {
 
     //
     // Now we will fetch the points for the pilots
-    const rawpoints: PositionMessage[] = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
-                                              FROM trackpoints
-                                             WHERE datecode=${datecode} AND class=${className} AND (${compno}='' OR compno = ${compno})
-                                             ORDER BY t ASC`);
+    const rawpoints: PositionMessage[] = await db.query(escape`
+        SELECT
+            compno c,
+            t,
+            round(lat, 10) lat,
+            round(lng, 10) lng,
+            altitude a,
+            agl g,
+            bearing b,
+            speed s,
+            0 AS l
+        FROM
+            trackpoints
+        WHERE
+            datecode = ${datecode}
+            AND class = ${className}
+            AND (
+                ${compno} = ''
+                OR compno = ${compno}
+            )
+        ORDER BY
+            t ASC
+    `);
 
     console.log(`${className}: fetched ${rawpoints.length} rows of trackpoints (getInitialTrackPoints)`);
 
@@ -138,14 +157,34 @@ const printDate = (x) => new Date(x * 1000).toUTCString();
 async function updateTasks(className: ClassName, datecode: Datecode): Promise<Task | null> {
     // Get the details for the task
     const taskdetails = ((await db.query(escape`
-         SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped,
-               CASE WHEN nostart ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${datecode}),' ',nostart))-(SELECT tzoffset FROM competition)
-               END nostartutc
-          FROM tasks, classes c
-          WHERE tasks.datecode= ${datecode}
-             AND tasks.class = c.class 
-             AND tasks.class= ${className} and tasks.flown='Y'
+        SELECT
+            tasks.*,
+            time_to_sec (tasks.duration) durationsecs,
+            c.grandprixstart,
+            c.handicapped,
+            CASE
+                WHEN nostart = '00:00:00' THEN 0
+                ELSE UNIX_TIMESTAMP (
+                    CONCAT(
+                        fdcode (${datecode}),
+                        ' ',
+                        nostart
+                    )
+                ) - (
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                )
+            END nostartutc
+        FROM
+            tasks,
+            classes c
+        WHERE
+            tasks.datecode = ${datecode}
+            AND tasks.class = c.class
+            AND tasks.class = ${className}
+            AND tasks.flown = 'Y'
     `)) || {})[0];
 
     if (!taskdetails || !taskdetails.type) {
@@ -156,11 +195,16 @@ async function updateTasks(className: ClassName, datecode: Datecode): Promise<Ta
     const taskid = taskdetails.taskid;
 
     const tasklegs = (await db.query(escape`
-      SELECT taskleg.*, nname name
-        FROM taskleg
-       WHERE taskleg.taskid = ${taskid}
-      ORDER BY legno
-`)) as any[];
+        SELECT
+            taskleg.*,
+            nname name
+        FROM
+            taskleg
+        WHERE
+            taskleg.taskid = ${taskid}
+        ORDER BY
+            legno
+    `)) as any[];
 
     if (tasklegs.length < 2) {
         console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
@@ -178,7 +222,8 @@ async function updateTasks(className: ClassName, datecode: Datecode): Promise<Ta
             nostartutc: taskdetails.nostartutc,
             aat: taskdetails.type == 'A',
             dh: taskdetails.type == 'D',
-            handicapped: taskdetails.handicapped == 'Y'
+            handicapped: taskdetails.handicapped == 'Y',
+            maxHandicap: Infinity
         },
         details: taskdetails,
         legs: tasklegs

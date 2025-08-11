@@ -10,6 +10,9 @@ import type {Datecode, ClassName, Task} from '../types';
 import type {Task as TaskProto} from '../protobuf/onglide';
 import type {Point, FeatureCollection} from 'geojson';
 
+import {adjustDistanceHandicapTask} from '../flightprocessing/distancehandicap';
+import {taskGeoJSON} from '../flightprocessing/taskhelper';
+
 import {d} from '../now';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
@@ -62,7 +65,12 @@ export const taskSlice = createSlice({
     selectors: {
         selectHasTask: (state, vc: ClassName) => (state.className == vc ? state.taskReceived : false),
         selectTask: (state, vc: ClassName) => (state.className == vc ? state.task : undefined),
-        selectTaskGeoJSON: (state, vc: ClassName) => (state.className == vc ? state.geoJSON : undefined)
+        selectTaskGeoJSON: (state, vc: ClassName, handicap: number | undefined) =>
+            state.className == vc //
+                ? state.task?.rules?.dh
+                    ? taskGeoJSON(adjustDistanceHandicapTask(state.task, handicap))
+                    : state.geoJSON
+                : undefined
     }
 });
 

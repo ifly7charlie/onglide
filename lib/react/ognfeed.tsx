@@ -228,6 +228,7 @@ export const OgnFeed = memo(
                         viewport={viewport}
                         setViewport={setViewport}
                         selectedCompno={selectedCompno}
+                        selectedHandicap={selectedCompno ? pilots?.[selectedCompno]?.handicap : undefined}
                         status={status}
                     />
                 </div>

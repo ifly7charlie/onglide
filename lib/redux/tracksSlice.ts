@@ -19,7 +19,6 @@ import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
 import type {
     DisplayPilotTrackData, //
     TrackData,
-    VarioData,
     DeckData,
     Compno,
     Datecode,

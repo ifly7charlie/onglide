@@ -27,6 +27,9 @@ import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 import {racingScoringGenerator} from './racingScoringGenerator';
 import {enrichedPositionGenerator} from './enrichedPositionGenerator';
 
+// DH adjuster
+import {adjustDistanceHandicapTask} from '../flightprocessing/distancehandicap';
+
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
 import {taskScoresGenerator} from './taskScoresGenerator';
@@ -382,13 +385,22 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 }
 
 // Loop through all of them
-function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) {
+function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
     const log =
         glider.compno == '---'
             ? console.log
             : () => {
                   /*noop*/
               };
+
+    let handicap = glider.handicap;
+
+    // Distance handicap
+    if (task.rules.dh) {
+        console.log('adjusting for dh task');
+        task = adjustDistanceHandicapTask(task, glider.handicap);
+        //        handicap = 100;
+    }
 
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
@@ -403,7 +415,7 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) 
 
     // 3. Once we have distances we can calculate task lengths
     //    and therefore speeds
-    const scores = taskScoresGenerator(task, glider.compno, glider.handicap, distances, log);
+    const scores = taskScoresGenerator(task, glider.compno, handicap, distances, log);
 
     return scores;
 }

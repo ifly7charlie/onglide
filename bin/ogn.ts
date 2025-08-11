@@ -39,7 +39,7 @@ import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode, toDateCode} from '../lib/datecode';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow} from '../lib/types';
+import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
 console.log('dev mode', dev);
 
@@ -225,7 +225,7 @@ interface OgnWebSocket extends WebSocket {
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
 
-import {getNow, getDelay, readOnly, replayBase, d} from '../lib/now';
+import {getNow, getDelay, readOnly, replayBase, d, getReplayDatecode} from '../lib/now';
 
 async function main() {
     if (error) {
@@ -604,7 +604,7 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
 // Get current date code
 async function getDCode(): Promise<Datecode> {
     if (replayBase) {
-        return;
+        return getReplayDatecode();
         toDateCode(new Date(replayBase * 1000));
     }
 
@@ -800,8 +800,8 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 
 async function updateTasks(): Promise<void> {
     // Get the details for the task
-    const getTask = async (className: ClassName, datecode: Datecode) => {
-        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number} & ClassesTableRow & ContestDayTableRow)[]>(escape`
+    const getTask = async (className: ClassName, datecode: Datecode, maxHandicap: number) => {
+        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow)[]>(escape`
             SELECT
                 tasks.*,
                 time_to_sec (tasks.duration) durationsecs,
@@ -811,6 +811,7 @@ async function updateTasks(): Promise<void> {
                 cd.calendardate,
                 cd.status,
                 cd.info,
+                0 AS distance,
                 CASE
                     WHEN COALESCE(nostart, '00:00:00') = '00:00:00' THEN 0
                     ELSE UNIX_TIMESTAMP (
@@ -864,9 +865,10 @@ async function updateTasks(): Promise<void> {
                 grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
                 nostartutc: taskdetails.nostartutc,
                 aat: taskdetails.type == 'A',
-                dh: taskdetails.type == 'D',
+                dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
                 dm: taskdetails.Dm ?? undefined,
-                handicapped: taskdetails.handicapped == 'Y'
+                handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+                maxHandicap
             },
             details: taskdetails,
             legs: tasklegs
@@ -877,7 +879,14 @@ async function updateTasks(): Promise<void> {
 
     // Go through all the channels and check for a change of task
     for (const channel of Object.values(channels)) {
-        const updatedTask = await getTask(channel.className, channel.datecode);
+        //
+        // Determine max handicap (dh)
+        const maxHandicap = Object.values(gliders)
+            .filter((g) => g.className == channel.className)
+            .reduce((highest, g) => Math.max(highest, g.handicap), 0);
+
+        // Update the task from the db
+        const updatedTask = await getTask(channel.className, channel.datecode, maxHandicap);
 
         if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
             console.log(
