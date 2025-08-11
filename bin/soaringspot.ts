@@ -64,12 +64,18 @@ async function main() {
     roboControl();
 
     console.log('Background api download from soaring spot enabled');
-    setInterval(function () {
-        soaringSpot();
-    }, 5 * 60 * 1000);
-    setInterval(function () {
-        roboControl();
-    }, 3 * 60 * 60 * 1000);
+    setInterval(
+        function () {
+            soaringSpot();
+        },
+        5 * 60 * 1000
+    );
+    setInterval(
+        function () {
+            roboControl();
+        },
+        3 * 60 * 60 * 1000
+    );
 }
 
 main();
@@ -87,8 +93,13 @@ async function roboControl() {
         // Get the soaring spot keys from database
         const row = (
             await mysql_db.query(escape`
-              SELECT url
-                FROM scoringsource where type='robocontrol'`)
+                SELECT
+                    url
+                FROM
+                    scoringsource
+                WHERE
+                    type = 'robocontrol'
+            `)
         )[0] ?? {url: null, overwrite: true};
         robocontrol_url = row.url;
     }
@@ -122,11 +133,36 @@ async function roboControl() {
 }
 
 async function updateTrackers(compno: string, trackerIds: string, feedType: 'robocontrol' | 'soaringspot') {
-    let success = !!(await mysql_db.query(escape`UPDATE tracker SET trackerid = ${trackerIds},feedid=${feedType} WHERE compno = ${compno} and (feedid=${feedType} or feedid is null)`)).affectedRows;
+    let success = !!(
+        await mysql_db.query(escape`
+            UPDATE tracker
+            SET
+                trackerid = ${trackerIds},
+                feedid = ${feedType}
+            WHERE
+                compno = ${compno}
+                AND (
+                    feedid = ${feedType}
+                    OR feedid IS NULL
+                )
+        `)
+    ).affectedRows;
     if (success) {
         console.log(`${feedType}: updated tracker ${compno} to ${trackerIds}`);
     }
-    await mysql_db.query(escape`INSERT INTO trackerhistory VALUES ( ${compno}, now(), ${trackerIds}, '', null, ${feedType} )`);
+    await mysql_db.query(escape`
+        INSERT INTO
+            trackerhistory
+        VALUES
+            (
+                ${compno},
+                now(),
+                ${trackerIds},
+                '',
+                NULL,
+                ${feedType}
+            )
+    `);
 }
 
 //
@@ -149,8 +185,13 @@ async function soaringSpot(deep = false) {
         // Get the soaring spot keys from database
         keys = (
             await mysql_db.query(escape`
-              SELECT *
-                FROM scoringsource where type='soaringspotkey'`)
+                SELECT
+                    *
+                FROM
+                    scoringsource
+                WHERE
+                    type = 'soaringspotkey'
+            `)
         )[0];
     }
 
@@ -242,12 +283,46 @@ async function update_class(compClass, keys) {
 
     // Add to the database
     await mysql_db.query(escape`
-INSERT INTO classes (class, classname, description, type, handicapped, Dm )
-VALUES ( ${classid}, ${name.substr(0, 29)}, ${name}, ${compClass.type}, ${isHandicapped}, ${dm} )
-                    ON DUPLICATE KEY UPDATE classname=values(classname), description=values(description),
-type=values(type), handicapped=values(handicapped), Dm = values(Dm) `);
+        INSERT INTO
+            classes (
+                class,
+                classname,
+                description,
+                type,
+                handicapped,
+                Dm
+            )
+        VALUES
+            (
+                ${classid},
+                ${name.substr(0, 29)},
+                ${name},
+                ${compClass.type},
+                ${isHandicapped},
+                ${dm}
+            ) ON DUPLICATE KEY
+        UPDATE classname =
+        VALUES
+            (classname),
+            description =
+        VALUES
+            (description),
+            type =
+        VALUES
+            (type),
+            handicapped =
+        VALUES
+            (handicapped),
+            Dm =
+        VALUES
+            (Dm)
+    `);
 
-    await mysql_db.query(escape`insert ignore into compstatus (class) values ( ${classid} )`);
+    await mysql_db.query(escape`
+        insert ignore INTO compstatus (class)
+        VALUES
+            (${classid})
+    `);
 
     // Make sure we have rows for each day and that compstatus is correct
     //    await mysql.query( escape`call contestdays()`);
@@ -305,22 +380,77 @@ async function update_pilots(class_url, classid, classname, keys) {
         };
 
         await t.query(escape`
-             INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
-                                 compno,participating,glidertype,greg,handicap,registered,registereddt)
-                  VALUES ( ${classid},
-                           ${pilot.name?.substring(0, 30) || ''}, '', ${pilot.club?.substring(0, 80) || ''}, null,
-                           ${epilot.civl_id ? epilot.civl_id : epilot.igc_id}, ${epilot.nationality?.substring(0, 2) || ''},
-                           ${gravatar(epilot)},
-                           ${compno},
-                           ${pilot.not_competing ? 'N' : 'Y'},
-                           ${pilot.aircraft_model.substring(0, 30) || ''},
-                           ${pilot.aircraft_registration?.substring(0, 8) || ''},
-                           ${pilot.handicap}, 'Y', NOW() )
-                  ON DUPLICATE KEY UPDATE
-                           class=values(class), firstname=values(firstname), lastname=values(lastname),
-                           homeclub=values(homeclub), fai=values(fai), country=values(country), email=values(email),
-                           participating=values(participating), handicap=values(handicap),
-                           glidertype=values(glidertype), greg=values(greg), registereddt=NOW()`);
+            INSERT INTO
+                pilots (
+                    class,
+                    firstname,
+                    lastname,
+                    homeclub,
+                    username,
+                    fai,
+                    country,
+                    email,
+                    compno,
+                    participating,
+                    glidertype,
+                    greg,
+                    handicap,
+                    registered,
+                    registereddt
+                )
+            VALUES
+                (
+                    ${classid},
+                    ${pilot.name?.substring(0, 30) || ''},
+                    '',
+                    ${pilot.club?.substring(0, 80) || ''},
+                    NULL,
+                    ${epilot.civl_id ? epilot.civl_id : epilot.igc_id},
+                    ${epilot.nationality?.substring(0, 2) || ''},
+                    ${gravatar(epilot)},
+                    ${compno},
+                    ${pilot.not_competing ? 'N' : 'Y'},
+                    ${pilot.aircraft_model.substring(0, 30) || ''},
+                    ${pilot.aircraft_registration?.substring(0, 8) || ''},
+                    ${pilot.handicap},
+                    'Y',
+                    NOW()
+                ) ON DUPLICATE KEY
+            UPDATE class =
+            VALUES
+                (class),
+                firstname =
+            VALUES
+                (firstname),
+                lastname =
+            VALUES
+                (lastname),
+                homeclub =
+            VALUES
+                (homeclub),
+                fai =
+            VALUES
+                (fai),
+                country =
+            VALUES
+                (country),
+                email =
+            VALUES
+                (email),
+                participating =
+            VALUES
+                (participating),
+                handicap =
+            VALUES
+                (handicap),
+                glidertype =
+            VALUES
+                (glidertype),
+                greg =
+            VALUES
+                (greg),
+                registereddt = NOW()
+        `);
 
         // Make a list of the IDs, stripping anything but last 6 characters
         const flarms = flarmIds
@@ -334,20 +464,28 @@ async function update_pilots(class_url, classid, classname, keys) {
 
         // Download pictures, sometime in the next 2 minutes
         if (epilot.igc_id) {
-            setTimeout(() => {
-                download_picture(
-                    pilot.contestant_number.substring(0, 4),
-                    classid,
-                    mysql, //
-                    {igc_id: epilot.igc_id, compno: pilot.contestant_number?.substring(0, 4)?.trim(), class: classid, greg: pilot.aircraft_registration?.substring(0, 8)?.trim(), civil_id: epilot.civl_id}
-                );
-            }, Math.random() * 120_000 + 60_000);
+            setTimeout(
+                () => {
+                    download_picture(
+                        pilot.contestant_number.substring(0, 4),
+                        classid,
+                        mysql, //
+                        {igc_id: epilot.igc_id, compno: pilot.contestant_number?.substring(0, 4)?.trim(), class: classid, greg: pilot.aircraft_registration?.substring(0, 8)?.trim(), civil_id: epilot.civl_id}
+                    );
+                },
+                Math.random() * 120_000 + 60_000
+            );
         }
     }
 
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
     await t
-        .query(escape`DELETE FROM pilots WHERE class=${classid} AND registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
+        .query(escape`
+            DELETE FROM pilots
+            WHERE
+                class = ${classid}
+                AND registereddt < DATE_SUB (NOW(), INTERVAL 15 MINUTE)
+        `)
 
         // Trackers needs a row for each pilot so fill any missing, perhaps we should
         // also remove unwanted ones
@@ -358,7 +496,19 @@ async function update_pilots(class_url, classid, classname, keys) {
         .query('UPDATE pilots SET image=CASE ' + '   WHEN (SELECT count(*) FROM images i WHERE i.compno=pilots.compno AND i.class = pilots.class AND i.image IS NOT NULL) > 0 THEN "Y" ' + '   ELSE "N" END')
 
         // Remove any old trackers
-        .query(escape`DELETE FROM tracker WHERE class=${classid} AND compno NOT IN (SELECT compno FROM pilots WHERE class=${classid})`)
+        .query(escape`
+            DELETE FROM tracker
+            WHERE
+                class = ${classid}
+                AND compno NOT IN (
+                    SELECT
+                        compno
+                    FROM
+                        pilots
+                    WHERE
+                        class = ${classid}
+                )
+        `)
 
         .rollback((e) => {
             console.log('update pilots rollback', e);
@@ -369,7 +519,21 @@ async function update_pilots(class_url, classid, classname, keys) {
 // Fetch the picture from FAI rankings
 async function download_picture(compno, classid, mysql, context) {
     // Check when it was last checked
-    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND (image is not null OR unix_timestamp()-updated < 86400)`))[0];
+    const lastUpdated = (
+        await mysql_db.query(escape`
+            SELECT
+                updated
+            FROM
+                images
+            WHERE
+                class = ${classid}
+                AND compno = ${compno}
+                AND (
+                    image IS NOT NULL
+                    OR unix_timestamp () - updated < 86400
+                )
+        `)
+    )[0];
 
     if (lastUpdated) {
         console.log(`not updating ${compno} picture`);
@@ -377,7 +541,16 @@ async function download_picture(compno, classid, mysql, context) {
     }
 
     // Find all the updater urls
-    const urls = (await mysql_db.query(escape`SELECT url FROM scoringsource WHERE type='pictureurl' order by overwrite asc`)) as {url: string}[];
+    const urls = (await mysql_db.query(escape`
+        SELECT
+            url
+        FROM
+            scoringsource
+        WHERE
+            type = 'pictureurl'
+        ORDER BY
+            overwrite ASC
+    `)) as {url: string}[];
     let success = false;
 
     for (const u of urls) {
@@ -396,8 +569,23 @@ async function download_picture(compno, classid, mysql, context) {
 
         const data = Buffer.from(await res.arrayBuffer());
         if (data) {
-            await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
-                                  ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)`);
+            await mysql_db.query(escape`
+                INSERT INTO
+                    images (class, compno, image, updated)
+                VALUES
+                    (
+                        ${classid},
+                        ${compno},
+                        ${data},
+                        unix_timestamp ()
+                    ) ON DUPLICATE KEY
+                UPDATE image =
+                VALUES
+                    (image),
+                    updated =
+                VALUES
+                    (updated)
+            `);
             success = true;
             break;
         } else {
@@ -407,8 +595,21 @@ async function download_picture(compno, classid, mysql, context) {
 
     if (!success) {
         console.log(` ${classid}:${compno}: image update failed`);
-        await mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, NULL, unix_timestamp() )
-                                  ON DUPLICATE KEY UPDATE image=NULL, updated=values(updated)`);
+        await mysql_db.query(escape`
+            INSERT INTO
+                images (class, compno, image, updated)
+            VALUES
+                (
+                    ${classid},
+                    ${compno},
+                    NULL,
+                    unix_timestamp ()
+                ) ON DUPLICATE KEY
+            UPDATE image = NULL,
+            updated =
+            VALUES
+                (updated)
+        `);
     }
 }
 
@@ -494,12 +695,17 @@ async function process_day_task(day, classid, classname, keys) {
     } else if (winddir && windspeed) {
         const {contestWindDivisionFactor} = (
             await mysql_db.query(escape`
-		SELECT contestWindDivisionFactor
-		     FROM global.comprules, classes, competition
-			WHERE classes.class=${classid}
-			  AND classes.type = comprules.name
-		      AND comprules.country = competition.countrycode
-`)
+                SELECT
+                    contestWindDivisionFactor
+                FROM
+                    global.comprules,
+                    classes,
+                    competition
+                WHERE
+                    classes.class = ${classid}
+                    AND classes.type = comprules.name
+                    AND comprules.country = competition.countrycode
+            `)
         )[0];
 
         // calculate wind according to new rules
@@ -524,7 +730,15 @@ async function process_day_task(day, classid, classname, keys) {
 
     // So we don't rebuild tasks if they haven't changed
     const hash = createHash('sha256').update(JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points'])).update(JSON.stringify(safeTask)).digest('base64');
-    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid}`);
+    const dbhashrow = await mysql_db.query(escape`
+        SELECT
+            hash
+        FROM
+            tasks
+        WHERE
+            datecode = ${toDateCode(date)}
+            AND class = ${classid}
+    `);
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
         console.log(`${classid} - ${date}: task unchanged`, hash, dbhashrow[0]?.hash);
@@ -543,31 +757,71 @@ async function process_day_task(day, classid, classname, keys) {
         .transaction()
 
         // Set the datecode
-        .query(
-            escape`
-                   UPDATE compstatus SET datecode = ${toDateCode(date)} WHERE (datecode < ${toDateCode(date)} or datecode is null) and class=${classid}`
-        )
+        .query(escape`
+            UPDATE compstatus
+            SET
+                datecode = ${toDateCode(date)}
+            WHERE
+                (
+                    datecode < ${toDateCode(date)}
+                    OR datecode IS NULL
+                )
+                AND class = ${classid}
+        `)
 
         // If it is the current day and we have a start time we save it
         .query(
             task_details.no_start && !task_details.no_start.endsWith('00:00:00')
                 ? escape`
-                   UPDATE compstatus SET starttime = COALESCE(${convert_to_mysql(task_details.no_start)},starttime)
-WHERE datecode = ${toDateCode(date)} AND class=${classid}`
-                : escape`SELECT 1`
+                      UPDATE compstatus
+                      SET
+                          starttime = COALESCE(${convert_to_mysql(task_details.no_start)}, starttime)
+                      WHERE
+                          datecode = ${toDateCode(date)}
+                          AND class = ${classid}
+                  `
+                : escape`
+                      SELECT
+                          1
+                  `
         )
 
         // remove any old crud
-        .query(escape`DELETE FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid} AND task='B'`)
+        .query(escape`
+            DELETE FROM tasks
+            WHERE
+                datecode = ${toDateCode(date)}
+                AND class = ${classid}
+                AND task = 'B'
+        `)
 
         // and add a new one
-        .query(
-            escape`
-          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, nostart, hash )
-             VALUES ( ${toDateCode(date)}, ${classid},
-                      'N', ${task_details.task_type},
-                      ${duration}, ${tasktype}, 'B', ${convert_to_mysql(task_details.no_start)}, ${hash} )`
-        )
+        .query(escape`
+            INSERT INTO
+                tasks (
+                    datecode,
+                    class,
+                    flown,
+                    description,
+                    duration,
+                    type,
+                    task,
+                    nostart,
+                    hash
+                )
+            VALUES
+                (
+                    ${toDateCode(date)},
+                    ${classid},
+                    'N',
+                    ${task_details.task_type},
+                    ${duration},
+                    ${tasktype},
+                    'B',
+                    ${convert_to_mysql(task_details.no_start)},
+                    ${hash}
+                )
+        `)
 
         // This query is a built one as we have to have it all as one string :( darn transactions
 
@@ -675,27 +929,108 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
         //                          return escape`call wcapdistance_taskid( ${taskid} )` })
 
         // make sure we have result placeholder for each day, we will fail to save scores otherwise
-        .query(
-            escape`INSERT IGNORE INTO pilotresult
-               ( class, datecode, compno, status, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable )
-             SELECT ${classid}, ${toDateCode(date)},
-               compno, '-', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N'
-             FROM pilots WHERE pilots.class = ${classid}`
-        )
+        .query(escape`
+            INSERT IGNORE INTO pilotresult (
+                class,
+                datecode,
+                compno,
+                status,
+                start,
+                finish,
+                duration,
+                distance,
+                hdistance,
+                speed,
+                hspeed,
+                igcavailable
+            )
+            SELECT
+                ${classid},
+                ${toDateCode(date)},
+                compno,
+                '-',
+                '00:00:00',
+                '00:00:00',
+                '00:00:00',
+                0,
+                0,
+                0,
+                0,
+                'N'
+            FROM
+                pilots
+            WHERE
+                pilots.class = ${classid}
+        `)
 
         // And update the day with status and text etc
-        .query(
-            escape`INSERT INTO contestday (class, script, length, result_type, info, winddir, windspeed, daynumber, status,
-                                                   notes, calendardate, datecode )
-                                         VALUES ( ${classid}, LEFT(${script},60), ${Math.round(day.task_distance / 100) / 10},
-                                                  ${status}, ${info.substring(0, 250)}, winddir, windspeed, ${day.task_number}, 'Y',
-                                                  ${task_details.notes}, ${date}, ${toDateCode(date)})
-                                       ON DUPLICATE KEY
-                                       UPDATE turnpoints = values(turnpoints), script = LEFT(values(script),60), length=values(length),
-                                          result_type=values(result_type), info=values(info),
-                                          winddir=values(winddir), windspeed=values(windspeed), daynumber=values(daynumber),
-                                          status=values(status), notes=values(notes), calendardate=values(calendardate)`
-        )
+        .query(escape`
+            INSERT INTO
+                contestday (
+                    class,
+                    script,
+                    length,
+                    result_type,
+                    info,
+                    winddir,
+                    windspeed,
+                    daynumber,
+                    status,
+                    notes,
+                    calendardate,
+                    datecode
+                )
+            VALUES
+                (
+                    ${classid},
+                    LEFT(${script}, 60),
+                    ${Math.round(day.task_distance / 100) / 10},
+                    ${status},
+                    ${info.substring(0, 250)},
+                    winddir,
+                    windspeed,
+                    ${day.task_number},
+                    'Y',
+                    ${task_details.notes},
+                    ${date},
+                    ${toDateCode(date)}
+                ) ON DUPLICATE KEY
+            UPDATE turnpoints =
+            VALUES
+                (turnpoints),
+                script = LEFT(
+                    VALUES
+                        (script),
+                        60
+                ),
+                length =
+            VALUES
+                (length),
+                result_type =
+            VALUES
+                (result_type),
+                info =
+            VALUES
+                (info),
+                winddir =
+            VALUES
+                (winddir),
+                windspeed =
+            VALUES
+                (windspeed),
+                daynumber =
+            VALUES
+                (daynumber),
+                status =
+            VALUES
+                (status),
+                notes =
+            VALUES
+                (notes),
+                calendardate =
+            VALUES
+                (calendardate)
+        `)
 
         // if it is today then set the briefing status properly, this is an update so does nothing
         // if they are marked as flying etc. If the day is cancelled we want that updated here as well
@@ -720,10 +1055,19 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
         //               set pr1.prevtotalrank = coalesce(pr2.totalrank,pr2.prevtotalrank)` )
 
         // Update the last date for results
-        .query(
-            escape`UPDATE compstatus SET resultsdatecode = GREATEST(${toDateCode(date)},COALESCE(resultsdatecode,${toDateCode(date)}))
-                       WHERE class=${classid}`
-        )
+        .query(escape`
+            UPDATE compstatus
+            SET
+                resultsdatecode = GREATEST(
+                    ${toDateCode(date)},
+                    COALESCE(
+                        resultsdatecode,
+                        ${toDateCode(date)}
+                    )
+                )
+            WHERE
+                class = ${classid}
+        `)
 
         .rollback((e) => {
             console.log('rollback', date, classid);
@@ -795,66 +1139,151 @@ async function process_day_scores(day, classid, classname, keys) {
         if (row.status_evaluated) {
             // check the file to check tracking details
             let {igcavailable, trackerid} = (
-                await mysql_db.query(escape`SELECT igcavailable, trackerid FROM pilotresult pr left outer 
-                                                   join tracker t on t.class = pr.class and t.compno = pr.compno 
-                                                   WHERE pr.datecode=${toDateCode(date)} and pr.compno=${pilot} and pr.class=${classid}`)
+                await mysql_db.query(escape`
+                    SELECT
+                        igcavailable,
+                        trackerid
+                    FROM
+                        pilotresult pr
+                        LEFT OUTER JOIN tracker t ON t.class = pr.class
+                        AND t.compno = pr.compno
+                    WHERE
+                        pr.datecode = ${toDateCode(date)}
+                        AND pr.compno = ${pilot}
+                        AND pr.class = ${classid}
+                `)
             )?.[0] || {igcavailable: 'Y', trackerid: 'unknown'};
 
             const r = await mysql_db.query(escape`
-                           UPDATE pilotresult
-                           SET
-                             start=TIME(COALESCE(${convert_to_mysql(row.scored_start)},start)),
-                             finish=TIME(COALESCE(${convert_to_mysql(row.scored_finish)},finish)),
-                             duration=COALESCE(TIMEDIFF(${convert_to_mysql(row.scored_finish)},${convert_to_mysql(row.scored_start)}),duration),
-                             statuschanged = (CASE WHEN (scoredstatus = ${scoredStatus}) THEN statuschanged
-                                        ELSE NOW() END),
-                             datafromscoring = "Y", igcavailable = "Y",
-                             scoredstatus= ${scoredStatus},
-                             status = (CASE WHEN ((status = "-" or status = "S" or status="G") and ${row.scored_finish} != "") THEN "F"
-                                        WHEN   ((status = "-" or status = "S" or status="G") and ${row.igc_file} != "") THEN "H"
-                                        ELSE status END),
-                             speed=${scoredvals.as! * 3.6}, distance=${scoredvals.ad! / 1000},
-                             hspeed=${scoredvals.hs! * 3.6}, hdistance=${scoredvals.hd! / 1000},
-                             daypoints=${row.points}, dayrank=${row.rank}, totalpoints=${row.points_total}, totalrank=${row.rank_total}, penalty=${row.penalty}
-                          WHERE datecode=${toDateCode(date)} AND compno=${pilot} and class=${classid}`);
+                UPDATE pilotresult
+                SET
+                    start = TIME(
+                        COALESCE(${convert_to_mysql(row.scored_start)}, start)
+                    ),
+                    finish = TIME(
+                        COALESCE(${convert_to_mysql(row.scored_finish)}, finish)
+                    ),
+                    duration = COALESCE(
+                        TIMEDIFF (
+                            ${convert_to_mysql(row.scored_finish)},
+                            ${convert_to_mysql(row.scored_start)}
+                        ),
+                        duration
+                    ),
+                    statuschanged = (
+                        CASE
+                            WHEN (scoredstatus = ${scoredStatus}) THEN statuschanged
+                            ELSE NOW()
+                        END
+                    ),
+                    datafromscoring = "Y",
+                    igcavailable = "N",
+                    scoredstatus = ${scoredStatus},
+                    status = (
+                        CASE
+                            WHEN (
+                                (
+                                    status = "-"
+                                    OR status = "S"
+                                    OR status = "G"
+                                )
+                                AND ${row.scored_finish} != ""
+                            ) THEN "F"
+                            WHEN (
+                                (
+                                    status = "-"
+                                    OR status = "S"
+                                    OR status = "G"
+                                )
+                                AND ${row.igc_file} != ""
+                            ) THEN "H"
+                            ELSE status
+                        END
+                    ),
+                    speed = ${scoredvals.as! * 3.6},
+                    distance = ${scoredvals.ad! / 1000},
+                    hspeed = ${scoredvals.hs! * 3.6},
+                    hdistance = ${scoredvals.hd! / 1000},
+                    daypoints = ${row.points},
+                    dayrank = ${row.rank},
+                    totalpoints = ${row.points_total},
+                    totalrank = ${row.rank_total},
+                    penalty = ${row.penalty}
+                WHERE
+                    datecode = ${toDateCode(date)}
+                    AND compno = ${pilot}
+                    AND class = ${classid}
+            `);
 
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );
             rows += r.affectedRows;
 
-            console.log('igc:', row?._links);
+            console.log('igc:', pilot, row?._links, trackerid, igcavailable);
 
             if ((igcavailable || 'Y') == 'N' && trackerid == 'unknown' && row?._links?.['http://api.soaringspot.com/rel/flight']) {
                 console.log(date, pilot, igcavailable, 'scheduling check for IGC');
 
-                setTimeout(() => {
-                    console.log('checking IGC file for launch times', classid, date, pilot);
-                    processIGC(classid, pilot, location.altitude, date, row._links['http://api.soaringspot.com/rel/flight']['href'], https, mysql_db, () => {
-                        soaringSpotAuthHeaders(keys);
-                    }).then(() => checkForOGNMatches(classid, date, mysql_db));
-                }, randomEarlyMorningTimeDelay());
+                setTimeout(
+                    () => {
+                        console.log('checking IGC file for launch times', classid, date, pilot);
+                        processIGC(
+                            classid,
+                            pilot,
+                            location,
+                            date,
+                            row._links['http://api.soaringspot.com/rel/flight']['href'], // url for the download
+                            https,
+                            mysql_db,
+                            () => soaringSpotAuthHeaders(keys)
+                        );
+                    },
+                    10000 * Math.random() + 0 * randomEarlyMorningTimeDelay()
+                );
             }
         }
 
         // if somebody has manually put the start times into SeeYou then capture it
         else if (row.scored_start) {
-            await mysql_db.query(escape`UPDATE pilotresult
-                                            SET start=TIME(COALESCE(${convert_to_mysql(row.scored_start)},start))
-                                          WHERE datecode=${toDateCode(date)} AND compno=${pilot} and class=${classid}`);
+            await mysql_db.query(escape`
+                UPDATE pilotresult
+                SET
+                    start = TIME(
+                        COALESCE(${convert_to_mysql(row.scored_start)}, start)
+                    )
+                WHERE
+                    datecode = ${toDateCode(date)}
+                    AND compno = ${pilot}
+                    AND class = ${classid}
+            `);
         }
 
         // we will capture the total if it is there but not update the scored status as
         // that would block preliminary scoring
         if (row.points_total || row.rank_total) {
-            await mysql_db.query(escape`UPDATE pilotresult
-                                            SET totalpoints=${row.points_total}, totalrank=${row.rank_total}
-                                          WHERE datecode=${toDateCode(date)} AND compno=${pilot} and class=${classid}`);
+            await mysql_db.query(escape`
+                UPDATE pilotresult
+                SET
+                    totalpoints = ${row.points_total},
+                    totalrank = ${row.rank_total}
+                WHERE
+                    datecode = ${toDateCode(date)}
+                    AND compno = ${pilot}
+                    AND class = ${classid}
+            `);
         }
     }
 
     // Did anything get updated?
     if (rows) {
-        await mysql_db.query(escape`UPDATE contestday SET results_uploaded=NOW()
-                                 WHERE class=${classid} AND datecode=${toDateCode(date)} and STATUS != "Z"`);
+        await mysql_db.query(escape`
+            UPDATE contestday
+            SET
+                results_uploaded = NOW()
+            WHERE
+                class = ${classid}
+                AND datecode = ${toDateCode(date)}
+                AND STATUS != "Z"
+        `);
     }
 }
 
@@ -873,14 +1302,18 @@ async function update_contest(contest, keys) {
         // TBD!!
         await mysql_db
             .transaction()
-            .query(escape`delete from classes`)
-            .query(escape`delete from logindetails where type="P"`)
-            .query(escape`delete from pilots`)
-            .query(escape`delete from pilotresult`)
-            .query(escape`delete from contestday`)
-            .query(escape`delete from compstatus`)
-            .query(escape`delete from taskleg`)
-            .query(escape`delete from tasks`)
+            .query(escape`DELETE FROM classes`)
+            .query(escape`
+                DELETE FROM logindetails
+                WHERE
+                    type = "P"
+            `)
+            .query(escape`DELETE FROM pilots`)
+            .query(escape`DELETE FROM pilotresult`)
+            .query(escape`DELETE FROM contestday`)
+            .query(escape`DELETE FROM compstatus`)
+            .query(escape`DELETE FROM taskleg`)
+            .query(escape`DELETE FROM tasks`)
             .commit();
         console.log('deep update requested, deleted everything');
     }
@@ -895,24 +1328,32 @@ async function update_contest(contest, keys) {
     //
     // Make sure the dates are copied across
     await mysql_db.query(escape`
-         UPDATE competition SET start = ${contest.start_date},
-                                  end = ${contest.end_date},
-                                  countrycode = ${contest.country},
-                                  name = ${contest.name.substring(0, 59)}`);
+        UPDATE competition
+        SET
+            start = ${contest.start_date},
+            END = ${contest.end_date},
+            countrycode = ${contest.country},
+            name = ${contest.name.substring(0, 59)}
+    `);
 
     // If we have a location then update
     const ssLocation = contest._embedded['http://api.soaringspot.com/rel/location'];
     if (ssLocation && ssLocation.latitude) {
         const lat = toDeg(ssLocation.latitude);
         const lng = toDeg(ssLocation.longitude);
-        await mysql_db.query(escape`UPDATE competition SET lt = ${lat}, lg = ${lng},
-                                                      sitename = ${ssLocation.name}`);
+        await mysql_db.query(escape`
+            UPDATE competition
+            SET
+                lt = ${lat},
+                lg = ${lng},
+                sitename = ${ssLocation.name}
+        `);
 
         // Save four our use
         location = {
             lt: lat,
             lg: lng,
-            point: point([lat, lng])
+            point: point([lng, lat])
         };
         // Calculate elevation so we can do launch calculations from the IGC files
         getElevationOffset(location.lt, location.lg, (agl) => {
@@ -925,12 +1366,29 @@ async function update_contest(contest, keys) {
     // We need to save timezone and calculate the offset from UTC
     const dbtz = (
         await mysql_db.query(escape`
-           SELECT time_to_sec(TIMEDIFF(CONVERT_TZ(NOW(),'+00:00',${contest.time_zone}),NOW())) tzoffset
-             FROM competition`)
+            SELECT
+                time_to_sec (
+                    TIMEDIFF (
+                        CONVERT_TZ (
+                            NOW(),
+                            '+00:00',
+                            ${contest.time_zone}
+                        ),
+                        NOW()
+                    )
+                ) tzoffset
+            FROM
+                competition
+        `)
     )[0];
 
     if (dbtz && dbtz.tzoffset) {
-        await mysql_db.query(escape`UPDATE competition set tz=${contest.time_zone}, tzoffset=${dbtz.tzoffset} `);
+        await mysql_db.query(escape`
+            UPDATE competition
+            SET
+                tz = ${contest.time_zone},
+                tzoffset = ${dbtz.tzoffset}
+        `);
     } else {
         console.log('TZ table not installed in mysql Please Correct (https://dev.mysql.com/doc/refman/8.0/en/mysql-tzinfo-to-sql.html)');
         process.exit();
@@ -939,7 +1397,11 @@ async function update_contest(contest, keys) {
     // And fix the URL to whatever is configured in soaringspot
     let url = ('' + contest._links['http://api.soaringspot.com/rel/www'].href).match(/(http[^']*)/)?.[0];
     if (url) {
-        await mysql_db.query(escape`UPDATE competition set mainwebsite=${url}`);
+        await mysql_db.query(escape`
+            UPDATE competition
+            SET
+                mainwebsite = ${url}
+        `);
     }
 }
 

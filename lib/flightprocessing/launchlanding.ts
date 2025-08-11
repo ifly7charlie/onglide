@@ -10,7 +10,7 @@ import sql from 'sql-template-strings';
 // line at a time reading of streamed webpage for igc download
 import * as readline from 'readline';
 
-import {Epoch, AltitudeAgl, Datecode} from '../types';
+import {Compno, ClassName, Epoch, AltitudeAgl, AltitudeAMSL, Datecode} from '../types';
 
 import {toDateCode} from '../datecode';
 
@@ -80,6 +80,10 @@ export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at:
         track = unknownTrack[id];
     }
 
+    if (!track) {
+        return;
+    }
+
     // Check to see if it's a possible launch or landing
     let trackDistance = length(track.path, {units: 'kilometers'}); // km
     let endToEndDistance = point
@@ -134,7 +138,7 @@ export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at:
                             INSERT IGNORE INTO movements (action, time, id, type, datecode)
                             VALUES
                                 (
-                                    'launch',
+                                    'landing',
                                     ${at},
                                     ${id},
                                     ${type},
@@ -308,12 +312,21 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
 
 //
 // Get an IGC file from a website spot so we can process it
-export async function processIGC(classid, compno, location, date, url, https, mysql, getHeaders?: Function) {
+export async function processIGC(
+    classid: ClassName,
+    compno: Compno, //
+    location: {altitude: AltitudeAMSL; lt: number; lg: number; point: any},
+    date,
+    url,
+    https,
+    mysql,
+    getHeaders?: () => {headers: {Authorization: string}} | undefined
+) {
     // IGC files may be from a Flarm, if they are then we can extract the flarm ID from them
     // and associate it with the device
     let flarm_lfla = new RegExp(/LFLA[0-9]+ID [0-9] ([0-9A-F]{6})/i);
     let flarm_lxvfla = new RegExp(/LLXVFLARM:LXV,[0-9.]+,([0-9A-F]{6})/i);
-    let brecord = new RegExp(/^B([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3})([NS])([0-9]{3})([0-9]{2})([0-9]{3})([EW])A([0-9]{5})([0-9]{5})/i);
+    let brecord = new RegExp(/^B([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3})([NS])([0-9]{3})([0-9]{2})([0-9]{3})([EW])A([0-9-]{5})([0-9]{5})/i);
     let hfdte = new RegExp(/^HFDTE([0-9]{2})([0-9]{2})([0-9]{2})/i);
     let hfdtedate = new RegExp(/^HFDTEDATE:([0-9]{2})([0-9]{2})([0-9]{2})/i);
 
@@ -344,6 +357,8 @@ export async function processIGC(classid, compno, location, date, url, https, my
 
     // Initiate a streaming request
     const request = https.get(url, getHeaders ? getHeaders() : undefined, function (response) {
+        console.log(`${compno}: igc response ${url}: ${response.statusCode} `);
+
         // Status check (handle redirects or errors)
         const code = response.statusCode || 0;
         if (code >= 300 && code < 400 && response.headers && response.headers.location) {
@@ -379,6 +394,7 @@ export async function processIGC(classid, compno, location, date, url, https, my
             if (validFile) {
                 capturePossibleLaunchLanding(key, dateCode, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
                 console.log(`igc: processed ${date} ${classid} - ${compno} successfully`);
+                checkForOGNMatches(classid, date, mysql);
             } else {
                 console.log(`igc: ${date} ${classid} - ${compno} no flight processed`);
             }
@@ -410,19 +426,22 @@ export async function processIGC(classid, compno, location, date, url, https, my
                 // Use GPS if present otherwise use pressure altitude, less drift during the day
                 let alt = parseInt(matches[13] ? matches[13] : matches[12]);
 
-                if (
-                    distance(jPoint, location.point, {
-                        units: 'kilometers'
-                    }) < 20
-                ) {
-                    // We are valid if we have a point within 20km of configured airfield
-                    // will also require epochbase to be set to make it this far
-                    validFile = true;
+                const dist = distance(jPoint, location.point, {
+                    units: 'kilometers'
+                });
 
+                if (dist < 10) {
                     // Now we need to check if it is a launch or landing point
                     // yes some files contain this information but we use same algo
                     // for flarm so hopefully a closer match
-                    capturePossibleLaunchLanding(key, dateCode, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc');
+                    try {
+                        capturePossibleLaunchLanding(key, dateCode, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc');
+                        // We are valid if we have a point within 20km of configured airfield
+                        // will also require epochbase to be set to make it this far
+                        validFile = true;
+                    } catch (e) {
+                        console.error(compno, line, e);
+                    }
                 }
             }
 

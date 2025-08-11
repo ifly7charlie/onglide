@@ -72,9 +72,9 @@ import * as dotenv from 'dotenv';
 import {getElevationOffset, getCacheSize} from '../lib/getelevationoffset';
 
 // handle unkownn gliders
-import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding.js';
+import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding';
 
-import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocessing/timehelper.js';
+import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocessing/timehelper';
 
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
@@ -399,10 +399,13 @@ async function main() {
         // For each channel (aka class)
         const now = getNow();
 
-        const positions = Object.values(channels).reduce((a, c: Channel) => {
-            a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
-            return a;
-        }, {} as Record<string, Positions>);
+        const positions = Object.values(channels).reduce(
+            (a, c: Channel) => {
+                a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+                return a;
+            },
+            {} as Record<string, Positions>
+        );
 
         const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
@@ -799,15 +802,38 @@ async function updateTasks(): Promise<void> {
     // Get the details for the task
     const getTask = async (className: ClassName, datecode: Datecode) => {
         const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number} & ClassesTableRow & ContestDayTableRow)[]>(escape`
-          SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped, c.Dm, cd.calendardate, cd.status, cd.info,
-CASE WHEN COALESCE(nostart,'00:00:00') ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
-               END nostartutc
-FROM tasks, classes c, contestday cd
-          WHERE tasks.datecode= ${datecode}
-             AND tasks.class = c.class AND cd.class = c.class AND cd.datecode = ${datecode}
-             AND tasks.class= ${className} and tasks.flown='Y'
-    `)) || {})[0];
+            SELECT
+                tasks.*,
+                time_to_sec (tasks.duration) durationsecs,
+                c.grandprixstart,
+                c.handicapped,
+                c.Dm,
+                cd.calendardate,
+                cd.status,
+                cd.info,
+                CASE
+                    WHEN COALESCE(nostart, '00:00:00') = '00:00:00' THEN 0
+                    ELSE UNIX_TIMESTAMP (
+                        CONCAT(${fromDateCode(datecode)}, ' ', nostart)
+                    ) - (
+                        SELECT
+                            tzoffset
+                        FROM
+                            competition
+                    )
+                END nostartutc
+            FROM
+                tasks,
+                classes c,
+                contestday cd
+            WHERE
+                tasks.datecode = ${datecode}
+                AND tasks.class = c.class
+                AND cd.class = c.class
+                AND cd.datecode = ${datecode}
+                AND tasks.class = ${className}
+                AND tasks.flown = 'Y'
+        `)) || {})[0];
 
         if (!taskdetails || !taskdetails.type) {
             console.log(`${className}/${datecode}: no active task`, taskdetails);
@@ -817,11 +843,16 @@ FROM tasks, classes c, contestday cd
         const taskid = taskdetails.taskid;
 
         const tasklegs = await db.query<TaskLegsTableRow[]>(escape`
-      SELECT taskleg.*, nname name
-        FROM taskleg
-       WHERE taskleg.taskid = ${taskid}
-      ORDER BY legno
-    `);
+            SELECT
+                taskleg.*,
+                nname name
+            FROM
+                taskleg
+            WHERE
+                taskleg.taskid = ${taskid}
+            ORDER BY
+                legno
+        `);
 
         if (tasklegs.length < 2) {
             console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
@@ -911,17 +942,63 @@ interface CTrackerRow {
 
 async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
-    let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
-                                             p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
-                                           ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
-                                             END utcStart,
-                                           CASE WHEN ppr.finish ='00:00:00' THEN 0
-                                           ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.finish))-(SELECT tzoffset FROM competition)
-                                            END utcFinish,
-                                           COALESCE(ppr.scoredStatus,'S') scoredStatus
-                                        FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join
-                                             (select compno,class,start,finish,scoredstatus from pilotresult pr where pr.datecode=${datecode}) as ppr
-                                      ON ppr.class=p.class and ppr.compno=p.compno`);
+    let cTrackers = await db.query<CTrackerRow[]>(escape`
+        SELECT
+            p.compno,
+            p.greg,
+            trackerId AS dbTrackerId,
+            0 duplicate,
+            p.handicap,
+            p.class className,
+            CASE
+                WHEN ppr.start = '00:00:00' THEN 0
+                ELSE UNIX_TIMESTAMP (
+                    CONCAT(
+                        ${fromDateCode(datecode)},
+                        ' ',
+                        ppr.start
+                    )
+                ) - (
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                )
+            END utcStart,
+            CASE
+                WHEN ppr.finish = '00:00:00' THEN 0
+                ELSE UNIX_TIMESTAMP (
+                    CONCAT(
+                        ${fromDateCode(datecode)},
+                        ' ',
+                        ppr.finish
+                    )
+                ) - (
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                )
+            END utcFinish,
+            COALESCE(ppr.scoredStatus, 'S') scoredStatus
+        FROM
+            pilots p
+            LEFT OUTER JOIN tracker t ON p.class = t.class
+            AND p.compno = t.compno
+            LEFT OUTER JOIN (
+                SELECT
+                    compno,
+                    class,
+                    start,
+                    finish,
+                    scoredstatus
+                FROM
+                    pilotresult pr
+                WHERE
+                    pr.datecode = ${datecode}
+            ) AS ppr ON ppr.class = p.class
+            AND ppr.compno = p.compno
+    `);
 
     const initialGliderCount = Object.keys(gliders).length;
     let updatedGliderCount = 0;
@@ -1375,13 +1452,16 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
         console.log(`${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
 
-        const mcs = channelGliders.reduce((all, glider) => {
-            if (glider.scoredStart) {
-                const ti = Math.trunc(glider.scoredStart / 300) * 300;
-                all[ti] = (all[ti] ?? 0) + 1;
-            }
-            return all;
-        }, {} as Record<number, number>);
+        const mcs = channelGliders.reduce(
+            (all, glider) => {
+                if (glider.scoredStart) {
+                    const ti = Math.trunc(glider.scoredStart / 300) * 300;
+                    all[ti] = (all[ti] ?? 0) + 1;
+                }
+                return all;
+            },
+            {} as Record<number, number>
+        );
 
         const likelyA = Object.keys(mcs)
             .sort((a, b) => mcs[a] - mcs[b])
@@ -1570,11 +1650,29 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {
             db.transaction()
-                .query(
-                    escape`UPDATE tracker SET trackerid = ${flarmId} WHERE
-                                      compno = ${match.compno} AND class = ${match.className} AND trackerid="unknown" limit 1`
-                )
-                .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), ${flarmId}, now(), "ognddb" )`)
+                .query(escape`
+                    UPDATE tracker
+                    SET
+                        trackerid = ${flarmId}
+                    WHERE
+                        compno = ${match.compno}
+                        AND class = ${match.className}
+                        AND trackerid = "unknown"
+                    LIMIT
+                        1
+                `)
+                .query(escape`
+                    INSERT INTO
+                        trackerhistory (compno, changed, flarmid, launchtime, method)
+                    VALUES
+                        (
+                            ${match.compno},
+                            now(),
+                            ${flarmId},
+                            now(),
+                            "ognddb"
+                        )
+                `)
                 .commit();
         }
     }
