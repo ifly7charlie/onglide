@@ -171,9 +171,10 @@ export interface Task {
 
         handicapped?: boolean;
         dm?: number;
+        maxHandicap: number; // highest handicap in the class
     };
 
-    details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance?: DistanceKM} & ClassesTableRow & ContestDayTableRow;
+    details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow;
 
     legs: TaskLeg[];
 }
@@ -410,7 +411,7 @@ export interface ClassesTableRow {
     classname: string;
     description: string;
     type: string | null;
-    handicapped: 'Y' | 'N';
+    handicapped: 'Y' | 'N' | 'D';
     grandprixstart: 'Y' | 'N';
     Dm: number | null;
 }
