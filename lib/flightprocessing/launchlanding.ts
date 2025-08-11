@@ -326,6 +326,10 @@ export async function processIGC(classid, compno, location, date, url, https, my
     let key = [String(date).substring(8, 11), classid, compno].join('/');
     const dateCode = toDateCode(date);
 
+    function onError(e) {
+        console.error(`processigc: ${classid}/${compno} ${url}`, e);
+    }
+
     // De-escape it
     url = url.replaceAll('&amp;', '&');
     mysql.query(sql`
@@ -339,7 +343,25 @@ export async function processIGC(classid, compno, location, date, url, https, my
     `);
 
     // Initiate a streaming request
-    return https.get(url, getHeaders ? getHeaders() : undefined, function (response) {
+    const request = https.get(url, getHeaders ? getHeaders() : undefined, function (response) {
+        // Status check (handle redirects or errors)
+        const code = response.statusCode || 0;
+        if (code >= 300 && code < 400 && response.headers && response.headers.location) {
+            request.destroy(); // stop current request before following
+            onError(new Error(`Redirected to ${response.headers.location}`));
+            return;
+        }
+        if (code < 200 || code >= 300) {
+            // Drain response to free sockets, then error
+            response.resume();
+            onError(new Error(`HTTP ${code}`));
+            return;
+        }
+
+        // Response-level errors
+        response.on('error', (err) => onError(err));
+        response.on('aborted', () => onError(new Error('Response aborted')));
+
         var myInterface = readline.createInterface({
             input: response
         });
@@ -356,7 +378,9 @@ export async function processIGC(classid, compno, location, date, url, https, my
             `);
             if (validFile) {
                 capturePossibleLaunchLanding(key, dateCode, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
-                console.log(`processed ${date} ${classid} - ${compno} successfully`);
+                console.log(`igc: processed ${date} ${classid} - ${compno} successfully`);
+            } else {
+                console.log(`igc: ${date} ${classid} - ${compno} no flight processed`);
             }
         });
 
@@ -444,7 +468,18 @@ export async function processIGC(classid, compno, location, date, url, https, my
             else if ((matches = line.match(hfdte)) || (matches = line.match(hfdtedate))) {
                 const fileDate = `20${matches[3]}-${matches[2]}-${matches[1]}`;
                 epochbase = Math.round(new Date(fileDate).getTime() / 1000);
+                console.log('file contains hfdet', compno, fileDate, epochbase);
             }
         });
     });
+
+    const timeoutMs = 60_000;
+
+    // Request-level errors and timeout
+    request.on('error', (err) => onError(err));
+    request.setTimeout(timeoutMs, () => {
+        request.destroy(new Error(`downloadigc: ${compno} Request timeout after ${timeoutMs}ms`));
+    });
+
+    return request;
 }
