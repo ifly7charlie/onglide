@@ -442,7 +442,7 @@ async function process_class_results(class_url, classid, classname, keys) {
     let dates: string[] = [];
     const day = results._embedded['http://api.soaringspot.com/rel/class_results'].sort((a, b) => a.task_date.localeCompare(b.task_date)).at(-1);
     if (day) {
-        console.log(`${classname}: ${date.task_dat}e: result checks scheduled`);
+        console.log(`${classname}: ${date.task_date}: result checks scheduled`);
         // Update the scores for the task
         await process_day_scores(day, classid, classname, keys);
     } else {
