@@ -11,7 +11,7 @@ export function adjustDistanceHandicapTask(task: Task, handicap: number): Task {
     // Make a new array for it
     var newTask = _clonedeep(task);
 
-    const eligibletps = task.legs.filter((leg) => leg.type == 'sector' && leg.r2 >= 0.49 && leg.a2 == 180)?.length ?? 0;
+    const eligibletps = task.legs.filter((leg) => leg.type == 'sector' && leg.r2 >= 0.5 && leg.a2 == 180)?.length ?? 0;
     if (!eligibletps) {
         console.error('no eligible legs found in task', task);
         return task;
@@ -30,7 +30,7 @@ export function adjustDistanceHandicapTask(task: Task, handicap: number): Task {
 
     // Now copy over the points reducing all symmetric
     newTask.legs.slice(1, newTask.legs.length - 1).forEach((leg: TaskLeg) => {
-        if (leg.type == 'sector' && leg.direction == 'symmetrical' && leg.r2 == 5 && leg.a2 == 180) {
+        if (leg.type == 'sector' && leg.direction == 'symmetrical' && leg.r2 >= 0.5 && leg.a2 == 180) {
             leg.r2 = sectorSize as DistanceKM;
         }
     });

@@ -86,7 +86,7 @@ export default function MApp(props: {
     const mapLight = mapStreet;
 
     // Track and Task Overlays
-    const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc, props.selectedHandicap));
+    const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc, props.selectedHandicap ?? 90));
     const task = useSelector((state) => selectTask(state, vc));
 
     const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
