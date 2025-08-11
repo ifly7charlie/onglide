@@ -14,6 +14,7 @@ import {uniqWith as _uniqWith, reduce as _reduce, map as _map} from 'lodash';
 
 import {} from '@turf/helpers';
 
+import type {FeatureCollection} from 'geojson';
 import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage, NearestSectorPoint, EnrichedPosition} from '../types';
 
 let hit = 0;
@@ -38,7 +39,7 @@ export function calculateTask(task: Task) {
 }
 
 export function taskGeoJSON(task: Task) {
-    let geoJSON = {
+    const geoJSON: FeatureCollection = {
         type: 'FeatureCollection',
         features: task.legs.reduce(
             (features, leg) => [
@@ -53,7 +54,7 @@ export function taskGeoJSON(task: Task) {
         )
     };
 
-    let trackLineGeoJSON = {
+    const trackLineGeoJSON: FeatureCollection = {
         type: 'FeatureCollection',
         features: _reduce(
             task.legs,
