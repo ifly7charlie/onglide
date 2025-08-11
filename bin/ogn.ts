@@ -605,17 +605,20 @@ async function getDCode(): Promise<Datecode> {
         toDateCode(new Date(replayBase * 1000));
     }
 
-    const now = new Date(); 
+    const now = new Date();
     const nowLocalMs = now.getTime() + location.tzoffset * 1000;
-    
+
     const local10am = new Date(
         now.getFullYear(),
         now.getMonth(),
         now.getDate(),
-        10, 0, 0, 0 // 10:00:00.000 local time
+        10,
+        0,
+        0,
+        0 // 10:00:00.000 local time
     );
-    if( nowLocalMs < local10am.getTime() ) {
-        local10am.setDate(local10am.getDate()-1)
+    if (nowLocalMs < local10am.getTime()) {
+        local10am.setDate(local10am.getDate() - 1);
     }
     const utcTime = local10am.getTime() - location.tzoffset * 1000;
     console.log('DateCode at 10am local:', utcTime, new Date(utcTime).toISOString());
@@ -1104,7 +1107,8 @@ async function updateDDB() {
             console.log('ddb entries:', Object.keys(ddb).length);
         })
         .catch((e) => {
-            console.log('unable to fetch ddb', e);
+            console.error('unable to fetch ddb', e);
+            setTimeout(updateDDB, 120_000 * Math.random() + 120_000);
         });
 }
 
@@ -1679,35 +1683,36 @@ function setupOgnWebServer(req, res) {
         res.writeHead(200, headers);
 
         const replacer = (key, value) => {
-            switch(key) {
-            case 'scoreHistory':
-            case 'scoreDb':
-            case 'broadcastChannel':
-            case 'deck':
-            case 'flarmIdRegex':
-            case 'geoTask':
-            case 'coordinates':
-            case 'pointGeoJSON':
-            case 'geoJSON':
-            case 'linestring':
-            case 'lineString':
-            case 'lastKeepAliveMsg':
-            case 'scoredPoints':
-            case 'minDistancePoints':
-            case 'maxDistancePoints':
-            case 'webPathData': return undefined;
+            switch (key) {
+                case 'scoreHistory':
+                case 'scoreDb':
+                case 'broadcastChannel':
+                case 'deck':
+                case 'flarmIdRegex':
+                case 'geoTask':
+                case 'coordinates':
+                case 'pointGeoJSON':
+                case 'geoJSON':
+                case 'linestring':
+                case 'lineString':
+                case 'lastKeepAliveMsg':
+                case 'scoredPoints':
+                case 'minDistancePoints':
+                case 'maxDistancePoints':
+                case 'webPathData':
+                    return undefined;
 
-            case 'dbTrackerId': return (typeof value === 'string' || value instanceof String) ? value.split(',').length : 'invalid';
+                case 'dbTrackerId':
+                    return typeof value === 'string' || value instanceof String ? value.split(',').length : 'invalid';
 
                 // Size of some arrays
-            case 'clients': return Array.isArray(value) ? value.length : undefined;
+                case 'clients':
+                    return Array.isArray(value) ? value.length : undefined;
             }
             return value;
-        }
-        
-        res.end(JSON.stringify({channels: channels ,
-                                gliders,
-                                unknownTrackers}, replacer));
+        };
+
+        res.end(JSON.stringify({channels: channels, gliders, unknownTrackers}, replacer));
         return;
     }
 
