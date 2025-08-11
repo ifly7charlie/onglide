@@ -523,7 +523,6 @@ function startAprsListener(config: AprsListenerConfig) {
 
 async function setupDatecode(config: AprsCommandDatecode) {
     // Make sure we have the latest datecode for the database
-    console.log(`APRS: capturing tracks for ${config.datecode}`);
     db = await initDB(config.datecode);
 }
 

@@ -255,11 +255,11 @@ type=values(type), handicapped=values(handicapped), Dm = values(Dm) `);
 
     // Now add details of pilots
     await update_pilots(compClass._links.self.href, classid, name, keys);
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise((r) => setTimeout(r, 15000));
 
     // Import the results
     await process_class_tasks(compClass._links.self.href, classid, name, keys);
-    await new Promise((r) => setTimeout(r, 5000));
+    await new Promise((r) => setTimeout(r, 15000));
     await process_class_results(compClass._links.self.href, classid, name, keys);
 }
 
@@ -341,7 +341,7 @@ async function update_pilots(class_url, classid, classname, keys) {
                     mysql, //
                     {igc_id: epilot.igc_id, compno: pilot.contestant_number?.substring(0, 4)?.trim(), class: classid, greg: pilot.aircraft_registration?.substring(0, 8)?.trim(), civil_id: epilot.civl_id}
                 );
-            }, Math.random() * 120 * 1000);
+            }, Math.random() * 120_000 + 60_000);
         }
     }
 
@@ -357,8 +357,11 @@ async function update_pilots(class_url, classid, classname, keys) {
         // And update the pilots picture to the latest one in the image table - this should be set by download_picture
         .query('UPDATE pilots SET image=CASE ' + '   WHEN (SELECT count(*) FROM images i WHERE i.compno=pilots.compno AND i.class = pilots.class AND i.image IS NOT NULL) > 0 THEN "Y" ' + '   ELSE "N" END')
 
+        // Remove any old trackers
+        .query(escape`DELETE FROM tracker WHERE class=${classid} AND compno NOT IN (SELECT compno FROM pilots WHERE class=${classid})`)
+
         .rollback((e) => {
-            console.log('rollback');
+            console.log('update pilots rollback', e);
         })
         .commit();
 }
@@ -439,7 +442,7 @@ async function process_class_results(class_url, classid, classname, keys) {
     let dates: string[] = [];
     const day = results._embedded['http://api.soaringspot.com/rel/class_results'].sort((a, b) => a.task_date.localeCompare(b.task_date)).at(-1);
     if (day) {
-        console.log(`${classname}: date.task_date: result checks scheduled`);
+        console.log(`${classname}: ${date.task_dat}e: result checks scheduled`);
         // Update the scores for the task
         await process_day_scores(day, classid, classname, keys);
     } else {
@@ -734,7 +737,6 @@ WHERE datecode = ${toDateCode(date)} AND class=${classid}`
 async function process_day_scores(day, classid, classname, keys) {
     let rows = 0;
     let date = day.task_date;
-    let doCheckForOGNMatches = false;
 
     // It's a big long list of results ;)
     for (const row of day._embedded['http://api.soaringspot.com/rel/results']) {
@@ -811,13 +813,15 @@ async function process_day_scores(day, classid, classname, keys) {
                              status = (CASE WHEN ((status = "-" or status = "S" or status="G") and ${row.scored_finish} != "") THEN "F"
                                         WHEN   ((status = "-" or status = "S" or status="G") and ${row.igc_file} != "") THEN "H"
                                         ELSE status END),
-                             speed=${scoredvals.as * 3.6}, distance=${scoredvals.ad / 1000},
-                             hspeed=${scoredvals.hs * 3.6}, hdistance=${scoredvals.hd / 1000},
+                             speed=${scoredvals.as! * 3.6}, distance=${scoredvals.ad! / 1000},
+                             hspeed=${scoredvals.hs! * 3.6}, hdistance=${scoredvals.hd! / 1000},
                              daypoints=${row.points}, dayrank=${row.rank}, totalpoints=${row.points_total}, totalrank=${row.rank_total}, penalty=${row.penalty}
                           WHERE datecode=${toDateCode(date)} AND compno=${pilot} and class=${classid}`);
 
             //          console.log(`${pilot}: ${handicap} (${duration} H) ${scoredvals.ad} ${scoredvals.hd}` );
             rows += r.affectedRows;
+
+            console.log('igc:', row?._links);
 
             if ((igcavailable || 'Y') == 'N' && trackerid == 'unknown' && row?._links?.['http://api.soaringspot.com/rel/flight']) {
                 console.log(date, pilot, igcavailable, 'scheduling check for IGC');
@@ -852,12 +856,6 @@ async function process_day_scores(day, classid, classname, keys) {
         await mysql_db.query(escape`UPDATE contestday SET results_uploaded=NOW()
                                  WHERE class=${classid} AND datecode=${toDateCode(date)} and STATUS != "Z"`);
     }
-
-    // rescore the day, but only for preliminary results
-    //    const status = day.result_status.toLowerCase();
-    //    if( status == 'preliminary' ) {
-    //        await db.query( escape`call daypoints(${classid})` );
-    //    }
 }
 
 function randomEarlyMorningTimeDelay() {

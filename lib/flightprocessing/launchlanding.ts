@@ -10,7 +10,7 @@ import escape from 'sql-template-strings';
 // line at a time reading of streamed webpage for igc download
 import * as readline from 'readline';
 
-import {Epoch, AltitudeAgl} from '../types';
+import {Epoch, AltitudeAgl, Datecode} from '../types';
 
 import {toDateCode} from '../datecode';
 
@@ -35,7 +35,7 @@ const minTestTime = 5;
 // that we can use both in soaringspot.js (on the igc file) or for the flarm
 // ID. We can then correlate the two
 // note: id could be either class+compno or flarmid
-export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl = 0, db, type) {
+export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl = 0, db, type) {
     // Now we are going to manipulate this track to look for either launch or landing
     let track = unknownTrack[id];
 
@@ -104,7 +104,7 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
         if (speed > 70 && gain > 25 && agl > 40 && trackDistance > 0.1) {
             if (!track.airborne) {
                 if (db) {
-                    db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'launch', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`);
+                    db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'launch', ${at}, ${id}, ${type}, ${datecode})`);
                 }
                 console.log(id, at, 'launch', speed, gain, agl);
                 track.airborne = true;
@@ -116,7 +116,7 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
                 // If we haven't changed height much (ridge soaring at the mind will break this if people are within 50m of takeoff altitude!)
                 if (Math.abs(gain) < 10 && speed < 35 && agl < 50) {
                     if (db) {
-                        db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'landing', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`);
+                        db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'launch', ${at}, ${id}, ${type}, ${datecode})`);
                     }
                     console.log(id, at, 'landing', speed, gain, agl);
                     track.airborne = false;
@@ -255,7 +255,7 @@ export async function processIGC(classid, compno, location, date, url, https, my
         myInterface.on('close', () => {
             mysql.query(escape`UPDATE pilotresult SET igcavailable=${validFile ? 'P' : 'F'} WHERE datecode=${dateCode} and compno=${compno} and class=${classid}`);
             if (validFile) {
-                capturePossibleLaunchLanding(key, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
+                capturePossibleLaunchLanding(key, dateCode, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
                 console.log(`processed ${date} ${classid} - ${compno} successfully`);
             }
         });
@@ -294,7 +294,7 @@ export async function processIGC(classid, compno, location, date, url, https, my
                     // Now we need to check if it is a launch or landing point
                     // yes some files contain this information but we use same algo
                     // for flarm so hopefully a closer match
-                    capturePossibleLaunchLanding(key, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc');
+                    capturePossibleLaunchLanding(key, dateCode, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc');
                 }
             }
 

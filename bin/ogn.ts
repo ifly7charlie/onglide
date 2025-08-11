@@ -1012,7 +1012,8 @@ async function updateTrackers(datecode: Datecode) {
                 }
 
                 // If we have a tracker for it then we need to link that as well
-                if (!hadTracker) { // && t.dbTrackerId && t.dbTrackerId != 'unknown') {
+                if (!hadTracker) {
+                    // && t.dbTrackerId && t.dbTrackerId != 'unknown') {
                     aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
@@ -1507,7 +1508,7 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
     const flarmId = data.c;
 
     // Check if it's a possible launch
-    capturePossibleLaunchLanding(flarmId, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm');
+    capturePossibleLaunchLanding(flarmId, datecode, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm');
 
     // Store in the unknown list for status display
     unknownTrackers[flarmId] = {
