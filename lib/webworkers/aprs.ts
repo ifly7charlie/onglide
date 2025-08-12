@@ -29,8 +29,7 @@ import {Coord, point} from '@turf/helpers';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {getNow} from '../now';
-import {getCurrentDateCode} from '../datecode';
+import {getNow, d} from '../now';
 
 import {PositionMessage} from '../types';
 interface InterimPositionMessage extends PositionMessage {
@@ -355,6 +354,17 @@ async function initDB(datecode: Datecode) {
     console.log(`changing database for ${Object.keys(trackers).length} trackers`);
     for (const t of Object.values(trackers)) {
         t.db = db.sublevel(t.id, {});
+    }
+
+    // Reset aircraft to new day as well
+    for (const a of Object.values(allAircraft)) {
+        a.messages = [];
+        delete a.lastTime;
+        delete a.lastSent;
+        delete a.lastMoved;
+        a.lastTick = 0 as Epoch;
+        a.stationary = 0;
+        a.ground = true;
     }
 
     if (old) {
@@ -801,7 +811,7 @@ async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messag
             messageQueue.splice(insertIndex, 0, message);
             loaded++;
         }
-        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${loaded}/${messageQueue.length} points loaded`);
+        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${loaded}/${messageQueue.length} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
     } catch (err) {
         console.error(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${err}...`);
     }
@@ -963,11 +973,11 @@ async function processMessageQueue(aircraft: Aircraft) {
             _: true,
             tick: true
         } as any);
-        console.log('PMQ tick:', aircraft.compno, (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch), Math.min(position, messages.length - 1), position, messages.length);
+        //        console.log('PMQ tick:', aircraft.compno, (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch), Math.min(position, messages.length - 1), position, messages.length);
         aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
-        if (!aircraft.lastTick) {
-            console.log(`PMQ: ${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} s:${start} t:${to}`);
-        }
+        //        if (!aircraft.lastTick) {
+        //            console.log(`PMQ: ${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} s:${start} t:${to}`);
+        //        }
     }
 
     if (count > 1) {
