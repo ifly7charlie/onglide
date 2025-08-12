@@ -192,14 +192,7 @@ enum ScoringCommandEnum {
     clearGlider
 }
 
-export type ScoringCommand =
-    | ScoringCommandShutdown
-    | ScoringCommandNewTask
-    | ScoringCommandTrack
-    | ScoringCommandRescoreGlider
-    | ScoringCommandUpdateScoreId
-    | ScoringCommandClearGlider
-    | ScoringCommandClearTask;
+export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | ScoringCommandClearGlider | ScoringCommandClearTask;
 
 interface ScoringCommandBase {
     className: ClassName;
