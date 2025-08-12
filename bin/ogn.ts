@@ -122,7 +122,7 @@ interface Channel {
 
     broadcastChannel?: BroadcastChannel;
     scoring?: ScoringController;
-    task?: any; // what task are we scoring - we use this to see if anything has changed
+    task?: Task; // what task are we scoring - we use this to see if anything has changed
     geoTask?: any;
     gliderHash?: string;
 
