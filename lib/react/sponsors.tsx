@@ -28,16 +28,16 @@ export default function Sponsor(props) {
                   <img width="150" height="150" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/7b75e0da-ff81-4b3f-965b-91b08f60d9bf/AS-1.jpg" />
               ]
             : process.env.NEXT_PUBLIC_SITEURL.startsWith('wgc')
-            ? []
-            : [
-                  <div>
-                      If you would like to use onglide for your competition please ask your scorer to send the SoaringSpot API keys to setup@onglide.com
-                      <hr />
-                      For feedback, bug reports etc please use <a href="https://github.com/ifly7charlie/onglide/issues">GitHub issues reporting</a>
-                      <br />
-                      Pull Requests welcome
-                  </div>
-              ]),
+              ? []
+              : [
+                    <div>
+                        If you would like to use onglide for your competition please ask your scorer to send the SoaringSpot API keys to setup@onglide.com
+                        <hr />
+                        For feedback, bug reports etc please use <a href="https://github.com/ifly7charlie/onglide/issues">GitHub issues reporting</a>
+                        <br />
+                        Pull Requests welcome
+                    </div>
+                ]),
 
         <img width="150" height="150" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />
     ];

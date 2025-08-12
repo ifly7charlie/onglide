@@ -4,16 +4,19 @@ import {getNow} from '../../lib/now';
 import {toDateCode} from '../../lib/datecode';
 
 export default async function competitionHandler(req, res) {
-    const competition = await query(
-        escape`
-         SELECT name, 
-                DATE_FORMAT( start, "%M %D" ) start, DATE_FORMAT( end, "%M %D" ) end, 
-                sitename club,
-                tzoffset,
-                mainwebsite,
-                lt, lg
-           FROM competition`
-    );
+    const competition = await query(escape`
+        SELECT
+            name,
+            DATE_FORMAT (start, "%M %D") start,
+            DATE_FORMAT (END, "%M %D") END,
+            sitename club,
+            tzoffset,
+            mainwebsite,
+            lt,
+            lg
+        FROM
+            competition
+    `);
 
     if (!competition[0]) {
         res.setHeader('Cache-Control', 'public, s-maxage=10, stale-while-revalidate=30');
@@ -41,11 +44,23 @@ export default async function competitionHandler(req, res) {
     const utcTime = local10am.getTime() - tzoffset * 1000;
     const datecode = toDateCode(new Date(utcTime));
 
-    const classes = await query(
-        escape`
-         SELECT c.class, c.classname, c.description, ${datecode} datecode, cs.status, handicapped, notes
-           FROM classes c, compstatus cs where c.class=cs.class ORDER BY c.class`
-    );
+    const classes = await query(escape`
+        SELECT
+            c.class,
+            c.classname,
+            c.description,
+            ${datecode} datecode,
+            cs.status,
+            handicapped,
+            notes
+        FROM
+            classes c,
+            compstatus cs
+        WHERE
+            c.class = cs.class
+        ORDER BY
+            c.class
+    `);
 
     // How long should it be cached - 5 minutes is ok
     res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=300');

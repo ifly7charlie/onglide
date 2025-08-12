@@ -164,8 +164,8 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
         ? vario.average > 0.2
             ? faCircleArrowUp
             : vario.average < -0.2
-            ? faCircleArrowDown
-            : faCircleArrowRight
+              ? faCircleArrowDown
+              : faCircleArrowRight
         : faQuestion;
 
     const convertedClimb = convertClimb(vario?.average ?? 0, units);
@@ -204,8 +204,8 @@ const StartComponent = memo(function StartComponent({
     const [endTime, description, icon] = utcFinish
         ? [OptionalTime(' ', utcFinish, tz), 'finish time', faHourglassEnd] //
         : taskTimeRemaining
-        ? [OptionalDuration('', taskTimeRemaining), 'remaining time', faHistory]
-        : ['', 'finish time', null];
+          ? [OptionalDuration('', taskTimeRemaining), 'remaining time', faHistory]
+          : ['', 'finish time', null];
 
     const duration = OptionalDuration('+', taskDuration as Epoch).split(':');
 
@@ -267,7 +267,7 @@ function HandicappedDistanceComponent({score}: {score: PilotScore}) {
             main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'handicapped distance done'}}
             data1={{value: score.actual.taskDistance, units: 'km', icon: faRightFromBracket, description: 'actual distance done'}}
             data2={{
-                value: !score.utcFinish ? score.handicapped.distanceRemaining ?? score.handicapped.minPossible : undefined,
+                value: !score.utcFinish ? (score.handicapped.distanceRemaining ?? score.handicapped.minPossible) : undefined,
                 units: 'km',
                 icon: faRightToBracket,
                 description: 'handicapped minimum distance remaining'
@@ -283,7 +283,7 @@ function ActualDistanceComponent({score}: {score: PilotScore}) {
             id="distance"
             title="distance" //
             main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'actual distance done'}}
-            data1={{value: !score.utcFinish ? score.actual.distanceRemaining ?? score.actual.minPossible : undefined, units: 'km', icon: faRightToBracket, description: 'actual minimum distance remaining'}}
+            data1={{value: !score.utcFinish ? (score.actual.distanceRemaining ?? score.actual.minPossible) : undefined, units: 'km', icon: faRightToBracket, description: 'actual minimum distance remaining'}}
         />
     );
 }

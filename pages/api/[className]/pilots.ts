@@ -16,14 +16,22 @@ export default async function taskHandler(req, res) {
 
     // this is the pilot results
     const pilots = await query(escape`
-	select pilots.class, pilots.compno, 
-	            concat(firstname,' ',lastname) name, gliderType, handicap, country,
-          CASE 
-            WHEN image != 'Y' THEN email ELSE 'Y' END image
-          
-			FROM pilots
-			WHERE 
-            pilots.class = ${className}`);
+        SELECT
+            pilots.class,
+            pilots.compno,
+            concat(firstname, ' ', lastname) name,
+            gliderType,
+            handicap,
+            country,
+            CASE
+                WHEN image != 'Y' THEN email
+                ELSE 'Y'
+            END image
+        FROM
+            pilots
+        WHERE
+            pilots.class = ${className}
+    `);
 
     if (!pilots || !pilots.length) {
         console.log('api/pilots: invalid class or day not started');

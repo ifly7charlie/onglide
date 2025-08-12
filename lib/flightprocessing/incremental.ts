@@ -5,7 +5,7 @@ import {PilotPosition} from '../protobuf/onglide';
 
 // Helper fro resizing TypedArrays so we don't end up with them being huge
 export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
-  let c = new allocator(Math.max(b,a.length));
+    let c = new allocator(Math.max(b, a.length));
     c.set(a);
     return c;
 }

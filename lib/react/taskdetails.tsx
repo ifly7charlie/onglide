@@ -30,7 +30,7 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
     // And then produce a string to display it locally
     const fClass = comp.classes.find((c) => c.class == vc);
     const dateString = useMemo(() => {
-        const date = task?.details?.calendardate ?? fClass?.datecode ? fromDateCode(fClass.datecode) : null;
+        const date = (task?.details?.calendardate ?? fClass?.datecode) ? fromDateCode(fClass.datecode) : null;
         return date ? `${new Date(date).toLocaleDateString(lang, {day: 'numeric', month: 'short'})}` : '';
     }, [lang, tz, task?.details?.calendardate]);
 

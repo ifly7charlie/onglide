@@ -26,9 +26,12 @@ export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
                 })
                     .catch((e) => {
                         console.log(new Date(), 'unable to fetch radar data, will try again in two minutes', e);
-                        timer = setTimeout(() => {
-                            loadRadar();
-                        }, 2 * 1000 * 60);
+                        timer = setTimeout(
+                            () => {
+                                loadRadar();
+                            },
+                            2 * 1000 * 60
+                        );
                     })
                     .then((res) => {
                         try {
@@ -40,9 +43,12 @@ export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
                     })
                     .catch((e) => {
                         console.log(new Date(), 'unable to fetch radar data, will try again in two minutes', e);
-                        timer = setTimeout(() => {
-                            loadRadar();
-                        }, 2 * 1000 * 60);
+                        timer = setTimeout(
+                            () => {
+                                loadRadar();
+                            },
+                            2 * 1000 * 60
+                        );
                     })
                     .then((apiData) => {
                         if (!apiData) {
@@ -69,15 +75,21 @@ export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
 
                         // Figure out when to run next, API updates in 10 minutes
                         const interval = parseInt(apiData?.generated) + 600 - Date.now() / 1000;
-                        timer = setTimeout(() => {
-                            loadRadar();
-                        }, Math.max(interval || 0, 60) * 1000);
+                        timer = setTimeout(
+                            () => {
+                                loadRadar();
+                            },
+                            Math.max(interval || 0, 60) * 1000
+                        );
                     })
                     .catch((e) => {
                         console.log(new Date(), 'unable to fetch radar data, will try again in two minutes', e);
-                        timer = setTimeout(() => {
-                            loadRadar();
-                        }, 2 * 1000 * 60);
+                        timer = setTimeout(
+                            () => {
+                                loadRadar();
+                            },
+                            2 * 1000 * 60
+                        );
                     });
             }
         }

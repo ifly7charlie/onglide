@@ -16,14 +16,14 @@ export function turnpointLayer(taskGeoJSONtp: any, map2d: boolean, mapLight: boo
                         ? [0, 128, 0, 96] // green
                         : [0x7c, 0xff, 0, 128]
                     : //
-                    i.properties.leg >= nextTp
-                    ? [255, 165, 0, mapLight ? 64 : 96]
-                    : mapLight
-                    ? [128, 128, 128, 64]
-                    : [255, 255, 255, 96]
+                      i.properties.leg >= nextTp
+                      ? [255, 165, 0, mapLight ? 64 : 96]
+                      : mapLight
+                        ? [128, 128, 128, 64]
+                        : [255, 255, 255, 96]
                 : mapLight
-                ? [128, 128, 128, 64]
-                : [192, 192, 192, 96];
+                  ? [128, 128, 128, 64]
+                  : [192, 192, 192, 96];
         },
         getElevation: (i) => (!nextTp || i.properties.leg == nextTp ? 10000 : 0),
         updateTriggers: {

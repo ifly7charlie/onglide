@@ -21,10 +21,18 @@ export default async function image(req, res) {
     // We need to figure out what date is needed as this isn't passed in to the webpage
     const imageBlob = (
         await query(escape`
-      SELECT image
-      FROM images
-      WHERE class = ${className} and compno=${compno} ORDER by updated desc limit 1
-    `)
+            SELECT
+                image
+            FROM
+                images
+            WHERE
+                class = ${className}
+                AND compno = ${compno}
+            ORDER BY
+                updated DESC
+            LIMIT
+                1
+        `)
     )?.[0]?.image;
 
     if (!imageBlob) {
