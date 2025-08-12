@@ -701,6 +701,13 @@ async function processPacket(packet: aprsPacket) {
         statistics.aprsMinDelayForDelayed = Math.min(statistics.aprsMinDelayForDelayed, td);
         statistics.delayedPackets++;
     } else {
+
+        // Ignore ones that are too old and that are not explicitly delayed
+        // I believe these are corrupted
+        if( td > 20*60 ) {
+            statistics.delayedPackets++;
+            return;
+        }
         statistics.aprsDelay += td;
         statistics.normalPackets++;
     }
@@ -805,13 +812,17 @@ async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messag
         let loaded = 0;
         for await (const [key, messageJson] of tracker.db.iterator()) {
             const message = JSON.parse(messageJson);
+            loaded++;
+            // Ignore if the delay is too big
+            if ( message.d > 1200 ) {
+                continue;
+            }
             message.c = aircraft.compno; // correct competition number as it may be wrong in the db
             const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
             message.j = point([message.lat, message.lng]);
             messageQueue.splice(insertIndex, 0, message);
-            loaded++;
         }
-        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${loaded}/${messageQueue.length} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
+        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${messageQueue.length}/${loaded} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
     } catch (err) {
         console.error(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${err}...`);
     }
@@ -833,8 +844,8 @@ async function processMessageQueue(aircraft: Aircraft) {
     const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
     let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
-    if (aircraft.compno == 'AS') {
-        console.log(`PMQ: ${aircraft.compno}:  ls: ${lastSent}, m: ${messages.length}, s:${start}, p: ${position}`);
+    if (aircraft.compno == '!AS') {
+        console.log(`PMQ: ${aircraft.compno}:  ls: ${JSON.stringify(lastSent)}, m: ${messages.length}, s:${start}, p: ${position}`);
     }
 
     let count = 0;
