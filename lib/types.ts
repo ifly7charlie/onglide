@@ -189,8 +189,8 @@ export enum EstimatedTurnType {
 export interface TaskLegStatus {
     legno: number;
     // If we are an AAT then we need to track the points (task.rules.aat controls this)
-    points?: BasePositionMessage[];
-    penaltyPoints?: BasePositionMessage[];
+    points: BasePositionMessage[];
+    penaltyPoints: BasePositionMessage[];
 
     entryTimeStamp?: Epoch;
     exitTimeStamp?: Epoch;

@@ -374,7 +374,7 @@ export function checkIsInTP(turnpoint: TaskLeg, p: EnrichedPosition, nearestPoin
     return [false, !turnpoint.finish && distanceRemaining < 0.5, distanceRemaining as DistanceKM];
 }
 
-export function checkIsInStartSector(turnpoint: TaskLeg, p): boolean {
+export function checkIsInStartSector(turnpoint: TaskLeg, p: EnrichedPosition): boolean {
     // Quick check to see if it is plausible
     const distanceRemaining = distance(p.geoJSON, turnpoint.point) as DistanceKM;
     const possiblyInsidePenaltyVolume = distanceRemaining < turnpoint.maxR + 0.5;
