@@ -62,7 +62,7 @@ export function bindChannelForInOrderPackets(
 
         // Reset on timestamp 0
         if (message.t == 0 && messageQueue.length) {
-            console.log(`${message.c}: IOG: reset on t=0`);
+            log(`${message.c}: IOG: reset on t=0`);
             messageQueue = [];
             messageQueueId = Math.random();
             return;
@@ -73,12 +73,12 @@ export function bindChannelForInOrderPackets(
 
         // Sanity check, this should never happen
         if (messageQueue[insertIndex]?.t == message.t) {
-            console.log(`${message.c}: IOG: unexpected duplicate packet`);
+            log(`${message.c}: IOG: unexpected duplicate packet`);
             return;
         }
 
         if (messageQueue.length != insertIndex) {
-            console.log(
+            log(
                 `${message.c} IOG: ${message.t} inserting out of order ${insertIndex}/${messageQueue.length} ${d(message.t)} now: ${d(getNow())}, end: ${d(messageQueue.at(-1)?.t ?? 0)}/${JSON.stringify(messageQueue.at(-1))}`
             );
         }
@@ -100,7 +100,7 @@ export function bindChannelForInOrderPackets(
         let hiccup: Epoch = 0 as Epoch;
         const currentMessageQueueId = messageQueueId;
 
-        console.log(`${className}/${compno}: IOG started ${messageQueue.length} initial messages`);
+        log(`${className}/${compno}: IOG started ${messageQueue.length} initial messages`);
 
         //
         // Replay all before we start blocking, we will flag that it's a live message
@@ -133,7 +133,7 @@ export function bindChannelForInOrderPackets(
         }
 
         let now: Epoch = getNow();
-        console.log(`${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${d(now)}, replayed to: ${d(messageQueue.at(-1)?.t ?? 0)} <${messageQueueId},${currentMessageQueueId}>`);
+        log(`${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${d(now)}, replayed to: ${d(messageQueue.at(-1)?.t ?? 0)} <${messageQueueId},${currentMessageQueueId}>`);
 
         // Find the position of the message we got up to, should always be increasing but better safe than sorry
         // as we may have had a reset of the message

@@ -86,6 +86,10 @@ const argv = yargs(hideBin(process.argv))
         type: 'boolean',
         describe: 'output logging'
     })
+    .option('verbose', {
+        type: 'boolean',
+        describe: 'output logging of interim scores'
+    })
     .strict()
     .help()
     .parseSync();
@@ -146,10 +150,14 @@ async function run() {
 }
 
 async function runScore(datecode: Datecode, className: ClassName, compno: Compno, trackerDb: string, handicap: number) {
-    console.log(datecode, className, compno, location);
+    const log = argv.log
+        ? console.log
+        : () => {
+              /*noop*/
+          };
 
     if (!trackerDb) {
-        console.error('no trackers found for pilot');
+        log(`${className}/${compno}: no trackers found`);
         return;
     }
 
@@ -165,11 +173,7 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         receiveNewPoints: false,
 
         // Setup logging
-        log: argv.log
-            ? function log() {
-                  console.log(compno, ...arguments);
-              }
-            : function log() {},
+        log,
 
         messages: []
     };
@@ -197,16 +201,10 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         await loadPointsForTracker(glider, trackers[id], interimQueue);
     }
 
-    console.log(`${className}: fetched ${interimQueue.length} rows of trackpoints (getInitialTrackPoints)`);
+    log(`${className}/${compno}: fetched ${interimQueue.length} rows of trackpoints (getInitialTrackPoints)`);
 
     const iterative = false;
     let getNow = () => Math.trunc(Date.now() / 1000) as Epoch;
-
-    const log = argv.log
-        ? console.log
-        : () => {
-              /*noop*/
-          };
 
     const task = await getTask(className, datecode, 100);
     if (!task) {
