@@ -90,56 +90,67 @@ const argv = yargs(hideBin(process.argv))
     .help()
     .parseSync();
 
-runScore(argv.datecode as Datecode, argv.className as ClassName, argv.compno as Compno);
+let location: AirfieldLocation;
+let db: Awaited<ReturnType<typeof initDB>>;
 
-async function runScore(datecode: Datecode, className: ClassName, compno: Compno) {
-    let location: AirfieldLocation = ((await mysql.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any)[0];
+run();
+
+async function run() {
+    const pilots = await mysql.query<{compno: Compno; class: ClassName; handicap: number; trackerid: string}[]>(escape`
+        SELECT
+            pilots.compno,
+            pilots.class,
+            handicap,
+            trackerid
+        FROM
+            pilots
+            LEFT JOIN tracker ON pilots.class = tracker.class
+            AND pilots.compno = tracker.compno
+        WHERE
+            (
+                NOT (${argv.className ?? ''} != '')
+                OR pilots.class = ${argv.className}
+            )
+            AND (
+                NOT ('' != (${argv.compno ?? ''}))
+                OR pilots.compno IN (${argv.compno?.split(',')})
+            )
+    `);
+
+    location = ((await mysql.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any)[0];
     location.point = point([location.lng, location.lat]);
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
     const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
 
+    // Make sure we have the latest datecode for the database
+    db = await initDB(argv.datecode as Datecode, internalName);
+
+    const results = (await Promise.allSettled(pilots.map((p) => runScore(argv.datecode as Datecode, p.class, p.compno, p.trackerid, p.handicap))))
+        .filter((r) => r.status == 'fulfilled')
+        .map((p) => p.value)
+        .filter((p) => p !== undefined);
+
+    const points = results.reduce((a, r) => a + (r.points as number), 0);
+    const numberOfScores = results.reduce((a, r) => a + (r.numberOfScores as number), 0);
+    const ms = results.reduce((a, r) => a + (r.ms as number), 0);
+    results.push({
+        compno: 'TOTAL',
+        points,
+        ms,
+        avgUs: +((ms * 1000) / (points || 1)),
+        cps: +((points || 0) / (ms / 1000 || 1))
+    } as any);
+
+    console.table(results.map((p) => ({...p, ms: +p.ms.toFixed(1), avgUs: +p.avgUs.toFixed(3), cps: +p.cps.toFixed(0)})));
+    process.exit(1);
+}
+
+async function runScore(datecode: Datecode, className: ClassName, compno: Compno, trackerDb: string, handicap: number) {
     console.log(datecode, className, compno, location);
-
-    const trackerDb: string = (
-        await mysql.query(escape`
-            SELECT
-                trackerid
-            FROM
-                tracker
-            WHERE
-                class = ${className}
-                AND compno = ${compno}
-        `)
-    )?.[0]?.trackerid;
-
-    console.table(
-        await mysql.query(escape`
-            SELECT
-                trackerid
-            FROM
-                tracker
-            WHERE
-                class = ${className}
-                AND compno = ${compno}
-        `)
-    );
-    console.log(trackerDb);
-
-    const handicap: string = (
-        await mysql.query(escape`
-            SELECT
-                handicap
-            FROM
-                pilots
-            WHERE
-                class = ${className}
-                AND compno = ${compno}
-        `)
-    )?.[0]?.handicap;
 
     if (!trackerDb) {
         console.error('no trackers found for pilot');
-        process.exit(1);
+        return;
     }
 
     const glider: Aircraft = {
@@ -162,9 +173,6 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
         messages: []
     };
-
-    // Make sure we have the latest datecode for the database
-    const db = await initDB(datecode, internalName);
 
     const interimQueue: any[] = [];
 
@@ -210,7 +218,11 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     } as any;
 
     await processMessageQueue(glider);
+    if (interimQueue.length) {
+        interimQueue.at(-1)._ = true;
+    }
 
+    const start = process.hrtime.bigint();
     const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, interimQueue, iterative, !iterative);
 
     // 0. Check if we are flying etc
@@ -226,7 +238,7 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
     // 3. Once we have distances we can calculate task lengths
     //    and therefore speeds
-    const scores = taskScoresGenerator(task, compno as Compno, parseFloat(handicap), distances, log);
+    const scores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
 
     let lastScore: PilotScore | undefined;
     let numberOfScores = 0;
@@ -236,11 +248,21 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         }
         lastScore = value;
         numberOfScores++;
+        if (value.live) {
+            break;
+        }
     }
+    const end = process.hrtime.bigint();
 
-    console.log(`${compno}: done, ${printDate(lastScore?.utcStart)} -${printDate(lastScore?.utcFinish)}` + `${lastScore?.actual?.taskDistance || 0}km, ${lastScore?.actual?.taskSpeed}kph`);
-    //        console.log(JSON.stringify(lastScore));
-    process.exit();
+    const ms = Number(end - start) / 1e6;
+    const points = interimQueue.length;
+    const avgUs = points ? (ms * 1000) / points : 0;
+    const cps = points ? points / (ms / 1000) : 0;
+
+    log(`${compno}: done, ${printDate(lastScore?.utcStart)} -${printDate(lastScore?.utcFinish)}` + `${lastScore?.actual?.taskDistance || 0}km, ${lastScore?.actual?.taskSpeed}kph`);
+    log(`${compno}: ${numberOfScores} scores output, ${ms.toFixed(2)}ms -> avgUs: ${avgUs.toFixed(1)}, ${cps.toFixed(0)}/sec`);
+
+    return {compno, points: interimQueue.length, numberOfScores, ms, avgUs, cps, taskDistance: lastScore?.actual?.taskDistance, taskSpeed: lastScore?.actual?.taskSpeed};
 }
 
 const printDate = (x) => new Date(x * 1000).toUTCString();
