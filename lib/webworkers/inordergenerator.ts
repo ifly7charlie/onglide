@@ -12,7 +12,15 @@ import {d, getNow} from '../now';
 // order
 // NOTE: ONLY ONE EXECUTION OF GENERATOR ALLOWED!
 
-export function bindChannelForInOrderPackets(className: ClassName, datecode: Datecode, compno: Compno, initialPoints: PositionMessage[], tick: boolean = false, once: boolean = false): InOrderGeneratorFunction {
+export function bindChannelForInOrderPackets(
+    className: ClassName,
+    datecode: Datecode,
+    compno: Compno,
+    initialPoints: PositionMessage[],
+    tick: boolean = false,
+    once: boolean = false,
+    log?: Function
+): InOrderGeneratorFunction {
     //
     // And we need a way to notify and wake up our generator
     // that is not asynchronous. Once we have achieved this
@@ -25,7 +33,13 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
     let messageQueue: PositionMessage[] = initialPoints;
     let messageQueueId = Math.random();
 
-    const log = compno == '!TJ' ? (...a: any[]) => console.log(compno + ':', ...a) : () => {};
+    //
+    // Make sure we have some logging
+    if (!log) {
+        log = () => {
+            /**/
+        };
+    }
 
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
@@ -86,7 +100,7 @@ export function bindChannelForInOrderPackets(className: ClassName, datecode: Dat
         let hiccup: Epoch = 0 as Epoch;
         const currentMessageQueueId = messageQueueId;
 
-        console.log(`${className}/${compno}: IOG started ${messageQueue.length}`);
+        console.log(`${className}/${compno}: IOG started ${messageQueue.length} initial messages`);
 
         //
         // Replay all before we start blocking, we will flag that it's a live message

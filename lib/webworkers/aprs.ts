@@ -132,7 +132,7 @@ const statistics = {
 };
 
 // Keep track of the aircraft requested
-interface Aircraft {
+export interface Aircraft {
     compno: string;
     className: string;
     trackers: FlarmID[];
@@ -159,7 +159,7 @@ interface Aircraft {
     interval?: NodeJS.Timeout;
 }
 
-interface Tracker {
+export interface Tracker {
     id: FlarmID;
     index: number;
     aircraftList: Aircraft[];
@@ -329,14 +329,14 @@ if (!isMainThread && parentPort) {
     startAprsListener(<AprsListenerConfig>workerData);
 }
 
-async function initDB(datecode: Datecode) {
+export async function initDB(datecode: Datecode, competitionName?: string) {
     if (db && dbDatecode == datecode) {
         return db;
     }
 
     const old = db;
 
-    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}-${workerData.competition}.db`;
+    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}-${competitionName ?? workerData.competition}.db`;
     const openedDb = (db = new DB(path));
     console.log('opening points database', path);
     dbDatecode = datecode;
@@ -678,7 +678,7 @@ function messageSortKey(m: InterimPositionMessage): number {
 
 //
 // collect points, emit to competition db every 30 seconds
-async function processPacket(packet: aprsPacket) {
+export async function processPacket(packet: aprsPacket) {
     // Flarm ID we use is last 6 characters, check if OGN tracker or regular flarm
     const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6) as FlarmID;
     const ognTracker = packet.sourceCallsign?.slice(0, 3) == 'OGN';
@@ -701,10 +701,9 @@ async function processPacket(packet: aprsPacket) {
         statistics.aprsMinDelayForDelayed = Math.min(statistics.aprsMinDelayForDelayed, td);
         statistics.delayedPackets++;
     } else {
-
         // Ignore ones that are too old and that are not explicitly delayed
         // I believe these are corrupted
-        if( td > 20*60 ) {
+        if (td > 20 * 60) {
             statistics.delayedPackets++;
             return;
         }
@@ -803,7 +802,7 @@ async function processPacket(packet: aprsPacket) {
 //
 // Read the database for all points for a specific aircraft tracker
 //
-async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messageQueue: InterimPositionMessage[]) {
+export async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messageQueue: InterimPositionMessage[]) {
     if (!tracker.db) {
         console.log('no database available for loading trackpoints');
         return;
@@ -814,7 +813,7 @@ async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messag
             const message = JSON.parse(messageJson);
             loaded++;
             // Ignore if the delay is too big
-            if ( message.d > 1200 ) {
+            if (message.d > 1200) {
                 continue;
             }
             message.c = aircraft.compno; // correct competition number as it may be wrong in the db
@@ -835,7 +834,7 @@ async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messag
 //
 // Note that we do not consume the message queue - it is used for scoring restarts etc
 // so all messages are kept.
-async function processMessageQueue(aircraft: Aircraft) {
+export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     //
     let lastSent = aircraft.lastSent;
     let messages = aircraft.messages;
@@ -844,8 +843,8 @@ async function processMessageQueue(aircraft: Aircraft) {
     const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
     let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
-    if (aircraft.compno == '!AS') {
-        console.log(`PMQ: ${aircraft.compno}:  ls: ${JSON.stringify(lastSent)}, m: ${messages.length}, s:${start}, p: ${position}`);
+    if (log) {
+        log(`PMQ: ${aircraft.compno}:  ls: ${JSON.stringify(lastSent)}, m: ${messages.length}, s:${start}/${d(start)}, to:${to}/${d(to)}, p: ${position}`);
     }
 
     let count = 0;
@@ -901,12 +900,7 @@ async function processMessageQueue(aircraft: Aircraft) {
         // Take the first one, if we don't
         const point = filtered.at(0) ?? (stationary ? sorted[0] : undefined);
 
-        //        if (duplicates.length > 1) {
-        //            console.log(t, t - realNow, aircraft.compno, stationary ? 'stationary' : '', 'multiple packets', duplicates.length, duplicates.map((m: InterimPositionMessage) => m.o).join(','), 'picked', point?.o);
-        //        }
-
-        //            if (duplicates.length || a) {
-        if (aircraft.compno == '!95') {
+        if (log) {
             // duplicates.length > 1 && lastSent) {
             console.log(aircraft.compno, 'no point found ===========');
             console.table([lastSent]);
@@ -984,14 +978,10 @@ async function processMessageQueue(aircraft: Aircraft) {
             _: true,
             tick: true
         } as any);
-        //        console.log('PMQ tick:', aircraft.compno, (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch), Math.min(position, messages.length - 1), position, messages.length);
         aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
-        //        if (!aircraft.lastTick) {
-        //            console.log(`PMQ: ${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} s:${start} t:${to}`);
-        //        }
     }
 
-    if (count > 1) {
+    if (log) {
         console.log(`${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, s:${start} t:${to}`);
     }
 }
