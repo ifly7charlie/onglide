@@ -37,6 +37,7 @@ interface InterimPositionMessage extends PositionMessage {
     j?: Coord;
     f: FlarmID; // id
     o: string; // sender
+    ad: number; // airfield distance
 }
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
@@ -759,7 +760,8 @@ export async function processPacket(packet: aprsPacket) {
         f: flarmId,
         o: sender,
         l: null,
-        d: td
+        d: td,
+        ad: airfieldDistance
     };
 
     if (tracker.db) {
@@ -953,7 +955,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // If we are on the ground and we are more than 3 km from airfield location then we don't
         // want to report it. This doesn't filter initial points as you are not marked as on the ground
         // till several stationary points have happened
-        if (aircraft.ground) {
+        if (aircraft.ground && (point.ad ?? 0) > 3) {
             continue;
         }
 
