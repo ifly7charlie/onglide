@@ -69,9 +69,8 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         }
     } else {
         // If not first point then make sure we are in order!
-        lastTime = glider.deck.t[glider.deck.posIndex - 1];
+        lastTime = glider.deck.posIndex ? glider.deck.t[glider.deck.posIndex - 1] : 0;
         if (point.t < lastTime) {
-            //            console.log(glider.compno, point.t, '<', lastTime);
             return false;
         }
     }
