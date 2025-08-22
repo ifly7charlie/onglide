@@ -87,7 +87,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             stationary = false;
 
             if (!point.lng) {
-                console.log(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${point}, prev: ${previousPoint}`);
+                console.log(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${JSON.stringify(point)}, prev: ${JSON.stringify(previousPoint)}`);
                 return;
             }
 

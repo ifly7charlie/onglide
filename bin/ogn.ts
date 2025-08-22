@@ -471,6 +471,7 @@ async function main() {
 
             channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
+            console.log(`${channelName}: active gliders: `, [...channel.activeGliders].join(','));
 
             // Remove invalid
             const notValid = _remove(channel.clients, (client: OgnWebSocket) => {
@@ -502,6 +503,7 @@ async function main() {
             // Send keep alive and reset the stats/status
             await sendKeepalive(channel);
         }
+
 
         //
         // Aggregate statistics
@@ -1068,6 +1070,9 @@ async function updateTrackers(datecode: Datecode) {
                     {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
                 ));
                 const channel = channels[glider.channelName];
+                if( ! channel ) {
+                    throw new Error('no channel' + glider.channelName);
+                }
 
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
