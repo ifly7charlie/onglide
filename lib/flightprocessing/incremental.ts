@@ -10,8 +10,8 @@ export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint32Arr
     return c;
 }
 
-export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVersion: number): void {
-    glider.deck = {
+export function getEmptyDeck(compno: Compno, trackVersion: number) {
+    return {
         compno: compno,
         positions: new Float32Array(deckPointIncrement * 3),
         indices: new Uint32Array(deckSegmentIncrement),
@@ -22,6 +22,10 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
         segmentIndex: 1,
         trackVersion
     };
+}
+
+export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVersion: number): void {
+    glider.deck = getEmptyDeck(compno, trackVersion);
 }
 
 //

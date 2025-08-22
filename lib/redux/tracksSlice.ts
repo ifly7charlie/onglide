@@ -31,7 +31,7 @@ import {oldTracksUrl} from '../react/fixupUrls';
 
 import type {PilotTracks, PilotTrack} from '../protobuf/onglide';
 
-import {mergePoint, calculateVario, calculateAverage, generateIndices} from '../flightprocessing/incremental';
+import {mergePoint, calculateVario, calculateAverage, generateIndices, getEmptyDeck} from '../flightprocessing/incremental';
 
 import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
 import {mergeVHPoint, initaliseVH} from '../react/deckvh';
@@ -307,7 +307,7 @@ function _updatePositions(state: TracksSliceState, action: PayloadAction<{positi
         const compno = point.c;
         const cp: DisplayPilotTrackData | undefined = trackData[compno];
 
-        // If we don't no the pilot we'll discard - this could mean we miss a point or
+        // If we don't know the pilot we'll discard - this could mean we miss a point or
         // two when connecting but eliminates ghosts when changing channel
         if (!cp) {
             return;
@@ -368,22 +368,21 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
                 existing = null;
             }
 
-            const ts = new Uint32Array(track.t.slice().buffer);
+            const ts = track.posIndex > 0 ? new Uint32Array(track.t.slice().buffer) : [];
             const indexOfOverlap = existing ? _sortedIndex(ts, existing.t[existing.posIndex - 1]) : 0;
-            //            if (existing) {
-            //                console.log(`${compno}: existing latest: ${existing?.t[existing.posIndex - 1]}, new range: ${ts[0]} to ${ts[track.posIndex - 1]}`);
-            //                console.log(`${compno}: existing length ${existing?.posIndex}, overlap index: ${indexOfOverlap}`);
-            //            }
 
-            let deck: DeckData = {
-                compno: compno as Compno,
-                positions: new Float32Array(track.positions.slice(indexOfOverlap * 3 * Float32Array.BYTES_PER_ELEMENT).buffer),
-                t: new Uint32Array(track.t.slice(indexOfOverlap * Uint32Array.BYTES_PER_ELEMENT).buffer),
-                climbRate: new Int8Array(track.climbRate.slice(indexOfOverlap * Int8Array.BYTES_PER_ELEMENT).buffer),
-                agl: new Int16Array(track.agl.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer),
-                posIndex: track.posIndex - indexOfOverlap,
-                trackVersion: track.trackVersion
-            };
+            let deck: DeckData =
+                track.posIndex > 0
+                    ? {
+                          compno: compno as Compno,
+                          positions: new Float32Array(track.positions.slice(indexOfOverlap * 3 * Float32Array.BYTES_PER_ELEMENT).buffer),
+                          t: new Uint32Array(track.t.slice(indexOfOverlap * Uint32Array.BYTES_PER_ELEMENT).buffer),
+                          climbRate: new Int8Array(track.climbRate.slice(indexOfOverlap * Int8Array.BYTES_PER_ELEMENT).buffer),
+                          agl: new Int16Array(track.agl.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer),
+                          posIndex: track.posIndex - indexOfOverlap,
+                          trackVersion: track.trackVersion
+                      }
+                    : getEmptyDeck(compno, track.trackVersion);
 
             if (existing) {
                 // Figure out which order to put them in

@@ -1290,6 +1290,14 @@ async function generateRecentPilotTracks(channel: Channel) {
                             posIndex: length,
                             trackVersion: p.trackVersion
                         };
+                    } else {
+                        // make the placeholder, it's empty but the other end will make
+                        // a new deck object for it.
+                        result[glider.compno] = {
+                            compno: glider.compno,
+                            posIndex: 0,
+                            trackVersion: p.trackVersion
+                        };
                     }
                 }
             }
