@@ -8,7 +8,7 @@ export default async function competitionHandler(req, res) {
         SELECT
             name,
             DATE_FORMAT (start, "%M %D") start,
-            DATE_FORMAT (END, "%M %D") END,
+            DATE_FORMAT (end, "%M %D") end,
             sitename club,
             tzoffset,
             mainwebsite,
