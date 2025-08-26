@@ -3,7 +3,7 @@ import type {ClassName, Datecode} from '../types';
 const httpsTest = new RegExp(/^(https|wss)/i, 'i');
 
 export function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string, scoreId: string) {
-    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
+    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || window.location.host;
     //    console.log('oldTracksUrl', hn);
     return (
         (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST ?? '') || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX ?? '') ? 'https://' : 'http://') +
@@ -12,7 +12,7 @@ export function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string
 }
 
 export function oldScoresUrl(vc: ClassName, datecode: Datecode, baseTime: string, scoreId: string) {
-    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
+    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || window.location.host;
     //    console.log('oldScoresUrl', hn);
     return (
         (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST ?? '') || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX ?? '') ? 'https://' : 'http://') +
