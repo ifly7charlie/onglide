@@ -335,7 +335,7 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
     }
     console.log(
         `track data received (${action.source ?? 'live'}): ${Object.values(tracks.pilots)
-            .map((p) => `${p.compno}:${p.t.length}`)
+            .map((p) => `${p.compno}:${p.t?.length}`)
             .join(',')}`
     );
 
