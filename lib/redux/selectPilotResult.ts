@@ -342,7 +342,7 @@ export const selectLD = createSelector(
             if (score?.utcFinish) {
                 return {compno: score.compno as Compno, value: 'finished', sortKey: 10000 + score.handicapped?.taskSpeed};
             } else if (gr > 200) {
-                return {compno: score.compno as Compno, value: '∞', sortKey: gr};
+                return {compno: score.compno as Compno, value: '∞', sortKey: -gr};
             } else if (gr > 0) {
                 return {compno: score.compno as Compno, value: Math.round(gr), suffix: ':1', sortKey: -gr};
             } else {
@@ -362,7 +362,7 @@ const selectActualLD = createSelector(
             if (score?.utcFinish) {
                 return {compno: score.compno as Compno, value: 'finished', sortKey: 10000 + score.actual?.taskSpeed};
             } else if (gr > 200) {
-                return {compno: score.compno as Compno, value: '∞', sortKey: gr};
+                return {compno: score.compno as Compno, value: '∞', sortKey: -gr};
             } else if (gr > 0) {
                 return {compno: score.compno as Compno, value: Math.round(gr), suffix: ':1', sortKey: -gr};
             } else {
