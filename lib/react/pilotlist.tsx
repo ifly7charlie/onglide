@@ -325,7 +325,7 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining, ho
     );
 });
 
-export const Details = memo(function Details({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) {
+export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) => {
     let competitionDelay = useMemo(() => {
         if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
             return (
@@ -533,7 +533,7 @@ export const Details = memo(function Details({compno, pilot, units, tz, replayTi
             {flightDetails}
         </div>
     );
-});
+};
 
 // Display the current height of the pilot as a percentage bar, note this is done altitude not AGL
 // which is probably wrong
