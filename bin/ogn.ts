@@ -1638,7 +1638,6 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
         if (!Object.keys(matches).length) {
             unknownTrackers[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
             console.log(unknownTrackers[flarmId].message);
-            console.table(gliders);
             return;
         }
 
