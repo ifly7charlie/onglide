@@ -145,7 +145,7 @@ export function bindChannelForInOrderPackets(
             if (position == messageQueue.length) {
                 // We will tick on empty queue with the current real time this flushes out
                 // landouts
-                const nextPoint = yield {c: compno, _: true, tick: true, t: getNow()};
+                const nextPoint = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
                 if (nextPoint) {
                     // If scoring needs us to rewind we can do that immediately
                     position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);

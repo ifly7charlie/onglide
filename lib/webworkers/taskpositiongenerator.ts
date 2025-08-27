@@ -122,8 +122,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             break;
         }
         try {
-            // What time have we scored to
-            status.t = current.value.t;
+            // Queue information & copy glider through
             status._ = current.value._;
             status.compno = current.value.c as Compno;
 
@@ -156,6 +155,10 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 continue;
             }
 
+            // What time have we scored to, we don't update this on a tick otherwise we will
+            // have an old score with a new t and things may end up out of order in the UI
+            status.t = current.value.t;
+
             // Keep track of where we are
             previousPoint = point;
             point = current.value;
@@ -184,6 +187,11 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 landedBack = false;
                 resetStart();
                 console.log(`New flight found for ${status.compno} after landback - t:${status.t}`);
+            }
+
+            // Can't score with only one point
+            if (!previousPoint) {
+                continue;
             }
 
             // Helper
