@@ -24,7 +24,8 @@ import type {
     Datecode,
     Epoch,
     ClassName,
-    AltitudeAgl
+    AltitudeAgl,
+    AltitudeAMSL
 } from '../types';
 
 import {oldTracksUrl} from '../react/fixupUrls';
@@ -213,6 +214,26 @@ const _selectAllAGL = createSelector(
         return result;
     }
 );
+const _selectAllAMSL = createSelector(
+    [
+        //
+        (_state: TracksSliceState, t: Epoch | undefined) => t,
+        (state: TracksSliceState) => state.tracks
+    ],
+    (t: Epoch, tracks: TrackData) => {
+        const result: Record<Compno, AltitudeAgl | null> = {};
+        for (const track of Object.values(tracks)) {
+            const deck = track.deck;
+            if (!deck) {
+                result[track.compno] = undefined;
+            } else {
+                const posIndex = findDisplayIndex(track.deck, t);
+                result[track.compno] = deck.positions[posIndex * 3 + 2] as AltitudeAMSL;
+            }
+        }
+        return result;
+    }
+);
 
 // Find the old tracks
 export const fetchOldTracks = createAsyncThunk<{downloaded: PilotTracks; websocket: PilotTracks}, {baseTime: Epoch; className: ClassName; datecode: Datecode; residual: PilotTracks}>(
@@ -279,6 +300,7 @@ export const tracksSlice = createSlice({
         selectAllAverageClimb: _selectAllAverageClimb,
         selectAllPositions: _selectAllPositions, // memoized
         selectAllAGL: _selectAllAGL,
+        selectAllAMSL: _selectAllAMSL,
         selectAllTracks: (state) => state.tracks,
         selectLatestUpdate: (state) => state.latestUpdate,
         selectTrackVersion: (state) => state.trackVersion,
@@ -288,8 +310,18 @@ export const tracksSlice = createSlice({
 
 export default tracksSlice.reducer;
 export const {updateTracks, updatePositions} = tracksSlice.actions;
-export const {selectPilotVario, selectPilotPosition, selectAllPositions, selectAllTracks, /*selectAllVarios,*/ selectAllAGL, selectAllAverageClimb, selectTrackVersion, selectNewestBaseTime, selectLatestUpdate} =
-    tracksSlice.selectors;
+export const {
+    selectPilotVario,
+    selectPilotPosition,
+    selectAllPositions,
+    selectAllTracks,
+    /*selectAllVarios,*/ selectAllAGL,
+    selectAllAMSL,
+    selectAllAverageClimb,
+    selectTrackVersion,
+    selectNewestBaseTime,
+    selectLatestUpdate
+} = tracksSlice.selectors;
 
 //////////////////////////////////////////
 // Logic for updates
@@ -322,7 +354,7 @@ function _updatePositions(state: TracksSliceState, action: PayloadAction<{positi
             }
         }
     });
-    state.latestUpdate = Math.max(state.latestUpdate, action.payload?.t) as Epoch;
+    state.latestUpdate = Math.max(state.latestUpdate, action.payload?.t ?? 0) as Epoch;
 }
 
 function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTracks> & {source?: string}) {
@@ -427,7 +459,7 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
 
             //            console.log(compno, state.latestUpdate, state.tracks[compno as Compno].t, new Date(state.tracks[compno as Compno].t * 1000).toISOString());
 
-            state.latestUpdate = Math.max(state.latestUpdate ?? 0, state.tracks[compno as Compno].t) as Epoch;
+            state.latestUpdate = Math.max(state.latestUpdate ?? 0, state.tracks[compno as Compno].t ?? 0) as Epoch;
             return deck.trackVersion.toString(16) ?? compno;
         })
         .sort()
