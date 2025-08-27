@@ -457,7 +457,7 @@ function startAprsListener(config: AprsListenerConfig) {
             // Into insights
             if (statistics.periodStart) {
                 console.log(
-                    `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs (${statistics.unknownReceived} unknown), ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${
+                    `APRS: ${statistics.knownReceived} known/${statistics.msgsReceived} msgs (${statistics.unknownReceived} unknown), ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${
                         statistics.duplicates
                     }, invalid: ${statistics.invalidPacket}, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
                 );
@@ -482,6 +482,7 @@ function startAprsListener(config: AprsListenerConfig) {
                 statistics.delayedPackets = //
                 statistics.normalPackets =
                 statistics.knownReceived =
+                statistics.unknownReceived =
                 statistics.invalidPacket =
                 statistics.encryptedPacket =
                 statistics.finishPoints =
