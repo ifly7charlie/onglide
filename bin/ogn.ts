@@ -81,6 +81,8 @@ import {ScoringController} from '../lib/webworkers/scoring';
 
 let userLogStream: WriteStream | null = null;
 
+let scoreFrequency = 60;
+
 process.setMaxListeners(35);
 
 // Where is the comp based
@@ -265,6 +267,8 @@ async function main() {
     if (readOnly) {
         console.log('readonly');
     }
+
+    scoreFrequency = Number(process.env.OGN_SCORE_FREQUENCY ?? 60);
 
     // Allow insights if it's configured.
     // DON'T TRACK DEPENDENCIES as it will pick up SQL statements
@@ -503,7 +507,6 @@ async function main() {
             // Send keep alive and reset the stats/status
             await sendKeepalive(channel);
         }
-
 
         //
         // Aggregate statistics
@@ -1070,7 +1073,7 @@ async function updateTrackers(datecode: Datecode) {
                     {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
                 ));
                 const channel = channels[glider.channelName];
-                if( ! channel ) {
+                if (!channel) {
                     throw new Error('no channel' + glider.channelName);
                 }
 
@@ -1435,11 +1438,28 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             if (!sh) {
                 shid.set(compno, (sh = []));
             }
-            const index = _sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
-            if (index < sh.length - 1 && index >= 0) {
-                console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[index].t)} sh:[${index}/${sh.length}]`);
+
+            const i = _sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
+            const prev = sh[i - 1];
+            const next = sh[i];
+
+            // Rewind log (we’re going to drop tail from i or i-1)
+            if (i < sh.length - 1) {
+                console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[i].t)} sh:[${i}/${sh.length}]`);
             }
-            sh.splice(index, Infinity, score);
+
+            const leftDist = prev ? t - prev.t : Infinity;
+            const rightDist = next ? next.t - t : Infinity;
+            const prevClose = leftDist < scoreFrequency;
+            const nextClose = rightDist < scoreFrequency;
+
+            // replace previous or current
+            const replacePrev = prevClose && nextClose ? leftDist <= rightDist : prevClose;
+
+            //  i === sh.length + prevClose -> replace last
+            //  i === sh.length + !prevClose -> append
+            //  i < sh.length -> insert/replace and drop tail (rewind)
+            sh.splice(replacePrev ? i - 1 : i, Infinity, score);
         }
 
         // Score from Live packets (either end of rescore or end of current score)
