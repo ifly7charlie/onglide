@@ -1,11 +1,14 @@
 import {Epoch, DistanceKM, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, PositionStatus, isTick} from '../types';
 
 import Graph from '../flightprocessing/dijkstras';
+import {DistanceOptimiser} from '../flightprocessing/distanceOptimiser';
 
 import {distHaversine, sumPath} from '../flightprocessing/taskhelper';
 
 import {lineString} from '@turf/helpers';
 import along from '@turf/along';
+
+import {d} from '../now';
 
 /*
  * This is used just for scoring an AAT task
@@ -22,9 +25,22 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             console.log(...a);
         };
 
+    const preparedLegs = task.preparedLegs;
+    if (!preparedLegs) {
+        return;
+    }
+
     let compno = '';
     let lastClosestToNext: DistanceKM | undefined = Infinity as DistanceKM;
     let lastTime: Epoch | undefined = undefined;
+
+    const minGraph = new DistanceOptimiser<BasePositionMessage>(distHaversine, task.legs.length); // min remaining graph
+    task.legs.forEach((t) => {
+        minGraph.replaceGroup(
+            t.legno,
+            t.coordinates.map((c: [number, number]) => ({lat: c[1], lng: c[0], t: 0, a: 0}))
+        );
+    });
 
     let flightStatus: PositionStatus | undefined = undefined;
 
@@ -96,12 +112,9 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
                 taskStatus.distance = (Math.round((taskStatus.distance + currentLeg.distance) * 10) / 10) as DistanceKM;
                 currentLeg.point = taskStatus.closestToNextSectorPoint;
-                // figure out where the scored point is
-                const scoredTo = along(
-                    lineString([task.legs[taskStatus.currentLeg].point, task.legs[taskStatus.currentLeg - 1].point]), //
-                    Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length)
-                );
-                [currentLeg.point.lng, currentLeg.point.lat] = scoredTo.geometry.coordinates;
+
+                currentLeg.point = preparedLegs[taskStatus.currentLeg] // figure out where the scored point is
+                    .scoredPointRemaining(Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length) as DistanceKM);
             }
 
             // If we haven't finished then we will figure out the shortest path from
@@ -120,45 +133,14 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 };
             } else {
                 // 1. Build the graphs
-                const minGraph = new Graph<BasePositionMessage, DistanceKM>(); // min remaining graph
-                let fakePointCount = -1;
 
-                const minLegStart = taskStatus.currentLeg;
-                let previousMinPoints = [taskStatus.lastProcessedPoint];
-                const finishLeg = task.legs.length - 1;
-                const finishPoint: BasePositionMessage = {
-                    t: finishLeg as Epoch,
-                    lat: task.legs[task.legs.length - 1].nlat,
-                    lng: task.legs[task.legs.length - 1].nlng
-                } as BasePositionMessage;
-
-                for (let legno = taskStatus.currentLeg; legno <= finishLeg; legno++) {
-                    // Points depend on the leg
-                    let thisLegPoints: BasePositionMessage[] =
-                        legno == finishLeg
-                            ? [finishPoint]
-                            : task.legs[legno].coordinates.map((sPoint: [number, number]) => {
-                                  return {t: legno as Epoch, lat: sPoint[1], lng: sPoint[0]};
-                              });
-
-                    for (const sectorPoint of thisLegPoints) {
-                        for (const pPoint of previousMinPoints) {
-                            // If it's our temp starting point then ignore
-                            // if it's the first leg then we need to do maximum as we can't shrink it
-                            minGraph.addLink(pPoint, sectorPoint, distHaversine(pPoint, sectorPoint));
-                        }
-                    }
-                    previousMinPoints = thisLegPoints; // after first point they are the same
-                }
-
-                const shortestRemainingPath = minGraph.findPath(taskStatus.lastProcessedPoint, finishPoint).reverse();
-                //            shortestRemainingPath.shift();
-                log('shortestRemainingPath', shortestRemainingPath);
+                const shortestRemainingPath = minGraph.shortestFrom(taskStatus.lastProcessedPoint, taskStatus.currentLeg - 1);
+                //                console.log('shortestRemainingPath', shortestRemainingPath);
 
                 try {
                     // Then add from where we are to the end of the task
                     taskStatus.distanceRemaining = 0 as DistanceKM;
-                    taskStatus.minPossible = sumPath(shortestRemainingPath, taskStatus.currentLeg - 1, task.legs, true, (leg, distance, point) => {
+                    taskStatus.minPossible = sumPath(shortestRemainingPath.path, taskStatus.currentLeg - 1, preparedLegs, true, (leg, distance, point) => {
                         taskStatus.legs[leg].minPossible = {distance, point};
                         taskStatus.distanceRemaining = (taskStatus.distanceRemaining + distance) as DistanceKM;
                     });
@@ -169,7 +151,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 }
             }
 
-            log(JSON.stringify(taskStatus, null, 4));
+            log('ts', JSON.stringify(taskStatus, null, 4));
             yield taskStatus;
         } catch (e) {
             // it's best if we just carry on because otherwise we may never score them again

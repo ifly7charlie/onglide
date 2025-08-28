@@ -1,4 +1,4 @@
-import {PositionMessage, Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task, PilotScore, FlarmID} from '../lib/types';
+import {PositionStatus, PositionStatusText, Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task, PilotScore, FlarmID} from '../lib/types';
 
 import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 'lodash';
 
@@ -7,6 +7,7 @@ import {bindChannelForInOrderPackets} from '../lib/webworkers/inordergenerator';
 import {point} from '@turf/helpers';
 
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
+import {PreparedTurnpoint} from '../lib/flightprocessing/preparedTurnpoint';
 
 // Scoring types
 import {assignedAreaScoringGenerator} from '../lib/webworkers/assignedAreaScoringGenerator';
@@ -135,17 +136,24 @@ async function run() {
         .filter((p) => p !== undefined);
 
     const points = results.reduce((a, r) => a + (r.points as number), 0);
+    const totalPoints = results.reduce((a, r) => a + (r.totalPoints as number), 0);
     const numberOfScores = results.reduce((a, r) => a + (r.numberOfScores as number), 0);
     const ms = results.reduce((a, r) => a + (r.ms as number), 0);
     results.push({
         compno: 'TOTAL',
         points,
+        numberOfScores,
+        totalPoints,
         ms,
         avgUs: +((ms * 1000) / (points || 1)),
         cps: +((points || 0) / (ms / 1000 || 1))
     } as any);
 
-    console.table(results.map((p) => ({...p, ms: +p.ms.toFixed(1), avgUs: +p.avgUs.toFixed(3), cps: +p.cps.toFixed(0)})));
+    console.table(
+        results
+            .map((p) => ({...p, ms: +p.ms.toFixed(1), avgUs: +p.avgUs.toFixed(3), cps: +p.cps.toFixed(0)})) //
+            .sort((a, b) => ((b.taskSpeed ? b.taskSpeed * 100 : b.taskDistance) ?? -1) - ((a.taskSpeed ? a.taskSpeed * 100 : a.taskDistance) ?? -1))
+    );
     process.exit(1);
 }
 
@@ -211,17 +219,23 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         return;
     }
 
+    task.preparedLegs = task.legs.map((_leg, i) => new PreparedTurnpoint(task.legs, i));
+
+    const simplifiedQueue: any[] = [];
+    glider.messages = interimQueue;
     glider.channel = {
-        postMessage: (a) => interimQueue.push({...a, _: false})
+        postMessage: (a) => simplifiedQueue.push({...a, _: false})
     } as any;
 
     await processMessageQueue(glider);
-    if (interimQueue.length) {
-        interimQueue.at(-1)._ = true;
+    if (simplifiedQueue.length) {
+        simplifiedQueue.at(-1)._ = true;
     }
 
+    console.log(`${glider.compno}: queue simplified from ${interimQueue.length} to ${simplifiedQueue.length}`);
+
     const start = process.hrtime.bigint();
-    const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, interimQueue, iterative, !iterative);
+    const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, simplifiedQueue, iterative, !iterative);
 
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(location, inorder(getNow), log);
@@ -253,14 +267,25 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     const end = process.hrtime.bigint();
 
     const ms = Number(end - start) / 1e6;
-    const points = interimQueue.length;
+    const points = simplifiedQueue.length;
     const avgUs = points ? (ms * 1000) / points : 0;
     const cps = points ? points / (ms / 1000) : 0;
 
     log(`${compno}: done, ${printDate(lastScore?.utcStart)} -${printDate(lastScore?.utcFinish)}` + `${lastScore?.actual?.taskDistance || 0}km, ${lastScore?.actual?.taskSpeed}kph`);
     log(`${compno}: ${numberOfScores} scores output, ${ms.toFixed(2)}ms -> avgUs: ${avgUs.toFixed(1)}, ${cps.toFixed(0)}/sec`);
 
-    return {compno, points: interimQueue.length, numberOfScores, ms, avgUs, cps, taskDistance: lastScore?.actual?.taskDistance, taskSpeed: lastScore?.actual?.taskSpeed};
+    return {
+        compno,
+        totalPoints: interimQueue.length,
+        points,
+        numberOfScores,
+        ms,
+        avgUs,
+        cps,
+        taskDistance: lastScore?.actual?.taskDistance, //
+        taskSpeed: lastScore?.actual?.taskSpeed,
+        status: PositionStatusText[lastScore?.flightStatus ?? PositionStatus.Unknown]
+    };
 }
 
 const printDate = (x) => new Date(x * 1000).toUTCString();

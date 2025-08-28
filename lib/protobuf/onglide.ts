@@ -31,6 +31,7 @@ export interface Identifiers {
 }
 
 export interface Task {
+  startOpen?: boolean | undefined;
   geoJSON?: string | undefined;
   taskJSON?: string | undefined;
 }
@@ -589,11 +590,14 @@ export const Identifiers = {
 };
 
 function createBaseTask(): Task {
-  return { geoJSON: undefined, taskJSON: undefined };
+  return { startOpen: undefined, geoJSON: undefined, taskJSON: undefined };
 }
 
 export const Task = {
   encode(message: Task, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.startOpen !== undefined) {
+      writer.uint32(24).bool(message.startOpen);
+    }
     if (message.geoJSON !== undefined) {
       writer.uint32(10).string(message.geoJSON);
     }
@@ -610,6 +614,13 @@ export const Task = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
+        case 3:
+          if (tag !== 24) {
+            break;
+          }
+
+          message.startOpen = reader.bool();
+          continue;
         case 1:
           if (tag !== 10) {
             break;
@@ -635,6 +646,7 @@ export const Task = {
 
   fromJSON(object: any): Task {
     return {
+      startOpen: isSet(object.startOpen) ? globalThis.Boolean(object.startOpen) : undefined,
       geoJSON: isSet(object.geoJSON) ? globalThis.String(object.geoJSON) : undefined,
       taskJSON: isSet(object.taskJSON) ? globalThis.String(object.taskJSON) : undefined,
     };
@@ -642,6 +654,9 @@ export const Task = {
 
   toJSON(message: Task): unknown {
     const obj: any = {};
+    if (message.startOpen !== undefined) {
+      obj.startOpen = message.startOpen;
+    }
     if (message.geoJSON !== undefined) {
       obj.geoJSON = message.geoJSON;
     }
@@ -656,6 +671,7 @@ export const Task = {
   },
   fromPartial<I extends Exact<DeepPartial<Task>, I>>(object: I): Task {
     const message = createBaseTask();
+    message.startOpen = object.startOpen ?? undefined;
     message.geoJSON = object.geoJSON ?? undefined;
     message.taskJSON = object.taskJSON ?? undefined;
     return message;

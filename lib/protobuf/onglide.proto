@@ -21,6 +21,7 @@ message Identifiers {
 }
 
 message Task {
+	optional bool startOpen = 3;
 	optional string geoJSON = 1;
 	optional string taskJSON = 2;
 }

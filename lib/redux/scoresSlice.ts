@@ -281,6 +281,7 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
             const index = _sortedIndexBy(sh, score, (x) => x.t);
             if (index < sh.length && index >= 0 && sh[index].t != score.t) {
                 console.log(compno, '***** rewind score history to ', index, sh[index].t, d(sh[index].t));
+                console.log(compno, `   ** new ${score.t} ${d(score.t)}, latest: ${sh.at(-1)?.t} ${d(sh.at(-1)?.t ?? 0)}`);
             }
             sh.splice(index, Infinity, result[compno]);
 

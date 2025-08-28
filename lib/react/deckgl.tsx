@@ -12,7 +12,7 @@ import {TaskUp} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
-import {selectTaskGeoJSON, selectTask} from '../redux/taskSlice';
+import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
 import {selectPilotScore} from '../redux/scoresSlice';
 import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
@@ -85,9 +85,12 @@ export default function MApp(props: {
     const mapStreet = !!options.mapType;
     const mapLight = mapStreet;
 
+    // Rules & legs etc
+    const task = useSelector((state) => selectTask(state, vc));
+
     // Track and Task Overlays
     const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc, props.selectedHandicap));
-    const task = useSelector((state) => selectTask(state, vc));
+    const startOpen = useSelector((state) => selectStartOpen(state, vc));
 
     const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
 
@@ -239,7 +242,7 @@ export default function MApp(props: {
         if (options.zoomTask && taskGeoJSONtp && mapRef?.current) {
             try {
                 const canvas = mapRef?.current?.getCanvasContainer();
-                const rect = canvas?.getBoundingClientRect() ?? {width: 0};
+                const rect = canvas?.getBoundingClientRect?.() ?? {width: 0};
 
                 const overlayWidth = Math.max(Math.trunc(rect.width * 0.3), 275);
                 const offset = rect.width >= 992 ? {padding: {right: overlayWidth, left: 10, top: 10, bottom: 10}} : {};
@@ -275,7 +278,7 @@ export default function MApp(props: {
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
-        return map2d ? turnpointStyle2d(selectedScore, mapLight) : turnpointStyle3d(selectedScore, mapLight);
+        return map2d ? turnpointStyle2d(selectedScore, mapLight, startOpen) : turnpointStyle3d(selectedScore, mapLight, startOpen);
     }, [selectedCompno, selectedScore?.currentLeg, selectedScore?.utcFinish, mapLight, map2d]);
 
     // Do we have a loaded set of details?
@@ -550,7 +553,7 @@ const attributionStyle = {
     fontSize: '13px'
 };
 
-function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): LayerProps[] {
+function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean, startOpen: boolean): LayerProps[] {
     return [
         {
             // Track line
@@ -567,7 +570,7 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
             // Turnpoints
             id: 'tp',
             type: 'fill',
-            filter: ['case', ['==', !selectedPilot, true], false, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], false, true],
+            filter: ['case', ['==', !selectedPilot, true], false, ['==', ['get', 'leg'], selectedPilot?.utcStart ? selectedPilot?.currentLeg || 0 : 0], false, true],
             paint: {
                 //                'line-color': 'grey',
                 //                'line-width': 1,
@@ -594,6 +597,8 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
                 //                'line-width': 1,
                 'fill-extrusion-color': [
                     'case',
+                    ['==', startOpen, false],
+                    'red',
                     ['==', !selectedPilot, true],
                     mapLight ? 'darkgrey' : 'white',
                     ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
@@ -628,7 +633,7 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
     ];
 }
 
-function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): LayerProps[] {
+function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean, startOpen: boolean): LayerProps[] {
     console.log('tps2d', mapLight);
     return [
         {

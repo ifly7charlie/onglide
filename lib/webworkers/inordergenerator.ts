@@ -43,6 +43,10 @@ export function bindChannelForInOrderPackets(
         };
     }
 
+    if (compno == 'I') {
+        log = console.log;
+    }
+
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
     // channel to simplify things
@@ -167,10 +171,10 @@ export function bindChannelForInOrderPackets(
                 }
             }
 
-            log(` normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
-
             // If we have a real message then process it
             const message = messageQueue[position++];
+            now = message.t;
+            log(` normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
             const nextPoint = yield {...message, _: position == messageQueue.length};
             if (nextPoint) {
                 position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);

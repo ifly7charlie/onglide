@@ -47,6 +47,7 @@ export interface TimeStampType {
 }
 
 import type {Point, Feature, Polygon, LineString} from 'geojson';
+import type {PreparedTurnpoint} from './flightprocessing/preparedTurnpoint';
 
 // Where is the airfield
 export interface AirfieldLocation {
@@ -151,7 +152,7 @@ export interface TaskLeg extends TaskLegsTableRow {
     direction: 'symmetrical' | 'np' | 'pp' | 'fixed';
 
     maxR?: DistanceKM;
-    geoJSON?: Polygon; // geoJSON for the sector
+    geoJSON?: Polygon | LineString; // geoJSON for the sector
     lineString?: any;
     point?: [number, number]; // coordiantes of center geoJSON style
     pointGeoJSON?: Feature<Point>;
@@ -177,6 +178,7 @@ export interface Task {
     details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow;
 
     legs: TaskLeg[];
+    preparedLegs?: PreparedTurnpoint[];
 }
 
 export enum EstimatedTurnType {

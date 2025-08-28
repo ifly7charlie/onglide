@@ -29,6 +29,7 @@ import {enrichedPositionGenerator} from './enrichedPositionGenerator';
 
 // DH adjuster
 import {adjustDistanceHandicapTask} from '../flightprocessing/distancehandicap';
+import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
@@ -293,7 +294,7 @@ if (!isMainThread) {
                     compno: task.compno,
                     handicap: task.handicap,
                     utcStart: task.utcStart,
-                    inorder: bindChannelForInOrderPackets(task.className, task.datecode, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
+                    inorder: bindChannelForInOrderPackets(task.className, task.datecode, task.compno, itTask.points),
                     scoring: null,
                     task: task.task,
                     scoreId: task.scoreId
@@ -352,6 +353,8 @@ function startScoring(config: ScoringConfig, task, scoreId: string) {
             scoreUpdater = scoreCollector(parentPort!, config.className, getNow);
         }
 
+        task.preparedLegs = task.legs.map((_leg, i) => new PreparedTurnpoint(task.legs, i));
+
         for (const glider of Object.values(gliders)) {
             glider.task = task;
             rescoreGlider(glider.compno, config, glider.handicap, glider.utcStart, scoreId);
@@ -380,7 +383,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
     const log =
-        glider.compno == '---'
+        glider.compno == 'I'
             ? console.log
             : () => {
                   /*noop*/

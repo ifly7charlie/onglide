@@ -236,7 +236,7 @@ export const OgnFeed = memo(
                                 <br />
                             </>
                         )}
-                        <TaskDetails vc={vc} fitBounds={fitBounds} tz={tz} />
+                        <TaskDetails vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
                         {connectionStatus}
                         {valid && connected ? (
                             <PilotList
