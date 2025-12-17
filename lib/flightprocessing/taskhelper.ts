@@ -59,7 +59,6 @@ export function calculateTask(task: Task) {
 
 export function taskGeoJSON(task: Task) {
     task.preparedLegs = task.legs.map((_leg, i) => new PreparedTurnpoint(task.legs, i));
-
     const geoJSON: FeatureCollection = {
         type: 'FeatureCollection',
         features: task.legs.reduce(

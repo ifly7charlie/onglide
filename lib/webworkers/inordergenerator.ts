@@ -43,10 +43,6 @@ export function bindChannelForInOrderPackets(
         };
     }
 
-    if (compno == 'I') {
-        log = console.log;
-    }
-
     // Hook it up to the position messages so we can update our
     // displayed track we wrap the function with the class and
     // channel to simplify things
@@ -59,7 +55,7 @@ export function bindChannelForInOrderPackets(
         toNotify.forEach((resolveFunction) => resolveFunction(false));
     };
 
-    broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => {
+    broadcastChannel.onmessage = (ev: MessageEvent<any>) => {
         // Get the message, and make sure it's for us
         let message = ev.data as PositionMessage;
         if (message.c != compno) {

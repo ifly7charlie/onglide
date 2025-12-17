@@ -56,6 +56,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                     if (ps == PositionStatus.Airborne) {
                         const gapLength = current.value.t - previousPoint.t;
                         log(`epg: ${previousPoint.c} checking for landout on tick gap:${gapLength} agl: ${previousPoint.g} rrd: ${ridgeRunningDistance}`);
+
                         if (
                             (gapLength > 60 && previousPoint.g < 10) || // acceptable gaps for altitude
                             (gapLength > 120 && previousPoint.g < 25) ||

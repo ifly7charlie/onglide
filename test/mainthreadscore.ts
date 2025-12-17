@@ -136,6 +136,7 @@ async function run() {
         .filter((p) => p !== undefined);
 
     const points = results.reduce((a, r) => a + (r.points as number), 0);
+
     const totalPoints = results.reduce((a, r) => a + (r.totalPoints as number), 0);
     const numberOfScores = results.reduce((a, r) => a + (r.numberOfScores as number), 0);
     const ms = results.reduce((a, r) => a + (r.ms as number), 0);

@@ -501,6 +501,7 @@ function startAprsListener(config: AprsListenerConfig) {
             trackMetric('aprs.unstableCount', unstableCount);
 
             // send a keepalive
+
             try {
                 // Send APRS keep alive or we will get dumped
                 connection.send(`# ${config.competition}`);
