@@ -29,8 +29,7 @@ import {Coord, point} from '@turf/helpers';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {getNow} from '../now';
-import {getCurrentDateCode} from '../datecode';
+import {getNow, d} from '../now';
 
 import {PositionMessage} from '../types';
 interface InterimPositionMessage extends PositionMessage {
@@ -38,6 +37,7 @@ interface InterimPositionMessage extends PositionMessage {
     j?: Coord;
     f: FlarmID; // id
     o: string; // sender
+    ad: number; // airfield distance
 }
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
@@ -133,7 +133,7 @@ const statistics = {
 };
 
 // Keep track of the aircraft requested
-interface Aircraft {
+export interface Aircraft {
     compno: string;
     className: string;
     trackers: FlarmID[];
@@ -160,7 +160,7 @@ interface Aircraft {
     interval?: NodeJS.Timeout;
 }
 
-interface Tracker {
+export interface Tracker {
     id: FlarmID;
     index: number;
     aircraftList: Aircraft[];
@@ -211,46 +211,54 @@ export class AprsController {
         this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config});
     }
 
-    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean) {
+    validateGlider(trackerIds: string): boolean {
+        if (!trackerIds || trackerIds == 'unknown') {
+            return false;
+        }
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
             .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
-        console.log('TRACKGLIDER', compno, flarmIDs);
-        if (flarmIDs && flarmIDs.length) {
-            // Tell APRS to start listening for the flarmid
-            console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}] receive:${receiveNewPoints}`);
-            const command: AprsCommandTrack = {
-                action: AprsCommandEnum.track,
-                compno: compno, //
-                className: className,
-                channelName,
-                datecode,
-                receiveNewPoints,
-                trackerId: flarmIDs
-            };
-            this.worker.postMessage?.(command);
-        } else {
-            console.log(`not tracking ${className}:${compno} => ${flarmIDs}`);
-        }
+        return flarmIDs && flarmIDs.length > 0;
     }
+
+    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
+        const flarmIDs = trackerIds
+            .split(/[:,]/)
+            .map((i) => i.toUpperCase())
+            .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
+
+        // Tell APRS to start listening for the flarmid
+        console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}] receive:${receiveNewPoints}`);
+        const command: AprsCommandTrack = {
+            action: AprsCommandEnum.track,
+            compno: compno, //
+            className: className,
+            channelName,
+            datecode,
+            receiveNewPoints,
+            trackerId: flarmIDs
+        };
+        this.worker.postMessage?.(command);
+        return true;
+    }
+
     untrackGlider(compno: Compno, className: ClassName, channelName: string, trackerIds: string) {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
             .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
-        if (flarmIDs && flarmIDs.length) {
-            // Tell APRS to start listening for the flarmid
-            console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
-            const command: AprsCommandUntrack = {
-                action: AprsCommandEnum.untrack,
-                compno: compno, //
-                className: className,
-                channelName: channelName,
-                trackerId: flarmIDs
-            };
-            this.worker.postMessage?.(command);
-        }
+
+        // Tell APRS to start listening for the flarmid
+        console.log(`Stopping APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}]`);
+        const command: AprsCommandUntrack = {
+            action: AprsCommandEnum.untrack,
+            compno: compno, //
+            className: className,
+            channelName: channelName,
+            trackerId: flarmIDs
+        };
+        this.worker.postMessage?.(command);
     }
     finishGlider(compno: Compno, className: ClassName, channelName: string) {
         console.log(`Finishing APRS Listener for glider ${className}/${compno}: [${channelName}]`);
@@ -322,14 +330,14 @@ if (!isMainThread && parentPort) {
     startAprsListener(<AprsListenerConfig>workerData);
 }
 
-async function initDB(datecode: Datecode) {
+export async function initDB(datecode: Datecode, competitionName?: string) {
     if (db && dbDatecode == datecode) {
         return db;
     }
 
     const old = db;
 
-    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}-${workerData.competition}.db`;
+    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}-${competitionName ?? workerData.competition}.db`;
     const openedDb = (db = new DB(path));
     console.log('opening points database', path);
     dbDatecode = datecode;
@@ -347,6 +355,17 @@ async function initDB(datecode: Datecode) {
     console.log(`changing database for ${Object.keys(trackers).length} trackers`);
     for (const t of Object.values(trackers)) {
         t.db = db.sublevel(t.id, {});
+    }
+
+    // Reset aircraft to new day as well
+    for (const a of Object.values(allAircraft)) {
+        a.messages = [];
+        delete a.lastTime;
+        delete a.lastSent;
+        delete a.lastMoved;
+        a.lastTick = 0 as Epoch;
+        a.stationary = 0;
+        a.ground = true;
     }
 
     if (old) {
@@ -430,87 +449,89 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // And every minute we need to confirm the APRS
     // connection has had some traffic
-    const kaInterval = setInterval(function () {
-        // Log and reset statistics
-        const period = (Date.now() - statistics.periodStart) / 1000;
+    const kaInterval = setInterval(
+        function () {
+            // Log and reset statistics
+            const period = (Date.now() - statistics.periodStart) / 1000;
 
-        // Into insights
-        if (statistics.periodStart) {
-            console.log(period);
-            console.log(
-                `APRS: ${statistics.knownReceived}/${statistics.msgsReceived} msgs (${statistics.unknownReceived} unknown), ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${
-                    statistics.duplicates
-                }, invalid: ${statistics.invalidPacket}, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
-            );
-            console.log(`APRS: ${statistics.normalPackets} NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
-            if (statistics.delayedPackets) {
+            // Into insights
+            if (statistics.periodStart) {
                 console.log(
-                    `APRS: ${statistics.delayedPackets} DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, range ${statistics.aprsMinDelayForDelayed} - ${
-                        statistics.aprsMaxDelayForDelayed
-                    }, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
+                    `APRS: ${statistics.knownReceived} known/${statistics.msgsReceived} msgs (${statistics.unknownReceived} unknown), ${(statistics.msgsReceived / period).toFixed(1)} msg/s,  ooo ${statistics.outOfOrder}, dup: ${
+                        statistics.duplicates
+                    }, invalid: ${statistics.invalidPacket}, encrypted: ${statistics.encryptedPacket} finished: ${statistics.finishPoints}, aprs server unstableCount: ${unstableCount}`
                 );
-            }
-            trackMetric('aprs.msgsReceived', statistics.msgsReceived);
-            trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
-            trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
-            trackMetric('aprs.server', parseInt(APRSSERVER.match(/([0-9])/)?.[0] || '99'));
-            trackMetric('aprs.jumps', statistics.jumps);
-        }
-
-        statistics.msgsReceived =
-            statistics.aprsDelay =
-            statistics.aprsDelayForDelayed =
-            statistics.delayedPackets = //
-            statistics.normalPackets =
-            statistics.knownReceived =
-            statistics.invalidPacket =
-            statistics.encryptedPacket =
-            statistics.finishPoints =
-            statistics.outOfOrder =
-            statistics.duplicates =
-            statistics.jumps =
-                0;
-
-        statistics.aprsMaxDelayForDelayed = 0;
-        statistics.aprsMinDelayForDelayed = Infinity;
-
-        statistics.periodStart = Date.now();
-        if (unstableCount > 0) {
-            unstableCount--;
-        }
-        trackMetric('aprs.unstableCount', unstableCount);
-
-        // send a keepalive
-        console.log('sending keepalive', `# ${config.competition}`);
-        try {
-            // Send APRS keep alive or we will get dumped
-            connection.sendLine(`# ${config.competition}`);
-        } catch (x) {
-            console.log('unable to send keepalive', x);
-            connection.valid = false;
-        }
-
-        // Re-establish the APRS connection if we haven't had anything in
-        if (!connection.valid) {
-            console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
-            connection.disconnect(() => {
-                unstableCount += 2;
-                if (unstableCount > 5) {
-                    console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
-                    clearInterval(kaInterval);
-                    startAprsListener(config);
-                    trackMetric('aprs.restart', 1);
+                console.log(`APRS: ${statistics.normalPackets} NORMAL average delay: ${(statistics.aprsDelay / statistics.normalPackets).toFixed(1)}s`);
+                if (statistics.delayedPackets) {
+                    console.log(
+                        `APRS: ${statistics.delayedPackets} DELAYED average delay: ${(statistics.aprsDelayForDelayed / statistics.delayedPackets).toFixed(1)}, range ${statistics.aprsMinDelayForDelayed} - ${
+                            statistics.aprsMaxDelayForDelayed
+                        }, ${((100 * statistics.delayedPackets) / statistics.msgsReceived).toFixed(0)}% packets delayed`
+                    );
                 }
-                connection.connect();
-            });
-        }
-        connection.valid = false;
-    }, 1 * 60 * 1000);
+                trackMetric('aprs.msgsReceived', statistics.msgsReceived);
+                trackMetric('aprs.msgsSec', statistics.msgsReceived / period);
+                trackMetric('aprs.avgDelay', statistics.aprsDelay / statistics.msgsReceived);
+                trackMetric('aprs.server', parseInt(APRSSERVER.match(/([0-9])/)?.[0] || '99'));
+                trackMetric('aprs.jumps', statistics.jumps);
+            }
+
+            statistics.msgsReceived =
+                statistics.aprsDelay =
+                statistics.aprsDelayForDelayed =
+                statistics.delayedPackets = //
+                statistics.normalPackets =
+                statistics.knownReceived =
+                statistics.unknownReceived =
+                statistics.invalidPacket =
+                statistics.encryptedPacket =
+                statistics.finishPoints =
+                statistics.outOfOrder =
+                statistics.duplicates =
+                statistics.jumps =
+                    0;
+
+            statistics.aprsMaxDelayForDelayed = 0;
+            statistics.aprsMinDelayForDelayed = Infinity;
+
+            statistics.periodStart = Date.now();
+            if (unstableCount > 0) {
+                unstableCount--;
+            }
+            trackMetric('aprs.unstableCount', unstableCount);
+
+            // send a keepalive
+            console.log('sending keepalive', `# ${config.competition}`);
+            try {
+                // Send APRS keep alive or we will get dumped
+                connection.sendLine(`# ${config.competition}`);
+            } catch (x) {
+                console.log('unable to send keepalive', x);
+                connection.valid = false;
+            }
+
+            // Re-establish the APRS connection if we haven't had anything in
+            if (!connection.valid) {
+                console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
+                connection.disconnect(() => {
+                    unstableCount += 2;
+                    if (unstableCount > 5) {
+                        console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+                        clearInterval(kaInterval);
+                        startAprsListener(config);
+                        trackMetric('aprs.restart', 1);
+                    }
+                    connection.connect();
+                });
+            }
+            connection.valid = false;
+        },
+        1 * 60 * 1000
+    );
 }
 
 async function setupDatecode(config: AprsCommandDatecode) {
     // Make sure we have the latest datecode for the database
-    console.log(`APRS: capturing tracks for ${config.datecode}`);
     db = await initDB(config.datecode);
 }
 
@@ -659,7 +680,7 @@ function messageSortKey(m: InterimPositionMessage): number {
 
 //
 // collect points, emit to competition db every 30 seconds
-async function processPacket(packet: aprsPacket) {
+export async function processPacket(packet: aprsPacket) {
     // Flarm ID we use is last 6 characters, check if OGN tracker or regular flarm
     const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6) as FlarmID;
     const ognTracker = packet.sourceCallsign?.slice(0, 3) == 'OGN';
@@ -682,6 +703,12 @@ async function processPacket(packet: aprsPacket) {
         statistics.aprsMinDelayForDelayed = Math.min(statistics.aprsMinDelayForDelayed, td);
         statistics.delayedPackets++;
     } else {
+        // Ignore ones that are too old and that are not explicitly delayed
+        // I believe these are corrupted
+        if (td > 20 * 60) {
+            statistics.delayedPackets++;
+            return;
+        }
         statistics.aprsDelay += td;
         statistics.normalPackets++;
     }
@@ -734,7 +761,8 @@ async function processPacket(packet: aprsPacket) {
         f: flarmId,
         o: sender,
         l: null,
-        d: td
+        d: td,
+        ad: airfieldDistance
     };
 
     if (tracker.db) {
@@ -777,7 +805,7 @@ async function processPacket(packet: aprsPacket) {
 //
 // Read the database for all points for a specific aircraft tracker
 //
-async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messageQueue: InterimPositionMessage[]) {
+export async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messageQueue: InterimPositionMessage[]) {
     if (!tracker.db) {
         console.log('no database available for loading trackpoints');
         return;
@@ -786,20 +814,20 @@ async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messag
         let loaded = 0;
         for await (const [key, messageJson] of tracker.db.iterator()) {
             const message = JSON.parse(messageJson);
+            loaded++;
+            // Ignore if the delay is too big
+            if (message.d > 1200) {
+                continue;
+            }
             message.c = aircraft.compno; // correct competition number as it may be wrong in the db
             const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
             message.j = point([message.lat, message.lng]);
             messageQueue.splice(insertIndex, 0, message);
-            loaded++;
         }
-        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${loaded}/${messageQueue.length} points loaded`);
+        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${messageQueue.length}/${loaded} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
     } catch (err) {
         console.error(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${err}...`);
     }
-}
-
-async function restartMessageQueue(aircraft: Aircraft) {
-    processMessageQueue(aircraft, 0 as Epoch, getNow());
 }
 
 //
@@ -809,26 +837,17 @@ async function restartMessageQueue(aircraft: Aircraft) {
 //
 // Note that we do not consume the message queue - it is used for scoring restarts etc
 // so all messages are kept.
-async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined = undefined, to: Epoch = (getNow() - inorderAdditionalDelay) as Epoch) {
+export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     //
     let lastSent = aircraft.lastSent;
     let messages = aircraft.messages;
-    const start = from ?? ((aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch);
+    const start = (aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch;
     const realNow = getNow();
+    const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
     let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
-    /*    if (position < messages.length) {
-        console.log(
-            `processMessageQueue ${aircraft.compno}: t: ${lastSent?.t} < [${start}-${to}...rn:${realNow}], p: ${position} < ${messages.length}, m: ${messages.at(position)?.t ?? 'no message'}, lm: ${messages.at(-1)?.t}`
-        );
-        } */
-
-    // If we have been asked to resent all points then we shall do so
-    if (start === 0 && aircraft.lastTime !== 0) {
-        console.log(`processMessageQueue: resending all points for ${aircraft.compno}, ${messages.length} points, ${messages.at(-1)?.g}`);
-        aircraft.channel!.postMessage({c: aircraft.compno, t: 1, _: false, tick: true} as any);
-        aircraft.lastTime = 0;
-        aircraft.lastTick = 0 as Epoch;
+    if (log) {
+        log(`PMQ: ${aircraft.compno}:  ls: ${JSON.stringify(lastSent)}, m: ${messages.length}, s:${start}/${d(start)}, to:${to}/${d(to)}, p: ${position}`);
     }
 
     let count = 0;
@@ -884,12 +903,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         // Take the first one, if we don't
         const point = filtered.at(0) ?? (stationary ? sorted[0] : undefined);
 
-        //        if (duplicates.length > 1) {
-        //            console.log(t, t - realNow, aircraft.compno, stationary ? 'stationary' : '', 'multiple packets', duplicates.length, duplicates.map((m: InterimPositionMessage) => m.o).join(','), 'picked', point?.o);
-        //        }
-
-        //            if (duplicates.length || a) {
-        if (aircraft.compno == '!95') {
+        if (log) {
             // duplicates.length > 1 && lastSent) {
             console.log(aircraft.compno, 'no point found ===========');
             console.table([lastSent]);
@@ -942,7 +956,7 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
         // If we are on the ground and we are more than 3 km from airfield location then we don't
         // want to report it. This doesn't filter initial points as you are not marked as on the ground
         // till several stationary points have happened
-        if (aircraft.ground) {
+        if (aircraft.ground && (point.ad ?? 0) > 3) {
             continue;
         }
 
@@ -957,10 +971,6 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
         // all it does is stop it sending to the front end
-        if (aircraft.compno == 'RP') {
-            console.log('RP =>', point.c, point.t);
-        }
-
         const live = start != 0 || position == messages.length;
         aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
     }
@@ -971,14 +981,10 @@ async function processMessageQueue(aircraft: Aircraft, from: Epoch | undefined =
             _: true,
             tick: true
         } as any);
-        //        console.log('IOG tick:', aircraft.compno, (messages.length ? messages[Math.min(position, messages.length - 1)]?.t : undefined) || (2 as Epoch), Math.min(position, messages.length - 1), position, messages.length);
         aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
-        if (!aircraft.lastTick) {
-            console.log(`${aircraft.compno}: tick at end of loop ${realNow}, pos: ${position}/${messages.length} f:${from} s:${start} t:${to}`);
-        }
     }
 
-    if (count > 1) {
-        console.log(`${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, f:${from} s:${start} t:${to}`);
+    if (log) {
+        console.log(`${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, s:${start} t:${to}`);
     }
 }

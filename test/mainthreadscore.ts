@@ -1,4 +1,4 @@
-import {PositionMessage, Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task, PilotScore} from '../lib/types';
+import {PositionMessage, Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task, PilotScore, FlarmID} from '../lib/types';
 
 import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 'lodash';
 
@@ -17,19 +17,27 @@ import {enrichedPositionGenerator} from '../lib/webworkers/enrichedPositionGener
 import {taskPositionGenerator} from '../lib/webworkers/taskpositiongenerator';
 import {taskScoresGenerator} from '../lib/webworkers/taskScoresGenerator';
 
+import type {Aircraft, Tracker} from '../lib/webworkers/aprs';
+import {loadPointsForTracker, initDB, processMessageQueue} from '../lib/webworkers/aprs';
+
+import {fromDateCode} from '../lib/datecode';
+
 import escape from 'sql-template-strings';
-import mysql from 'serverless-mysql';
+import Mysql from 'serverless-mysql';
 
 import * as dotenv from 'dotenv';
 
 // Where is the comp based
 const error = dotenv.config({path: '.env.local'}).error;
 
+import yargs from 'yargs';
+import {hideBin} from 'yargs/helpers';
+
 if (error) {
     console.log(error);
 }
 
-const db = mysql({
+const mysql = Mysql({
     config: {
         host: process.env.MYSQL_HOST,
         database: process.env.MYSQL_DATABASE,
@@ -58,132 +66,279 @@ const db = mysql({
     connUtilization: 0.2
 });
 
-var argv = require('yargs/yargs')(process.argv.slice(2)).argv;
+const argv = yargs(hideBin(process.argv))
+    .scriptName('benchmark')
+    .usage('$0 --legs ./legs.json [options]')
+    .option('datecode', {
+        type: 'string',
+        demandOption: true,
+        describe: 'datecode'
+    })
+    .option('className', {
+        type: 'string',
+        describe: 'Class'
+    })
+    .option('compno', {
+        type: 'string',
+        describe: 'compno to score'
+    })
+    .option('log', {
+        type: 'boolean',
+        describe: 'output logging'
+    })
+    .option('verbose', {
+        type: 'boolean',
+        describe: 'output logging of interim scores'
+    })
+    .strict()
+    .help()
+    .parseSync();
 
-runScore((argv.datecode || '28K') as Datecode, (argv.class || 'standard') as ClassName, (argv.compno || '') as Compno, 100);
+let location: AirfieldLocation;
+let db: Awaited<ReturnType<typeof initDB>>;
 
-async function runScore(datecode, className, compno: Compno, handicap) {
-    let location: AirfieldLocation = ((await db.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any)[0];
+run();
+
+async function run() {
+    const pilots = await mysql.query<{compno: Compno; class: ClassName; handicap: number; trackerid: string}[]>(escape`
+        SELECT
+            pilots.compno,
+            pilots.class,
+            handicap,
+            trackerid
+        FROM
+            pilots
+            LEFT JOIN tracker ON pilots.class = tracker.class
+            AND pilots.compno = tracker.compno
+        WHERE
+            (
+                NOT (${argv.className ?? ''} != '')
+                OR pilots.class = ${argv.className}
+            )
+            AND (
+                NOT ('' != (${argv.compno ?? ''}))
+                OR pilots.compno IN (${argv.compno?.split(',')})
+            )
+    `);
+
+    location = ((await mysql.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any)[0];
     location.point = point([location.lng, location.lat]);
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
+    const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
 
-    //
-    // Now we will fetch the points for the pilots
-    const rawpoints: PositionMessage[] = await db.query(escape`SELECT compno c, t, round(lat,10) lat, round(lng,10) lng, altitude a, agl g, bearing b, speed s, 0 as l
-                                              FROM trackpoints
-                                             WHERE datecode=${datecode} AND class=${className} AND (${compno}='' OR compno = ${compno})
-                                             ORDER BY t ASC`);
+    // Make sure we have the latest datecode for the database
+    db = await initDB(argv.datecode as Datecode, internalName);
 
-    console.log(`${className}: fetched ${rawpoints.length} rows of trackpoints (getInitialTrackPoints)`);
+    const results = (await Promise.allSettled(pilots.map((p) => runScore(argv.datecode as Datecode, p.class, p.compno, p.trackerid, p.handicap))))
+        .filter((r) => r.status == 'fulfilled')
+        .map((p) => p.value)
+        .filter((p) => p !== undefined);
 
-    // AND compno='LS3'
+    const points = results.reduce((a, r) => a + (r.points as number), 0);
+    const numberOfScores = results.reduce((a, r) => a + (r.numberOfScores as number), 0);
+    const ms = results.reduce((a, r) => a + (r.ms as number), 0);
+    results.push({
+        compno: 'TOTAL',
+        points,
+        ms,
+        avgUs: +((ms * 1000) / (points || 1)),
+        cps: +((points || 0) / (ms / 1000 || 1))
+    } as any);
 
-    const start = Date.now();
-    const rbase = 1660924503 - 3600;
-    //    let getNow = () => Math.trunc((Date.now() - start) / 1000) * 45 + rbase;
+    console.table(results.map((p) => ({...p, ms: +p.ms.toFixed(1), avgUs: +p.avgUs.toFixed(3), cps: +p.cps.toFixed(0)})));
+    process.exit(1);
+}
+
+async function runScore(datecode: Datecode, className: ClassName, compno: Compno, trackerDb: string, handicap: number) {
+    const log = argv.log
+        ? console.log
+        : () => {
+              /*noop*/
+          };
+
+    if (!trackerDb) {
+        log(`${className}/${compno}: no trackers found`);
+        return;
+    }
+
+    const glider: Aircraft = {
+        compno,
+        className: className,
+        trackers: trackerDb.split(',') as FlarmID[],
+
+        // Not had a message
+        stationary: 0,
+        ground: false,
+        lastTick: 0 as Epoch,
+        receiveNewPoints: false,
+
+        // Setup logging
+        log,
+
+        messages: []
+    };
+
+    const interimQueue: any[] = [];
+
+    // Link the tracker(s) in
+    const trackerList = glider.trackers;
+    const trackers: Tracker[] = [];
+    let index = 0;
+    for (const id of [...new Set(trackerList)]) {
+        console.log('load tracker', glider.compno, id);
+        if (trackers[id]) {
+            trackers[id].aircraftList.push(glider);
+            trackers[id].receiveNewPoints = trackers[id].receiveNewPoints;
+        } else {
+            trackers[id] = {
+                id: id as FlarmID,
+                index: index++,
+                aircraftList: [glider],
+                receiveNewPoints: true,
+                db: db?.sublevel(id, {})
+            };
+        }
+        await loadPointsForTracker(glider, trackers[id], interimQueue);
+    }
+
+    log(`${className}/${compno}: fetched ${interimQueue.length} rows of trackpoints (getInitialTrackPoints)`);
+
     const iterative = false;
     let getNow = () => Math.trunc(Date.now() / 1000) as Epoch;
 
-    const groupedPoints: Record<Compno, PositionMessage[]> = _groupby(rawpoints, 'c');
-
-    const log =
-        compno != ''
-            ? console.log
-            : () => {
-                  /*noop*/
-              };
-
-    const task = await updateTasks(className, datecode);
+    const task = await getTask(className, datecode, 100);
     if (!task) {
         return;
     }
 
-    for (const compno in groupedPoints) {
-        console.log(compno, groupedPoints[compno].length);
+    glider.channel = {
+        postMessage: (a) => interimQueue.push({...a, _: false})
+    } as any;
 
-        const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, groupedPoints[compno], iterative, !iterative);
-
-        // 0. Check if we are flying etc
-        const epg = enrichedPositionGenerator(location, inorder(getNow), log);
-
-        // 1. Figure out where in the task we are
-        const tpg = taskPositionGenerator(task, 0 as Epoch, epg, log);
-
-        // 2. Figure out what that means for leg distances
-        const distances = task.rules.aat // what kind of scoring do we do
-            ? assignedAreaScoringGenerator(task, tpg, log)
-            : racingScoringGenerator(task, tpg, log);
-
-        // 3. Once we have distances we can calculate task lengths
-        //    and therefore speeds
-        const scores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
-
-        let lastScore: PilotScore | undefined;
-        let numberOfScores = 0;
-        for await (const value of scores) {
-            if (argv.verbose && lastScore !== undefined) {
-                console.log(`${compno}: #${numberOfScores} - latest ${value.t} ${new Date(value.t * 1000).toUTCString()} ${lastScore?.actual?.taskDistance?.toFixed(0)}km, ${lastScore?.currentLeg}`);
-            }
-            lastScore = value;
-            numberOfScores++;
-        }
-
-        console.log(`${compno}: done, ${printDate(lastScore?.utcStart)} -${printDate(lastScore?.utcFinish)}` + `${lastScore?.actual?.taskDistance || 0}km, ${lastScore?.actual?.taskSpeed}kph`);
-        //        console.log(JSON.stringify(lastScore));
+    await processMessageQueue(glider);
+    if (interimQueue.length) {
+        interimQueue.at(-1)._ = true;
     }
+
+    const start = process.hrtime.bigint();
+    const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, interimQueue, iterative, !iterative);
+
+    // 0. Check if we are flying etc
+    const epg = enrichedPositionGenerator(location, inorder(getNow), log);
+
+    // 1. Figure out where in the task we are
+    const tpg = taskPositionGenerator(task, 0 as Epoch, epg, log);
+
+    // 2. Figure out what that means for leg distances
+    const distances = task.rules.aat // what kind of scoring do we do
+        ? assignedAreaScoringGenerator(task, tpg, log)
+        : racingScoringGenerator(task, tpg, log);
+
+    // 3. Once we have distances we can calculate task lengths
+    //    and therefore speeds
+    const scores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
+
+    let lastScore: PilotScore | undefined;
+    let numberOfScores = 0;
+    for await (const value of scores) {
+        if (argv.verbose && lastScore !== undefined) {
+            console.log(`${compno}: #${numberOfScores} - latest ${value.t} ${new Date(value.t * 1000).toUTCString()} ${lastScore?.actual?.taskDistance?.toFixed(0)}km, ${lastScore?.currentLeg}`);
+        }
+        lastScore = value;
+        numberOfScores++;
+        if (value.live) {
+            break;
+        }
+    }
+    const end = process.hrtime.bigint();
+
+    const ms = Number(end - start) / 1e6;
+    const points = interimQueue.length;
+    const avgUs = points ? (ms * 1000) / points : 0;
+    const cps = points ? points / (ms / 1000) : 0;
+
+    log(`${compno}: done, ${printDate(lastScore?.utcStart)} -${printDate(lastScore?.utcFinish)}` + `${lastScore?.actual?.taskDistance || 0}km, ${lastScore?.actual?.taskSpeed}kph`);
+    log(`${compno}: ${numberOfScores} scores output, ${ms.toFixed(2)}ms -> avgUs: ${avgUs.toFixed(1)}, ${cps.toFixed(0)}/sec`);
+
+    return {compno, points: interimQueue.length, numberOfScores, ms, avgUs, cps, taskDistance: lastScore?.actual?.taskDistance, taskSpeed: lastScore?.actual?.taskSpeed};
 }
 
 const printDate = (x) => new Date(x * 1000).toUTCString();
 
-async function updateTasks(className: ClassName, datecode: Datecode): Promise<Task | null> {
-    // Get the details for the task
-    const taskdetails = ((await db.query(escape`
-         SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped,
-               CASE WHEN nostart ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(fdcode(${datecode}),' ',nostart))-(SELECT tzoffset FROM competition)
-               END nostartutc
-          FROM tasks, classes c
-          WHERE tasks.datecode= ${datecode}
-             AND tasks.class = c.class 
-             AND tasks.class= ${className} and tasks.flown='Y'
+// Get the details for the task
+const getTask = async (className: ClassName, datecode: Datecode, maxHandicap: number) => {
+    const taskdetails = ((await mysql.query<any[]>(escape`
+        SELECT
+            tasks.*,
+            time_to_sec (tasks.duration) durationsecs,
+            c.grandprixstart,
+            c.handicapped,
+            c.Dm,
+            cd.calendardate,
+            cd.status,
+            cd.info,
+            0 AS distance,
+            CASE
+                WHEN COALESCE(nostart, '00:00:00') = '00:00:00' THEN 0
+                ELSE UNIX_TIMESTAMP (
+                    CONCAT(${fromDateCode(datecode)}, ' ', nostart)
+                ) - (
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                )
+            END nostartutc
+        FROM
+            tasks,
+            classes c,
+            contestday cd
+        WHERE
+            tasks.datecode = ${datecode}
+            AND tasks.class = c.class
+            AND cd.class = c.class
+            AND cd.datecode = ${datecode}
+            AND tasks.class = ${className}
+            AND tasks.flown = 'Y'
     `)) || {})[0];
 
     if (!taskdetails || !taskdetails.type) {
-        console.log(`${className}: no active task`, taskdetails);
+        console.log(`${className}/${datecode}: no active task`, taskdetails);
         return null;
     }
 
     const taskid = taskdetails.taskid;
 
-    const tasklegs = (await db.query(escape`
-      SELECT taskleg.*, nname name
-        FROM taskleg
-       WHERE taskleg.taskid = ${taskid}
-      ORDER BY legno
-`)) as any[];
+    const tasklegs = await mysql.query<any[]>(escape`
+        SELECT
+            taskleg.*,
+            nname name
+        FROM
+            taskleg
+        WHERE
+            taskleg.taskid = ${taskid}
+        ORDER BY
+            legno
+    `);
 
     if (tasklegs.length < 2) {
         console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
         return null;
     }
 
-    // These are invalid
-    delete taskdetails.hdistance;
-    delete taskdetails.distance;
-    delete taskdetails.maxmarkingdistance;
-
-    let task = {
+    let task: Task = {
         rules: {
             grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
             nostartutc: taskdetails.nostartutc,
             aat: taskdetails.type == 'A',
-            dh: taskdetails.type == 'D',
-            handicapped: taskdetails.handicapped == 'Y'
+            dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+            dm: taskdetails.Dm ?? undefined,
+            handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+            maxHandicap
         },
         details: taskdetails,
         legs: tasklegs
     };
-
     calculateTask(task);
     return task;
-}
+};

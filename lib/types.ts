@@ -75,6 +75,13 @@ export interface TickMessage extends TimeStampType {
     _?: boolean;
 }
 
+export function isEnrichedTick(m: any): m is EnrichedTickMessage {
+    return 'tick' in m && 'ps' in m;
+}
+export interface EnrichedTickMessage extends TickMessage {
+    ps: PositionStatus;
+}
+
 export interface BasePositionMessage extends TimeStampType {
     lat: number;
     lng: number;
@@ -164,9 +171,10 @@ export interface Task {
 
         handicapped?: boolean;
         dm?: number;
+        maxHandicap: number; // highest handicap in the class
     };
 
-    details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance?: DistanceKM} & ClassesTableRow & ContestDayTableRow;
+    details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow;
 
     legs: TaskLeg[];
 }
@@ -181,8 +189,8 @@ export enum EstimatedTurnType {
 export interface TaskLegStatus {
     legno: number;
     // If we are an AAT then we need to track the points (task.rules.aat controls this)
-    points?: BasePositionMessage[];
-    penaltyPoints?: BasePositionMessage[];
+    points: BasePositionMessage[];
+    penaltyPoints: BasePositionMessage[];
 
     entryTimeStamp?: Epoch;
     exitTimeStamp?: Epoch;
@@ -258,7 +266,7 @@ export type InOrderGenerator = AsyncGenerator<PositionMessage | TickMessage, voi
 export type InOrderGeneratorFunction = (getNow: () => Epoch) => InOrderGenerator;
 
 // Figure out what is happening in the flight
-export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition | TickMessage, void, Epoch | void>;
+export type EnrichedPositionGenerator = AsyncGenerator<EnrichedPosition | EnrichedTickMessage, void, Epoch | void>;
 
 // Figure out where in a task somebody is
 export type TaskStatusGenerator = AsyncGenerator<TaskStatus, void, void>;
@@ -278,7 +286,6 @@ export interface DeckData {
     indices?: Uint32Array;
     agl: Int16Array;
     t: Uint32Array;
-    tr?: Uint32Array;
     climbRate: Int8Array;
     posIndex: number;
     segmentIndex?: number;
@@ -404,7 +411,7 @@ export interface ClassesTableRow {
     classname: string;
     description: string;
     type: string | null;
-    handicapped: 'Y' | 'N';
+    handicapped: 'Y' | 'N' | 'D';
     grandprixstart: 'Y' | 'N';
     Dm: number | null;
 }

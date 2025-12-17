@@ -57,6 +57,7 @@ export default function MApp(props: {
     setFollow: Function;
     vc: ClassName;
     selectedCompno: Compno;
+    selectedHandicap: number;
     setSelectedCompno: (compno: Compno) => void;
     tz: TZ;
     viewport: any;
@@ -85,7 +86,7 @@ export default function MApp(props: {
     const mapLight = mapStreet;
 
     // Track and Task Overlays
-    const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc));
+    const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc, props.selectedHandicap));
     const task = useSelector((state) => selectTask(state, vc));
 
     const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
@@ -106,10 +107,10 @@ export default function MApp(props: {
         !task || !selectedScore
             ? null //
             : !selectedScore?.utcStart
-            ? task.legs[0].point // if we are before start
-            : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
-            ? task.legs.at(-1)?.point // or at finish or only finish left
-            : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0))?.point; // mindistance is from us so this is the next point
+              ? task.legs[0].point // if we are before start
+              : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
+                ? task.legs.at(-1)?.point // or at finish or only finish left
+                : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0))?.point; // mindistance is from us so this is the next point
 
     const handleKeyPress = useCallback(
         (e) => {
@@ -359,7 +360,7 @@ export default function MApp(props: {
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
     return (
-        <ErrorBoundary fallback={<p>Please reload me!</p>}>
+        <ErrorBoundary fallback={<p style={{marginTop: 100}}>Please reload me!</p>}>
             <Map //
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}

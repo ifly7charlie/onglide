@@ -96,7 +96,6 @@ export const OgnFeed = memo(
 
         const mergeWsStatus = useCallback(
             (state: any) => {
-                console.log(new Date().toISOString(), 'WS:', state);
                 setWsStatus({...wsStatus, ...state});
             },
             [wsStatus, setWsStatus]
@@ -166,8 +165,6 @@ export const OgnFeed = memo(
                 closed: ['Connection to tracking is closed, please change the selected class to retry', <FontAwesomeIcon icon={faLinkSlash} />]
             }[wsStatus.state ?? 'open'];
 
-            console.log('last timestamp on status change', wsStatus.at, connectionStatusO?.[0]);
-
             if (connectionStatusO) {
                 return (
                     <div className={'connectionStatus'}>
@@ -184,7 +181,6 @@ export const OgnFeed = memo(
             (cn) => {
                 setSelectedCompno(cn);
                 if (cn && pilots && pilots[cn]) {
-                    console.log('setFollow,setCompno');
                     setFollow(true);
                 }
             },
@@ -228,6 +224,7 @@ export const OgnFeed = memo(
                         viewport={viewport}
                         setViewport={setViewport}
                         selectedCompno={selectedCompno}
+                        selectedHandicap={selectedCompno ? pilots?.[selectedCompno]?.handicap : undefined}
                         status={status}
                     />
                 </div>

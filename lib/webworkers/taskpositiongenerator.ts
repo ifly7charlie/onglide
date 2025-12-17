@@ -18,7 +18,7 @@ import {
     EnrichedPositionGenerator,
     EnrichedPosition,
     AltitudeAMSL,
-    isTick,
+    isEnrichedTick,
     NearestSectorPoint
 } from '../types';
 
@@ -122,13 +122,15 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             break;
         }
         try {
-            // What time have we scored to
-            status.t = current.value.t;
+            // Queue information & copy glider through
             status._ = current.value._;
             status.compno = current.value.c as Compno;
 
             // We pass ticks through and then do nothing more
-            if (isTick(current.value)) {
+            if (isEnrichedTick(current.value)) {
+                // Copy any changes to flight status across
+                status.flightStatus = current.value.ps;
+                // Now see if things have changed
                 const progress = (status?.closestDistanceToNext ?? 0) - (lastTickStatus?.closestDistanceToNext ?? 0);
                 let ok =
                     !lastTickStatus?.closestDistanceToNext ||
@@ -152,6 +154,10 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 }
                 continue;
             }
+
+            // What time have we scored to, we don't update this on a tick otherwise we will
+            // have an old score with a new t and things may end up out of order in the UI
+            status.t = current.value.t;
 
             // Keep track of where we are
             previousPoint = point;
@@ -183,6 +189,11 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 console.log(`New flight found for ${status.compno} after landback - t:${status.t}`);
             }
 
+            // Can't score with only one point
+            if (!previousPoint) {
+                continue;
+            }
+
             // Helper
             let legStatus = status.legs[status.currentLeg];
 
@@ -194,6 +205,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // do nothing,
                 if (point.t < task.rules.nostartutc - 10) {
                     if (point._) {
+                        yield status;
                         await setTimeout(Math.min((task.rules.nostartutc - 10 - point.t) * 1000, sleepInterval));
                     }
                     continue;
@@ -203,6 +215,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // ignore before - this can happen if scored into soaringspot
                 if (status.utcStart && point.t < status.utcStart) {
                     if (point._) {
+                        yield status;
                         await setTimeout(Math.min((status.utcStart - point.t - 10) * 1000, sleepInterval));
                     }
                     continue;

@@ -9,7 +9,7 @@ export interface ShortDisplayKeys {
 }
 // list of descriptions
 const handicappedDescriptions = {
-    auto: 'Handicapped or height agl',
+    auto: 'Handicapped or height amsl',
     speed: 'Current handicapped speed',
     aspeed: 'Current actual speed',
     fspeed: 'Handicapped speed if finishing now',
@@ -32,7 +32,7 @@ const handicappedDescriptions = {
 const handicappedSortOrders = {
     auto: ['auto'],
     speed: ['speed', 'aspeed', 'fspeed', 'faspeed'],
-    height: ['aheight', 'height'],
+    height: ['height', 'aheight'],
     climb: ['climb'],
     ld: ['ld', 'ald'],
     remaining: ['remaining', 'aremaining'],
@@ -42,7 +42,7 @@ const handicappedSortOrders = {
 
 // list of descriptions
 const descriptions = {
-    auto: 'Speed, distance or height agl',
+    auto: 'Speed, distance or height amsl',
     aspeed: 'Current actual speed',
     faspeed: 'Actual speed assuming finishing now',
     height: 'Current height above sea level',
@@ -60,7 +60,7 @@ const descriptions = {
 const sortOrders = {
     auto: ['auto'],
     speed: ['aspeed', 'faspeed'],
-    height: ['aheight', 'height'],
+    height: ['height', 'aheight'],
     climb: ['climb'],
     ld: ['ald'],
     remaining: ['aremaining'],

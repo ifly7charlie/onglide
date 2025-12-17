@@ -92,7 +92,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             //    if we aren't then we need to do fractional distance calculations
             const currentLeg = taskStatus.legs[taskStatus.currentLeg];
             log(taskStatus);
-            if (!taskStatus.inSector && !taskStatus.inPenalty && taskStatus.closestToNextSectorPoint) {
+            if (!taskStatus.inSector && taskStatus.closestToNextSectorPoint && taskStatus.closestDistanceToNext) {
                 currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
                 taskStatus.distance = (Math.round((taskStatus.distance + currentLeg.distance) * 10) / 10) as DistanceKM;
                 currentLeg.point = taskStatus.closestToNextSectorPoint;

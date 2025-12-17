@@ -27,6 +27,9 @@ import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 import {racingScoringGenerator} from './racingScoringGenerator';
 import {enrichedPositionGenerator} from './enrichedPositionGenerator';
 
+// DH adjuster
+import {adjustDistanceHandicapTask} from '../flightprocessing/distancehandicap';
+
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from './taskpositiongenerator';
 import {taskScoresGenerator} from './taskScoresGenerator';
@@ -270,7 +273,7 @@ if (!isMainThread) {
     //
     // action: shutdown
     // action: track
-    parentPort.on('message', (task: ScoringCommand) => {
+    parentPort?.on('message', (task: ScoringCommand) => {
         // If we have been asked to exit then do so
         if (task.action == ScoringCommandEnum.shutdown) {
             console.log('closing worker');
@@ -279,55 +282,59 @@ if (!isMainThread) {
 
         // Load data for specific tracker and add it to the list
         // of gliders to track
-        if (task.action == ScoringCommandEnum.initialTrack) {
-            const itTask: ScoringCommandTrack = task;
-            console.log(`${task.className}/${task.compno}: ${itTask.handicap} hcap, ${itTask.utcStart} utcStart [${itTask.scoreId}]`);
-            const alreadyScoring = !!scoreCollector;
+        switch (task.action) {
+            case ScoringCommandEnum.initialTrack: {
+                const itTask: ScoringCommandTrack = task;
+                console.log(`${task.className}/${task.compno}: ${itTask.handicap} hcap, ${itTask.utcStart} utcStart [${itTask.scoreId}]`);
+                const alreadyScoring = !!scoreCollector;
 
-            gliders[makeClassname_Compno(task)] = {
-                className: task.className,
-                compno: task.compno,
-                handicap: task.handicap,
-                utcStart: task.utcStart,
-                inorder: bindChannelForInOrderPackets(task.className, task.datecode, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
-                scoring: null,
-                task: task.task,
-                scoreId: task.scoreId
-            };
+                gliders[makeClassname_Compno(task)] = {
+                    className: task.className,
+                    compno: task.compno,
+                    handicap: task.handicap,
+                    utcStart: task.utcStart,
+                    inorder: bindChannelForInOrderPackets(task.className, task.datecode, task.compno, itTask.points), //, () => (1659883036 - 4000) as Epoch),
+                    scoring: null,
+                    task: task.task,
+                    scoreId: task.scoreId
+                };
 
-            if (alreadyScoring) {
-                rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+                if (alreadyScoring) {
+                    rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+                }
+
+                break;
             }
-        }
 
-        // Actually start scoring the task, will score all the gliders we have tracks for
-        if (task.action == ScoringCommandEnum.newTask) {
-            console.log(`${task.className}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})} [${task.scoreId}]`);
-            startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task, task.scoreId);
-        }
+            // Actually start scoring the task, will score all the gliders we have tracks for
+            case ScoringCommandEnum.newTask:
+                console.log(`${task.className}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})} [${task.scoreId}]`);
+                startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task, task.scoreId);
+                break;
 
-        if (task.action == ScoringCommandEnum.clearTask) {
-            console.log(`${task.className}: scoring task cleared`);
-            scoreUpdater?.reset();
-            // Clear the task just in case
-            Object.values(gliders).forEach((g) => {
-                g.task = undefined;
-            });
-        }
+            case ScoringCommandEnum.clearTask:
+                console.log(`${task.className}: scoring task cleared`);
+                scoreUpdater?.reset();
+                // Clear the task just in case
+                Object.values(gliders).forEach((g) => {
+                    g.task = undefined;
+                });
+                break;
 
-        if (task.action == ScoringCommandEnum.rescoreGlider) {
-            console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.handicap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
-            rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
-        }
+            case ScoringCommandEnum.rescoreGlider:
+                console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.handicap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
+                rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+                break;
 
-        if (task.action == ScoringCommandEnum.updateScoreId) {
-            console.log(`${task.className}: update scoreId from ${task.oldScoreId} to ${task.scoreId} for unchanged gliders`);
-            scoreUpdater?.updateScoreId(task.oldScoreId, task.scoreId);
-        }
+            case ScoringCommandEnum.updateScoreId:
+                console.log(`${task.className}: update scoreId from ${task.oldScoreId} to ${task.scoreId} for unchanged gliders`);
+                scoreUpdater?.updateScoreId(task.oldScoreId, task.scoreId);
+                break;
 
-        if (task.action == ScoringCommandEnum.clearGlider && scoreUpdater) {
-            console.log(`${task.className}/${task.compno}: stopping scoring for ${task.compno}`);
-            scoreUpdater?.clearGlider(task.compno);
+            case ScoringCommandEnum.clearGlider:
+                console.log(`${task.className}/${task.compno}: stopping scoring for ${task.compno}`);
+                scoreUpdater?.clearGlider(task.compno);
+                break;
         }
     });
 }
@@ -371,13 +378,22 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 }
 
 // Loop through all of them
-function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) {
+function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
     const log =
         glider.compno == '---'
             ? console.log
             : () => {
                   /*noop*/
               };
+
+    let handicap = glider.handicap;
+
+    // Distance handicap
+    if (task.rules.dh) {
+        console.log('adjusting for dh task');
+        task = adjustDistanceHandicapTask(task, glider.handicap);
+        //        handicap = 100;
+    }
 
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
@@ -392,7 +408,7 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: any) 
 
     // 3. Once we have distances we can calculate task lengths
     //    and therefore speeds
-    const scores = taskScoresGenerator(task, glider.compno, glider.handicap, distances, log);
+    const scores = taskScoresGenerator(task, glider.compno, handicap, distances, log);
 
     return scores;
 }

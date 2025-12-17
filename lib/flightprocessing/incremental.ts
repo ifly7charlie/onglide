@@ -1,5 +1,3 @@
-import {sortedIndex as _sortedIndex} from 'lodash';
-
 import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants';
 
 import {Compno, PositionMessage, PilotTrackData, DisplayPilotTrackData, Epoch, DeckData, VarioData} from '../types';
@@ -7,13 +5,13 @@ import {PilotPosition} from '../protobuf/onglide';
 
 // Helper fro resizing TypedArrays so we don't end up with them being huge
 export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
-    let c = new allocator(b);
+    let c = new allocator(Math.max(b, a.length));
     c.set(a);
     return c;
 }
 
-export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVersion: number): void {
-    glider.deck = {
+export function getEmptyDeck(compno: Compno, trackVersion: number) {
+    return {
         compno: compno,
         positions: new Float32Array(deckPointIncrement * 3),
         indices: new Uint32Array(deckSegmentIncrement),
@@ -26,6 +24,10 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
     };
 }
 
+export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVersion: number): void {
+    glider.deck = getEmptyDeck(compno, trackVersion);
+}
+
 //
 // Go through all the points and update the segments - this is needed when we merge two files
 export function generateIndices(deck: DeckData, glider: PilotTrackData) {
@@ -36,7 +38,6 @@ export function generateIndices(deck: DeckData, glider: PilotTrackData) {
     let lastTime = deck.t[0];
     if (!deck.indices) {
         deck.indices = new Uint32Array(deckSegmentIncrement);
-        deck.tr = new Uint32Array(deckPointIncrement);
     }
     deck.indices[0] = 0;
     deck.segmentIndex = 1;
@@ -68,9 +69,8 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         }
     } else {
         // If not first point then make sure we are in order!
-        lastTime = glider.deck.t[glider.deck.posIndex - 1];
+        lastTime = glider.deck.posIndex ? glider.deck.t[glider.deck.posIndex - 1] : 0;
         if (point.t < lastTime) {
-            //            console.log(glider.compno, point.t, '<', lastTime);
             return false;
         }
     }
@@ -150,13 +150,14 @@ export function calculateVario(deck: DeckData, tNow: Epoch, index: number): Vari
     // Add them up
     const total = deck.positions[index * 3 + 2] - deck.positions[start * 3 + 2];
     const Xperiod = (t - deck.t[start]) as Epoch;
+    const valid = Xperiod > 0 && tNow - t < 40;
 
     // The total and the average, along with misc status values
     return {
-        valid: Xperiod && tNow - t < 40,
+        valid,
         total,
         Xperiod,
-        average: Math.round((total * 10) / Xperiod) / 10,
+        average: Xperiod > 0 ? Math.round((total * 10) / Xperiod) / 10 : 0,
         agl: deck.agl[index],
         altitude: deck.positions[start * 3 + 2],
         t: t as Epoch

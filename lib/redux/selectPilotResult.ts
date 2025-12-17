@@ -6,10 +6,6 @@ import {Units, SortKey, Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, Alt
 
 import {sortBy as _sortBy, reduce as _reduce} from 'lodash';
 
-import type {IconDefinition} from '@fortawesome/free-regular-svg-icons';
-import {faCircleQuestion} from '@fortawesome/free-regular-svg-icons';
-import {faCloudArrowUp, faCow, faHouse, faCirclePause, faPaperPlane, faSignal, faClock, faTrophy} from '@fortawesome/free-solid-svg-icons';
-
 export type DisplayKeys = ConvertedDisplayKeys | NormalDisplayKeys;
 
 type NormalDisplayKeys = BaseDisplayKeys & {
@@ -51,7 +47,7 @@ function convertTime(i: ConvertedDisplayKeys, _units: Units, tz: TZ): NormalDisp
 
 import type {RootState} from './store';
 import {selectAllScores} from './scoresSlice';
-import {selectAllPositions, selectAllAverageClimb, selectAllAGL} from './tracksSlice';
+import {selectAllPositions, selectAllAverageClimb, selectAllAMSL} from './tracksSlice';
 
 export type AllDisplayKeys = DisplayKeys[];
 export type AllNormalDisplayKeys = NormalDisplayKeys[];
@@ -73,7 +69,7 @@ export const selectAuto = createSelector(
     [
         (_state: RootState, t: Epoch | undefined) => t,
         (state: RootState, t: Epoch | undefined) => selectAllScores(state, t) ?? [], //
-        (state: RootState, t: Epoch | undefined) => selectAllAGL(state, t)
+        (state: RootState, t: Epoch | undefined) => selectAllAMSL(state, t)
     ],
     (t: Epoch | undefined, scores: ScoreData, altitudes): AllDisplayKeys => {
         const nowIsh = t ? t : _reduce(scores, (m, v) => (v.t && v.t > m ? v.t : m), 0);
@@ -82,7 +78,7 @@ export const selectAuto = createSelector(
                 if (!score.compno) {
                     return undefined;
                 }
-                const agl = altitudes[score.compno as Compno];
+                const amsl = altitudes[score.compno as Compno];
 
                 let sortKey: number = Infinity;
                 let value: any = undefined;
@@ -98,8 +94,8 @@ export const selectAuto = createSelector(
                     sortKey = -1;
                     value = '-';
                 } else if (!score.utcStart) {
-                    sortKey = agl / 10000;
-                    value = agl;
+                    sortKey = amsl / 10000;
+                    value = amsl;
                     converter = convertHeight;
                 } else {
                     // After start, it's speed if we have recent points and are airborne or finished
@@ -117,8 +113,8 @@ export const selectAuto = createSelector(
                         value = Math.round(distance);
                         suffix = 'km';
                     } else {
-                        sortKey = agl / 10000;
-                        value = agl;
+                        sortKey = amsl / 10000;
+                        value = amsl;
                         converter = convertHeight;
                     }
                 }
@@ -342,7 +338,7 @@ export const selectLD = createSelector(
             if (score?.utcFinish) {
                 return {compno: score.compno as Compno, value: 'finished', sortKey: 10000 + score.handicapped?.taskSpeed};
             } else if (gr > 200) {
-                return {compno: score.compno as Compno, value: '∞', sortKey: gr};
+                return {compno: score.compno as Compno, value: '∞', sortKey: -gr};
             } else if (gr > 0) {
                 return {compno: score.compno as Compno, value: Math.round(gr), suffix: ':1', sortKey: -gr};
             } else {
@@ -362,7 +358,7 @@ const selectActualLD = createSelector(
             if (score?.utcFinish) {
                 return {compno: score.compno as Compno, value: 'finished', sortKey: 10000 + score.actual?.taskSpeed};
             } else if (gr > 200) {
-                return {compno: score.compno as Compno, value: '∞', sortKey: gr};
+                return {compno: score.compno as Compno, value: '∞', sortKey: -gr};
             } else if (gr > 0) {
                 return {compno: score.compno as Compno, value: Math.round(gr), suffix: ':1', sortKey: -gr};
             } else {

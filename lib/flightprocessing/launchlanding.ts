@@ -5,12 +5,12 @@ import {point, lineString} from '@turf/helpers';
 import type {Position} from 'geojson';
 
 // Database
-import escape from 'sql-template-strings';
+import sql from 'sql-template-strings';
 
 // line at a time reading of streamed webpage for igc download
 import * as readline from 'readline';
 
-import {Epoch, AltitudeAgl} from '../types';
+import {Compno, ClassName, Epoch, AltitudeAgl, AltitudeAMSL, Datecode} from '../types';
 
 import {toDateCode} from '../datecode';
 
@@ -35,7 +35,7 @@ const minTestTime = 5;
 // that we can use both in soaringspot.js (on the igc file) or for the flarm
 // ID. We can then correlate the two
 // note: id could be either class+compno or flarmid
-export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl = 0, db, type) {
+export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl = 0, db, type) {
     // Now we are going to manipulate this track to look for either launch or landing
     let track = unknownTrack[id];
 
@@ -80,9 +80,17 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
         track = unknownTrack[id];
     }
 
+    if (!track) {
+        return;
+    }
+
     // Check to see if it's a possible launch or landing
     let trackDistance = length(track.path, {units: 'kilometers'}); // km
-    let endToEndDistance = point ? distance(track.path.geometry.coordinates[0], point, {units: 'kilometers'}) : 0;
+    let endToEndDistance = point
+        ? distance(track.path.geometry.coordinates[0], point, {
+              units: 'kilometers'
+          })
+        : 0;
     at ??= track.times[0];
     let elapsed = at! - track.times[0]; // seconds
     let speed = endToEndDistance / (elapsed / 3600); // kph
@@ -104,7 +112,17 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
         if (speed > 70 && gain > 25 && agl > 40 && trackDistance > 0.1) {
             if (!track.airborne) {
                 if (db) {
-                    db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'launch', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`);
+                    db.query(sql`
+                        INSERT IGNORE INTO movements (action, time, id, type, datecode)
+                        VALUES
+                            (
+                                'launch',
+                                ${at},
+                                ${id},
+                                ${type},
+                                ${datecode}
+                            )
+                    `);
                 }
                 console.log(id, at, 'launch', speed, gain, agl);
                 track.airborne = true;
@@ -116,7 +134,17 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
                 // If we haven't changed height much (ridge soaring at the mind will break this if people are within 50m of takeoff altitude!)
                 if (Math.abs(gain) < 10 && speed < 35 && agl < 50) {
                     if (db) {
-                        db.query(escape`INSERT IGNORE INTO movements ( action, time, id, type, datecode ) VALUES ( 'landing', ${at}, ${id}, ${type}, (select datecode from compstatus limit 1) )`);
+                        db.query(sql`
+                            INSERT IGNORE INTO movements (action, time, id, type, datecode)
+                            VALUES
+                                (
+                                    'landing',
+                                    ${at},
+                                    ${id},
+                                    ${type},
+                                    ${datecode}
+                                )
+                        `);
                     }
                     console.log(id, at, 'landing', speed, gain, agl);
                     track.airborne = false;
@@ -146,22 +174,64 @@ export function capturePossibleLaunchLanding(id: string, at: Epoch | undefined, 
 // date is YYYY-MM-DD format
 export async function checkForOGNMatches(classid: string, date: string, mysql) {
     // Check what ones we have (simplier to do as two queries)
-    const trackersRaw = await mysql.query(escape`SELECT compno, trackerid FROM tracker WHERE class=${classid}`);
+    const trackersRaw = await mysql.query(sql`
+        SELECT
+            compno,
+            trackerid
+        FROM
+            tracker
+        WHERE
+            class = ${classid}
+    `);
     const trackers = _groupby(trackersRaw, 'compno');
 
     // Check for the tugs
-    const frequentFlyersRaw = await mysql.query(escape`select id,count(*) c from movements
-                                                     where movements.datecode = todcode(${date})
-                                                     group by 1 having c > 8`);
+    const frequentFlyersRaw = await mysql.query(sql`
+        SELECT
+            id,
+            count(*) c
+        FROM
+            movements
+        WHERE
+            movements.datecode = ${toDateCode(date)}
+        GROUP BY
+            1
+        HAVING
+            c > 8
+    `);
     const frequentFlyers = _groupby(frequentFlyersRaw || [{id: 'none'}], 'id');
 
     // Find the potential associations
     const key = [date.substring(8, 11), classid, '%'].join('/');
-    const matchesRaw = await mysql.query(escape`SELECT mo.id flarmid, mi.id glider, group_concat(mi.action ORDER BY mi.action) actions FROM movements mo 
-                                                            JOIN movements mi ON mo.action = mi.action and abs(truncate(mo.time/30,0)-truncate(mi.time/30,0)) < 4 and mo.id != mi.id 
-                                                            WHERE mi.type='igc' and mo.type='flarm' and mi.id like ${key} and mo.datecode=mi.datecode and mo.datecode = todcode(${date})
-                                                            GROUP BY 1,2 
-                                                            HAVING actions='landing,launch'`);
+    const matchesRaw = await mysql.query(sql`
+        SELECT
+            mo.id flarmid,
+            mi.id glider,
+            group_concat (
+                mi.action
+                ORDER BY
+                    mi.action
+            ) actions
+        FROM
+            movements mo
+            JOIN movements mi ON mo.action = mi.action
+            AND abs(
+                TRUNCATE (mo.time / 30, 0) -
+                TRUNCATE (mi.time / 30, 0)
+            ) < 4
+            AND mo.id != mi.id
+        WHERE
+            mi.type = 'igc'
+            AND mo.type = 'flarm'
+            AND mi.id LIKE ${key}
+            AND mo.datecode = mi.datecode
+            AND mo.datecode = ${toDateCode(date)}
+        GROUP BY
+            1,
+            2
+        HAVING
+            actions = 'landing,launch'
+    `);
     if (!matchesRaw || !matchesRaw.length) {
         console.log(`${date} ${classid}: no IGC/OGN matches found`);
     } else {
@@ -205,11 +275,29 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
                 // Do an associate and log that we did (or tried)
                 mysql
                     .transaction()
-                    .query(
-                        escape`UPDATE tracker SET trackerid = ${m.flarmid} 
-                                                WHERE compno = ${mCompno} AND class = ${classid} AND trackerid="unknown" limit 1`
-                    )
-                    .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${mCompno}, now(), ${m.flarmid}, now(), "tltimes" )`)
+                    .query(sql`
+                        UPDATE tracker
+                        SET
+                            trackerid = ${m.flarmid}
+                        WHERE
+                            compno = ${mCompno}
+                            AND class = ${classid}
+                            AND trackerid = "unknown"
+                        LIMIT
+                            1
+                    `)
+                    .query(sql`
+                        INSERT INTO
+                            trackerhistory (compno, changed, flarmid, launchtime, method)
+                        VALUES
+                            (
+                                ${mCompno},
+                                now(),
+                                ${m.flarmid},
+                                now(),
+                                "tltimes"
+                            )
+                    `)
                     .commit();
             } else {
                 if (flarmid != m.flarmid) {
@@ -224,12 +312,21 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
 
 //
 // Get an IGC file from a website spot so we can process it
-export async function processIGC(classid, compno, location, date, url, https, mysql, getHeaders?: Function) {
+export async function processIGC(
+    classid: ClassName,
+    compno: Compno, //
+    location: {altitude: AltitudeAMSL; lt: number; lg: number; point: any},
+    date,
+    url,
+    https,
+    mysql,
+    getHeaders?: () => {headers: {Authorization: string}} | undefined
+) {
     // IGC files may be from a Flarm, if they are then we can extract the flarm ID from them
     // and associate it with the device
     let flarm_lfla = new RegExp(/LFLA[0-9]+ID [0-9] ([0-9A-F]{6})/i);
     let flarm_lxvfla = new RegExp(/LLXVFLARM:LXV,[0-9.]+,([0-9A-F]{6})/i);
-    let brecord = new RegExp(/^B([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3})([NS])([0-9]{3})([0-9]{2})([0-9]{3})([EW])A([0-9]{5})([0-9]{5})/i);
+    let brecord = new RegExp(/^B([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{2})([0-9]{3})([NS])([0-9]{3})([0-9]{2})([0-9]{3})([EW])A([0-9-]{5})([0-9]{5})/i);
     let hfdte = new RegExp(/^HFDTE([0-9]{2})([0-9]{2})([0-9]{2})/i);
     let hfdtedate = new RegExp(/^HFDTEDATE:([0-9]{2})([0-9]{2})([0-9]{2})/i);
 
@@ -242,21 +339,64 @@ export async function processIGC(classid, compno, location, date, url, https, my
     let key = [String(date).substring(8, 11), classid, compno].join('/');
     const dateCode = toDateCode(date);
 
+    function onError(e) {
+        console.error(`processigc: ${classid}/${compno} ${url}`, e);
+    }
+
     // De-escape it
     url = url.replaceAll('&amp;', '&');
-    mysql.query(escape`UPDATE pilotresult SET igcavailable="P" WHERE datecode=${dateCode} and compno=${compno} and class=${classid}`);
+    mysql.query(sql`
+        UPDATE pilotresult
+        SET
+            igcavailable = "P"
+        WHERE
+            datecode = ${dateCode}
+            AND compno = ${compno}
+            AND class = ${classid}
+    `);
 
     // Initiate a streaming request
-    return https.get(url, getHeaders ? getHeaders() : undefined, function (response) {
+    const request = https.get(url, getHeaders ? getHeaders() : undefined, function (response) {
+        console.log(`${compno}: igc response ${url}: ${response.statusCode} `);
+
+        // Status check (handle redirects or errors)
+        const code = response.statusCode || 0;
+        if (code >= 300 && code < 400 && response.headers && response.headers.location) {
+            request.destroy(); // stop current request before following
+            onError(new Error(`Redirected to ${response.headers.location}`));
+            return;
+        }
+        if (code < 200 || code >= 300) {
+            // Drain response to free sockets, then error
+            response.resume();
+            onError(new Error(`HTTP ${code}`));
+            return;
+        }
+
+        // Response-level errors
+        response.on('error', (err) => onError(err));
+        response.on('aborted', () => onError(new Error('Response aborted')));
+
         var myInterface = readline.createInterface({
             input: response
         });
 
         myInterface.on('close', () => {
-            mysql.query(escape`UPDATE pilotresult SET igcavailable=${validFile ? 'P' : 'F'} WHERE datecode=${dateCode} and compno=${compno} and class=${classid}`);
+            mysql.query(sql`
+                UPDATE pilotresult
+                SET
+                    igcavailable = ${validFile ? 'P' : 'F'}
+                WHERE
+                    datecode = ${dateCode}
+                    AND compno = ${compno}
+                    AND class = ${classid}
+            `);
             if (validFile) {
-                capturePossibleLaunchLanding(key, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
-                console.log(`processed ${date} ${classid} - ${compno} successfully`);
+                capturePossibleLaunchLanding(key, dateCode, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
+                console.log(`igc: processed ${date} ${classid} - ${compno} successfully`);
+                checkForOGNMatches(classid, date, mysql);
+            } else {
+                console.log(`igc: ${date} ${classid} - ${compno} no flight processed`);
             }
         });
 
@@ -286,15 +426,22 @@ export async function processIGC(classid, compno, location, date, url, https, my
                 // Use GPS if present otherwise use pressure altitude, less drift during the day
                 let alt = parseInt(matches[13] ? matches[13] : matches[12]);
 
-                if (distance(jPoint, location.point, {units: 'kilometers'}) < 20) {
-                    // We are valid if we have a point within 20km of configured airfield
-                    // will also require epochbase to be set to make it this far
-                    validFile = true;
+                const dist = distance(jPoint, location.point, {
+                    units: 'kilometers'
+                });
 
+                if (dist < 10) {
                     // Now we need to check if it is a launch or landing point
                     // yes some files contain this information but we use same algo
                     // for flarm so hopefully a closer match
-                    capturePossibleLaunchLanding(key, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc');
+                    try {
+                        capturePossibleLaunchLanding(key, dateCode, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc');
+                        // We are valid if we have a point within 20km of configured airfield
+                        // will also require epochbase to be set to make it this far
+                        validFile = true;
+                    } catch (e) {
+                        console.error(compno, line, e);
+                    }
                 }
             }
 
@@ -306,11 +453,29 @@ export async function processIGC(classid, compno, location, date, url, https, my
                 // Do an associate and log that we did (or tried)
                 mysql
                     .transaction()
-                    .query(
-                        escape`UPDATE tracker SET trackerid = ${flarmId} WHERE
-                                      compno = ${compno} AND class = ${classid} AND trackerid="unknown" limit 1`
-                    )
-                    .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${compno}, now(), ${flarmId}, now(), "igcfile" )`)
+                    .query(sql`
+                        UPDATE tracker
+                        SET
+                            trackerid = ${flarmId}
+                        WHERE
+                            compno = ${compno}
+                            AND class = ${classid}
+                            AND trackerid = "unknown"
+                        LIMIT
+                            1
+                    `)
+                    .query(sql`
+                        INSERT INTO
+                            trackerhistory (compno, changed, flarmid, launchtime, method)
+                        VALUES
+                            (
+                                ${compno},
+                                now(),
+                                ${flarmId},
+                                now(),
+                                "igcfile"
+                            )
+                    `)
                     .commit();
 
                 // We may not have processed it but we did get useful information from it so that's
@@ -322,7 +487,18 @@ export async function processIGC(classid, compno, location, date, url, https, my
             else if ((matches = line.match(hfdte)) || (matches = line.match(hfdtedate))) {
                 const fileDate = `20${matches[3]}-${matches[2]}-${matches[1]}`;
                 epochbase = Math.round(new Date(fileDate).getTime() / 1000);
+                console.log('file contains hfdet', compno, fileDate, epochbase);
             }
         });
     });
+
+    const timeoutMs = 60_000;
+
+    // Request-level errors and timeout
+    request.on('error', (err) => onError(err));
+    request.setTimeout(timeoutMs, () => {
+        request.destroy(new Error(`downloadigc: ${compno} Request timeout after ${timeoutMs}ms`));
+    });
+
+    return request;
 }

@@ -57,18 +57,18 @@ message PilotTrack {
     uint32 posIndex = 2;
 
     // epoch time for each point (actually uint32)
-    bytes t = 3;
+    optional bytes t = 3;
 
     // Three tuple of [lat,lng,alt] repeated length times (actually float) (and the height above ground)
-    bytes positions = 4;
+    optional bytes positions = 4;
 		
     // For colouring, all Uint8 arrays one for each point all optional
-	bytes climbRate = 8;
+	optional bytes climbRate = 8;
 	//    bytes airSpeed = 9;
 	//    bytes altitudeBand = 10;
 	//    bytes leg = 11;
 
-    bytes agl = 12; // int16
+    optional bytes agl = 12; // int16
 	
 	// This changes if we need to replace the pilot track
 	uint32 trackVersion = 13;

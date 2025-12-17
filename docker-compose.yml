@@ -3,16 +3,20 @@ services:
         image: mariadb:11
         command: --lower-case-table-names=2 --sql-mode=""
         healthcheck:
-#            test: mariadb-admin ping -u root -p ${MYSQL_PASSWORD}
             test: mariadb ogn --user=root --password='${MYSQL_PASSWORD}' --silent --execute "SELECT 1;"
             interval: 10s
             timeout: 10s
             retries: 10
         environment:
             MYSQL_ROOT_PASSWORD: '$MYSQL_PASSWORD'
+        networks:
+            app-net:
+                aliases:
+                    - mysql
         volumes:
             - ./conf/sql/docker:/docker-entrypoint-initdb.d
             - ./mariadb/${DOCKER_TAG}:/var/lib/mysql
+
     next:
         image: next:${DOCKER_TAG:-latest}
         build:
@@ -20,7 +24,7 @@ services:
             dockerfile: ./conf/Dockerfile
             target: next
             args:
-                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+                ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
                 NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN?Mapbox token must be set}
                 NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL}
                 NEXT_PUBLIC_WEBSOCKET_HOST: $NEXT_PUBLIC_WEBSOCKET_HOST
@@ -31,19 +35,22 @@ services:
                 MYSQL_HOST: mysql
                 MYSQL_USER: root
                 MYSQL_DATABASE: ogn
-#        command: yarn next start
         platform: 'linux/amd64'
         depends_on:
             mysql:
                 condition: service_healthy
-        ports:
-            - 3000:3000
         networks:
-            default:
-                aliases:
-                    - next
+            traefik-net:
+            app-net:
+        labels:
+            - 'traefik.enable=true'
+            - 'traefik.http.routers.${DOCKER_TAG}.rule=Host(`${NEXT_PUBLIC_SITEURL}`)'
+            - 'traefik.http.routers.${DOCKER_TAG}.entrypoints=websecure'
+            - 'traefik.http.routers.${DOCKER_TAG}.tls.certresolver=leresolver'
+            - 'traefik.http.services.${DOCKER_TAG}.loadbalancer.server.port=3000'
+            - 'traefik.docker.network=traefik_net'
         environment:
-            ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+            ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -60,7 +67,7 @@ services:
             target: ogn
             dockerfile: ./conf/Dockerfile
             args:
-                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+                ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
         command: node bin/ogn
         platform: 'linux/amd64'
         depends_on:
@@ -68,8 +75,8 @@ services:
                 condition: service_healthy
         restart: always
         environment:
-            ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
-            DOCKER_TAG: ${DOCKER_TAG}   
+            ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
+            DOCKER_TAG: ${DOCKER_TAG}
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -79,12 +86,22 @@ services:
             NEXT_PUBLIC_COMPETITION_DELAY: ${NEXT_PUBLIC_COMPETITION_DELAY}
             NEXT_PUBLIC_REPLAY: ${NEXT_PUBLIC_REPLAY}
             API_HOSTNAME: next:3000
-#        ports:
-#            - 8080:8080
         networks:
-            default:
+            traefik-net:
+            app-net:
                 aliases:
                     - ogn
+        labels:
+            - 'traefik.enable=true'
+            - 'traefik.http.routers.${DOCKER_TAG}-ws.rule=Host(`${NEXT_PUBLIC_WEBSOCKET_HOST}`)'
+            - 'traefik.http.routers.${DOCKER_TAG}-ws.entrypoints=websecure'
+            - 'traefik.http.routers.${DOCKER_TAG}-ws.tls.certresolver=leresolver'
+            - 'traefik.http.services.${DOCKER_TAG}-ws.loadbalancer.server.port=8080'
+            - 'traefik.http.routers.${DOCKER_TAG}-history.rule=Host(`${NEXT_PUBLIC_SITEURL}`) && PathPrefix(`/tracks`) || Host(`${NEXT_PUBLIC_SITEURL}`) && PathPrefix(`/scorehistory`)'
+            - 'traefik.http.routers.${DOCKER_TAG}-history.entrypoints=websecure'
+            - 'traefik.http.routers.${DOCKER_TAG}-history.tls.certresolver=leresolver'
+            - 'traefik.http.services.${DOCKER_TAG}-history.loadbalancer.server.port=8080'
+            - 'traefik.docker.network=traefik_net'
         volumes:
             - ./db:/onglide/db
             - ./keys:/onglide/keys
@@ -94,16 +111,18 @@ services:
             dockerfile: ./conf/Dockerfile
             target: soaringspot
             args:
-                ENV_FILE: ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
+                ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
         command: node bin/soaringspot
         platform: 'linux/amd64'
         depends_on:
             mysql:
                 condition: service_healthy
         restart: always
+        networks:
+            - app-net
         environment:
-            ENV_FILE:  ".env${DOCKER_TAG:+.${DOCKER_TAG}}"
-            DOCKER_TAG: ${DOCKER_TAG}   
+            ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
+            DOCKER_TAG: ${DOCKER_TAG}
             MYSQL_PASSWORD: $MYSQL_PASSWORD
             MYSQL_HOST: mysql
             MYSQL_USER: root
@@ -112,26 +131,7 @@ services:
             SOARINGSPOT_CLIENT_ID: $SOARINGSPOT_CLIENT_ID
             SOARINGSPOT_SECRET: ${SOARINGSPOT_SECRET?SoaringSpot Secret not set}
             SOARINGSPOT_ACTUALS: ${SOARINGSPOT_ACTUALS:-1}
-    apache:
-        image: apache:${DOCKER_TAG:-latest}
-        platform: 'linux/amd64'
-        build:
-            context: ./conf/apache
-            target: apache
-        restart: always
-        command: httpd-foreground -DONGLIDE_SSL
-        tty: true
-        stdin_open: true
-        depends_on:
-            - next
-            - ogn
-        ports:
-            - 80:8080
-            - 443:8443
-        volumes:
-            - ./keys:/etc/md
-        environment:
-            NEXT_PUBLIC_SITEURL: ${NEXT_PUBLIC_SITEURL?URL for the site is not set}
-            NEXT_PUBLIC_WEBSOCKET_HOST: ${NEXT_PUBLIC_WEBSOCKET_HOST-}
-            ONGLIDE_SSL: 1
-            SERVER_ADMIN: $SERVER_ADMIN
+networks:
+    app-net:
+    traefik-net:
+        external: true

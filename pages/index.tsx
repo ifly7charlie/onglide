@@ -226,8 +226,27 @@ export default function CombinePage(props) {
 // Determine the default class
 export async function getServerSideProps(context) {
     try {
-        const location = (await query(escape`SELECT lt, lg, tzoffset, tz FROM competition LIMIT 1`))?.[0];
-        const classes = await query(escape`SELECT class FROM classes ORDER BY class`);
+        const location = (
+            await query(escape`
+                SELECT
+                    lt,
+                    lg,
+                    tzoffset,
+                    tz
+                FROM
+                    competition
+                LIMIT
+                    1
+            `)
+        )?.[0];
+        const classes = await query(escape`
+            SELECT
+                class
+            FROM
+                classes
+            ORDER BY
+                class
+        `);
 
         return {
             props: {

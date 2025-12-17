@@ -52,8 +52,7 @@ export function pilotsTrackLayer(
         const selected = compno == props.selectedCompno;
 
         const p = track.deck;
-        if (!p) {
-            console.log(`deck missing from ${compno}`, track);
+        if (!p || !p.posIndex) {
             return;
         }
 

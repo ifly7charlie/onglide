@@ -39,7 +39,7 @@ import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode, toDateCode} from '../lib/datecode';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow} from '../lib/types';
+import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
 console.log('dev mode', dev);
 
@@ -72,14 +72,16 @@ import * as dotenv from 'dotenv';
 import {getElevationOffset, getCacheSize} from '../lib/getelevationoffset';
 
 // handle unkownn gliders
-import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding.js';
+import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding';
 
-import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocessing/timehelper.js';
+import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocessing/timehelper';
 
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
 let userLogStream: WriteStream | null = null;
+
+let scoreFrequency = 60;
 
 process.setMaxListeners(35);
 
@@ -122,7 +124,7 @@ interface Channel {
 
     broadcastChannel?: BroadcastChannel;
     scoring?: ScoringController;
-    task?: any; // what task are we scoring - we use this to see if anything has changed
+    task?: Task; // what task are we scoring - we use this to see if anything has changed
     geoTask?: any;
     gliderHash?: string;
 
@@ -225,7 +227,7 @@ interface OgnWebSocket extends WebSocket {
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
 
-import {getNow, getDelay, readOnly, replayBase, d} from '../lib/now';
+import {getNow, getDelay, readOnly, replayBase, d, getReplayDatecode} from '../lib/now';
 
 async function main() {
     if (error) {
@@ -265,6 +267,8 @@ async function main() {
     if (readOnly) {
         console.log('readonly');
     }
+
+    scoreFrequency = Number(process.env.OGN_SCORE_FREQUENCY ?? 60);
 
     // Allow insights if it's configured.
     // DON'T TRACK DEPENDENCIES as it will pick up SQL statements
@@ -399,10 +403,13 @@ async function main() {
         // For each channel (aka class)
         const now = getNow();
 
-        const positions = Object.values(channels).reduce((a, c: Channel) => {
-            a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
-            return a;
-        }, {} as Record<string, Positions>);
+        const positions = Object.values(channels).reduce(
+            (a, c: Channel) => {
+                a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+                return a;
+            },
+            {} as Record<string, Positions>
+        );
 
         const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
@@ -468,6 +475,7 @@ async function main() {
 
             channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
+            console.log(`${channelName}: active gliders: `, [...channel.activeGliders].join(','));
 
             // Remove invalid
             const notValid = _remove(channel.clients, (client: OgnWebSocket) => {
@@ -601,21 +609,24 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
 // Get current date code
 async function getDCode(): Promise<Datecode> {
     if (replayBase) {
-        return;
+        return getReplayDatecode();
         toDateCode(new Date(replayBase * 1000));
     }
 
-    const now = new Date(); 
+    const now = new Date();
     const nowLocalMs = now.getTime() + location.tzoffset * 1000;
-    
+
     const local10am = new Date(
         now.getFullYear(),
         now.getMonth(),
         now.getDate(),
-        10, 0, 0, 0 // 10:00:00.000 local time
+        10,
+        0,
+        0,
+        0 // 10:00:00.000 local time
     );
-    if( nowLocalMs < local10am.getTime() ) {
-        local10am.setDate(local10am.getDate()-1)
+    if (nowLocalMs < local10am.getTime()) {
+        local10am.setDate(local10am.getDate() - 1);
     }
     const utcTime = local10am.getTime() - location.tzoffset * 1000;
     console.log('DateCode at 10am local:', utcTime, new Date(utcTime).toISOString());
@@ -640,11 +651,37 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     }
 
     // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await db.query<{class: ClassName}[]>('SELECT class FROM compstatus');
+    const classes = await db.query<{class: ClassName; datecode: Datecode}[]>('SELECT class, datecode FROM compstatus');
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
     for (const c of classes) {
+        // Check if we are not same as configured in db (ie from scoring)
+        if (datecode !== c.datecode) {
+            // Before competition start
+            if (!c.datecode) {
+                if (toDateCode(new Date(location.start)) > datecode) {
+                    console.error(
+                        `${c.class}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
+                            location.end
+                        } and no task configured - not tracking`
+                    );
+                    continue;
+                }
+            }
+            // after competition end
+            else {
+                if (toDateCode(new Date(location.end)) < datecode) {
+                    console.error(
+                        `${c.class}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
+                            location.end
+                        } and no task configured - not tracking`
+                    );
+                    continue;
+                }
+            }
+        }
+
         const cname = channelName(c.class, datecode);
         let channel: Channel = channels[cname];
 
@@ -768,17 +805,41 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 
 async function updateTasks(): Promise<void> {
     // Get the details for the task
-    const getTask = async (className: ClassName, datecode: Datecode) => {
-        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number} & ClassesTableRow & ContestDayTableRow)[]>(escape`
-          SELECT tasks.*, time_to_sec(tasks.duration) durationsecs, c.grandprixstart, c.handicapped, c.Dm, cd.calendardate, cd.status, cd.info,
-CASE WHEN COALESCE(nostart,'00:00:00') ='00:00:00' THEN 0
-                    ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',nostart))-(SELECT tzoffset FROM competition)
-               END nostartutc
-FROM tasks, classes c, contestday cd
-          WHERE tasks.datecode= ${datecode}
-             AND tasks.class = c.class AND cd.class = c.class AND cd.datecode = ${datecode}
-             AND tasks.class= ${className} and tasks.flown='Y'
-    `)) || {})[0];
+    const getTask = async (className: ClassName, datecode: Datecode, maxHandicap: number) => {
+        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow)[]>(escape`
+            SELECT
+                tasks.*,
+                time_to_sec (tasks.duration) durationsecs,
+                c.grandprixstart,
+                c.handicapped,
+                c.Dm,
+                cd.calendardate,
+                cd.status,
+                cd.info,
+                0 AS distance,
+                CASE
+                    WHEN COALESCE(nostart, '00:00:00') = '00:00:00' THEN 0
+                    ELSE UNIX_TIMESTAMP (
+                        CONCAT(${fromDateCode(datecode)}, ' ', nostart)
+                    ) - (
+                        SELECT
+                            tzoffset
+                        FROM
+                            competition
+                    )
+                END nostartutc
+            FROM
+                tasks,
+                classes c,
+                contestday cd
+            WHERE
+                tasks.datecode = ${datecode}
+                AND tasks.class = c.class
+                AND cd.class = c.class
+                AND cd.datecode = ${datecode}
+                AND tasks.class = ${className}
+                AND tasks.flown = 'Y'
+        `)) || {})[0];
 
         if (!taskdetails || !taskdetails.type) {
             console.log(`${className}/${datecode}: no active task`, taskdetails);
@@ -788,11 +849,16 @@ FROM tasks, classes c, contestday cd
         const taskid = taskdetails.taskid;
 
         const tasklegs = await db.query<TaskLegsTableRow[]>(escape`
-      SELECT taskleg.*, nname name
-        FROM taskleg
-       WHERE taskleg.taskid = ${taskid}
-      ORDER BY legno
-    `);
+            SELECT
+                taskleg.*,
+                nname name
+            FROM
+                taskleg
+            WHERE
+                taskleg.taskid = ${taskid}
+            ORDER BY
+                legno
+        `);
 
         if (tasklegs.length < 2) {
             console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
@@ -804,9 +870,10 @@ FROM tasks, classes c, contestday cd
                 grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
                 nostartutc: taskdetails.nostartutc,
                 aat: taskdetails.type == 'A',
-                dh: taskdetails.type == 'D',
+                dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
                 dm: taskdetails.Dm ?? undefined,
-                handicapped: taskdetails.handicapped == 'Y'
+                handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+                maxHandicap
             },
             details: taskdetails,
             legs: tasklegs
@@ -817,7 +884,14 @@ FROM tasks, classes c, contestday cd
 
     // Go through all the channels and check for a change of task
     for (const channel of Object.values(channels)) {
-        const updatedTask = await getTask(channel.className, channel.datecode);
+        //
+        // Determine max handicap (dh)
+        const maxHandicap = Object.values(gliders)
+            .filter((g) => g.className == channel.className)
+            .reduce((highest, g) => Math.max(highest, g.handicap), 0);
+
+        // Update the task from the db
+        const updatedTask = await getTask(channel.className, channel.datecode, maxHandicap);
 
         if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
             console.log(
@@ -882,17 +956,63 @@ interface CTrackerRow {
 
 async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
-    let cTrackers = await db.query<CTrackerRow[]>(escape`SELECT p.compno, p.greg, trackerId as dbTrackerId, 0 duplicate, p.handicap,
-                                             p.class className, CASE WHEN ppr.start ='00:00:00' THEN 0
-                                           ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.start))-(SELECT tzoffset FROM competition)
-                                             END utcStart,
-                                           CASE WHEN ppr.finish ='00:00:00' THEN 0
-                                           ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)},' ',ppr.finish))-(SELECT tzoffset FROM competition)
-                                            END utcFinish,
-                                           COALESCE(ppr.scoredStatus,'S') scoredStatus
-                                        FROM pilots p left outer join tracker t on p.class=t.class and p.compno=t.compno left outer join
-                                             (select compno,class,start,finish,scoredstatus from pilotresult pr where pr.datecode=${datecode}) as ppr
-                                      ON ppr.class=p.class and ppr.compno=p.compno`);
+    let cTrackers = await db.query<CTrackerRow[]>(escape`
+        SELECT
+            p.compno,
+            p.greg,
+            trackerId AS dbTrackerId,
+            0 duplicate,
+            p.handicap,
+            p.class className,
+            CASE
+                WHEN ppr.start = '00:00:00' THEN 0
+                ELSE UNIX_TIMESTAMP (
+                    CONCAT(
+                        ${fromDateCode(datecode)},
+                        ' ',
+                        ppr.start
+                    )
+                ) - (
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                )
+            END utcStart,
+            CASE
+                WHEN ppr.finish = '00:00:00' THEN 0
+                ELSE UNIX_TIMESTAMP (
+                    CONCAT(
+                        ${fromDateCode(datecode)},
+                        ' ',
+                        ppr.finish
+                    )
+                ) - (
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                )
+            END utcFinish,
+            COALESCE(ppr.scoredStatus, 'S') scoredStatus
+        FROM
+            pilots p
+            LEFT OUTER JOIN tracker t ON p.class = t.class
+            AND p.compno = t.compno
+            LEFT OUTER JOIN (
+                SELECT
+                    compno,
+                    class,
+                    start,
+                    finish,
+                    scoredstatus
+                FROM
+                    pilotresult pr
+                WHERE
+                    pr.datecode = ${datecode}
+            ) AS ppr ON ppr.class = p.class
+            AND ppr.compno = p.compno
+    `);
 
     const initialGliderCount = Object.keys(gliders).length;
     let updatedGliderCount = 0;
@@ -953,6 +1073,9 @@ async function updateTrackers(datecode: Datecode) {
                     {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
                 ));
                 const channel = channels[glider.channelName];
+                if (!channel) {
+                    throw new Error('no channel' + glider.channelName);
+                }
 
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
@@ -983,7 +1106,8 @@ async function updateTrackers(datecode: Datecode) {
                 }
 
                 // If we have a tracker for it then we need to link that as well
-                if (!hadTracker && t.dbTrackerId && t.dbTrackerId != 'unknown') {
+                if (!hadTracker) {
+                    // && t.dbTrackerId && t.dbTrackerId != 'unknown') {
                     aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
@@ -1078,7 +1202,8 @@ async function updateDDB() {
             console.log('ddb entries:', Object.keys(ddb).length);
         })
         .catch((e) => {
-            console.log('unable to fetch ddb', e);
+            console.error('unable to fetch ddb', e);
+            setTimeout(updateDDB, 120_000 * Math.random() + 120_000);
         });
 }
 
@@ -1171,6 +1296,14 @@ async function generateRecentPilotTracks(channel: Channel) {
                             climbRate: new Uint8Array(p.climbRate.buffer, start, length),
                             agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
                             posIndex: length,
+                            trackVersion: p.trackVersion
+                        };
+                    } else {
+                        // make the placeholder, it's empty but the other end will make
+                        // a new deck object for it.
+                        result[glider.compno] = {
+                            compno: glider.compno,
+                            posIndex: 0,
                             trackVersion: p.trackVersion
                         };
                     }
@@ -1305,11 +1438,28 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             if (!sh) {
                 shid.set(compno, (sh = []));
             }
-            const index = _sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
-            if (index < sh.length - 1 && index >= 0) {
-                console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[index].t)} sh:[${index}/${sh.length}]`);
+
+            const i = _sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
+            const prev = sh[i - 1];
+            const next = sh[i];
+
+            // Rewind log (we’re going to drop tail from i or i-1)
+            if (i < sh.length - 1) {
+                console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[i].t)} sh:[${i}/${sh.length}]`);
             }
-            sh.splice(index, Infinity, score);
+
+            const leftDist = prev ? t - prev.t : Infinity;
+            const rightDist = next ? next.t - t : Infinity;
+            const prevClose = leftDist < scoreFrequency;
+            const nextClose = rightDist < scoreFrequency;
+
+            // replace previous or current
+            const replacePrev = prevClose && nextClose ? leftDist <= rightDist : prevClose;
+
+            //  i === sh.length + prevClose -> replace last
+            //  i === sh.length + !prevClose -> append
+            //  i < sh.length -> insert/replace and drop tail (rewind)
+            sh.splice(replacePrev ? i - 1 : i, Infinity, score);
         }
 
         // Score from Live packets (either end of rescore or end of current score)
@@ -1344,13 +1494,16 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
         console.log(`${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
 
-        const mcs = channelGliders.reduce((all, glider) => {
-            if (glider.scoredStart) {
-                const ti = Math.trunc(glider.scoredStart / 300) * 300;
-                all[ti] = (all[ti] ?? 0) + 1;
-            }
-            return all;
-        }, {} as Record<number, number>);
+        const mcs = channelGliders.reduce(
+            (all, glider) => {
+                if (glider.scoredStart) {
+                    const ti = Math.trunc(glider.scoredStart / 300) * 300;
+                    all[ti] = (all[ti] ?? 0) + 1;
+                }
+                return all;
+            },
+            {} as Record<number, number>
+        );
 
         const likelyA = Object.keys(mcs)
             .sort((a, b) => mcs[a] - mcs[b])
@@ -1477,7 +1630,7 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
     const flarmId = data.c;
 
     // Check if it's a possible launch
-    capturePossibleLaunchLanding(flarmId, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm');
+    capturePossibleLaunchLanding(flarmId, datecode, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm');
 
     // Store in the unknown list for status display
     unknownTrackers[flarmId] = {
@@ -1505,7 +1658,6 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
         if (!Object.keys(matches).length) {
             unknownTrackers[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
             console.log(unknownTrackers[flarmId].message);
-            console.table(gliders);
             return;
         }
 
@@ -1539,11 +1691,29 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {
             db.transaction()
-                .query(
-                    escape`UPDATE tracker SET trackerid = ${flarmId} WHERE
-                                      compno = ${match.compno} AND class = ${match.className} AND trackerid="unknown" limit 1`
-                )
-                .query(escape`INSERT INTO trackerhistory (compno,changed,flarmid,launchtime,method) VALUES ( ${match.compno}, now(), ${flarmId}, now(), "ognddb" )`)
+                .query(escape`
+                    UPDATE tracker
+                    SET
+                        trackerid = ${flarmId}
+                    WHERE
+                        compno = ${match.compno}
+                        AND class = ${match.className}
+                        AND trackerid = "unknown"
+                    LIMIT
+                        1
+                `)
+                .query(escape`
+                    INSERT INTO
+                        trackerhistory (compno, changed, flarmid, launchtime, method)
+                    VALUES
+                        (
+                            ${match.compno},
+                            now(),
+                            ${flarmId},
+                            now(),
+                            "ognddb"
+                        )
+                `)
                 .commit();
         }
     }
@@ -1653,35 +1823,36 @@ function setupOgnWebServer(req, res) {
         res.writeHead(200, headers);
 
         const replacer = (key, value) => {
-            switch(key) {
-            case 'scoreHistory':
-            case 'scoreDb':
-            case 'broadcastChannel':
-            case 'deck':
-            case 'flarmIdRegex':
-            case 'geoTask':
-            case 'coordinates':
-            case 'pointGeoJSON':
-            case 'geoJSON':
-            case 'linestring':
-            case 'lineString':
-            case 'lastKeepAliveMsg':
-            case 'scoredPoints':
-            case 'minDistancePoints':
-            case 'maxDistancePoints':
-            case 'webPathData': return undefined;
+            switch (key) {
+                case 'scoreHistory':
+                case 'scoreDb':
+                case 'broadcastChannel':
+                case 'deck':
+                case 'flarmIdRegex':
+                case 'geoTask':
+                case 'coordinates':
+                case 'pointGeoJSON':
+                case 'geoJSON':
+                case 'linestring':
+                case 'lineString':
+                case 'lastKeepAliveMsg':
+                case 'scoredPoints':
+                case 'minDistancePoints':
+                case 'maxDistancePoints':
+                case 'webPathData':
+                    return undefined;
 
-            case 'dbTrackerId': return (typeof value === 'string' || value instanceof String) ? value.split(',').length : 'invalid';
+                case 'dbTrackerId':
+                    return typeof value === 'string' || value instanceof String ? value.split(',').length : 'invalid';
 
                 // Size of some arrays
-            case 'clients': return Array.isArray(value) ? value.length : undefined;
+                case 'clients':
+                    return Array.isArray(value) ? value.length : undefined;
             }
             return value;
-        }
-        
-        res.end(JSON.stringify({channels: channels ,
-                                gliders,
-                                unknownTrackers}, replacer));
+        };
+
+        res.end(JSON.stringify({channels: channels, gliders, unknownTrackers}, replacer));
         return;
     }
 
