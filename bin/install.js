@@ -311,19 +311,46 @@ NEXT_PUBLIC_SITEURL=${wsresponse.url}
     await mysql
         .transaction()
         .query('DELETE FROM scoringsource')
-        .query(
-            escape`
-INSERT INTO scoringsource (type,url,client_id,secret,contest_name,overwrite,actuals,portoffset,domain)
-VALUES ( ${Object.keys(sstypemap)[stresponse.type]}, ${ssresponse.ssurl || ''},
-         ${ssresponse.ssclient || ''}, ${ssresponse.sssecret || ''}, ${ssresponse.sscontest_name || ''},
-0, ${ssresponse.actuals}, ${wsresponse.portoffset}, ${wsresponse.url} )`
-        )
+        .query(escape`
+            INSERT INTO
+                scoringsource (
+                    type,
+                    url,
+                    client_id,
+                    secret,
+                    contest_name,
+                    overwrite,
+                    actuals,
+                    portoffset,
+                    domain
+                )
+            VALUES
+                (
+                    ${Object.keys(sstypemap)[stresponse.type]},
+                    ${ssresponse.ssurl || ''},
+                    ${ssresponse.ssclient || ''},
+                    ${ssresponse.sssecret || ''},
+                    ${ssresponse.sscontest_name || ''},
+                    0,
+                    ${ssresponse.actuals},
+                    ${wsresponse.portoffset},
+                    ${wsresponse.url}
+                )
+        `)
         .commit();
 
     if (wsresponse.fairankingimages) {
         await mysql
             .transaction()
-            .query(escape`INSERT INTO scoringsource (type, url) VALUES ( 'pictureurl', 'http://rankingdata.fai.org/PilotImages/{igc_id}.jpg' )`)
+            .query(escape`
+                INSERT INTO
+                    scoringsource (type, url)
+                VALUES
+                    (
+                        'pictureurl',
+                        'http://rankingdata.fai.org/PilotImages/{igc_id}.jpg'
+                    )
+            `)
             .commit();
     }
 
@@ -341,9 +368,31 @@ VALUES ( ${Object.keys(sstypemap)[stresponse.type]}, ${ssresponse.ssurl || ''},
 
         // Start and end not used yet
         const urlprefix = wsresponse.url.match(/^([A-Z0-9]+)\./i)[1] || wsresponse.url;
-        await mysql_admin.query(escape`INSERT INTO competitions.comps ( db, portoffset, start, end, site ) 
-                                       VALUES ( ${response.database}, ${wsresponse.portoffset}, now(), '2100-01-01', ${urlprefix} ) 
-                         ON DUPLICATE KEY SET portoffset=values(portoffset), start=values(start), end=values(end), site=values(site)`);
+        await mysql_admin.query(escape`
+            INSERT INTO
+                competitions.comps (db, portoffset, start, END, site)
+            VALUES
+                (
+                    ${response.database},
+                    ${wsresponse.portoffset},
+                    now(),
+                    '2100-01-01',
+                    ${urlprefix}
+                ) ON DUPLICATE KEY
+            SET
+                portoffset =
+            VALUES
+                (portoffset),
+                start =
+            VALUES
+                (start),
+                END =
+            VALUES
+                (END),
+                site =
+            VALUES
+                (site)
+        `);
     }
 
     console.log('done');
