@@ -6,7 +6,7 @@ import Nav from 'react-bootstrap/Nav';
 import Collapse from 'react-bootstrap/Collapse';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faFileArrowUp, faPlane, faMagnifyingGlassLocation, faTasks, faCaretUp, faCaretDown} from '@fortawesome/free-solid-svg-icons';
+import {faFileArrowUp, faPlane, faMagnifyingGlassLocation, faTasks, faCaretUp, faCaretDown, faCopy, faRotateLeft, faArrowsRotate} from '@fortawesome/free-solid-svg-icons';
 
 import {Nbsp} from '../lib/react/htmlhelper';
 import {Options} from '../lib/react/options';
@@ -24,6 +24,7 @@ import otherPilotsReducer from '../lib/redux/otherPilotsSlice';
 
 import {selectAvailableScoreTimes} from '../lib/redux/nowSlice';
 import {selectTask} from '../lib/redux/taskSlice';
+import {selectAllScores} from '../lib/redux/scoresSlice';
 import {selectLatestUpdate} from '../lib/redux/tracksSlice';
 import {useSelector, useDispatch} from '../lib/redux';
 
@@ -211,6 +212,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     });
 
     const availableScores = useSelector(selectAvailableScoreTimes);
+    const allScores = useSelector((state) => selectAllScores(state, replayTime));
     const task = useSelector((state) => selectTask(state, VC));
 
     const taskRef = useRef<any>(null);
@@ -359,6 +361,35 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         },
         [setSelectedCompno]
     );
+
+    const handleReset = useCallback(() => {
+        setFlights([]);
+        setTaskBuilt(false);
+        taskRef.current = null;
+        setSelectedCompno(undefined);
+        setReplayTime(undefined);
+        setError(null);
+        dispatchClass(dispatch, 0 as Epoch, 0 as Epoch);
+    }, [dispatch]);
+
+    const handleRescore = useCallback(async () => {
+        if (!taskRef.current || flights.length === 0) return;
+        setProcessing(true);
+        setError(null);
+        try {
+            for (const flight of flights) {
+                const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, 100, 0 as Epoch);
+                if (scores.length) {
+                    dispatchScores(dispatch, scores);
+                }
+            }
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Error rescoring');
+            console.error(e);
+        } finally {
+            setProcessing(false);
+        }
+    }, [dispatch, flights]);
 
     const fitBounds = useCallback(() => {
         if (options) {
@@ -509,8 +540,31 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                     handicapped={false}
                                 />
                             )}
-                            <div style={{padding: '4px 8px', textAlign: 'center', cursor: 'pointer', opacity: 0.6}} onClick={() => fileInputRef.current?.click()}>
-                                <FontAwesomeIcon icon={faFileArrowUp} /> Add more flights
+                            <div style={{padding: '4px 8px', textAlign: 'center', display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap'}}>
+                                <span style={{cursor: 'pointer', opacity: 0.6}} onClick={() => fileInputRef.current?.click()}>
+                                    <FontAwesomeIcon icon={faFileArrowUp} /> Add more flights
+                                </span>
+                                <span style={{cursor: processing ? 'default' : 'pointer', opacity: processing ? 0.3 : 0.6}} onClick={processing ? undefined : handleRescore} title="Re-run scoring on all loaded flights">
+                                    <FontAwesomeIcon icon={faArrowsRotate} /> Rescore
+                                </span>
+                                <span style={{cursor: 'pointer', opacity: 0.6}} onClick={handleReset} title="Clear all flights and start over">
+                                    <FontAwesomeIcon icon={faRotateLeft} /> Reset
+                                </span>
+                                {allScores && Object.keys(allScores).length > 0 && (
+                                    <span
+                                        style={{cursor: 'pointer', opacity: 0.6}}
+                                        onClick={() => {
+                                            const dump = Object.entries(allScores).reduce((acc, [compno, s]: [string, any]) => {
+                                                acc[compno] = s;
+                                                return acc;
+                                            }, {});
+                                            navigator.clipboard.writeText(JSON.stringify(dump, null, 2));
+                                        }}
+                                        title="Copy current scores as JSON to clipboard"
+                                    >
+                                        <FontAwesomeIcon icon={faCopy} /> Copy Scores
+                                    </span>
+                                )}
                             </div>
                         </div>
                     </div>

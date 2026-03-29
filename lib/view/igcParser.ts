@@ -32,6 +32,7 @@ const hdteRegex = /^HFDTE(?:DATE:)?(\d{2})(\d{2})(\d{2})/i;
 const hpltRegex = /^HFPLT[^:]*:\s*(.*)/i;
 const hcidRegex = /^HFCID[^:]*:\s*(.*)/i;
 const hgtyRegex = /^HFGTY[^:]*:\s*(.*)/i;
+const hgidRegex = /^HFGID[^:]*:\s*(.*)/i;
 
 // Timezone offset (from H record or LCU:: comment)
 const tzRegex = /^(?:LCU::)?H[FP]TZN.*TIMEZONE:\s*(-?[\d.]+)/i;
@@ -73,6 +74,7 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
 
     let pilotName = '';
     let compno = (defaultCompno || '') as Compno;
+    let gliderId = '';
     let gliderType = '';
     let epochBase: Epoch = 0 as Epoch;
     let day = 0,
@@ -158,6 +160,12 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
             m = hcidRegex.exec(line);
             if (m) {
                 compno = m[1].trim() as Compno;
+                continue;
+            }
+
+            m = hgidRegex.exec(line);
+            if (m) {
+                gliderId = m[1].trim();
                 continue;
             }
 
@@ -276,6 +284,16 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
     // Use LLXV as fallback if no LSEEYOU OZ/TSK lines were found
     const finalOZParams = ozParams.size > 0 ? ozParams : llxvOZParams;
     const finalTaskParams = taskParams.noStartUTC !== null || taskParams.taskTimeSecs !== null ? taskParams : llxvTaskParams;
+
+    // Use glider ID as compno if it's shorter than the competition ID
+    if (gliderId && compno && gliderId.length < compno.length) {
+        compno = gliderId as Compno;
+    }
+
+    // Truncate long compnos to last 2 characters
+    if (compno.length > 3) {
+        compno = compno.slice(-2) as Compno;
+    }
 
     // Mark last fix as "live" to trigger score emission
     if (fixes.length > 0) {
