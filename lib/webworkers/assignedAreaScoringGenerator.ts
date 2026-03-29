@@ -1,8 +1,6 @@
-import Graph from '../flightprocessing/dijkstras';
 import {type ShortestResult, DistanceOptimiser} from '../flightprocessing/distanceOptimiser';
-import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
-import type {Epoch, DistanceKM, AltitudeAMSL, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
+import type {Epoch, DistanceKM, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
 import {isTick, PositionStatus} from '../types';
 
 import {cloneDeep as _clonedeep, keyBy as _keyby, sortBy as _sortby} from 'lodash';
@@ -10,10 +8,6 @@ import {cloneDeep as _clonedeep, keyBy as _keyby, sortBy as _sortby} from 'lodas
 import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelper';
 
 import {convexHull} from '../flightprocessing/convexHull';
-import length from '@turf/length';
-//import distance from '@turf/distance';
-import along from '@turf/along';
-import {lineString} from '@turf/helpers';
 
 /*
  * This is used just for scoring an AAT task
@@ -171,7 +165,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     maxGraph.addPointsToGroup(legno, newAdditions);
                     minGraph.addPointsToGroup(legno, newAdditions);
 
-                    maxGraph.printSummary();
+                    maxGraph.printSummary(log);
 
                     // Capture the status
                     aatLeg.convexHull = newConvexHull;
@@ -210,46 +204,40 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     const isInSector = taskStatus.inSector || taskStatus.inPenalty;
                     const aatPreviousLeg = aatLegStatus[taskStatus.currentLeg - 1];
 
-                    if (false && aatPreviousLeg) {
+                    if (aatPreviousLeg) {
                         const convexHull = aatLegStatus[taskStatus.currentLeg].convexHull;
                         if (isInSector) {
                             // if we have multiple points check and see if they are making progress towards the
                             // next turnpoint
                             if (convexHull.length > 1) {
                                 const chReversed = _sortby(convexHull, (a) => -a.t);
-                                chReversed.pop(); // remove the oldest one, we must leave one in the list
+                                chReversed.pop(); // remove the oldest one — it has no prior points so the time filter would match nothing
                                 const nextLeg = preparedLegs[taskStatus.currentLeg + 1];
                                 scoredPoints = chReversed
                                     .map((point) => {
                                         const hc = nextLeg.hasCrossed(point, point); // get how close to next leg we are
-                                        const spr = nextLeg.scoredPointRemaining(hc.distanceKm!);
-                                        return maxGraph.shortestAnyToGroupThenToPoint(spr!, taskStatus.currentLeg, (p) => p.t < point.t);
+                                        if (hc.distanceKm == null) return undefined; // already inside next sector
+                                        const spr = nextLeg.scoredPointRemaining(hc.distanceKm);
+                                        if (!spr) return undefined;
+                                        return maxGraph.shortestAnyToGroupThenToPoint(spr, taskStatus.currentLeg, (p) => p.t < point.t);
                                     })
+                                    .filter((r): r is ShortestResult<BasePositionMessage> => r != null)
                                     .sort((a, b) => a.distance - b.distance)?.[0];
                             } else {
                                 // if there is only one then just solve to that point
                                 scoredPoints = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
                             }
-                        } else if (taskStatus.closestSectorPoint && taskStatus.closestDistanceToNext) {
+                        } else if (taskStatus.closestSectorPoint && taskStatus.closestDistanceToNext && isFinite(taskStatus.closestDistanceToNext)) {
                             log('ts/closestsectorpoint', taskStatus.closestSectorPoint, taskStatus.closestDistanceToNext);
-                            //                            const isFinish = taskStatus.currentLeg == task.legs.length - 1 && !taskStatus.inSector && !taskStatus.inPenalty;
                             const leg = preparedLegs[taskStatus.currentLeg];
-                            const spr = leg.scoredPointRemaining(taskStatus.closestDistanceToNext!);
-                            scoredPoints = maxGraph.shortestAnyToGroupThenToPoint(spr!, taskStatus.currentLeg - 1); // spr is closest we are to next sector
-
-                            /*                                const ls = lineString([
-                                    [ppoint.lng, ppoint.lat],
-                                                                        isFinish // if we are at finish then we don't actually use closest point as it is to the center
-                                    ? task.legs.at(-1)!.point!
-                                    : [taskStatus.closestSectorPoint.lng, taskStatus.closestSectorPoint.lat] */
-                            // ]);
-                        } else {
-                            console.log('missing closest sector point', JSON.stringify(taskStatus));
+                            const spr = leg.scoredPointRemaining(taskStatus.closestDistanceToNext);
+                            if (spr) {
+                                scoredPoints = maxGraph.shortestAnyToGroupThenToPoint(spr, taskStatus.currentLeg - 1); // spr is closest we are to next sector
+                            }
                         }
                     }
 
-                    console.log('scored points ');
-                    console.table(scoredPoints?.path ?? []);
+                    log('scored points', scoredPoints?.path ?? []);
 
                     //
                     // Now the fun part - calculate possible distance remaining from where we are
@@ -316,9 +304,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     //find path from last point
                     const shortestRemainingPath = minPossibleGraph.shortestAll();
 
-                    console.log('>>>>');
-                    console.log(drPoints);
-                    console.log(shortestRemainingPath?.path);
+                    log('minPossible drPoints:', drPoints, 'shortestRemainingPath:', shortestRemainingPath?.path);
 
                     // now we need to add all those points in front
                     // Then add from where we are to the end of the task

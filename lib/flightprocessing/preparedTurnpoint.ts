@@ -347,14 +347,26 @@ export class PreparedTurnpoint {
 
     // ---------------- Crossing: line ----------------
 
-    /** +1 if left-normal (lineBearing+90) is closer to departureMid; -1 if right-normal is closer. */
+    /** +1 if left-normal (lineBearing+90) is closer to the task direction through this line;
+     *  -1 if right-normal is closer.
+     *
+     *  The task direction is: toward brNP for the start (leg 0, no previous),
+     *  from brPP for the finish (last leg, no next), or brNP for middle legs.
+     *  This is independent of the `direction` field which controls line orientation. */
     private _lineNormalSign(): number {
+        // Task direction through the line: for start use brNP, for finish use
+        // opposite of brPP (= direction pilot is heading after crossing),
+        // for middle legs brNP
+        const taskDirection = this.brNP ?? norm360((this.brPP ?? 0) + 180);
         const left = norm360(this.lineBearing + 90);
         const right = norm360(this.lineBearing - 90);
-        const dl = Math.abs(norm180(this.departureMid - left));
-        const dr = Math.abs(norm180(this.departureMid - right));
+        const dl = Math.abs(norm180(taskDirection - left));
+        const dr = Math.abs(norm180(taskDirection - right));
         return dl <= dr ? +1 : -1;
     }
+
+    /** Debug flag: set to true to enable logging in _hasCrossedLine */
+    static debugLine = false;
 
     /** Analytic crossing with the infinite line; then check finite extent and direction. */
     private _hasCrossedLine(prev: BasePositionMessage, pos: BasePositionMessage): HasCrossedResult {
@@ -372,6 +384,11 @@ export class PreparedTurnpoint {
             const t = -v0 / dv; // v(t)=0 -> intersection with infinite line
             if (t > 0 && t < 1) {
                 const u = u0 + t * (u1 - u0);
+                if (PreparedTurnpoint.debugLine) {
+                    const distToCenter = Math.sqrt(u * u); // u at crossing, v=0 by definition
+                    const distBeyondEnd = Math.max(0, Math.abs(u) - this.lineHalfLenM);
+                    console.log(`  LINE-DBG leg${this.leg.legno} t=${pos.t}: prev=[${prev.lat.toFixed(5)},${prev.lng.toFixed(5)}] pos=[${pos.lat.toFixed(5)},${pos.lng.toFixed(5)}] v0=${v0.toFixed(0)} v1=${v1.toFixed(0)} u0=${u0.toFixed(0)} u1=${u1.toFixed(0)} t_cross=${t.toFixed(3)} u@cross=${u.toFixed(0)} halfLen=${this.lineHalfLenM} beyond=${distBeyondEnd.toFixed(0)} finalInside=${finalInside}`);
+                }
                 if (Math.abs(u) <= this.lineHalfLenM + 1e-6) {
                     const at = this._interpOnGeodesic(prev, pos, t);
                     // Correct direction iff dv has same sign as the chosen forward normal

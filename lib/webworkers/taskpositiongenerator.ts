@@ -230,6 +230,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // check if we are in the sector
                 else {
                     const hc = startLine.hasCrossed(previousPoint, point);
+                    if ((hc.distanceKm ?? Infinity) < 0.2 || hc.everInside) log('startline:', hc.everInside, 'crossings:', hc.crossings.length, 'dist:', hc.distanceKm?.toFixed(3));
                     if (hc.everInside) {
                         if (!hc.finalInside) {
                             // for starts it's always the last crossing that matters
@@ -319,7 +320,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             // If this point is closer to the sector than the last one then save it away so we can
             // check for doglegs
             if (!inSector && !inPenalty && distanceRemaining < status.closestDistanceToNext!) {
-                console.log('CD2N:', status.compno, distanceRemaining);
                 status.closestDistanceToNext = (Math.round(distanceRemaining * 10) / 10) as DistanceKM;
                 status.closestToNextSectorPoint = simplifyPoint(point);
                 status.closestSectorPoint = hc.onBoundary;

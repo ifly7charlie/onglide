@@ -43,7 +43,10 @@ const mysql = Mysql({
         host: process.env.MYSQL_HOST,
         database: process.env.MYSQL_DATABASE,
         user: process.env.MYSQL_USER,
-        password: process.env.MYSQL_PASSWORD
+        password: process.env.MYSQL_PASSWORD,
+        // mysql2@3.x returns BIGINT/DECIMAL as strings by default;
+        // restore mysql@2.x behaviour of returning numbers
+        decimalNumbers: true
     },
     onError: (e) => {
         console.log(e);
@@ -222,6 +225,28 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
     task.preparedLegs = task.legs.map((_leg, i) => new PreparedTurnpoint(task.legs, i));
 
+    // Debug: print task geometry for first invocation
+    if (argv.compno && !argv.compno.includes(',')) {
+        console.log(`\n=== Task Rules ===`);
+        console.log(`  grandprixstart: ${task.rules.grandprixstart}, nostartutc: ${task.rules.nostartutc} (type: ${typeof task.rules.nostartutc})`);
+        console.log(`  aat: ${task.rules.aat}, type: ${task.details.type}`);
+        for (const [i, leg] of task.legs.entries()) {
+            const pl = task.preparedLegs[i];
+            console.log(`  leg ${i}: type=${leg.type} dir=${leg.direction} a1=${leg.a1} a12=${leg.a12} r1=${leg.r1} r2=${leg.r2} a2=${leg.a2}`);
+            console.log(`    brNP=${pl.brNP?.toFixed(2)} brPP=${pl.brPP?.toFixed(2)} approachMid=${pl.approachMid.toFixed(2)} departureMid=${pl.departureMid.toFixed(2)}`);
+            if (leg.type === 'line') {
+                console.log(`    lineBearing=${pl.lineBearing.toFixed(2)} lineHalfLenM=${pl.lineHalfLenM} lineNormalSign=${pl.lineNormalSign}`);
+                console.log(`    lineEndA=${JSON.stringify(pl.lineEndA)} lineEndB=${JSON.stringify(pl.lineEndB)}`);
+            }
+        }
+        console.log(`===\n`);
+    }
+
+    // Enable line crossing debug for single pilot
+    if (argv.compno && !argv.compno.includes(',')) {
+        PreparedTurnpoint.debugLine = true;
+    }
+
     const simplifiedQueue: any[] = [];
     glider.messages = interimQueue;
     glider.channel = {
@@ -274,6 +299,31 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
     log(`${compno}: done, ${printDate(lastScore?.utcStart)} -${printDate(lastScore?.utcFinish)}` + `${lastScore?.actual?.taskDistance || 0}km, ${lastScore?.actual?.taskSpeed}kph`);
     log(`${compno}: ${numberOfScores} scores output, ${ms.toFixed(2)}ms -> avgUs: ${avgUs.toFixed(1)}, ${cps.toFixed(0)}/sec`);
+
+    // Detailed output when running a single compno
+    if (argv.compno && !argv.compno.includes(',') && lastScore) {
+        console.log(`\n=== ${compno} Final Score Details ===`);
+        console.log(`  start: ${printDate(lastScore.utcStart)} (${lastScore.utcStart})`);
+        console.log(`  finish: ${lastScore.utcFinish ? printDate(lastScore.utcFinish) + ' (' + lastScore.utcFinish + ')' : 'NONE'}`);
+        console.log(`  flightStatus: ${PositionStatusText[lastScore.flightStatus ?? PositionStatus.Unknown]}`);
+        console.log(`  currentLeg: ${lastScore.currentLeg}`);
+        console.log(`  taskDuration: ${lastScore.taskDuration}s (${lastScore.taskDuration ? (lastScore.taskDuration / 3600).toFixed(2) + 'h' : '-'})`);
+        console.log(`  taskTimeRemaining: ${lastScore.taskTimeRemaining}s`);
+        console.log(`  actual.taskDistance: ${lastScore.actual?.taskDistance}`);
+        console.log(`  actual.taskSpeed: ${lastScore.actual?.taskSpeed}`);
+        console.log(`  actual.distanceRemaining: ${lastScore.actual?.distanceRemaining}`);
+        console.log(`  actual.minPossible: ${lastScore.actual?.minPossible}`);
+        console.log(`  actual.maxPossible: ${lastScore.actual?.maxPossible}`);
+        console.log(`  inSector: ${lastScore.inSector}, inPenalty: ${lastScore.inPenalty}`);
+        console.log(`  task.rules: grandprix=${task.rules.grandprixstart}, aat=${task.rules.aat}, nostartutc=${task.rules.nostartutc}`);
+        console.log(`  task.details.type: ${task.details.type}, durationsecs: ${task.details.durationsecs}`);
+        console.log(`  Legs:`);
+        for (const [legno, leg] of Object.entries(lastScore.legs)) {
+            console.log(`    leg ${legno}: dist=${leg.actual?.distance}, taskDist=${leg.actual?.taskDistance}, speed=${leg.actual?.legSpeed}, time=${leg.time ? printDate(leg.time) : '-'}, dur=${leg.duration}s`);
+        }
+        console.log(`  home: dist=${lastScore.home?.distanceRemaining?.toFixed(1)}, gr=${lastScore.home?.grRemaining}`);
+        console.log('===\n');
+    }
 
     return {
         compno,
