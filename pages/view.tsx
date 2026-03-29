@@ -35,6 +35,7 @@ import {parseIGC, type IGCData} from '../lib/view/igcParser';
 import {buildTask} from '../lib/view/taskBuilder';
 import {scoreIGCFlight} from '../lib/view/clientScoringPipeline';
 import {dispatchClass, dispatchTask, dispatchTrack, dispatchScores, dispatchTimeRange} from '../lib/view/populateStore';
+import {setReferenceDate} from '../lib/flightprocessing/referenceDate';
 
 import {PilotList, Details} from '../lib/react/pilotlist';
 
@@ -268,6 +269,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         const result = buildTask(igcData);
                         if (result) {
                             taskRef.current = result.task;
+                            setReferenceDate(igcData.date.epochBase);
 
                             const earliest = igcData.fixes[0].t;
                             const latest = igcData.fixes[igcData.fixes.length - 1].t;

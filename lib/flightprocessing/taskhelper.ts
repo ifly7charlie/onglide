@@ -30,7 +30,7 @@ export function calculateTask(task: Task) {
         let feature: Feature<Polygon | LineString | MultiPolygon> = pl.toGeoJSON();
 
         if (feature.geometry?.type === 'LineString') {
-            feature = buffer(feature.geometry, 50, {units: 'meters'});
+            feature = buffer(feature.geometry, 100, {units: 'meters'});
         }
 
         if (feature.geometry?.type === 'MultiPolygon') {
