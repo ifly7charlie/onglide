@@ -7,14 +7,11 @@
 
 import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, isEnrichedTick} from '../types';
 
-import {setTimeout} from 'timers/promises';
-
 import {cloneDeep as _clonedeep} from 'lodash';
 
 import {stripPoints} from '../flightprocessing/taskhelper';
 
-const sleepInterval = parseInt(process.env.MIN_SCORING_EMIT_TIME_MS ?? '10000') || 10000;
-const RELAXED_START_TOLERANCE_M = parseInt(process.env.RELAXED_START_TOLERANCE_M ?? '1500') || 1500;
+import {RELAXED_START_TOLERANCE_M} from '../constants';
 
 //export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
@@ -191,7 +188,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (point.t < task.rules.nostartutc - 10) {
                     if (point._) {
                         yield status;
-                        await setTimeout(Math.min((task.rules.nostartutc - 10 - point.t) * 1000, sleepInterval));
                     }
                     continue;
                 }
@@ -201,7 +197,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (status.utcStart && point.t < status.utcStart) {
                     if (point._) {
                         yield status;
-                        await setTimeout(Math.min((status.utcStart - point.t - 10) * 1000, sleepInterval));
+
                     }
                     continue;
                 }
@@ -228,7 +224,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                     if (point._) {
                         yield status;
-                        await setTimeout(sleepInterval);
+
                     }
                     continue;
                 }
@@ -254,7 +250,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             relaxedStartCandidate = null; // strict takes priority
                             if (point._) {
                                 yield status;
-                                await setTimeout(sleepInterval);
+        
                             }
                         } else {
                             // if we are entering then we can reset - this only works for sectors not lines
@@ -294,7 +290,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             relaxedStartCandidate = null;
                             if (point._) {
                                 yield status;
-                                await setTimeout(sleepInterval);
+        
                             }
                         } else if (distToTP1 > relaxedStartCandidate.distToTP1 + 2.0) {
                             // Pilot moving away from TP1 → reject candidate
@@ -309,7 +305,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (!status.startFound) {
                     if (point._) {
                         yield status;
-                        await setTimeout(sleepInterval);
+
                     }
                     continue;
                 }
@@ -404,7 +400,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     // we must see a point to complete this so nothing to do
                     if (point._) {
                         yield status;
-                        await setTimeout((1 / 10) * sleepInterval);
                     }
                     continue;
                 }
@@ -602,11 +597,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             if (point._) {
                 log(status);
                 yield status;
-                if (task.rules.aat) {
-                    await setTimeout((status.inSector ? 2 : 1) * sleepInterval); // less often for in sector aat
-                } else {
-                    await setTimeout(Math.max((Math.min(status.closestDistanceToNext ?? Infinity, 25) / 25) * sleepInterval, 5000)); //
-                }
             }
         } catch (e) {
             console.log('Exception in taskPositionGenerator');

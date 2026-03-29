@@ -1,6 +1,5 @@
 import {Epoch, DistanceKM, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, PositionStatus, isTick} from '../types';
 
-import Graph from '../flightprocessing/dijkstras';
 import {DistanceOptimiser} from '../flightprocessing/distanceOptimiser';
 
 import {distHaversine, sumPath} from '../flightprocessing/taskhelper';

@@ -253,7 +253,10 @@ export const tracksSlice = createSlice({
     initialState,
     reducers: {
         updateTracks: _updateTracks,
-        updatePositions: _updatePositions
+        updatePositions: _updatePositions,
+        loadTracks: (state, action: PayloadAction<PilotTracks>) => {
+            _updateTracks(state, {...action, source: 'loaded'});
+        }
     },
     extraReducers: (builder) => {
         //
@@ -309,7 +312,7 @@ export const tracksSlice = createSlice({
 });
 
 export default tracksSlice.reducer;
-export const {updateTracks, updatePositions} = tracksSlice.actions;
+export const {updateTracks, updatePositions, loadTracks} = tracksSlice.actions;
 export const {
     selectPilotVario,
     selectPilotPosition,

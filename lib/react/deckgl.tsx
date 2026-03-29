@@ -340,7 +340,7 @@ export default function MApp(props: {
             if (map) {
                 map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
                 map.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
-                map.setLayoutProperty('contour-line', 'visible', mapStreet ? 'none' : 'visible');
+                map.setLayoutProperty('contour-line', 'visibility', mapStreet ? 'none' : 'visible');
             }
         } catch (e) {}
     }, [mapStreet, mapRef?.current]);
@@ -420,10 +420,10 @@ export default function MApp(props: {
                         ) : null}
                     </>
                 ) : null}
-                {selectedScore ? (
-                    <Source type="geojson" data={selectedScore?.scoredGeoJSON} key={'scored_'} id={'scored'}>
-                        <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: selectedScore?.scoredGeoJSON ? 'visible' : 'none'}}} />
-                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, !!selectedScore?.scoredGeoJSON)} />
+                {selectedScore?.scoredGeoJSON ? (
+                    <Source type="geojson" data={selectedScore.scoredGeoJSON} key={'scored_'} id={'scored'}>
+                        <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: 'visible'}}} />
+                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, true)} />
                     </Source>
                 ) : null}
                 <MeasureLayers key="measure" />

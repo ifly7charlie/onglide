@@ -19,7 +19,7 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
     const oldChecksums = useSelector(selectTrackVersion);
 
     const decoder = async (data: Buffer): Promise<void> => {
-        return new Response(data).arrayBuffer().then(async (ab) => {
+        return new Response(data as unknown as BodyInit).arrayBuffer().then(async (ab) => {
             const decoded = OnglideWebSocketMessage.decode(new Uint8Array(ab));
             if (!decoded) {
                 console.log('unable to decode websocket message');
