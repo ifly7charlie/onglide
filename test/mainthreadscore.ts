@@ -333,7 +333,9 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         ms,
         avgUs,
         cps,
-        taskDistance: lastScore?.actual?.taskDistance, //
+        start: lastScore?.utcStart ? new Date(lastScore.utcStart * 1000).toISOString().substring(11, 19) : '-',
+        finish: lastScore?.utcFinish ? new Date(lastScore.utcFinish * 1000).toISOString().substring(11, 19) : '-',
+        taskDistance: lastScore?.actual?.taskDistance,
         taskSpeed: lastScore?.actual?.taskSpeed,
         status: PositionStatusText[lastScore?.flightStatus ?? PositionStatus.Unknown]
     };

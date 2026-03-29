@@ -14,6 +14,7 @@ import {cloneDeep as _clonedeep} from 'lodash';
 import {stripPoints} from '../flightprocessing/taskhelper';
 
 const sleepInterval = parseInt(process.env.MIN_SCORING_EMIT_TIME_MS ?? '10000') || 10000;
+const RELAXED_START_TOLERANCE_M = parseInt(process.env.RELAXED_START_TOLERANCE_M ?? '1500') || 1500;
 
 //export type TaskPositionGeneratorFunction = (task: Task, pointGenerator: InOrderGeneratorFunction, log?: Function) => AsyncGenerator<TaskStatus, void, void>;
 
@@ -34,8 +35,14 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
     let lastTickStatus: TaskStatus | null = null;
     let status: TaskStatus = null;
+    // Relaxed start line detection state
+    let relaxedStartCandidate: {crossing: {entered: boolean; left: boolean; at: BasePositionMessage}; beyondM: number; distToTP1: DistanceKM} | null = null;
+    let closestDistToStartLine: DistanceKM = Infinity as DistanceKM;
+
     // Reset everything related to the current task
     function resetStart() {
+        relaxedStartCandidate = null;
+        closestDistToStartLine = Infinity as DistanceKM;
         status = {
             compno: status?.compno || ('init' as Compno),
             t: status?.t || (0 as Epoch),
@@ -230,6 +237,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // check if we are in the sector
                 else {
                     const hc = startLine.hasCrossed(previousPoint, point);
+
+                    // Track closest perpendicular approach to the start line
+                    if (hc.distanceKm !== undefined && hc.distanceKm < closestDistToStartLine) {
+                        closestDistToStartLine = hc.distanceKm;
+                    }
+
                     if ((hc.distanceKm ?? Infinity) < 0.2 || hc.everInside) log('startline:', hc.everInside, 'crossings:', hc.crossings.length, 'dist:', hc.distanceKm?.toFixed(3));
                     if (hc.everInside) {
                         if (!hc.finalInside) {
@@ -238,6 +251,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             status.startFound = true;
                             status.currentLeg = 1;
                             status.utcStart = status.legs[0].exitTimeStamp = status.legs[0].points[0].t;
+                            relaxedStartCandidate = null; // strict takes priority
                             if (point._) {
                                 yield status;
                                 await setTimeout(sleepInterval);
@@ -247,6 +261,45 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             // lines can never have finalInside set
                             resetStart();
                             continue;
+                        }
+                    }
+                    // Relaxed start line detection: near-miss crossing beyond finite extent
+                    else if (
+                        !status.startFound &&
+                        startLine.leg.type === 'line' &&
+                        hc.nearMissBeyondM !== undefined &&
+                        hc.nearMissBeyondM <= RELAXED_START_TOLERANCE_M &&
+                        hc.nearMissCrossing &&
+                        closestDistToStartLine < 2.0 // pilot was near the line at some point
+                    ) {
+                        const distToTP1 = (legs[1]?.fromSector(point) ?? Infinity) as DistanceKM;
+                        relaxedStartCandidate = {
+                            crossing: hc.nearMissCrossing,
+                            beyondM: hc.nearMissBeyondM,
+                            distToTP1
+                        };
+                        log(`relaxed start candidate: beyond=${hc.nearMissBeyondM.toFixed(0)}m, distToTP1=${distToTP1.toFixed(1)}`);
+                    }
+                    // Confirm a relaxed start candidate: pilot moving toward TP1
+                    else if (!status.startFound && relaxedStartCandidate) {
+                        const distToTP1 = (legs[1]?.fromSector(point) ?? Infinity) as DistanceKM;
+                        if (distToTP1 < relaxedStartCandidate.distToTP1 - 0.5) {
+                            // Pilot is closer to TP1 → accept the relaxed start
+                            log(`relaxed start ACCEPTED: beyond=${relaxedStartCandidate.beyondM.toFixed(0)}m, distToTP1 ${relaxedStartCandidate.distToTP1.toFixed(1)}->${distToTP1.toFixed(1)}`);
+                            status.legs[0].points = [simplifyPoint(relaxedStartCandidate.crossing.at)];
+                            status.legs[0].estimatedTurn = EstimatedTurnType.dogleg;
+                            status.startFound = true;
+                            status.currentLeg = 1;
+                            status.utcStart = status.legs[0].exitTimeStamp = status.legs[0].points[0].t;
+                            relaxedStartCandidate = null;
+                            if (point._) {
+                                yield status;
+                                await setTimeout(sleepInterval);
+                            }
+                        } else if (distToTP1 > relaxedStartCandidate.distToTP1 + 2.0) {
+                            // Pilot moving away from TP1 → reject candidate
+                            log(`relaxed start candidate rejected: pilot moving away from TP1`);
+                            relaxedStartCandidate = null;
                         }
                     }
                 }

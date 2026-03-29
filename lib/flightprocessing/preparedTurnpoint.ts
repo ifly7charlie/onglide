@@ -45,6 +45,12 @@ export interface HasCrossedResult {
     distanceKm?: DistanceKM;
     /** Boundary point corresponding to distanceKm; carries t/a from POS when synthesized. */
     onBoundary?: BasePositionMessage;
+    /** When the infinite line was crossed but outside the finite extent,
+     *  how far beyond the nearest line endpoint (meters, positive). */
+    nearMissBeyondM?: number;
+    /** Crossing positioned at the nearest line endpoint (not on the extension).
+     *  Time is interpolated from the infinite-line crossing fraction. */
+    nearMissCrossing?: Crossing;
 }
 
 type AccNearest = {
@@ -385,9 +391,8 @@ export class PreparedTurnpoint {
             if (t > 0 && t < 1) {
                 const u = u0 + t * (u1 - u0);
                 if (PreparedTurnpoint.debugLine) {
-                    const distToCenter = Math.sqrt(u * u); // u at crossing, v=0 by definition
-                    const distBeyondEnd = Math.max(0, Math.abs(u) - this.lineHalfLenM);
-                    console.log(`  LINE-DBG leg${this.leg.legno} t=${pos.t}: prev=[${prev.lat.toFixed(5)},${prev.lng.toFixed(5)}] pos=[${pos.lat.toFixed(5)},${pos.lng.toFixed(5)}] v0=${v0.toFixed(0)} v1=${v1.toFixed(0)} u0=${u0.toFixed(0)} u1=${u1.toFixed(0)} t_cross=${t.toFixed(3)} u@cross=${u.toFixed(0)} halfLen=${this.lineHalfLenM} beyond=${distBeyondEnd.toFixed(0)} finalInside=${finalInside}`);
+                    const beyond = Math.max(0, Math.abs(u) - this.lineHalfLenM);
+                    console.log(`  LINE-DBG leg${this.leg.legno} t=${pos.t}: v0=${v0.toFixed(0)} v1=${v1.toFixed(0)} u@cross=${u.toFixed(0)} halfLen=${this.lineHalfLenM} beyond=${beyond.toFixed(0)} finalInside=${finalInside}`);
                 }
                 if (Math.abs(u) <= this.lineHalfLenM + 1e-6) {
                     const at = this._interpOnGeodesic(prev, pos, t);
@@ -403,6 +408,27 @@ export class PreparedTurnpoint {
                             everInside: finalInside
                         };
                     }
+                } else if (finalInside) {
+                    // Near-miss: crossed infinite line beyond finite extent, correct direction.
+                    // Record crossing positioned at the nearest line ENDPOINT for scoring.
+                    const beyondM = Math.abs(u) - this.lineHalfLenM;
+                    const dirOk = dv * this.lineNormalSign > 0;
+                    const uEnd = u < 0 ? -this.lineHalfLenM : this.lineHalfLenM;
+                    const endPt = G.Direct(this.leg.nlat, this.leg.nlng, this.lineBearing, uEnd, Geodesic.LATITUDE | Geodesic.LONGITUDE);
+                    const ts = Math.round(prev.t + t * (pos.t - prev.t)) as BasePositionMessage['t'];
+                    const a = prev.a + t * (pos.a - prev.a);
+
+                    const uClamped = Math.max(-this.lineHalfLenM, Math.min(this.lineHalfLenM, u1));
+                    const on = G.Direct(this.leg.nlat, this.leg.nlng, this.lineBearing, uClamped, Geodesic.LATITUDE | Geodesic.LONGITUDE);
+                    return {
+                        finalInside: false,
+                        everInside: false,
+                        crossings: [],
+                        distanceKm: (Math.abs(v1) / 1000) as DistanceKM,
+                        onBoundary: {lat: on.lat2!, lng: on.lon2!, t: pos.t, a: pos.a},
+                        nearMissBeyondM: beyondM,
+                        nearMissCrossing: {entered: dirOk, left: !dirOk, at: {lat: endPt.lat2!, lng: endPt.lon2!, t: ts, a}}
+                    };
                 }
             }
         }
@@ -418,7 +444,6 @@ export class PreparedTurnpoint {
             everInside: false,
             crossings: [],
             distanceKm: (Math.abs(v1) / 1000) as DistanceKM,
-            //            ppDistSquared: (u0 - u1) * (u0 - u1) + (v0 - v1) * (v0 - v1),
             onBoundary: {lat: on.lat2!, lng: on.lon2!, t: pos.t, a: pos.a}
         };
     }
