@@ -191,6 +191,18 @@ export class PreparedTurnpoint {
         }
     }
 
+    /** Geodesic distance between two points in km. */
+    static geodesicDistance(from: BasePositionMessage, to: BasePositionMessage): DistanceKM {
+        return (G.Inverse(from.lat, from.lng, to.lat, to.lng, Geodesic.DISTANCE).s12! / 1000) as DistanceKM;
+    }
+
+    /** Interpolate a point along the geodesic from `from` to `to` at `distance` km from `from`. */
+    static interpolatePoint(from: BasePositionMessage, to: BasePositionMessage, distance: DistanceKM): BasePositionMessage {
+        const inv = G.Inverse(from.lat, from.lng, to.lat, to.lng, Geodesic.AZIMUTH);
+        const result = G.Direct(from.lat, from.lng, inv.azi1!, distance * 1000, Geodesic.LATITUDE | Geodesic.LONGITUDE);
+        return {t: to.t, a: to.a, lat: result.lat2!, lng: result.lon2!};
+    }
+
     scoredPointRemaining(remaining: DistanceKM): BasePositionMessage | undefined {
         if (!this.brPP) {
             return undefined;

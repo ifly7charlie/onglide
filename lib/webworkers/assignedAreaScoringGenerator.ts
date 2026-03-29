@@ -8,6 +8,7 @@ import {cloneDeep as _clonedeep, keyBy as _keyby, sortBy as _sortby} from 'lodas
 import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelper';
 
 import {convexHull} from '../flightprocessing/convexHull';
+import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
 /*
  * This is used just for scoring an AAT task
@@ -181,6 +182,8 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             // What we optimize in next stage
             //            let scoredPoints: BasePositionMessage[];
             let scoredPoints: ShortestResult<BasePositionMessage> | undefined;
+            let scoredDistanceAdjust = 0;
+            let scoredDistanceAdjustLeg = 0;
 
             // We don't optimize without a start
             if (taskStatus.startFound) {
@@ -194,46 +197,45 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // in the previous sector so we can optimise properly
                     //                    var tempGraph = maxGraph.clone();
 
-                    // If we are not in a sector it is a bit easier as it is just to the landout.  This is not
-                    // 100% correct as it..
-                    /// Annex A: to the point of the next Assigned Area which is nearest to the Outlanding Position,
-                    /// less the distance from the Outlanding Position to this nearest point
-                    // and this is doing it to the centre of the sector rather than the nearest point - it will be right
-                    // on circular sectors but not on wedges
-                    //                log('  assuming leg end leg' + t + ', at ' + (minNextDistP ? minNextDistP : p) + ' mdp:' + minNextDistP + ', finish:' + finish);
+                    // FAI Annex A: If not in a sector, route to the nearest boundary point of the
+                    // next Assigned Area, less the distance from the outlanding position to that point.
+                    // If achieved distance on the uncompleted leg is negative, take as zero.
                     const isInSector = taskStatus.inSector || taskStatus.inPenalty;
                     const aatPreviousLeg = aatLegStatus[taskStatus.currentLeg - 1];
 
                     if (aatPreviousLeg) {
-                        const convexHull = aatLegStatus[taskStatus.currentLeg].convexHull;
-                        if (isInSector) {
-                            // if we have multiple points check and see if they are making progress towards the
-                            // next turnpoint
-                            if (convexHull.length > 1) {
-                                const chReversed = _sortby(convexHull, (a) => -a.t);
-                                chReversed.pop(); // remove the oldest one — it has no prior points so the time filter would match nothing
-                                const nextLeg = preparedLegs[taskStatus.currentLeg + 1];
-                                scoredPoints = chReversed
-                                    .map((point) => {
-                                        const hc = nextLeg.hasCrossed(point, point); // get how close to next leg we are
-                                        if (hc.distanceKm == null) return undefined; // already inside next sector
-                                        const spr = nextLeg.scoredPointRemaining(hc.distanceKm);
-                                        if (!spr) return undefined;
-                                        return maxGraph.shortestAnyToGroupThenToPoint(spr, taskStatus.currentLeg, (p) => p.t < point.t);
-                                    })
-                                    .filter((r): r is ShortestResult<BasePositionMessage> => r != null)
-                                    .sort((a, b) => a.distance - b.distance)?.[0];
-                            } else {
-                                // if there is only one then just solve to that point
-                                scoredPoints = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
+                        // For the finish leg there is no "next sector" to extend to, so
+                        // always use the FAI boundary approach (same as not-in-sector).
+                        const isFinishLeg = taskStatus.currentLeg === task.legs.length - 1;
+
+                        if (isInSector && !isFinishLeg) {
+                            // When in sector, find the maximum distance path from start
+                            // through all previous sectors to the best point in the current sector's
+                            // convex hull. Don't extend to the next sector - that inflates the scored distance.
+                            scoredPoints = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
+
+                            // FAI Annex A: also credit progress toward next sector.
+                            // Append the nearest boundary point of the next AA to the optimal path
+                            // (preserving the credited fixes), then subtract pilot-to-boundary distance.
+                            // The uncompleted leg distance is clamped to zero so this never reduces the score.
+                            if (current.lastProcessedPoint && scoredPoints) {
+                                const nextPreparedLeg = preparedLegs[taskStatus.currentLeg + 1];
+                                if (nextPreparedLeg) {
+                                    const hc = nextPreparedLeg.hasCrossed(current.lastProcessedPoint, current.lastProcessedPoint);
+                                    if (hc.distanceKm && hc.onBoundary && isFinite(hc.distanceKm)) {
+                                        scoredPoints = {distance: scoredPoints.distance, path: [...scoredPoints.path, hc.onBoundary]};
+                                        scoredDistanceAdjust = hc.distanceKm;
+                                        scoredDistanceAdjustLeg = taskStatus.currentLeg + 1;
+                                    }
+                                }
                             }
                         } else if (taskStatus.closestSectorPoint && taskStatus.closestDistanceToNext && isFinite(taskStatus.closestDistanceToNext)) {
                             log('ts/closestsectorpoint', taskStatus.closestSectorPoint, taskStatus.closestDistanceToNext);
-                            const leg = preparedLegs[taskStatus.currentLeg];
-                            const spr = leg.scoredPointRemaining(taskStatus.closestDistanceToNext);
-                            if (spr) {
-                                scoredPoints = maxGraph.shortestAnyToGroupThenToPoint(spr, taskStatus.currentLeg - 1); // spr is closest we are to next sector
-                            }
+                            // FAI Annex A: route to nearest boundary point of next AA,
+                            // then subtract distance from outlanding to that point
+                            scoredPoints = maxGraph.shortestAnyToGroupThenToPoint(taskStatus.closestSectorPoint, taskStatus.currentLeg - 1);
+                            scoredDistanceAdjust = taskStatus.closestDistanceToNext;
+                            scoredDistanceAdjustLeg = taskStatus.currentLeg;
                         }
                     }
 
@@ -277,13 +279,14 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                         log('maxPossible', scoredStatus.maxPossible, longestRemainingPath.distance);
                     }
 
-                    // Next do distance remaining, it's shortest parth from current point to home
+                    // Next do distance remaining, it's shortest path from current point to home
+                    // When in sector, skip the current sector (pilot is already there) and go to next
                     const minRemainingFirstLeg = taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg;
-                    const drPath = minGraph.shortestFrom(current.lastProcessedPoint!, taskStatus.currentLeg - 1);
+                    const drPath = minGraph.shortestFrom(current.lastProcessedPoint!, minRemainingFirstLeg - 1);
                     log('drPath:', minRemainingFirstLeg, drPath);
 
                     const drPoints: BasePositionMessage[] = [];
-                    scoredStatus.distanceRemaining = sumPath(drPath.path, taskStatus.currentLeg - 1, preparedLegs, true, (leg, distance, p) => {
+                    scoredStatus.distanceRemaining = sumPath(drPath.path, minRemainingFirstLeg - 1, preparedLegs, true, (leg, distance, p) => {
                         log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
                         scoredStatus.legs[leg].distanceRemaining = distance;
                         if (p) {
@@ -299,16 +302,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                         minPossibleGraph.replaceGroup(index, [sp]);
                     });
 
-                    // Link from the current turn points to the next shortest path point
-                    const startLeg = aatLegStatus[taskStatus.currentLeg].convexHull.length ? taskStatus.currentLeg : taskStatus.currentLeg - 1;
-                    //find path from last point
                     const shortestRemainingPath = minPossibleGraph.shortestAll();
 
                     log('minPossible drPoints:', drPoints, 'shortestRemainingPath:', shortestRemainingPath?.path);
 
-                    // now we need to add all those points in front
-                    // Then add from where we are to the end of the task
-                    scoredStatus.minPossible = sumPath([...drPoints, ...(shortestRemainingPath?.path || [])], 0, preparedLegs, true, (leg, distance, point) => {
+                    // Use the full min path which has scored points pinned for completed legs
+                    // and minimum remaining through future sectors
+                    scoredStatus.minPossible = sumPath(shortestRemainingPath?.path || [], 0, preparedLegs, true, (leg, distance, point) => {
                         if (point) {
                             if (!scoredStatus.legs[leg]) {
                                 console.log('unable to set scored status', leg, distance, point);
@@ -336,6 +336,49 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                         scoredStatus.legs[leg].point = point;
                         scoredStatus.legs[leg].distance = distance;
                     });
+
+                    // FAI Annex A: "less the distance from the Outlanding Position to this nearest point"
+                    // "If the achieved distance of the uncompleted leg is less than zero, it shall be taken as zero"
+                    if (scoredDistanceAdjust > 0) {
+                        const cl = scoredStatus.legs[scoredDistanceAdjustLeg];
+                        if (cl) {
+                            const fullDist = cl.distance;
+                            const adj = Math.min(scoredDistanceAdjust, fullDist) as DistanceKM;
+                            const creditedDist = Math.max(fullDist - scoredDistanceAdjust, 0) as DistanceKM;
+
+                            cl.distance = (Math.round(creditedDist * 20) / 20) as DistanceKM;
+                            scoredStatus.distance = (Math.round((scoredStatus.distance - adj) * 20) / 20) as DistanceKM;
+
+                            // Move the scored point along the geodesic from previous fix toward
+                            // the boundary, so the visual line ends at the credited position
+                            const prevPoint = scoredStatus.legs[scoredDistanceAdjustLeg - 1]?.point;
+                            if (prevPoint && cl.point && fullDist > 0 && creditedDist > 0) {
+                                cl.point = PreparedTurnpoint.interpolatePoint(prevPoint, cl.point, creditedDist);
+                            } else {
+                                // No credited distance — remove the point to avoid a zero-length line
+                                cl.point = undefined;
+                            }
+                        }
+                    }
+
+                    // For finished tasks, recompute the finish leg distance along the
+                    // correct geodesic (previous fix → finish center) minus the ring radius,
+                    // rather than using the LDA approach-line approximation.
+                    if (scoredStatus.utcFinish) {
+                        const lastIdx = scoredStatus.legs.length - 1;
+                        const finishLeg = scoredStatus.legs[lastIdx];
+                        const prevLeg = scoredStatus.legs[lastIdx - 1];
+                        if (finishLeg?.point && prevLeg?.point) {
+                            const ringRadius = preparedLegs[lastIdx]?.leg?.legDistanceAdjust ?? 0;
+                            const fullDist = PreparedTurnpoint.geodesicDistance(prevLeg.point, fakeFinishPoint);
+                            const correctedDist = (Math.round(Math.max(fullDist - ringRadius, 0) * 20) / 20) as DistanceKM;
+                            scoredStatus.distance = (Math.round((scoredStatus.distance - finishLeg.distance + correctedDist) * 20) / 20) as DistanceKM;
+                            finishLeg.distance = correctedDist;
+                            if (correctedDist > 0) {
+                                finishLeg.point = PreparedTurnpoint.interpolatePoint(prevLeg.point, fakeFinishPoint, correctedDist);
+                            }
+                        }
+                    }
                 }
 
                 // We don't need necessary precision
