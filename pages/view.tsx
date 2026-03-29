@@ -297,13 +297,18 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             0 as Epoch
                         );
 
-                        dispatchTrack(dispatch, compno, igcData.pilot.name, igcData.fixes);
+                        // Find the start time from scores and drop pre-start fixes
+                        const lastScore = allScores.at(-1);
+                        const startUtc = lastScore?.utcStart as Epoch | undefined;
+                        const trackFixes = startUtc ? igcData.fixes.filter((f) => f.t >= startUtc - 30) : igcData.fixes;
+
+                        dispatchTrack(dispatch, compno, igcData.pilot.name, trackFixes);
                         if (allScores.length) {
                             dispatchScores(dispatch, allScores);
                         }
 
-                        const earliest = Math.min(availableScores.earliestScore, igcData.fixes[0].t) as Epoch;
-                        const latest = Math.max(availableScores.latestScore, igcData.fixes[igcData.fixes.length - 1].t) as Epoch;
+                        const earliest = Math.min(availableScores.earliestScore, trackFixes[0].t) as Epoch;
+                        const latest = Math.max(availableScores.latestScore, trackFixes[trackFixes.length - 1].t) as Epoch;
                         dispatchTimeRange(dispatch, earliest, latest);
                     }
 
@@ -381,6 +386,10 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         try {
             for (const flight of flights) {
                 const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, 100, 0 as Epoch);
+                const lastScore = scores.at(-1);
+                const startUtc = lastScore?.utcStart as Epoch | undefined;
+                const trackFixes = startUtc ? flight.igcData.fixes.filter((f) => f.t >= startUtc - 30) : flight.igcData.fixes;
+                dispatchTrack(dispatch, flight.compno, flight.pilotName, trackFixes);
                 if (scores.length) {
                     dispatchScores(dispatch, scores);
                 }
