@@ -10,6 +10,15 @@ module.exports = (phase, {defaultConfig}) => {
     const nextConfig = {
 		...additionalconfig,
         /* config options here */
+        async rewrites() {
+            return [
+                {
+                    source: '/',
+                    destination: '/viewer',
+                    has: [{ type: 'header', key: 'x-viewer' }]
+                }
+            ];
+        },
         i18n: {
             // These are all the locales you want to support in
             // your application
