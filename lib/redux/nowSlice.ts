@@ -2,7 +2,7 @@
 // This slice maintains the deck.gl data for tracks
 //
 
-import {createSlice} from '@reduxjs/toolkit';
+import {createSlice, createSelector} from '@reduxjs/toolkit';
 
 import {updateClassAction} from './actions';
 
@@ -64,11 +64,17 @@ export const nowSlice = createSlice({
         selectClassName: (state) => state.className,
         selectDatecode: (state) => state.datecode,
         selectScoreId: (state) => state.liveScoreId,
-        selectAvailableScoreTimes: (state) => ({earliestScore: state.earliestScore, latestScore: state.latestScore, live: !!state.liveScoreId}),
+        selectEarliestScore: (state) => state.earliestScore,
+        selectLatestScore: (state) => state.latestScore,
         selectOnline: (state) => state.onlineStart
     }
 });
 
 export default nowSlice.reducer;
 export const {updateNow, offline} = nowSlice.actions;
-export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectAvailableScoreTimes, selectOnline} = nowSlice.selectors;
+export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectEarliestScore, selectLatestScore, selectOnline} = nowSlice.selectors;
+
+export const selectAvailableScoreTimes = createSelector(
+    [selectEarliestScore, selectLatestScore, selectScoreId],
+    (earliestScore, latestScore, liveScoreId) => ({earliestScore, latestScore, live: !!liveScoreId})
+);

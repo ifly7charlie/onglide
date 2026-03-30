@@ -19,6 +19,9 @@ module.exports = (phase, {defaultConfig}) => {
             // a non-locale prefixed path e.g. `/hello`
             defaultLocale: 'en-GB',
         },
+		sassOptions: {
+			silenceDeprecations: ['import', 'global-builtin', 'color-functions', 'mixed-decls'],
+		},
 		output: "standalone",
     };
     return nextConfig;
