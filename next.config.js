@@ -11,15 +11,6 @@ module.exports = (phase, {defaultConfig}) => {
 		...additionalconfig,
         /* config options here */
         allowedDevOrigins: ['viewer.onglide.com'],
-        async rewrites() {
-            return [
-                {
-                    source: '/',
-                    destination: '/viewer',
-                    has: [{ type: 'host', value: 'viewer.onglide.com' }]
-                }
-            ];
-        },
         i18n: {
             // These are all the locales you want to support in
             // your application
