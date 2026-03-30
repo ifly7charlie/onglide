@@ -93,7 +93,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             scoredPoints: [],
             minDistancePoints: [],
             maxDistancePoints: [],
-            scoringClosestPoint: item.scoringClosestPoint ? {t: item.scoringClosestPoint.t, lat: item.scoringClosestPoint.lat, lng: item.scoringClosestPoint.lng} : undefined
+            scoringClosestPoint: item.scoringClosestPoint ? {t: item.scoringClosestPoint.t, lat: item.scoringClosestPoint.lat, lng: item.scoringClosestPoint.lng} : undefined,
+            optimalNextSectorPoint: item.optimalNextSectorPoint ? {t: item.optimalNextSectorPoint.t, lat: item.optimalNextSectorPoint.lat, lng: item.optimalNextSectorPoint.lng} : undefined
         };
 
         // If we have no start we may have had a tick we should just pass it through and ignore

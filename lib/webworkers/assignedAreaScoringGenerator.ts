@@ -214,6 +214,15 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             // convex hull. Don't extend to the next sector - that inflates the scored distance.
                             scoredPoints = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
 
+                            // Compute optimal next sector point for direction visualization
+                            if (scoredPoints && scoredPoints.path.length > 0 && taskStatus.currentLeg + 1 < task.legs.length) {
+                                const bestCurrentPoint = scoredPoints.path.at(-1)!;
+                                const forwardPath = maxGraph.shortestFrom(bestCurrentPoint, taskStatus.currentLeg);
+                                if (forwardPath.path.length >= 2) {
+                                    scoredStatus.optimalNextSectorPoint = forwardPath.path[1];
+                                }
+                            }
+
                             // FAI Annex A: also credit progress toward next sector.
                             // Append the nearest boundary point of the next AA to the optimal path
                             // (preserving the credited fixes), then subtract pilot-to-boundary distance.
@@ -332,6 +341,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
                     scoredPoints = maxGraph.shortestAll();
                     delete scoredStatus.scoringClosestPoint;
+                    delete scoredStatus.optimalNextSectorPoint;
                     scoredStatus.legs.forEach((l) => {
                         l.distanceRemaining = 0 as DistanceKM;
                         delete l.maxPossible;

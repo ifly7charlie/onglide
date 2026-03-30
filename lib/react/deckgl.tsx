@@ -19,6 +19,7 @@ import {useSelector} from '../redux';
 import {ErrorBoundary} from 'react-error-boundary';
 
 import {assembleHullLine} from './hullLine';
+import {assembleOptimalDirection} from './optimalDirection';
 
 function DeckGLOverlay(
     props: MapboxOverlayProps & {
@@ -370,6 +371,45 @@ export default function MApp(props: {
     // If we are on last leg of AAT then we stop showing construction lines
     const lastLeg = task?.rules?.aat && debouncedScore?.currentLeg == task?.legs?.length - 1;
 
+    // Iso-distance ellipses for AAT in-sector visualization, locked to the current scored point
+    const optimalDirectionGeoJSON = useMemo(() => {
+        if (
+            !options.constructionLines ||
+            !task?.rules?.aat ||
+            !debouncedScore?.optimalNextSectorPoint ||
+            (!debouncedScore?.inSector && !debouncedScore?.inPenalty) ||
+            lastLeg
+        ) {
+            return null;
+        }
+
+        const sp = debouncedScore.scoredPoints;
+        const currentLeg = debouncedScore.currentLeg;
+        if (!sp || sp.length < 12 || currentLeg < 1) return null;
+
+        // A = scored point in previous sector (4 floats per point: lng, lat, dist, hdist)
+        const aIdx = (currentLeg - 1) * 4;
+        // S = current scored point in this sector (the optimiser's best point in the hull)
+        const sIdx = currentLeg * 4;
+        if (sIdx + 1 >= sp.length) return null;
+
+        const A = {lng: sp[aIdx], lat: sp[aIdx + 1]};
+        const S = {lng: sp[sIdx], lat: sp[sIdx + 1]};
+        const C = debouncedScore.optimalNextSectorPoint;
+
+        return assembleOptimalDirection(S, A, C);
+    }, [
+        debouncedScore?.optimalNextSectorPoint?.lat,
+        debouncedScore?.optimalNextSectorPoint?.lng,
+        debouncedScore?.scoredPoints,
+        debouncedScore?.currentLeg,
+        debouncedScore?.inSector,
+        debouncedScore?.inPenalty,
+        options.constructionLines,
+        task?.rules?.aat,
+        lastLeg
+    ]);
+
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
@@ -427,6 +467,11 @@ export default function MApp(props: {
                             <Source type="geojson" data={assembleHullLine(debouncedScore.legs)} key={'hull_'}>
                                 <Layer {...hullLineStyle} />
                                 <Layer {...hullPointStyle} />
+                            </Source>
+                        ) : null}
+                        {optimalDirectionGeoJSON ? (
+                            <Source type="geojson" data={optimalDirectionGeoJSON} key={'optimal_'} id={'optimal'}>
+                                <Layer {...isoDistanceEllipseStyle} />
                             </Source>
                         ) : null}
                     </>
@@ -512,6 +557,18 @@ const hullLineStyle: LayerProps = {
         'line-width': 2,
         'line-opacity': 0.6,
         'line-dasharray': [4, 1]
+    }
+};
+
+const isoDistanceEllipseStyle: LayerProps = {
+    id: 'iso_distance',
+    type: 'line',
+    filter: ['==', ['get', 'type'], 'isoDistance'],
+    paint: {
+        'line-color': ['case', ['==', ['get', 'deltaFromCurrent'], 0], '#ff0', '#ffa500'],
+        'line-width': 2,
+        'line-opacity': 0.6,
+        'line-dasharray': [2, 2]
     }
 };
 
