@@ -22,7 +22,6 @@ module.exports = (phase, {defaultConfig}) => {
 		sassOptions: {
 			silenceDeprecations: ['import', 'global-builtin', 'color-functions', 'mixed-decls'],
 		},
-		output: "standalone",
     };
     return nextConfig;
 };
