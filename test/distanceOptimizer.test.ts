@@ -1,6 +1,6 @@
 // DistanceOptimiser.test.ts
 import {DistanceOptimiser} from '../lib/flightprocessing/distanceOptimiser';
-import {describe, test, expect, jest} from '@jest/globals';
+import {describe, test, expect, vi} from 'vitest';
 
 type Pt = {x: number; y: number};
 const w = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -180,7 +180,7 @@ describe('DistanceOptimiser (fixed L) – public API', () => {
         const opt = makeBaseOptimiser();
         // Build prefix first
         const d = opt.shortestAll().distance;
-        const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+        const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
         opt.printSummary();
         const calls = spy.mock.calls.flat().join('\n');
         expect(calls).toEqual(expect.stringContaining('Groups: 4'));

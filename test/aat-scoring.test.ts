@@ -4,6 +4,7 @@
  * Tests the full scoring chain with synthetic tasks and flights.
  * Each test references the specific rule clause it validates.
  */
+import {describe, test, expect} from 'vitest';
 import {Geodesic} from 'geographiclib-geodesic';
 import type {Epoch, DistanceKM} from '../lib/types';
 import {distHaversine} from '../lib/flightprocessing/taskhelper';
@@ -61,8 +62,6 @@ function dist(a: {lat: number; lng: number}, b: {lat: number; lng: number}): num
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 describe('AAT Scoring — FAI Rule Compliance', () => {
-    // Give async generators plenty of time
-    jest.setTimeout(30000);
 
     // ── 7.6.1c: Credited Fixes maximize distance ──────────────────────
 
