@@ -284,24 +284,33 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // Next do distance remaining, it's shortest path from current point to home
                     // When in sector, skip the current sector (pilot is already there) and go to next
                     const minRemainingFirstLeg = taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg;
-                    const drPath = minGraph.shortestFrom(current.lastProcessedPoint!, minRemainingFirstLeg - 1);
-                    log('drPath:', minRemainingFirstLeg, drPath);
-
                     const drPoints: BasePositionMessage[] = [];
-                    scoredStatus.distanceRemaining = sumPath(drPath.path, minRemainingFirstLeg - 1, preparedLegs, true, (leg, distance, p) => {
-                        log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
-                        scoredStatus.legs[leg].distanceRemaining = distance;
-                        if (p) {
-                            drPoints.push(p);
-                        }
-                    });
+
+                    // Guard: if in the finish sector, there's nowhere left to go
+                    if (minRemainingFirstLeg < task.legs.length) {
+                        const drPath = minGraph.shortestFrom(current.lastProcessedPoint!, minRemainingFirstLeg - 1);
+                        log('drPath:', minRemainingFirstLeg, drPath);
+
+                        scoredStatus.distanceRemaining = sumPath(drPath.path, minRemainingFirstLeg - 1, preparedLegs, true, (leg, distance, p) => {
+                            log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
+                            scoredStatus.legs[leg].distanceRemaining = distance;
+                            if (p) {
+                                drPoints.push(p);
+                            }
+                        });
+                    } else {
+                        scoredStatus.distanceRemaining = 0 as DistanceKM;
+                    }
 
                     // Finally we need to find min possible remaining task distance
                     // this is basically the maximum distance up until now, and then the
                     // minimum distance from there to the finish.
                     const minPossibleGraph = minGraph.clone();
+                    const minPossibleGroups = minPossibleGraph.getGroups().length;
                     scoredPoints?.path.forEach((sp, index) => {
-                        minPossibleGraph.replaceGroup(index, [sp]);
+                        if (index < minPossibleGroups) {
+                            minPossibleGraph.replaceGroup(index, [sp]);
+                        }
                     });
 
                     const shortestRemainingPath = minPossibleGraph.shortestAll();
