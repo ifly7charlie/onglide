@@ -10,12 +10,13 @@ module.exports = (phase, {defaultConfig}) => {
     const nextConfig = {
 		...additionalconfig,
         /* config options here */
+        allowedDevOrigins: ['viewer.onglide.com'],
         async rewrites() {
             return [
                 {
                     source: '/',
                     destination: '/viewer',
-                    has: [{ type: 'header', key: 'x-viewer' }]
+                    has: [{ type: 'host', value: 'viewer.onglide.com' }]
                 }
             ];
         },
