@@ -11,6 +11,8 @@ import {useSelector} from '../redux';
 
 import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
 
+import {d} from '../now';
+
 import {OgnTripsLayer} from './ogntripslayer';
 
 // Figure out the baseline date
@@ -39,7 +41,7 @@ export function pilotsTrackLayer(
     fullPaths: PathLength
 ) {
     const trackData = useSelector((state) => selectAllTracks(state));
-    const startTimes = useSelector((state) => selectAllTimes(state));
+    const startTimes = useSelector((state) => selectAllTimes(state, props.replayTime));
 
     if (!trackData) {
         console.log('missing layers');
@@ -110,7 +112,7 @@ export function pilotsTrackLayer(
             // as this is a path layer the primary data structure is segments - we only need to redraw the last segment
             _dataDiff: (newData: any, oldData: any) => [{startRow: oldData.length - 1, endRow: newData.length}],
             updateTriggers: {
-                getPath: p.posIndex,
+                getPath: [p.posIndex, clipStartAt],
                 getColor: [mapLight, complexColours[sortKey] ? sortKey : 'normal', mapLight, selected, fullPaths],
                 getTimestamps: [track.deckAdditional?.tr?.length],
                 getWidth: selected
