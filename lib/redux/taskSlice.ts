@@ -21,6 +21,7 @@ interface TaskSliceState {
     className: ClassName;
     datecode: Datecode;
     geoJSON?: {tp: FeatureCollection; track: FeatureCollection; Dm: Point} | undefined;
+    startOpen: boolean;
     task?: Task | undefined;
     taskReceived: boolean;
 }
@@ -29,6 +30,7 @@ interface TaskSliceState {
 const initialState: TaskSliceState = {
     className: 'unknown' as ClassName,
     datecode: '' as Datecode,
+    startOpen: true,
     taskReceived: false
 };
 
@@ -41,6 +43,7 @@ export const taskSlice = createSlice({
             try {
                 state.task = payload.taskJSON ? (JSON.parse(payload.taskJSON) as Task) : undefined;
                 state.geoJSON = payload.geoJSON ? (JSON.parse(payload.geoJSON) as (typeof state)['geoJSON']) : undefined;
+                state.startOpen = payload.startOpen ?? true;
                 state.taskReceived = true;
                 console.log(`task updated to ${state.task?.details.taskid}: nostart:${d(state.task?.rules?.nostartutc)} [${state.task?.details?.hash}]`);
             } catch (e) {
@@ -57,6 +60,7 @@ export const taskSlice = createSlice({
                 state.className = payload.className as ClassName;
                 state.datecode = payload.datecode as Datecode;
                 state.task = undefined;
+                state.startOpen = true;
                 state.geoJSON = undefined;
                 state.taskReceived = false;
             }
@@ -65,10 +69,11 @@ export const taskSlice = createSlice({
     selectors: {
         selectHasTask: (state, vc: ClassName) => (state.className == vc ? state.taskReceived : false),
         selectTask: (state, vc: ClassName) => (state.className == vc ? state.task : undefined),
+        selectStartOpen: (state, vc: ClassName) => (state.className == vc ? state.startOpen : true),
         selectTaskGeoJSON: (state, vc: ClassName, handicap: number | undefined) =>
             state.className == vc //
                 ? state.task?.rules?.dh
-                    ? taskGeoJSON(adjustDistanceHandicapTask(state.task, handicap))
+                    ? taskGeoJSON(adjustDistanceHandicapTask(state.task as unknown as Task, handicap))
                     : state.geoJSON
                 : undefined
     }
@@ -76,4 +81,4 @@ export const taskSlice = createSlice({
 
 export default taskSlice.reducer;
 export const {updateTask} = taskSlice.actions;
-export const {selectTask, selectTaskGeoJSON, selectHasTask} = taskSlice.selectors;
+export const {selectTask, selectTaskGeoJSON, selectHasTask, selectStartOpen} = taskSlice.selectors;

@@ -17,3 +17,6 @@ export const webPathBaseTimeDuration = 5 * 60;
 export const scoreChunkSize = 30 * 60;
 
 export const inorderAdditionalDelay = 6;
+
+// How far beyond the finite extent of a start line a near-miss is accepted (metres)
+export const RELAXED_START_TOLERANCE_M = 1500;

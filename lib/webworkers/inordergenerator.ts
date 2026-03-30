@@ -55,7 +55,7 @@ export function bindChannelForInOrderPackets(
         toNotify.forEach((resolveFunction) => resolveFunction(false));
     };
 
-    broadcastChannel.onmessage = (ev: MessageEvent<PositionMessage>) => {
+    broadcastChannel.onmessage = (ev) => {
         // Get the message, and make sure it's for us
         let message = ev.data as PositionMessage;
         if (message.c != compno) {
@@ -167,10 +167,10 @@ export function bindChannelForInOrderPackets(
                 }
             }
 
-            log(` normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
-
             // If we have a real message then process it
             const message = messageQueue[position++];
+            now = message.t;
+            log(` normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
             const nextPoint = yield {...message, _: position == messageQueue.length};
             if (nextPoint) {
                 position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);

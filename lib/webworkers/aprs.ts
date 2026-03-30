@@ -43,7 +43,7 @@ interface InterimPositionMessage extends PositionMessage {
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
 
 // APRS connection
-let connection;
+let connection: ISSocket & {valid: boolean; aprsc: string};
 const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern5.glidernet.org'];
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
@@ -395,13 +395,13 @@ function startAprsListener(config: AprsListenerConfig) {
     getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
 
     // Connect to the APRS server
-    connection = new ISSocket(`onglide ${config.competition.substring(0, 6)}/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER);
+    connection = new ISSocket(`onglide ${config.competition.substring(0, 6)}/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
     let parser = new aprsParser();
 
     // Handle a connect
     connection.on('connect', () => {
         connection.sendLogin();
-        connection.sendLine(`# onglide ${config.competition}`);
+        connection.send(`# onglide ${config.competition}`);
     });
 
     // Handle a data packet
@@ -501,10 +501,10 @@ function startAprsListener(config: AprsListenerConfig) {
             trackMetric('aprs.unstableCount', unstableCount);
 
             // send a keepalive
-            console.log('sending keepalive', `# ${config.competition}`);
+
             try {
                 // Send APRS keep alive or we will get dumped
-                connection.sendLine(`# ${config.competition}`);
+                connection.send(`# ${config.competition}`);
             } catch (x) {
                 console.log('unable to send keepalive', x);
                 connection.valid = false;
@@ -562,12 +562,12 @@ async function trackGlider(task: AprsCommandTrack) {
         // Not had a message
         stationary: 0,
         ground: false,
-        lastTick: getNow(),
+        lastTick: (getNow() - inorderAdditionalDelay) as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
         // Setup logging
         log:
-            task.compno == (process.env.NEXT_PUBLIC_COMPNO || '')
+            task.compno == (process.env.NEXT_PUBLIC_COMPNO || 'I')
                 ? function log() {
                       console.log(task.compno, ...arguments);
                   }
@@ -846,8 +846,11 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
     let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
+    if (!log) {
+        log = aircraft.log;
+    }
     if (log) {
-        log(`PMQ: ${aircraft.compno}:  ls: ${JSON.stringify(lastSent)}, m: ${messages.length}, s:${start}/${d(start)}, to:${to}/${d(to)}, p: ${position}`);
+        log(`PMQ: ${aircraft.compno}: m: ${messages.length}, s:${start}/${d(start)}, to:${to}/${d(to)}, p: ${position}`);
     }
 
     let count = 0;
@@ -863,10 +866,6 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // Get list and then advance past it
         const duplicates = messages.slice(position, duplicatePosition);
         position = duplicatePosition;
-
-        if (!duplicates.length) {
-            console.log('no duplicates for ', position, duplicatePosition);
-        }
 
         // If we have many we need to reduce this to one
         // we take smallest difference in position, or if the same the smallest vertical difference from
@@ -887,7 +886,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
                       };
                   })
                   // Quickly remove faster than 300kph Horizontal or 30m/s Vertical
-                  // as they can't possible be correct
+                  // as they can't possible be correct (point.s is the flarm reported speed)
                   .filter((point) => point.dSH < (point.s || 160) * 2.3 && point.dSV < 30)
                   // Then sort them by amount of change
                   .sort((a, b) => (a.dH - a.dH > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
@@ -900,35 +899,8 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // We haven't picked one because we have had no movement but we have had packets
         const stationary = lastSent && !filtered.length && sorted.length && realNow - lastSent.t > 30;
 
-        // Take the first one, if we don't
+        // Take the first one, if we don't have one then we can just do nothing for now
         const point = filtered.at(0) ?? (stationary ? sorted[0] : undefined);
-
-        if (log) {
-            // duplicates.length > 1 && lastSent) {
-            console.log(aircraft.compno, 'no point found ===========');
-            console.table([lastSent]);
-            console.table(
-                lastSent
-                    ? duplicates.map((point) => {
-                          const dH = lastSent ? distance(point.j!, lastSent!.j!) : 0;
-                          const dV = point.a - lastSent!.a;
-                          const dT = point.t - lastSent!.t;
-                          return {
-                              ...point,
-                              dH: Math.round(1000 * dH),
-                              dV,
-                              dT,
-                              dSH: Math.round((3600 * dH) / dT), //km/s
-                              dSV: Math.round(10 * Math.abs(dV / dT)) / 10 // m/s
-                          };
-                      })
-                    : duplicates
-            );
-            console.log('----sorted-----');
-            console.table(sorted.map((f) => [f.o, f.lat, f.lng, f.a]));
-            console.log('----filtered-----');
-            console.table(filtered.map((f) => [f.o, f.lat, f.lng, f.a]));
-        }
         if (!point) {
             continue;
         }
@@ -950,9 +922,6 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
             aircraft.ground = false;
         }
 
-        //            console.log('FL =>', point.c, point.t, stationary, aircraft.ground);
-        //        }
-
         // If we are on the ground and we are more than 3 km from airfield location then we don't
         // want to report it. This doesn't filter initial points as you are not marked as on the ground
         // till several stationary points have happened
@@ -971,8 +940,9 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
         // all it does is stop it sending to the front end
-        const live = start != 0 || position == messages.length;
+        const live = start != 0 || position == messages.length || (messages[position]?.t ?? Infinity) >= to;
         aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
+        log('sent->', point);
     }
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {
         aircraft.channel!.postMessage({
@@ -985,6 +955,6 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     }
 
     if (log) {
-        console.log(`${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, s:${start} t:${to}`);
+        log(`PMQ: ${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, s:${start} t:${to}`);
     }
 }

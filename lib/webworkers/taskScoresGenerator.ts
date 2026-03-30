@@ -20,11 +20,11 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         return Math.round((1000.0 * dist) / handicap) / 10;
     }
 
-    const doSpeedCalc = (sd: SpeedDist | undefined, legDuration: number, taskDuration: number) => {
+    const doSpeedCalc = (sd: SpeedDist | undefined, legDuration: number | undefined, taskDuration: number) => {
         if (!sd) {
             return;
         }
-        if (legDuration) {
+        if (legDuration && sd.distance) {
             sd.legSpeed = Math.max(0, Math.round(sd.distance / (legDuration / 36000)) / 10);
         }
         if (taskDuration) {
@@ -33,7 +33,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
     };
 
     const doGrCalc = (sd: SpeedDist | null | undefined, agl: AltitudeAgl) => {
-        if (sd && agl) {
+        if (sd && agl > 0) {
             sd.grRemaining = Math.round((sd.distanceRemaining || sd.minPossible || 0) / (agl / 1000));
         }
     };
@@ -92,7 +92,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             legs: {},
             scoredPoints: [],
             minDistancePoints: [],
-            maxDistancePoints: []
+            maxDistancePoints: [],
+            scoringClosestPoint: item.scoringClosestPoint ? {t: item.scoringClosestPoint.t, lat: item.scoringClosestPoint.lat, lng: item.scoringClosestPoint.lng} : undefined
         };
 
         // If we have no start we may have had a tick we should just pass it through and ignore
@@ -131,19 +132,19 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 }
                 if (!score.utcFinish) {
                     if (leg.minPossible) {
-                        sl.actual.minPossible = Math.round(leg.minPossible.distance * 10) / 10;
+                        sl.actual.minPossible = Math.round((leg.minPossible?.distance ?? 0) * 10) / 10;
                     }
                     if (leg.maxPossible) {
                         sl.actual.maxPossible = Math.round(leg.maxPossible.distance * 10) / 10;
                     }
                     if (leg.distanceRemaining || leg.minPossible) {
-                        sl.actual.distanceRemaining = Math.round((leg.distanceRemaining || leg.minPossible.distance) * 10) / 10;
+                        sl.actual.distanceRemaining = Math.round((leg.distanceRemaining || leg.minPossible?.distance || 0) * 10) / 10;
                     }
                 }
 
                 doHandicapping(sl);
-                doGrCalc(sl.actual, sl.alt - leg.altitude ?? 0);
-                doGrCalc(sl.handicapped, sl.alt - leg.altitude ?? 0);
+                doGrCalc(sl.actual, (sl.alt ?? 0) - (leg.altitude ?? 0));
+                doGrCalc(sl.handicapped, (sl.alt ?? 0) - (leg.altitude ?? 0));
 
                 // If we don't have a time then it's because we are in progress, don't use leg.point as that's scored
                 // and may have fake time for AATs use the actual time we are scored to which is in item.t

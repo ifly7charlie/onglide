@@ -1,0 +1,79 @@
+import type {Compno, Epoch, PositionMessage, AirfieldLocation, Task, TZ, AltitudeAMSL} from '../types';
+import type {PilotScore} from '../protobuf/onglide';
+
+import {point as turfPoint} from '@turf/helpers';
+
+import {bindClientInOrderGenerator} from './clientInOrderGenerator';
+
+import {enrichedPositionGenerator} from '../webworkers/enrichedPositionGenerator';
+import {taskPositionGenerator} from '../webworkers/taskpositiongenerator';
+import {racingScoringGenerator} from '../webworkers/racingScoringGenerator';
+import {assignedAreaScoringGenerator} from '../webworkers/assignedAreaScoringGenerator';
+import {taskScoresGenerator} from '../webworkers/taskScoresGenerator';
+
+import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
+
+function deriveAirfield(task: Task, fixes: PositionMessage[]): AirfieldLocation {
+    // Use the glider's initial position as airfield location (not task start point)
+    // This is critical: the enrichedPositionGenerator uses distance from airfield
+    // to distinguish "Grid" (near airfield) from "Landed" (far from airfield).
+    // If we use the task start TP, a glider sitting on a distant airfield grid
+    // would be detected as "landed out" before the flight even begins.
+    const firstFix = fixes[0];
+    const firstFixAlt = firstFix?.a ?? 0;
+
+    return {
+        name: 'IGC Airfield',
+        tz: 'Etc/UTC' as TZ,
+        tzoffset: 0,
+        sunset: ((fixes.at(-1)?.t ?? 0) + 7200) as Epoch, // 2 hours after last fix
+        lat: firstFix?.lat ?? task.legs[0].nlat,
+        lng: firstFix?.lng ?? task.legs[0].nlng,
+        start: '',
+        end: '',
+        officialDelay: 0 as Epoch,
+        altitude: firstFixAlt as AltitudeAMSL,
+        point: turfPoint([firstFix?.lng ?? task.legs[0].nlng, firstFix?.lat ?? task.legs[0].nlat])
+    };
+}
+
+export async function scoreIGCFlight(
+    task: Task,
+    fixes: PositionMessage[],
+    compno: Compno,
+    handicap: number = 100,
+    utcStart: Epoch = 0 as Epoch
+): Promise<PilotScore[]> {
+    if (!fixes.length || !task.legs.length) {
+        return [];
+    }
+
+    // Ensure preparedLegs exist
+    if (!task.preparedLegs) {
+        task.preparedLegs = task.legs.map((_leg, i) => new PreparedTurnpoint(task.legs, i));
+    }
+
+    const airfield = deriveAirfield(task, fixes);
+
+    // Create the getNow function for the inorder generator
+    const lastFixTime = fixes[fixes.length - 1].t;
+    const getNow = () => lastFixTime;
+
+    // Build the scoring chain (same pattern as getScoringChain in scoring.ts)
+    const noop = () => {};
+    const inorder = bindClientInOrderGenerator(compno, fixes);
+    const epg = enrichedPositionGenerator(airfield, inorder(getNow), noop);
+    const tpg = taskPositionGenerator(task, utcStart, epg, noop);
+    const distances = task.rules.aat //
+        ? assignedAreaScoringGenerator(task, tpg, noop)
+        : racingScoringGenerator(task, tpg, noop);
+    const scores = taskScoresGenerator(task, compno, handicap, distances, noop);
+
+    // Collect all scores
+    const allScores: PilotScore[] = [];
+    for await (const score of scores) {
+        allScores.push(score);
+    }
+
+    return allScores;
+}

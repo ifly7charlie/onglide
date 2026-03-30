@@ -16,11 +16,12 @@ const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 import {selectTask, selectHasTask} from '../redux/taskSlice';
 import {useSelector} from '../redux';
 
-import type {TaskLeg, ClassName, TZ} from '../types';
+import type {TaskLeg, ClassName, TZ, Epoch} from '../types';
 import {fromDateCode} from '../datecode';
+import {getNow} from '../now';
 
 //
-export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: ClassName; fitBounds: Function; tz: TZ}) {
+export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz, replayTime}: {vc: ClassName; fitBounds: Function; tz: TZ; replayTime: Epoch}) {
     const task = useSelector((state) => selectTask(state, vc));
     const hasTask = useSelector((state) => selectHasTask(state, vc));
     const {comp, isLoading} = useContest();
@@ -33,6 +34,11 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
         const date = (task?.details?.calendardate ?? fClass?.datecode) ? fromDateCode(fClass.datecode) : null;
         return date ? `${new Date(date).toLocaleDateString(lang, {day: 'numeric', month: 'short'})}` : '';
     }, [lang, tz, task?.details?.calendardate]);
+
+    const noStart = useMemo(() => {
+        console.log('noStart:', getNow(), task?.rules?.nostartutc);
+        return (task?.rules?.nostartutc ?? 0) > (replayTime ?? getNow()) ? `Start Opens at ${new Date(task.rules.nostartutc * 1000).toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})}` : '';
+    }, [lang, tz, task?.rules?.nostartutc]);
 
     if (isLoading || !hasTask) {
         return <Spinner />;
@@ -89,7 +95,7 @@ export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz}: {vc: C
                         </button>
                     </span>
                 </h5>
-
+                {task?.rules?.nostartutc ? <>{noStart}</> : null}
                 <Collapse in={open}>
                     <div id="task-collapse">
                         <p>{task?.details?.nostart != '00:00:00' ? `Start open ${task.details.nostart.substring(0, 5)}` : ''}</p>

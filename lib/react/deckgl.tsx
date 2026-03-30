@@ -1,6 +1,6 @@
 'use client';
 
-import {useCallback, useMemo, useRef, useEffect} from 'react';
+import {useCallback, useMemo, useRef, useEffect, useState} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl';
@@ -12,7 +12,7 @@ import {TaskUp} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
-import {selectTaskGeoJSON, selectTask} from '../redux/taskSlice';
+import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
 import {selectPilotScore} from '../redux/scoresSlice';
 import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
@@ -85,9 +85,12 @@ export default function MApp(props: {
     const mapStreet = !!options.mapType;
     const mapLight = mapStreet;
 
+    // Rules & legs etc
+    const task = useSelector((state) => selectTask(state, vc));
+
     // Track and Task Overlays
     const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc, props.selectedHandicap));
-    const task = useSelector((state) => selectTask(state, vc));
+    const startOpen = useSelector((state) => selectStartOpen(state, vc));
 
     const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
 
@@ -239,7 +242,7 @@ export default function MApp(props: {
         if (options.zoomTask && taskGeoJSONtp && mapRef?.current) {
             try {
                 const canvas = mapRef?.current?.getCanvasContainer();
-                const rect = canvas?.getBoundingClientRect() ?? {width: 0};
+                const rect = canvas?.getBoundingClientRect?.() ?? {width: 0};
 
                 const overlayWidth = Math.max(Math.trunc(rect.width * 0.3), 275);
                 const offset = rect.width >= 992 ? {padding: {right: overlayWidth, left: 10, top: 10, bottom: 10}} : {};
@@ -275,7 +278,7 @@ export default function MApp(props: {
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
-        return map2d ? turnpointStyle2d(selectedScore, mapLight) : turnpointStyle3d(selectedScore, mapLight);
+        return map2d ? turnpointStyle2d(selectedScore, mapLight, startOpen) : turnpointStyle3d(selectedScore, mapLight, startOpen);
     }, [selectedCompno, selectedScore?.currentLeg, selectedScore?.utcFinish, mapLight, map2d]);
 
     // Do we have a loaded set of details?
@@ -337,7 +340,7 @@ export default function MApp(props: {
             if (map) {
                 map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
                 map.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
-                map.setLayoutProperty('contour-line', 'visible', mapStreet ? 'none' : 'visible');
+                map.setLayoutProperty('contour-line', 'visibility', mapStreet ? 'none' : 'visible');
             }
         } catch (e) {}
     }, [mapStreet, mapRef?.current]);
@@ -353,8 +356,19 @@ export default function MApp(props: {
         }
     }, [setFollow, follow]);
 
+    // Debounce the selected score for Mapbox source updates to avoid worker queue buildup
+    // when scrubbing the replay slider. Position/scores update instantly via Redux; only
+    // the GeoJSON line layers are debounced.
+    const [debouncedScore, setDebouncedScore] = useState(selectedScore);
+    const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        clearTimeout(debounceTimer.current);
+        debounceTimer.current = setTimeout(() => setDebouncedScore(selectedScore), 60);
+        return () => clearTimeout(debounceTimer.current);
+    }, [selectedScore?.t, selectedScore?.currentLeg]);
+
     // If we are on last leg of AAT then we stop showing construction lines
-    const lastLeg = task?.rules?.aat && selectedScore?.currentLeg == task?.legs?.length - 1;
+    const lastLeg = task?.rules?.aat && debouncedScore?.currentLeg == task?.legs?.length - 1;
 
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
@@ -395,32 +409,33 @@ export default function MApp(props: {
                         <Layer {...trackLineStyle} key="tls" />
                     </Source>
                 ) : null}
-                {selectedScore && options.constructionLines ? (
+                {debouncedScore && options.constructionLines ? (
                     <>
-                        {selectedScore.minGeoJSON && !lastLeg ? (
-                            <Source type="geojson" data={selectedScore.minGeoJSON} key={'min_'} id={'min'}>
+                        {debouncedScore.minGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={debouncedScore.minGeoJSON} key={'min_'} id={'min'}>
                                 <Layer {...distanceLineLabelStyle(minLineStyle)} beforeId={'scored_line'} />
                                 <Layer {...minLineStyle} beforeId={'minpossible_label'} />
                             </Source>
                         ) : null}
-                        {selectedScore.maxGeoJSON && !lastLeg ? (
-                            <Source type="geojson" data={selectedScore.maxGeoJSON} key={'max_'} id={'max'}>
+                        {debouncedScore.maxGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={debouncedScore.maxGeoJSON} key={'max_'} id={'max'}>
                                 <Layer {...distanceLineLabelStyle(maxLineStyle)} beforeId={'scored_line'} />
                                 <Layer {...maxLineStyle} beforeId={'maxpossible_label'} />
                             </Source>
                         ) : null}
-                        {selectedScore.legs && task?.rules?.aat ? (
-                            <Source type="geojson" data={assembleHullLine(selectedScore.legs)} key={'hull_'}>
+                        {debouncedScore.legs && task?.rules?.aat ? (
+                            <Source type="geojson" data={assembleHullLine(debouncedScore.legs)} key={'hull_'}>
                                 <Layer {...hullLineStyle} />
                                 <Layer {...hullPointStyle} />
                             </Source>
                         ) : null}
                     </>
                 ) : null}
-                {selectedScore ? (
-                    <Source type="geojson" data={selectedScore?.scoredGeoJSON} key={'scored_'} id={'scored'}>
-                        <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: selectedScore?.scoredGeoJSON ? 'visible' : 'none'}}} />
-                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, !!selectedScore?.scoredGeoJSON)} />
+                {debouncedScore?.scoredGeoJSON ? (
+                    <Source type="geojson" data={debouncedScore.scoredGeoJSON} key={'scored_'} id={'scored'}>
+                        <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: 'visible'}}} />
+                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, true)} />
+                        <Layer key="scoringPoint" {...scoringPointStyle} />
                     </Source>
                 ) : null}
                 <MeasureLayers key="measure" />
@@ -443,6 +458,19 @@ const scoredLineStyle: LayerProps = {
         'line-color': '#0f0',
         'line-width': 5,
         'line-opacity': 1
+    }
+};
+
+const scoringPointStyle: LayerProps = {
+    id: 'scoring_point',
+    type: 'circle',
+    filter: ['==', ['get', 'scoringPoint'], true],
+    paint: {
+        'circle-radius': 5,
+        'circle-color': '#0f0',
+        'circle-stroke-color': '#000',
+        'circle-stroke-width': 1,
+        'circle-opacity': 1
     }
 };
 
@@ -550,7 +578,7 @@ const attributionStyle = {
     fontSize: '13px'
 };
 
-function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): LayerProps[] {
+function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean, startOpen: boolean): LayerProps[] {
     return [
         {
             // Track line
@@ -567,7 +595,7 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
             // Turnpoints
             id: 'tp',
             type: 'fill',
-            filter: ['case', ['==', !selectedPilot, true], false, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], false, true],
+            filter: ['case', ['==', !selectedPilot, true], false, ['==', ['get', 'leg'], selectedPilot?.utcStart ? selectedPilot?.currentLeg || 0 : 0], false, true],
             paint: {
                 //                'line-color': 'grey',
                 //                'line-width': 1,
@@ -594,6 +622,8 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
                 //                'line-width': 1,
                 'fill-extrusion-color': [
                     'case',
+                    ['==', startOpen, false],
+                    'red',
                     ['==', !selectedPilot, true],
                     mapLight ? 'darkgrey' : 'white',
                     ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
@@ -628,7 +658,7 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean): 
     ];
 }
 
-function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean): LayerProps[] {
+function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean, startOpen: boolean): LayerProps[] {
     console.log('tps2d', mapLight);
     return [
         {

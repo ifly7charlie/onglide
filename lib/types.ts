@@ -47,6 +47,7 @@ export interface TimeStampType {
 }
 
 import type {Point, Feature, Polygon, LineString} from 'geojson';
+import type {PreparedTurnpoint} from './flightprocessing/preparedTurnpoint';
 
 // Where is the airfield
 export interface AirfieldLocation {
@@ -151,7 +152,7 @@ export interface TaskLeg extends TaskLegsTableRow {
     direction: 'symmetrical' | 'np' | 'pp' | 'fixed';
 
     maxR?: DistanceKM;
-    geoJSON?: Polygon; // geoJSON for the sector
+    geoJSON?: Polygon | LineString; // geoJSON for the sector
     lineString?: any;
     point?: [number, number]; // coordiantes of center geoJSON style
     pointGeoJSON?: Feature<Point>;
@@ -177,6 +178,7 @@ export interface Task {
     details: TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow;
 
     legs: TaskLeg[];
+    preparedLegs?: PreparedTurnpoint[];
 }
 
 export enum EstimatedTurnType {
@@ -215,6 +217,9 @@ export interface TaskStatus extends TimeStampType {
     closestDistanceToNext?: DistanceKM; // closest point to next sector (dist)
     closestToNextSectorPoint?: BasePositionMessage; // positionmessage
     closestSectorPoint?: BasePositionMessage; // point on next sector that matches above
+
+    closestDistanceToTPCenter?: DistanceKM; // min distance from pilot to next TP center coords (for landout scoring)
+    closestToTPCenterPoint?: BasePositionMessage; // pilot position when above was minimized
 
     //
     pointsProcessed: number;
@@ -257,6 +262,7 @@ export interface CalculatedTaskStatus extends TaskStatus {
     distanceRemaining?: DistanceKM; // how much left (for both aat & speed)
     maxPossible?: DistanceKM; // max task distance remaining
     minPossible?: DistanceKM; // shortest distance to home (for aat this is smallest task distance based on what has been flown)
+    scoringClosestPoint?: BasePositionMessage; // the point used for scoring on uncompleted leg
 }
 
 // points re-ordered if necessary

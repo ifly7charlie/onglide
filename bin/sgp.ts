@@ -34,7 +34,7 @@ let mysql_db = undefined;
 //const fetch = require('node:fetch');
 
 // Fix the turpoint types so we draw the sectors right
-const oz_types = {Turnpoint: 'symmetrical', Finish: 'pp', Start: 'np'};
+const oz_direction = {Turnpoint: 'symmetrical', Finish: 'pp', Start: 'np'};
 
 // Load the current file
 const dotenv = require('dotenv');
@@ -62,9 +62,12 @@ async function main() {
     SGP();
 
     console.log('Background download from SGP enabled');
-    setInterval(function () {
-        SGP();
-    }, 5 * 60 * 1000);
+    setInterval(
+        function () {
+            SGP();
+        },
+        5 * 60 * 1000
+    );
 }
 
 main().then(() => 'exiting');
@@ -78,8 +81,13 @@ async function SGP(deep = false) {
     // Get the soaring spot keys from database
     let keys = (
         await mysql_db.query(escape`
-              SELECT *
-                FROM scoringsource where type='sgp'`)
+            SELECT
+                *
+            FROM
+                scoringsource
+            WHERE
+                type = 'sgp'
+        `)
     )[0];
 
     if (!keys?.url) {
@@ -133,22 +141,50 @@ overwrites{hostname} = 0;
 */
 
 async function update_class() {
-    const tzoffset = parseInt((await mysql_db.query(escape`SELECT tzoffset FROM competition`))[0]?.tzoffset || '0');
+    const tzoffset = parseInt(
+        (
+            await mysql_db.query(escape`
+                SELECT
+                    tzoffset
+                FROM
+                    competition
+            `)
+        )[0]?.tzoffset || '0'
+    );
 
     console.log(`using datecode ${toDateCode(new Date(Date.now() + tzoffset * 1000))}, offset ${tzoffset}`);
 
     // Add to the database
     await mysql_db.query(escape`
-             INSERT INTO classes (class, classname, description, type )
-                   VALUES ( 'sgp', 'SGP', 'SGP', 'grandprix' )
-                    ON DUPLICATE KEY UPDATE classname=values(classname), description=values(description),
-                                            type=values(type) `);
+        INSERT INTO
+            classes (class, classname, description, type)
+        VALUES
+            ('sgp', 'SGP', 'SGP', 'grandprix') ON DUPLICATE KEY
+        UPDATE classname =
+        VALUES
+            (classname),
+            description =
+        VALUES
+            (description),
+            type =
+        VALUES
+            (type)
+    `);
 
-    await mysql_db.query(escape`insert ignore into compstatus (class) values ( 'sgp' )`);
+    await mysql_db.query(escape`
+        insert ignore INTO compstatus (class)
+        VALUES
+            ('sgp')
+    `);
 
     // Make sure we have rows for each day and that compstatus is correct
     //    await mysql.query( escape`call contestdays()`);
-    await mysql_db.query(escape`update compstatus set status=':', datecode=${toDateCode(new Date(Date.now() + tzoffset * 1000))}`);
+    await mysql_db.query(escape`
+        UPDATE compstatus
+        SET
+            status = ':',
+            datecode = ${toDateCode(new Date(Date.now() + tzoffset * 1000))}
+    `);
 }
 
 //
@@ -182,31 +218,96 @@ async function update_pilots(pilots) {
         };
 
         await t.query(escape`
-             INSERT INTO pilots (class,firstname,lastname,homeclub,username,fai,country,email,
-                                 compno,participating,glidertype,greg,handicap,registered,registereddt)
-                  VALUES ( 'sgp',
-                           ${pilot.pilotName?.substring(0, 30) || ''}, '', '', null,
-                           ${igcid}, ${getCountryISO2(pilot.country?.substring(0, 3)) || ''},
-                           ${gravatar(pilot)},
-                           ${pilot.competitionId.substring(0, 4)},
-                           'Y',
-                           ${pilot.aircraft.substring(0, 30) || ''},
-                           ${pilot.registration?.substring(0, 8) || ''},
-                           100, 'Y', NOW() )
-                  ON DUPLICATE KEY UPDATE
-                           class=values(class), firstname=values(firstname), lastname=values(lastname),
-                           homeclub=values(homeclub), fai=values(fai), country=values(country), email=values(email),
-                           participating=values(participating), handicap=values(handicap),
-                           glidertype=values(glidertype), greg=values(greg), registereddt=NOW()`);
+            INSERT INTO
+                pilots (
+                    class,
+                    firstname,
+                    lastname,
+                    homeclub,
+                    username,
+                    fai,
+                    country,
+                    email,
+                    compno,
+                    participating,
+                    glidertype,
+                    greg,
+                    handicap,
+                    registered,
+                    registereddt
+                )
+            VALUES
+                (
+                    'sgp',
+                    ${pilot.pilotName?.substring(0, 30) || ''},
+                    '',
+                    '',
+                    NULL,
+                    ${igcid},
+                    ${getCountryISO2(pilot.country?.substring(0, 3)) || ''},
+                    ${gravatar(pilot)},
+                    ${pilot.competitionId.substring(0, 4)},
+                    'Y',
+                    ${pilot.aircraft.substring(0, 30) || ''},
+                    ${pilot.registration?.substring(0, 8) || ''},
+                    100,
+                    'Y',
+                    NOW()
+                ) ON DUPLICATE KEY
+            UPDATE class =
+            VALUES
+                (class),
+                firstname =
+            VALUES
+                (firstname),
+                lastname =
+            VALUES
+                (lastname),
+                homeclub =
+            VALUES
+                (homeclub),
+                fai =
+            VALUES
+                (fai),
+                country =
+            VALUES
+                (country),
+                email =
+            VALUES
+                (email),
+                participating =
+            VALUES
+                (participating),
+                handicap =
+            VALUES
+                (handicap),
+                glidertype =
+            VALUES
+                (glidertype),
+                greg =
+            VALUES
+                (greg),
+                registereddt = NOW()
+        `);
 
         if (pilot.ognTrackerPaired) {
             flarmIds.push(pilot.ognTrackerPaired.match(/[0-9A-F]{6}$/gi));
         }
 
         await t.query(escape`
-              INSERT INTO tracker ( class, compno, type, trackerid ) 
-                  VALUES ( 'sgp', ${pilot.competitionId.substring(0, 4)}, 'flarm', ${flarmIds.filter((d) => d?.length).join(',')} )
-                ON DUPLICATE KEY UPDATE trackerid=values(trackerid)`);
+            INSERT INTO
+                tracker (class, compno, type, trackerid)
+            VALUES
+                (
+                    'sgp',
+                    ${pilot.competitionId.substring(0, 4)},
+                    'flarm',
+                    ${flarmIds.filter((d) => d?.length).join(',')}
+                ) ON DUPLICATE KEY
+            UPDATE trackerid =
+            VALUES
+                (trackerid)
+        `);
 
         // Download pictures
         if (pilot.portraitUrl) {
@@ -215,7 +316,12 @@ async function update_pilots(pilots) {
     }
 
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
-    t.query(escape`DELETE FROM pilots WHERE class='sgp' AND registereddt < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`)
+    t.query(escape`
+        DELETE FROM pilots
+        WHERE
+            class = 'sgp'
+            AND registereddt < DATE_SUB (NOW(), INTERVAL 15 MINUTE)
+    `)
 
         // Trackers needs a row for each pilot so fill any missing, perhaps we should
         // also remove unwanted ones
@@ -234,7 +340,18 @@ async function update_pilots(pilots) {
 // Fetch the picture from FAI rankings
 async function download_picture(url, compno, classid, mysql) {
     // Check when it was last checked
-    const lastUpdated = (await mysql_db.query(escape`SELECT updated FROM images WHERE class=${classid} AND compno=${compno} AND unix_timestamp()-updated < 86400`))[0];
+    const lastUpdated = (
+        await mysql_db.query(escape`
+            SELECT
+                updated
+            FROM
+                images
+            WHERE
+                class = ${classid}
+                AND compno = ${compno}
+                AND unix_timestamp () - updated < 86400
+        `)
+    )[0];
 
     if (lastUpdated) {
         console.log(`not updating ${compno} picture`);
@@ -257,9 +374,31 @@ async function download_picture(url, compno, classid, mysql) {
         .then((ab) => {
             const data = ab ? Buffer.from(ab) : null;
             if (data) {
-                mysql_db.query(escape`INSERT INTO images (class,compno,image,updated) VALUES ( ${classid}, ${compno}, ${data}, unix_timestamp() )
-                                  ON DUPLICATE KEY UPDATE image=values(image), updated=values(updated)`);
-                mysql_db.query(escape`UPDATE pilots SET image = 'Y' WHERE  class=${classid} AND compno=${compno}`);
+                mysql_db.query(escape`
+                    INSERT INTO
+                        images (class, compno, image, updated)
+                    VALUES
+                        (
+                            ${classid},
+                            ${compno},
+                            ${data},
+                            unix_timestamp ()
+                        ) ON DUPLICATE KEY
+                    UPDATE image =
+                    VALUES
+                        (image),
+                        updated =
+                    VALUES
+                        (updated)
+                `);
+                mysql_db.query(escape`
+                    UPDATE pilots
+                    SET
+                        image = 'Y'
+                    WHERE
+                        class = ${classid}
+                        AND compno = ${compno}
+                `);
             }
         });
 }
@@ -288,7 +427,15 @@ async function update_task(task) {
 
     // So we don't rebuild tasks if they haven't changed
     const hash = createHash('sha256').update(JSON.stringify(task)).digest('base64');
-    const dbhashrow = await mysql_db.query(escape`SELECT hash FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid}`);
+    const dbhashrow = await mysql_db.query(escape`
+        SELECT
+            hash
+        FROM
+            tasks
+        WHERE
+            datecode = ${toDateCode(date)}
+            AND class = ${classid}
+    `);
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
         console.log(`${classid} - ${date}: task unchanged`);
@@ -308,24 +455,57 @@ async function update_task(task) {
         .transaction()
 
         // If it is the current day and we have a start time we save it
-        .query(
-            escape`
-            UPDATE compstatus SET starttime = COALESCE(${startOpen},${convert_to_mysql_time(date)},starttime)
-              WHERE datecode = ${toDateCode(date)}`
-        )
+        .query(escape`
+            UPDATE compstatus
+            SET
+                starttime = COALESCE(
+                    ${startOpen},
+                    ${convert_to_mysql_time(date)},
+                    starttime
+                )
+            WHERE
+                datecode = ${toDateCode(date)}
+        `)
 
         // remove any old crud
-        .query(escape`DELETE FROM tasks WHERE datecode=${toDateCode(date)} AND class=${classid} AND task='B'`)
+        .query(escape`
+            DELETE FROM tasks
+            WHERE
+                datecode = ${toDateCode(date)}
+                AND class = ${classid}
+                AND task = 'B'
+        `)
 
         // and add a new one
-        .query(
-            escape`
-          INSERT INTO tasks (datecode, class, flown, description, duration, type, task, nostart, hash )
-             VALUES ( ${toDateCode(date)}, ${classid},
-                      'N', ${task.taskName},
-                      '00:00:00',
-                      ${tasktype}, 'B', COALESCE(${startOpen},${convert_to_mysql_time(date)}), ${hash} )`
-        )
+        .query(escape`
+            INSERT INTO
+                tasks (
+                    datecode,
+                    class,
+                    flown,
+                    description,
+                    duration,
+                    type,
+                    task,
+                    nostart,
+                    hash
+                )
+            VALUES
+                (
+                    ${toDateCode(date)},
+                    ${classid},
+                    'N',
+                    ${task.taskName},
+                    '00:00:00',
+                    ${tasktype},
+                    'B',
+                    COALESCE(
+                        ${startOpen},
+                        ${convert_to_mysql_time(date)}
+                    ),
+                    ${hash}
+                )
+        `)
 
         // This query is a built one as we have to have it all as one string :( darn transactions
 
@@ -363,11 +543,16 @@ async function update_task(task) {
 
                 const leglength = previousPoint ? distance(previousPoint, currentPoint) : 0;
                 const bearingDeg = previousPoint ? (bearing(previousPoint, currentPoint) + 360) % 360 : 0;
+
+                const tpType = tp.observationZone == 'Line' ? 'line' : 'sector';
+
                 let hi = 0; // only used when windicapping
                 query =
                     query +
                     '( ?, ?, ?, ?, ' + //
-                    " ?,?, ?, ?, 0, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
+                    ' ?,?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ),';
+
+                console.log(tp);
 
                 values = values.concat([
                     'sgp',
@@ -380,7 +565,8 @@ async function update_task(task) {
                     tp.longitude,
                     trigraph,
                     tpname,
-                    oz_types[tp.type],
+                    tpType,
+                    oz_direction[tp.type],
                     tp.radius / 1000,
                     tp.type != 'Turnpoint' ? 90 : 360,
                     0,
@@ -410,36 +596,127 @@ async function update_task(task) {
         // redo the distance calculation, including calculating handicaps
         .query((r, ro) => {
             const taskid = ro[ro.length - 5].insertId;
-            return escape`call wcapdistance_taskid( ${taskid} )`;
+            return escape`CALL wcapdistance_taskid (${taskid})`;
         })
 
         // make sure we have result placeholder for each day, we will fail to save scores otherwise
-        .query(
-            escape`INSERT IGNORE INTO pilotresult
-               ( class, datecode, compno, status, start, finish, duration, distance, hdistance, speed, hspeed, igcavailable )
-             SELECT ${classid}, ${toDateCode(date)},
-               compno, '-', '00:00:00', '00:00:00', '00:00:00', 0, 0, 0, 0, 'N'
-             FROM pilots WHERE pilots.class = ${classid}`
-        )
+        .query(escape`
+            INSERT IGNORE INTO pilotresult (
+                class,
+                datecode,
+                compno,
+                status,
+                start,
+                finish,
+                duration,
+                distance,
+                hdistance,
+                speed,
+                hspeed,
+                igcavailable
+            )
+            SELECT
+                ${classid},
+                ${toDateCode(date)},
+                compno,
+                '-',
+                '00:00:00',
+                '00:00:00',
+                '00:00:00',
+                0,
+                0,
+                0,
+                0,
+                'N'
+            FROM
+                pilots
+            WHERE
+                pilots.class = ${classid}
+        `)
 
         // And update the day with status and text etc
-        .query(
-            escape`INSERT INTO contestday (class, script, length, result_type, info, winddir, windspeed, daynumber, status,
-                                                   notes, calendardate, datecode )
-                                         VALUES ( 'sgp', LEFT('Sailplane Grand Prix',60), 0, 
-                                                  '', '', 0, 0, 1, 'Y', '', ${convert_to_mysql_datetime(date)}, ${toDateCode(date)})
-                                       ON DUPLICATE KEY
-                                       UPDATE turnpoints = values(turnpoints), script = LEFT(values(script),60), length=values(length),
-                                          result_type=values(result_type), info=values(info),
-                                          winddir=values(winddir), windspeed=values(windspeed), daynumber=values(daynumber),
-                                          status=values(status), notes=values(notes), calendardate=values(calendardate)`
-        )
+        .query(escape`
+            INSERT INTO
+                contestday (
+                    class,
+                    script,
+                    length,
+                    result_type,
+                    info,
+                    winddir,
+                    windspeed,
+                    daynumber,
+                    status,
+                    notes,
+                    calendardate,
+                    datecode
+                )
+            VALUES
+                (
+                    'sgp',
+                    LEFT('Sailplane Grand Prix', 60),
+                    0,
+                    '',
+                    '',
+                    0,
+                    0,
+                    1,
+                    'Y',
+                    '',
+                    ${convert_to_mysql_datetime(date)},
+                    ${toDateCode(date)}
+                ) ON DUPLICATE KEY
+            UPDATE turnpoints =
+            VALUES
+                (turnpoints),
+                script = LEFT(
+                    VALUES
+                        (script),
+                        60
+                ),
+                length =
+            VALUES
+                (length),
+                result_type =
+            VALUES
+                (result_type),
+                info =
+            VALUES
+                (info),
+                winddir =
+            VALUES
+                (winddir),
+                windspeed =
+            VALUES
+                (windspeed),
+                daynumber =
+            VALUES
+                (daynumber),
+                status =
+            VALUES
+                (status),
+                notes =
+            VALUES
+                (notes),
+                calendardate =
+            VALUES
+                (calendardate)
+        `)
 
         // Update the last date for results
-        .query(
-            escape`UPDATE compstatus SET resultsdatecode = GREATEST(${toDateCode(date)},COALESCE(resultsdatecode,${toDateCode(date)}))
-                       WHERE class=${classid}`
-        )
+        .query(escape`
+            UPDATE compstatus
+            SET
+                resultsdatecode = GREATEST(
+                    ${toDateCode(date)},
+                    COALESCE(
+                        resultsdatecode,
+                        ${toDateCode(date)}
+                    )
+                )
+            WHERE
+                class = ${classid}
+        `)
 
         .rollback((e) => {
             console.log('rollback');

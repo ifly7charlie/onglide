@@ -28,19 +28,15 @@ type _OgnTripsLayerProps<DataT = unknown> = {
     startTime?: number;
 };
 
-const uniformBlock = `\
-uniform startUniforms {
-  float startTime;
-} starts;
-`;
-
 const startUniforms = {
     name: 'starts',
-    fs: uniformBlock,
+    fs: `uniform startsUniforms {
+  float startTime;
+} starts;`,
     uniformTypes: {
         startTime: 'f32'
     }
-}; //as const satisfies ShaderModule<TripsProps>;
+};
 
 export class OgnTripsLayer extends TripsLayer<OgnTripsData, _OgnTripsLayerProps> {
     constructor(a) {
@@ -51,11 +47,9 @@ export class OgnTripsLayer extends TripsLayer<OgnTripsData, _OgnTripsLayerProps>
 
     getShaders() {
         const shaders = super.getShaders();
-        shaders.inject['fs:#decl'] += `
-uniform float startTime;
-`;
+        shaders.modules = [...(shaders.modules || []), startUniforms];
         shaders.inject['fs:#main-start'] += `
-if(vTime < startTime) {
+if(vTime < starts.startTime) {
 discard;
 }`;
         return shaders;
@@ -75,13 +69,8 @@ discard;
 
     draw(params) {
         const {startTime} = this.props;
-        //        const startProps = {startTime: startTime ?? 0};
-        //        const model = this.state.model!;
-        //        model.shaderInputs.setProps({starts: startProps});
-        params.uniforms = {
-            ...params.uniforms,
-            startTime: startTime ?? 0
-        };
+        const model = this.state.model!;
+        model.shaderInputs.setProps({starts: {startTime: startTime ?? 0}});
         super.draw(params);
     }
 

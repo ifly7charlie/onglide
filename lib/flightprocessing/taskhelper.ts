@@ -1,10 +1,9 @@
-import LatLong from './LatLong.js';
 import {sumBy as _sumby} from 'lodash';
 
-import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
-import nearestPointOnLine from '@turf/nearest-point-on-line';
 import along from '@turf/along';
-import distance from '@turf/distance';
+import {buffer} from '@turf/buffer';
+
+import type {Feature, LineString, Polygon, MultiPolygon, Position} from 'geojson';
 
 //import type {Feature, LineString, Position} from 'geojson';
 import {lineString, point as turfPoint} from '@turf/helpers';
@@ -17,28 +16,49 @@ import {} from '@turf/helpers';
 import type {FeatureCollection} from 'geojson';
 import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage, NearestSectorPoint, EnrichedPosition} from '../types';
 
-let hit = 0;
-let miss = 0;
-
-type Radian = number & As<'Radian'>;
-
-const steps = process.env.NEXT_RUNTIME ? 25 : 25;
-const scoring = !(process.env.NEXT_RUNTIME || false);
-
-var _2pi: Radian = (Math.PI * 2) as Radian;
+import {PreparedTurnpoint} from './preparedTurnpoint';
 
 //
 // Generate the geoJSON objects and length and everything else need to be ready for processing
 export function calculateTask(task: Task) {
-    task.details.distance = calculateTaskLength(task.legs);
+    task.preparedLegs = [];
 
     for (const leg of task.legs) {
         preprocessSector(leg);
-        sectorGeoJSON(task.legs, leg.legno);
+        const pl = (task.preparedLegs[leg.legno] = new PreparedTurnpoint(task.legs, leg.legno));
+
+        let feature: Feature<Polygon | LineString | MultiPolygon> = pl.toGeoJSON();
+
+        if (feature.geometry?.type === 'LineString') {
+            feature = buffer(feature.geometry, 100, {units: 'meters'});
+        }
+
+        if (feature.geometry?.type === 'MultiPolygon') {
+            console.error(`Unable to process turnpoint ${leg.legno} as geometry type unknown`, JSON.stringify(feature));
+            return;
+        }
+
+        leg.geoJSON = feature.geometry;
+        leg.coordinates = _uniqWith(
+            coordReduce(
+                leg.type === 'line' // logic is different line vs sector
+                    ? lineChunk(lineString(pl.toGeoJSON().geometry.coordinates as Position[]), 0.5) //
+                    : lineChunk(lineString(leg.geoJSON.coordinates[0] as Position[]), 2.5),
+                (prev, current) => {
+                    prev.push(current);
+                    return prev;
+                },
+                []
+            ),
+            (a, b) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000)
+        );
     }
+
+    task.details.distance = calculateTaskLength(task.legs);
 }
 
 export function taskGeoJSON(task: Task) {
+    task.preparedLegs = task.legs.map((_leg, i) => new PreparedTurnpoint(task.legs, i));
     const geoJSON: FeatureCollection = {
         type: 'FeatureCollection',
         features: task.legs.reduce(
@@ -128,308 +148,8 @@ export function preprocessSector(tp: TaskLeg) {
     }
 }
 
-export function sectorGeoJSON(task: TaskLeg[], tpno: number) {
-    var polypoints = [];
-    var turnpoint = task[tpno];
-
-    //    var symmetric = 0;
-    var np = 9999;
-    var pp = 9999;
-    let geoJSONtype: 'Polygon' | undefined; //| 'LineString' | undefined;
-
-    const tp = task[tpno];
-    const ltlg = new LatLong(tp.nlat, tp.nlng);
-
-    var a1 = -1,
-        a2 = -1;
-    if (tpno < task.length - 1) {
-        var ltlgn = new LatLong(task[tpno + 1].nlat, task[tpno + 1].nlng);
-        np = a1 = LatLong.radToDBrng(LatLong.bearing(ltlg, ltlgn));
-    }
-
-    if (tpno >= 1) {
-        var ltlgp = new LatLong(task[tpno - 1].nlat, task[tpno - 1].nlng);
-        pp = a2 = LatLong.radToDBrng(LatLong.bearing(ltlg, ltlgp));
-        //        console.log( "2b) pp=" + pp );
-    }
-
-    if (np == 9999) {
-        np = pp;
-    }
-
-    if (pp == 9999) {
-        pp = np;
-    }
-
-    var center: Radian = 0 as Radian;
-    switch (turnpoint.direction) {
-        case 'symmetrical':
-            if (a1 != -1 && a2 != -1) {
-                var x1 = a1 - a2;
-                if (x1 < 0) {
-                    x1 += _2pi;
-                }
-                var x2 = a2 - a1;
-                if (x2 < 0) {
-                    x2 += _2pi;
-                }
-                var minAngle = Math.min(x1, x2);
-                if ((a1 + minAngle) % _2pi == a2) {
-                    center = ((a1 + minAngle / 2 + Math.PI) % _2pi) as Radian;
-                } else {
-                    center = ((a2 + minAngle / 2 + Math.PI) % _2pi) as Radian;
-                }
-            }
-            break;
-        case 'np':
-            center = ((np + Math.PI) % _2pi) as Radian;
-            break;
-        case 'pp':
-            center = ((pp + Math.PI) % _2pi) as Radian;
-            break;
-        case 'fixed':
-            if (typeof turnpoint.a12 !== 'undefined' && !isNaN(turnpoint.a12)) {
-                center = (((turnpoint.a12 * Math.PI) / 180 + Math.PI) % _2pi) as Radian;
-                //            center = ((turnpoint.a12*Math.PI/180)) % (2*Math.PI);
-            } else {
-                //            console.log( 'No A12 specified' );
-            }
-            break;
-        default:
-            //        console.log( turnpoint.direction + " not implemented yet" );
-            break;
-    }
-
-    //    turnpoint.centerAngle = ((center + _2pi) % _2pi) as Bearing;
-    //  turnpoint.centerAngleRaw = center;
-
-    // Needed for both line and sectors
-    const a1rad = ((turnpoint.a1 * Math.PI) / 180) as Radian;
-    const from = ((_2pi + (center - a1rad)) % _2pi) as Radian;
-    const to = ((_2pi + (center + a1rad)) % _2pi) as Radian;
-
-    switch (turnpoint.type) {
-        /*        case 'line':
-            var dltlg = ltlg.destPointRad(from, turnpoint.r1);
-            polypoints = [].concat(polypoints, [dltlg.dlong(), dltlg.dlat()]);
-            dltlg = ltlg.destPointRad(to, turnpoint.r1);
-            polypoints = [].concat(polypoints, [dltlg.dlong(), dltlg.dlat()]);
-            geoJSONtype = 'LineString';
-            break;*/
-
-        case 'sector':
-            if (turnpoint.a1 != 180 && turnpoint.r2 == 0) {
-                polypoints.push([ltlg.dlong(), ltlg.dlat()]);
-            }
-
-            polypoints = [].concat(polypoints, addArc(from, to, ltlg, turnpoint.r1, !!turnpoint.r2));
-            // TBD: !! -> this code was wrong in Javascript. assuming if r2 is set then go backwards but not confirmed
-
-            // something has been configured for turnpoint a2
-            //turnpoint a2 has been configured and has a radius
-            if (turnpoint.a2 != 0 && !isNaN(turnpoint.a2) && !isNaN(turnpoint.r2) && Math.round(Math.abs(turnpoint.a2)) == Math.round(Math.abs(turnpoint.a1)) && turnpoint.r1 != turnpoint.r2 && turnpoint.r2 != 0) {
-                //            console.log( "(neg) a1:"+turnpoint.a1, ", a2:"+turnpoint.a2 );
-
-                polypoints = [].concat(polypoints, addArc((center + (turnpoint.a1 * Math.PI) / 180) as Radian, (center - (turnpoint.a1 / 180) * Math.PI) as Radian, ltlg, turnpoint.r2, true));
-            } else if (turnpoint.a2 != 0 && !isNaN(turnpoint.a2) && !isNaN(turnpoint.r2) && turnpoint.a1 != turnpoint.a2 && turnpoint.r1 != turnpoint.r2) {
-                //            console.log( "! a1:"+turnpoint.a1, ", a2:"+turnpoint.a2 );
-
-                polypoints = [].concat(polypoints, addArc((center + (turnpoint.a1 * Math.PI) / 180) as Radian, (center + (turnpoint.a2 / 180) * Math.PI) as Radian, ltlg, turnpoint.r2, false));
-
-                if (turnpoint.a2 != 180) {
-                    polypoints.push([ltlg.dlong(), ltlg.dlat()]);
-                }
-
-                polypoints = [].concat(polypoints, addArc((center - (turnpoint.a2 / 180) * Math.PI) as Radian, (center - (turnpoint.a1 * Math.PI) / 180) as Radian, ltlg, turnpoint.r2, false));
-                polypoints.push(polypoints[0]);
-            }
-            //turnpoint a2 has been configured and has a radius
-            else if (turnpoint.a2 == 0 && turnpoint.r1 != turnpoint.r2 && turnpoint.r2 != 0) {
-                polypoints = [].concat(polypoints, addArc((center + (turnpoint.a1 * Math.PI) / 180) as Radian, (center - (turnpoint.a1 / 180) * Math.PI) as Radian, ltlg, turnpoint.r2, false));
-            } else if (turnpoint.a1 != 180) {
-                //      console.log('180');
-                polypoints.push([ltlg.dlong(), ltlg.dlat()]);
-            }
-
-            geoJSONtype = 'Polygon';
-            break;
-    }
-
-    // Reduce precision
-    polypoints.forEach((p) => {
-        p[0] = Math.fround(100000.0 * p[0]) / 100000;
-        p[1] = Math.fround(100000.0 * p[1]) / 100000;
-    });
-
-    // Generate the line list
-    turnpoint.geoJSON = {
-        type: geoJSONtype,
-        coordinates: [polypoints]
-    };
-    if (scoring) {
-        turnpoint.coordinates = _uniqWith(
-            coordReduce(
-                lineChunk(lineString(polypoints), 5),
-                (prev, current) => {
-                    prev.push(current);
-                    return prev;
-                },
-                []
-            ),
-            (a, b) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000)
-        );
-    }
-    turnpoint.lineString = lineString(polypoints);
-
-    turnpoint.pointGeoJSON = turfPoint([tp.nlng, tp.nlat]);
-    return turnpoint.geoJSON;
-}
-
-//console.log(process.env);
-
-// Iterate over an arc adding the appropriate points
-function addArc(startAngle: Radian, endAngle: Radian, ltlg: LatLong, radius: DistanceKM, backwards: boolean) {
-    // accumulate the points and return them
-    let points = [];
-
-    if (Math.round(((2 * Math.PI + startAngle) % (Math.PI * 2)) * steps) == Math.round(((2 * Math.PI + endAngle) % (Math.PI * 2)) * steps)) {
-        for (var i = (2 * Math.PI) as Radian, adj = (Math.PI / steps) as Radian; i >= 0; i = (i - adj) as Radian) {
-            var dltlg = ltlg.destPointRad(i % (2 * Math.PI), radius);
-            points.push([dltlg.dlong(), dltlg.dlat()]);
-        }
-        points.push(pointAtRadius(ltlg, _2pi, radius));
-    } else if (0) {
-        if (startAngle < endAngle) {
-            for (var i = startAngle, adj = ((endAngle - startAngle) / steps) as Radian, ea = Math.round(endAngle * 100); Math.round(i * 100) <= ea; i = (i - adj) as Radian) {
-                var dltlg = ltlg.destPointRad(i, radius);
-                points.push([dltlg.dlong(), dltlg.dlat()]);
-            }
-        } else {
-            for (var i = startAngle, adj = (((_2pi + (startAngle - endAngle)) % _2pi) / steps) as Radian, ea = Math.round(endAngle * 100); i >= startAngle || Math.round(i * 100) <= ea; i = roundRad(i + adj)) {
-                var dltlg = ltlg.destPointRad(i, radius);
-                points.push([dltlg.dlong(), dltlg.dlat()]);
-            }
-        }
-    } else if (startAngle < endAngle) {
-        for (var i = startAngle, adj = ((endAngle - startAngle) / steps) as Radian, ea = Math.round(endAngle * 100); Math.round(i * 100) <= ea; i = (i + adj) as Radian) {
-            var dltlg = ltlg.destPointRad(i, radius);
-            points.push([dltlg.dlong(), dltlg.dlat()]);
-        }
-    } else {
-        for (var i = startAngle, adj = (((_2pi + (startAngle - endAngle)) % _2pi) / steps) as Radian, ea = Math.round(endAngle * 100); i >= startAngle || Math.round(i * 100) <= ea; i = roundRad(i + adj)) {
-            var dltlg = ltlg.destPointRad(i, radius);
-            points.push([dltlg.dlong(), dltlg.dlat()]);
-        }
-    }
-
-    return points;
-}
-
-// Check ti see if the turn point contains the point,
-// check radius before checking the geoJSON sub object as often radius is enough
-//
-// returns: - is distance to run in km, any + is inside
-// nearestPoint will be updated with closest point on sector boundary
-//   if it is specified.
-export function checkIsInTP(turnpoint: TaskLeg, p: EnrichedPosition, nearestPoint: NearestSectorPoint = undefined): [boolean, boolean, DistanceKM] {
-    // Quick check to see if it is plausible
-    let distanceRemaining = distance(p.geoJSON, turnpoint.point) as DistanceKM;
-
-    // If we are inside the radius and the sector is just a circle then we are done
-    if (turnpoint.quickSector) {
-        distanceRemaining = (distanceRemaining - turnpoint.maxR) as DistanceKM;
-        const insidePenaltyVolume = !turnpoint.finish && distanceRemaining < 0.5; // no penalty volume on finish
-        const insideSector = distanceRemaining < 0;
-
-        // Accept penalty volume of 0.5km on each sector
-        if (insidePenaltyVolume || insideSector) {
-            return [insideSector, !insideSector && insidePenaltyVolume, (insideSector ? 0 : distanceRemaining) as DistanceKM];
-        }
-
-        // The are not in the sector and we have been asked for position
-        if (nearestPoint) {
-            const r = along(lineString([[p.lng, p.lat], turnpoint.point]), distanceRemaining);
-            nearestPoint.geometry = r.geometry;
-            // set dist as it is set by distanceToTPPolygon
-            nearestPoint.properties = {...r.properties, t: p.t, p: p, dist: distanceRemaining};
-        }
-        return [false, false, distanceRemaining as DistanceKM];
-    }
-    //
-    // If it's not a circle then if we are outside possible penaltyVolume we
-    // don't need to check if we are in the polygon
-    if (distanceRemaining > turnpoint.maxR + (turnpoint.finish ? 0 : 0.5)) {
-        distanceRemaining = distanceToTPPolygon(turnpoint, p, nearestPoint);
-        return [false, !turnpoint.finish && distanceRemaining < 0.5, distanceRemaining as DistanceKM];
-    }
-
-    // Otherwise confirm if it is inside the polygon, here we do need
-    // to do the distance remaining work as we can't guess distance
-    // as could be a wedge etc.
-    if (booleanPointInPolygon(p.geoJSON, turnpoint.geoJSON)) {
-        return [true, false, 0 as DistanceKM];
-    }
-
-    distanceRemaining = distanceToTPPolygon(turnpoint, p, nearestPoint);
-    return [false, !turnpoint.finish && distanceRemaining < 0.5, distanceRemaining as DistanceKM];
-}
-
-export function checkIsInStartSector(turnpoint: TaskLeg, p: EnrichedPosition): boolean {
-    // Quick check to see if it is plausible
-    const distanceRemaining = distance(p.geoJSON, turnpoint.point) as DistanceKM;
-    const possiblyInsidePenaltyVolume = distanceRemaining < turnpoint.maxR + 0.5;
-
-    // If we are inside the radius and the sector is just a circle then we are done
-    if (turnpoint.quickSector) {
-        // Accept penalty volume of 0.5km on each sector
-        return possiblyInsidePenaltyVolume;
-    }
-
-    // If it's not a circle then if we are outside possible penaltyVolume we
-    // don't need to check if we are in the polygon
-    // as we can't be
-    if (distanceRemaining > turnpoint.maxR) {
-        return false;
-    }
-
-    // Otherwise confirm if it is inside the polygon, here we do need
-    // to do the distance remaining work as we can't guess distance
-    // as could be a wedge etc.
-    return booleanPointInPolygon(p.geoJSON, turnpoint.geoJSON);
-}
-
-function pointAtRadius(ltlg: LatLong, radians: Radian, radius: DistanceKM) {
-    var dltlg = radius ? ltlg.destPointRad(radians, radius) : ltlg;
-    return [dltlg.dlong(), dltlg.dlat()];
-}
-
-// Make sure we have a round number
-function roundRad(i: Radian | number): Radian {
-    return ((_2pi + i) % _2pi) as Radian;
-}
-
-// Find the nearest point on the sector - note we have a simple line polygon
-// with no holes so nothing fancy required
-export function distanceToTPPolygon(tp, point, nearestPoint): DistanceKM {
-    try {
-        const r = nearestPointOnLine(tp.lineString, point.geoJSON);
-        if (nearestPoint) {
-            nearestPoint.geometry = r.geometry;
-            nearestPoint.properties = {...r.properties, t: point.t, p: point};
-        }
-        return r.properties.dist as DistanceKM;
-    } catch (e) {
-        throw new Error(JSON.stringify(tp) + JSON.stringify(point));
-    }
-}
-
 export function calcHandicap(dist, leg, handicap) {
     return (100.0 * dist) / Math.max(handicap + leg.Hi, 25);
-}
-
-export function stats() {
-    console.log(`in tp cache ratio ${((100 * hit) / miss).toFixed(1)}%}`);
-    hit = miss = 0;
 }
 
 //  * (C) 2002-2005 Chris Veness, www.movable-type.co.uk (From LatLong.js)
@@ -478,7 +198,7 @@ export function distHaversineRaw(p1: number[], p2: number[]): DistanceKM {
 export function sumPath(
     path: BasePositionMessage[], //
     startLeg: number = 0,
-    legs: TaskLeg[],
+    legs: PreparedTurnpoint[],
     lda: boolean,
     saveLeg: Function = (_leg: number, _distance: DistanceKM, _point?: BasePositionMessage): void => {}
 ): DistanceKM {
@@ -486,17 +206,23 @@ export function sumPath(
     let distance = 0;
     let leg = startLeg;
     for (const point of path) {
+        if (leg < 0) {
+            continue;
+        }
+        if (leg >= legs.length) {
+            break;
+        }
         if (previousPoint) {
-            const legDistanceAdjust = legs[leg]?.legDistanceAdjust ?? 0;
+            const legDistanceAdjust = legs[leg].leg?.legDistanceAdjust ?? 0;
             if (lda && legDistanceAdjust) {
                 // if the point is the turnpoint then we need to adjust for the distance
-                const legRemaining = Math.max(distHaversineRaw(legs[leg].point!, [point.lng, point.lat]) + legDistanceAdjust, 0);
-                const newPoint = along(lineString([legs[leg].point!, [previousPoint.lng, previousPoint.lat]]), legRemaining).geometry.coordinates;
-                const legDistance = Math.max(Math.round(distHaversineRaw([previousPoint.lng, previousPoint.lat], newPoint) * 20) / 20, 0);
-                saveLeg(leg, legDistance, {t: point.t, lat: newPoint[1], lng: newPoint[0], lda: true});
+                const legRemaining = Math.max((legs[leg].fromSector(point) ?? 0) + legDistanceAdjust, 0);
+                const newPoint = legs[leg].scoredPointRemaining(legRemaining as DistanceKM);
+                const legDistance = Math.max(Math.round(legs[leg].interpointDistance(previousPoint, newPoint) * 20) / 20, 0);
+                saveLeg(leg, legDistance, {...newPoint, t: point.t, lda: true});
                 distance += legDistance;
             } else {
-                const legDistance = Math.max(Math.round(distHaversine(previousPoint, point) * 20) / 20, 0);
+                const legDistance = Math.max(Math.round(legs[leg].interpointDistance(previousPoint, point) * 20) / 20, 0);
                 saveLeg(leg, legDistance, point);
                 distance += legDistance;
             }

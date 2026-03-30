@@ -473,6 +473,11 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
             &nbsp;
             {OptionalTime('', replayTime, tz)}
             {process.env.NODE_ENV == 'development' && score ? OptionalTime(',', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
+            {process.env.NODE_ENV == 'development' ? (
+                <p>
+                    t:{latestUpdate} s:{score?.t}
+                </p>
+            ) : null}
         </span>
     ) : uptodate ? (
         <span>
@@ -480,6 +485,11 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
             <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
                 <FontAwesomeIcon icon={faSquareCheck} /> {Math.round(delay)}s delay
                 {process.env.NODE_ENV == 'development' && score ? ', ' + Math.round(latestUpdate - score?.t) + 's delay' + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
+                {process.env.NODE_ENV == 'development' ? (
+                    <p>
+                        t:{latestUpdate} s:{score?.t}
+                    </p>
+                ) : null}
             </a>
         </span>
     ) : (
@@ -499,6 +509,11 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
                     </>
                 )}
                 {process.env.NODE_ENV == 'development' && score ? ', ' + delayToText(latestUpdate - score?.t) + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
+                {process.env.NODE_ENV == 'development' ? (
+                    <p>
+                        t:{latestUpdate} s:{score?.t}
+                    </p>
+                ) : null}
             </a>
         </span>
     );

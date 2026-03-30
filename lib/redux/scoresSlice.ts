@@ -168,18 +168,36 @@ export const scoresSlice = createSlice({
                 }
             } */
         ),
-        selectAllTimes: createSelector([(state: ScoresSliceState) => state.scores], (scores: ScoreData | null) => {
-            // this doesn't need to deal with history as there can only be one start/finish recorded as a restart
-            // obliterates any previous scoring
-            return _reduce(
-                scores ?? {},
-                (prev, current, key) => {
-                    prev[key] = {startUtc: current.utcStart, finishUtc: current.utcFinish};
-                    return prev;
-                },
-                {}
-            );
-        }),
+        selectAllTimes: createSelector(
+            [
+                (_state: ScoresSliceState, t: Epoch | undefined) => t,
+                (state: ScoresSliceState, t: Epoch | undefined) => (t ? null : state.scores),
+                (state: ScoresSliceState, t: Epoch | undefined) => (t ? state.historical : null)
+            ],
+            (t: Epoch | undefined, scores: ScoreData | null, historical: HistoricalScoreData | null) => {
+                if (!t) {
+                    return _reduce(
+                        scores ?? {},
+                        (prev, current, key) => {
+                            prev[key] = {startUtc: current.utcStart, finishUtc: current.utcFinish};
+                            return prev;
+                        },
+                        {}
+                    );
+                }
+                return _reduce(
+                    historical ?? {},
+                    (prev, pilotScores, key) => {
+                        const index = _sortedIndexBy(pilotScores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
+                        if (index >= 0 && pilotScores[index]) {
+                            prev[key] = {startUtc: pilotScores[index].utcStart, finishUtc: pilotScores[index].utcFinish};
+                        }
+                        return prev;
+                    },
+                    {}
+                );
+            }
+        ),
         selectPilotScore: createSelector(
             [
                 //
@@ -281,6 +299,7 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
             const index = _sortedIndexBy(sh, score, (x) => x.t);
             if (index < sh.length && index >= 0 && sh[index].t != score.t) {
                 console.log(compno, '***** rewind score history to ', index, sh[index].t, d(sh[index].t));
+                console.log(compno, `   ** new ${score.t} ${d(score.t)}, latest: ${sh.at(-1)?.t} ${d(sh.at(-1)?.t ?? 0)}`);
             }
             sh.splice(index, Infinity, result[compno]);
 
@@ -295,7 +314,7 @@ function mapScoresToDisplayScores(p: PilotScore): PilotScoreDisplay {
         ...p,
         ...(p.scoredPoints && p.scoredPoints.length > 3
             ? {
-                  scoredGeoJSON: assembleLabeledLine(p.scoredPoints)
+                  scoredGeoJSON: assembleLabeledLine(p.scoredPoints, p.scoringClosestPoint)
               }
             : {}),
         ...(p.minDistancePoints && p.minDistancePoints.length > 2

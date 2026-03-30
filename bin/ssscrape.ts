@@ -519,11 +519,10 @@ async function update_pilots(data) {
         console.log('====>', compno, existing);
 
         let fainumber = existing[0]?.fai;
-        if (!existing?.length || !fainumber || fainumber < 300) {
-            fainumber = existing.length && fainumber < 300 ? await findPilot(pilot.Contestant, existing[0].country, classid, compno) : 0;
-
+        if (!existing?.length || !fainumber || fainumber > 3000000) {
+            fainumber = existing.length && fainumber < 3003000 ? await findPilot(pilot.Contestant, existing[0].country, classid, compno) : 0;
             if (!fainumber) {
-                fainumber = existing[0]?.fai ? existing[0].fai + 300 : ++pilotnumber;
+                fainumber = existing[0]?.fai ? existing[0].fai : 3000000 + ++pilotnumber;
             }
         }
         await download_picture(

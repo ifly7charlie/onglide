@@ -4,7 +4,7 @@
 import type {Task, TaskLeg, DistanceKM} from '../types';
 import {calculateTask} from './taskhelper';
 
-import _clonedeep from 'lodash.clonedeep';
+import {cloneDeep as _clonedeep} from 'lodash';
 
 // Make a copy of the task reduced for the specified handicap
 export function adjustDistanceHandicapTask(task: Task, handicap: number | undefined): Task {
