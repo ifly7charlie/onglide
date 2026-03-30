@@ -241,6 +241,10 @@ export interface PilotScore {
   scoredPoints: number[];
   minDistancePoints: number[];
   maxDistancePoints: number[];
+  /** The point used for scoring on the uncompleted leg (nearest boundary for AAT, pilot position for racing landout) */
+  scoringClosestPoint?:
+    | BasePositionMessage
+    | undefined;
   /** For rescoring */
   scoreId?: string | undefined;
 }
@@ -2351,6 +2355,7 @@ function createBasePilotScore(): PilotScore {
     scoredPoints: [],
     minDistancePoints: [],
     maxDistancePoints: [],
+    scoringClosestPoint: undefined,
     scoreId: undefined,
   };
 }
@@ -2426,6 +2431,9 @@ export const PilotScore = {
       writer.float(v);
     }
     writer.ldelim();
+    if (message.scoringClosestPoint !== undefined) {
+      BasePositionMessage.encode(message.scoringClosestPoint, writer.uint32(506).fork()).ldelim();
+    }
     if (message.scoreId !== undefined) {
       writer.uint32(442).string(message.scoreId);
     }
@@ -2619,6 +2627,13 @@ export const PilotScore = {
           }
 
           break;
+        case 63:
+          if (tag !== 506) {
+            break;
+          }
+
+          message.scoringClosestPoint = BasePositionMessage.decode(reader, reader.uint32());
+          continue;
         case 55:
           if (tag !== 442) {
             break;
@@ -2669,6 +2684,9 @@ export const PilotScore = {
       maxDistancePoints: globalThis.Array.isArray(object?.maxDistancePoints)
         ? object.maxDistancePoints.map((e: any) => globalThis.Number(e))
         : [],
+      scoringClosestPoint: isSet(object.scoringClosestPoint)
+        ? BasePositionMessage.fromJSON(object.scoringClosestPoint)
+        : undefined,
       scoreId: isSet(object.scoreId) ? globalThis.String(object.scoreId) : undefined,
     };
   },
@@ -2744,6 +2762,9 @@ export const PilotScore = {
     if (message.maxDistancePoints?.length) {
       obj.maxDistancePoints = message.maxDistancePoints;
     }
+    if (message.scoringClosestPoint !== undefined) {
+      obj.scoringClosestPoint = BasePositionMessage.toJSON(message.scoringClosestPoint);
+    }
     if (message.scoreId !== undefined) {
       obj.scoreId = message.scoreId;
     }
@@ -2785,6 +2806,9 @@ export const PilotScore = {
     message.scoredPoints = object.scoredPoints?.map((e) => e) || [];
     message.minDistancePoints = object.minDistancePoints?.map((e) => e) || [];
     message.maxDistancePoints = object.maxDistancePoints?.map((e) => e) || [];
+    message.scoringClosestPoint = (object.scoringClosestPoint !== undefined && object.scoringClosestPoint !== null)
+      ? BasePositionMessage.fromPartial(object.scoringClosestPoint)
+      : undefined;
     message.scoreId = object.scoreId ?? undefined;
     return message;
   },

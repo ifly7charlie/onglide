@@ -226,6 +226,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                                         scoredPoints = {distance: scoredPoints.distance, path: [...scoredPoints.path, hc.onBoundary]};
                                         scoredDistanceAdjust = hc.distanceKm;
                                         scoredDistanceAdjustLeg = taskStatus.currentLeg + 1;
+                                        scoredStatus.scoringClosestPoint = hc.onBoundary;
                                     }
                                 }
                             }
@@ -236,6 +237,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             scoredPoints = maxGraph.shortestAnyToGroupThenToPoint(taskStatus.closestSectorPoint, taskStatus.currentLeg - 1);
                             scoredDistanceAdjust = taskStatus.closestDistanceToNext;
                             scoredDistanceAdjustLeg = taskStatus.currentLeg;
+                            scoredStatus.scoringClosestPoint = taskStatus.closestSectorPoint;
                         }
                     }
 
@@ -320,6 +322,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 } /* finished */ else {
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
                     scoredPoints = maxGraph.shortestAll();
+                    delete scoredStatus.scoringClosestPoint;
                     scoredStatus.legs.forEach((l) => {
                         l.distanceRemaining = 0 as DistanceKM;
                         delete l.maxPossible;

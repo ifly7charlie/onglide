@@ -194,6 +194,9 @@ message PilotScore {
     repeated float minDistancePoints = 60;
     repeated float maxDistancePoints = 61;
 
+    // The point used for scoring on the uncompleted leg (nearest boundary for AAT, pilot position for racing landout)
+    optional BasePositionMessage scoringClosestPoint = 63;
+
     // For DH we have a specific task for the pilot
 	//    optional string taskGeoJSON = 53;
 

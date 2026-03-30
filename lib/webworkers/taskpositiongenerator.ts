@@ -10,6 +10,7 @@ import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskSta
 import {cloneDeep as _clonedeep} from 'lodash';
 
 import {stripPoints} from '../flightprocessing/taskhelper';
+import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
 import {RELAXED_START_TOLERANCE_M} from '../constants';
 
@@ -50,6 +51,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             startConfirmed: false,
             currentLeg: 0,
             closestDistanceToNext: Infinity as DistanceKM,
+            closestDistanceToTPCenter: Infinity as DistanceKM,
             inSector: false,
             inPenalty: false,
             pointsProcessed: status?.pointsProcessed || 0,
@@ -329,8 +331,10 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                     // we are now inside...
                     status.closestDistanceToNext = Infinity as DistanceKM;
+                    status.closestDistanceToTPCenter = Infinity as DistanceKM;
                     possibleAdvances = [];
                     delete status.closestToNextSectorPoint;
+                    delete status.closestToTPCenterPoint;
                 } else if (distFromPrevious > Math.min(task.legs[status.currentLeg]?.length * 0.1, 10)) {
                     status.recentLegAdvance = 0;
                 }
@@ -354,8 +358,10 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 } else {
                     // Nowhere else to go as we are in the sector...
                     status.closestDistanceToNext = Infinity as DistanceKM;
+                    status.closestDistanceToTPCenter = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
                     delete status.closestSectorPoint;
+                    delete status.closestToTPCenterPoint;
                 }
             };
 
@@ -372,6 +378,17 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 status.closestDistanceToNext = (Math.round(distanceRemaining * 10) / 10) as DistanceKM;
                 status.closestToNextSectorPoint = simplifyPoint(point);
                 status.closestSectorPoint = hc.onBoundary;
+            }
+
+            // Also track closest approach to TP center (for FAI landout scoring which uses
+            // distance to Turn Point, not to observation zone boundary)
+            if (!inSector && !inPenalty) {
+                const tpCenter = {lat: task.legs[status.currentLeg].nlat, lng: task.legs[status.currentLeg].nlng} as BasePositionMessage;
+                const distToCenter = PreparedTurnpoint.geodesicDistance(point, tpCenter);
+                if (distToCenter < (status.closestDistanceToTPCenter ?? Infinity)) {
+                    status.closestDistanceToTPCenter = (Math.round(distToCenter * 10) / 10) as DistanceKM;
+                    status.closestToTPCenterPoint = simplifyPoint(point);
+                }
             }
 
             // Check for the finish, if it is then only one point counts and we can stop tracking
@@ -391,7 +408,9 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                     // Nowhere else to go
                     status.closestDistanceToNext = Infinity as DistanceKM;
+                    status.closestDistanceToTPCenter = Infinity as DistanceKM;
                     delete status.closestToNextSectorPoint;
+                    delete status.closestToTPCenterPoint;
                     // we are done scoring at this point so we can close the iterator and
                     // return to complete scoring
                     yield status;
@@ -430,8 +449,10 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 }
                 legStatus.exitTimeStamp = point.t;
                 status.closestDistanceToNext = Infinity as DistanceKM;
+                status.closestDistanceToTPCenter = Infinity as DistanceKM;
                 possibleAdvances = [];
                 delete status.closestToNextSectorPoint;
+                delete status.closestToTPCenterPoint;
             }
 
             // If we have a point in the penalty sector and we don't yet/or ever

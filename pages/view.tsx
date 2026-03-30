@@ -248,6 +248,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
             setError(null);
 
             const newFlights: LoadedFlight[] = [];
+            let runningEarliest = availableScores.earliestScore;
+            let runningLatest = availableScores.latestScore;
 
             try {
                 for (const file of Array.from(fileList)) {
@@ -273,7 +275,9 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
 
                             const earliest = igcData.fixes[0].t;
                             const latest = igcData.fixes[igcData.fixes.length - 1].t;
-                            dispatchClass(dispatch, earliest, latest);
+                            runningEarliest = Math.min(runningEarliest, earliest) as Epoch;
+                            runningLatest = Math.max(runningLatest, latest) as Epoch;
+                            dispatchClass(dispatch, runningEarliest, runningLatest);
                             dispatchTask(dispatch, result.task, result.geoJSON);
                             setTaskBuilt(true);
 
@@ -297,19 +301,19 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             0 as Epoch
                         );
 
-                        // Find the start time from scores and drop pre-start fixes
-                        const lastScore = allScores.at(-1);
-                        const startUtc = lastScore?.utcStart as Epoch | undefined;
-                        const trackFixes = startUtc ? igcData.fixes.filter((f) => f.t >= startUtc - 30) : igcData.fixes;
+                        // Find the earliest start time from scores and drop pre-start fixes from track display
+                        const earliestStart = allScores.reduce((min, s) => (s.utcStart && s.utcStart < min ? s.utcStart : min), Infinity) as Epoch;
+                        const trackFixes = earliestStart < Infinity ? igcData.fixes.filter((f) => f.t >= earliestStart - 30) : igcData.fixes;
 
                         dispatchTrack(dispatch, compno, igcData.pilot.name, trackFixes);
                         if (allScores.length) {
                             dispatchScores(dispatch, allScores);
                         }
 
-                        const earliest = Math.min(availableScores.earliestScore, trackFixes[0].t) as Epoch;
-                        const latest = Math.max(availableScores.latestScore, trackFixes[trackFixes.length - 1].t) as Epoch;
-                        dispatchTimeRange(dispatch, earliest, latest);
+                        // Use full fix range (not clipped) for the time slider
+                        runningEarliest = Math.min(runningEarliest, igcData.fixes[0].t) as Epoch;
+                        runningLatest = Math.max(runningLatest, igcData.fixes[igcData.fixes.length - 1].t) as Epoch;
+                        dispatchTimeRange(dispatch, runningEarliest, runningLatest);
                     }
 
                     newFlights.push({
@@ -376,7 +380,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         setSelectedCompno(undefined);
         setReplayTime(undefined);
         setError(null);
-        dispatchClass(dispatch, 0 as Epoch, 0 as Epoch);
+        dispatchClass(dispatch, Infinity as Epoch, 0 as Epoch, true);
     }, [dispatch]);
 
     const handleRescore = useCallback(async () => {
@@ -386,9 +390,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         try {
             for (const flight of flights) {
                 const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, 100, 0 as Epoch);
-                const lastScore = scores.at(-1);
-                const startUtc = lastScore?.utcStart as Epoch | undefined;
-                const trackFixes = startUtc ? flight.igcData.fixes.filter((f) => f.t >= startUtc - 30) : flight.igcData.fixes;
+                const earliestStart = scores.reduce((min, s) => (s.utcStart && s.utcStart < min ? s.utcStart : min), Infinity) as Epoch;
+                const trackFixes = earliestStart < Infinity ? flight.igcData.fixes.filter((f) => f.t >= earliestStart - 30) : flight.igcData.fixes;
                 dispatchTrack(dispatch, flight.compno, flight.pilotName, trackFixes);
                 if (scores.length) {
                     dispatchScores(dispatch, scores);

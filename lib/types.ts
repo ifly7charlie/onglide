@@ -218,6 +218,9 @@ export interface TaskStatus extends TimeStampType {
     closestToNextSectorPoint?: BasePositionMessage; // positionmessage
     closestSectorPoint?: BasePositionMessage; // point on next sector that matches above
 
+    closestDistanceToTPCenter?: DistanceKM; // min distance from pilot to next TP center coords (for landout scoring)
+    closestToTPCenterPoint?: BasePositionMessage; // pilot position when above was minimized
+
     //
     pointsProcessed: number;
     legs: TaskLegStatus[];
@@ -259,6 +262,7 @@ export interface CalculatedTaskStatus extends TaskStatus {
     distanceRemaining?: DistanceKM; // how much left (for both aat & speed)
     maxPossible?: DistanceKM; // max task distance remaining
     minPossible?: DistanceKM; // shortest distance to home (for aat this is smallest task distance based on what has been flown)
+    scoringClosestPoint?: BasePositionMessage; // the point used for scoring on uncompleted leg
 }
 
 // points re-ordered if necessary

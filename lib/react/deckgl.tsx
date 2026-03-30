@@ -435,6 +435,7 @@ export default function MApp(props: {
                     <Source type="geojson" data={debouncedScore.scoredGeoJSON} key={'scored_'} id={'scored'}>
                         <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: 'visible'}}} />
                         <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, true)} />
+                        <Layer key="scoringPoint" {...scoringPointStyle} />
                     </Source>
                 ) : null}
                 <MeasureLayers key="measure" />
@@ -457,6 +458,19 @@ const scoredLineStyle: LayerProps = {
         'line-color': '#0f0',
         'line-width': 5,
         'line-opacity': 1
+    }
+};
+
+const scoringPointStyle: LayerProps = {
+    id: 'scoring_point',
+    type: 'circle',
+    filter: ['==', ['get', 'scoringPoint'], true],
+    paint: {
+        'circle-radius': 5,
+        'circle-color': '#0f0',
+        'circle-stroke-color': '#000',
+        'circle-stroke-width': 1,
+        'circle-opacity': 1
     }
 };
 

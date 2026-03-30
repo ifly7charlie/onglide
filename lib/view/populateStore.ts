@@ -11,7 +11,21 @@ const SCORE_ID = 'igc-view';
 const CLASS_NAME = 'View' as ClassName;
 const DATECODE = 'view' as Datecode;
 
-export function dispatchClass(dispatch: AppDispatch, earliestScore: Epoch, latestScore: Epoch) {
+export function dispatchClass(dispatch: AppDispatch, earliestScore: Epoch, latestScore: Epoch, reset?: boolean) {
+    if (reset) {
+        // Use a temporary datecode to force all slices to clear their state
+        dispatch(
+            updateClassAction({
+                className: CLASS_NAME,
+                datecode: ('reset-' + Date.now()) as Datecode,
+                competition: 'IGC Viewer',
+                earliestScore: earliestScore as number,
+                latestScore: latestScore as number,
+                scoreId: SCORE_ID,
+                t: latestScore
+            })
+        );
+    }
     dispatch(
         updateClassAction({
             className: CLASS_NAME,

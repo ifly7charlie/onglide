@@ -3,6 +3,7 @@ import {Epoch, DistanceKM, Task, CalculatedTaskStatus, CalculatedTaskGenerator, 
 import {DistanceOptimiser} from '../flightprocessing/distanceOptimiser';
 
 import {distHaversine, sumPath} from '../flightprocessing/taskhelper';
+import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
 import {lineString} from '@turf/helpers';
 import along from '@turf/along';
@@ -108,12 +109,21 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             const currentLeg = taskStatus.legs[taskStatus.currentLeg];
             log(taskStatus);
             if (!taskStatus.inSector && taskStatus.closestToNextSectorPoint && taskStatus.closestDistanceToNext) {
-                currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
+                if (taskStatus.flightStatus === PositionStatus.Landed && taskStatus.closestDistanceToTPCenter) {
+                    // FAI landout: "length of that leg less the distance between the Outlanding Position
+                    // and the next Turn Point" — Turn Point is the center coordinate, not the OZ boundary.
+                    // Outlanding position is the most favourable fix (closest to TP center).
+                    currentLeg.distance = (Math.round(Math.max(task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToTPCenter, 0) * 10) / 10) as DistanceKM;
+                    currentLeg.point = taskStatus.closestToTPCenterPoint;
+                    taskStatus.scoringClosestPoint = taskStatus.closestToTPCenterPoint;
+                } else {
+                    // In-progress: use boundary distance for live display (more meaningful to viewers)
+                    currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
+                    currentLeg.point = preparedLegs[taskStatus.currentLeg]
+                        .scoredPointRemaining(Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length) as DistanceKM);
+                    taskStatus.scoringClosestPoint = taskStatus.closestToNextSectorPoint;
+                }
                 taskStatus.distance = (Math.round((taskStatus.distance + currentLeg.distance) * 10) / 10) as DistanceKM;
-                currentLeg.point = taskStatus.closestToNextSectorPoint;
-
-                currentLeg.point = preparedLegs[taskStatus.currentLeg] // figure out where the scored point is
-                    .scoredPointRemaining(Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length) as DistanceKM);
             }
 
             // If we haven't finished then we will figure out the shortest path from
@@ -121,6 +131,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             // minTaskDistance - this is much more interesting that just the 'task length'
             // remaining as it's what the pilot needs to fly to finish
             if (taskStatus.utcFinish) {
+                delete taskStatus.scoringClosestPoint;
                 const leg = taskStatus.legs[taskStatus.currentLeg];
                 leg.distance = (Math.round(task.legs[leg.legno].length * 10) / 10) as DistanceKM; // already adjusted for start/finish rings
                 taskStatus.distance = (Math.round((taskStatus.distance + leg.distance) * 10) / 10) as DistanceKM;
