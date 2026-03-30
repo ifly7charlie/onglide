@@ -1,6 +1,6 @@
 'use client';
 
-import {useCallback, useMemo, useRef, useEffect} from 'react';
+import {useCallback, useMemo, useRef, useEffect, useState} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 
 import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl';
@@ -356,8 +356,19 @@ export default function MApp(props: {
         }
     }, [setFollow, follow]);
 
+    // Debounce the selected score for Mapbox source updates to avoid worker queue buildup
+    // when scrubbing the replay slider. Position/scores update instantly via Redux; only
+    // the GeoJSON line layers are debounced.
+    const [debouncedScore, setDebouncedScore] = useState(selectedScore);
+    const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => {
+        clearTimeout(debounceTimer.current);
+        debounceTimer.current = setTimeout(() => setDebouncedScore(selectedScore), 60);
+        return () => clearTimeout(debounceTimer.current);
+    }, [selectedScore?.t, selectedScore?.currentLeg]);
+
     // If we are on last leg of AAT then we stop showing construction lines
-    const lastLeg = task?.rules?.aat && selectedScore?.currentLeg == task?.legs?.length - 1;
+    const lastLeg = task?.rules?.aat && debouncedScore?.currentLeg == task?.legs?.length - 1;
 
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
@@ -398,30 +409,30 @@ export default function MApp(props: {
                         <Layer {...trackLineStyle} key="tls" />
                     </Source>
                 ) : null}
-                {selectedScore && options.constructionLines ? (
+                {debouncedScore && options.constructionLines ? (
                     <>
-                        {selectedScore.minGeoJSON && !lastLeg ? (
-                            <Source type="geojson" data={selectedScore.minGeoJSON} key={'min_'} id={'min'}>
+                        {debouncedScore.minGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={debouncedScore.minGeoJSON} key={'min_'} id={'min'}>
                                 <Layer {...distanceLineLabelStyle(minLineStyle)} beforeId={'scored_line'} />
                                 <Layer {...minLineStyle} beforeId={'minpossible_label'} />
                             </Source>
                         ) : null}
-                        {selectedScore.maxGeoJSON && !lastLeg ? (
-                            <Source type="geojson" data={selectedScore.maxGeoJSON} key={'max_'} id={'max'}>
+                        {debouncedScore.maxGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={debouncedScore.maxGeoJSON} key={'max_'} id={'max'}>
                                 <Layer {...distanceLineLabelStyle(maxLineStyle)} beforeId={'scored_line'} />
                                 <Layer {...maxLineStyle} beforeId={'maxpossible_label'} />
                             </Source>
                         ) : null}
-                        {selectedScore.legs && task?.rules?.aat ? (
-                            <Source type="geojson" data={assembleHullLine(selectedScore.legs)} key={'hull_'}>
+                        {debouncedScore.legs && task?.rules?.aat ? (
+                            <Source type="geojson" data={assembleHullLine(debouncedScore.legs)} key={'hull_'}>
                                 <Layer {...hullLineStyle} />
                                 <Layer {...hullPointStyle} />
                             </Source>
                         ) : null}
                     </>
                 ) : null}
-                {selectedScore?.scoredGeoJSON ? (
-                    <Source type="geojson" data={selectedScore.scoredGeoJSON} key={'scored_'} id={'scored'}>
+                {debouncedScore?.scoredGeoJSON ? (
+                    <Source type="geojson" data={debouncedScore.scoredGeoJSON} key={'scored_'} id={'scored'}>
                         <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: 'visible'}}} />
                         <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, true)} />
                     </Source>
