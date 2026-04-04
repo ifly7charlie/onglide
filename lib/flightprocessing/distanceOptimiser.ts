@@ -397,6 +397,46 @@ export class DistanceOptimiser<T> {
         return {distance: best, path};
     }
 
+    // ----- hypothetical evaluation -----
+
+    /**
+     * Evaluate the optimal total path weight through each hypothetical point
+     * as if it were placed in the given group. Does NOT modify the graph.
+     *
+     * For each point P the result is:
+     *   min_q(prefixCost[g-1][q] + weight(q, P))
+     * + min_r(weight(P, r) + suffixCost[g+1][r])
+     *
+     * Lower weight ⇒ higher actual distance (when using inverted weights).
+     */
+    evaluatePointsInGroup(groupIndex: number, points: T[]): number[] {
+        this.assertIndex(groupIndex);
+        if (groupIndex === 0 || groupIndex === this.L - 1) {
+            throw new Error('Cannot evaluate hypothetical points in the first or last group');
+        }
+        this.ensurePrefixTo(groupIndex - 1);
+        this.ensureSuffixFrom(groupIndex + 1);
+
+        const prevGroup = this.groups[groupIndex - 1];
+        const prevCost = this.prefixCost[groupIndex - 1]!;
+        const nextGroup = this.groups[groupIndex + 1];
+        const nextCost = this.suffixCost[groupIndex + 1]!;
+
+        return points.map((p) => {
+            let bestPrefix = Number.POSITIVE_INFINITY;
+            for (let q = 0; q < prevGroup.length; q++) {
+                const c = prevCost[q] + this.weight(prevGroup[q], p);
+                if (c < bestPrefix) bestPrefix = c;
+            }
+            let bestSuffix = Number.POSITIVE_INFINITY;
+            for (let r = 0; r < nextGroup.length; r++) {
+                const c = this.weight(p, nextGroup[r]) + nextCost[r];
+                if (c < bestSuffix) bestSuffix = c;
+            }
+            return bestPrefix + bestSuffix;
+        });
+    }
+
     // ----- cloning -----
 
     /** Make a copy of the current state. If weightFn is provided and differs, caches are reset. */

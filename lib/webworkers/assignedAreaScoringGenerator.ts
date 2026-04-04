@@ -81,6 +81,11 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     let scoredStatus: CalculatedTaskStatus = {} as CalculatedTaskStatus;
     let flightStatus: PositionStatus | undefined = undefined;
 
+    // Optimal direction grid: computed once per sector entry
+    let cachedOptimalGrid: number[] | undefined;
+    let lastGridLeg = -1;
+    const GRID_SIZE = 25;
+
     for await (const current of taskStatusGenerator) {
         try {
             const taskStatus = Object.assign(scoredStatus, current);
@@ -178,6 +183,73 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             }
 
             maxGraph.printSummary(log);
+
+            // Compute optimal direction grid once per sector entry (when previous hull is finalized)
+            const isFinishLegForGrid = taskStatus.currentLeg === task.legs.length - 1;
+            if (taskStatus.currentLeg !== lastGridLeg && taskStatus.currentLeg > 0 && !isFinishLegForGrid) {
+                lastGridLeg = taskStatus.currentLeg;
+                const sectorCoords = task.legs[taskStatus.currentLeg].coordinates as [number, number][];
+                if (sectorCoords?.length >= 3) {
+                    // Bbox of the sector
+                    let minLng = Infinity,
+                        maxLng = -Infinity,
+                        minLat = Infinity,
+                        maxLat = -Infinity;
+                    for (const [lng, lat] of sectorCoords) {
+                        if (lng < minLng) minLng = lng;
+                        if (lng > maxLng) maxLng = lng;
+                        if (lat < minLat) minLat = lat;
+                        if (lat > maxLat) maxLat = lat;
+                    }
+                    const dLng = (maxLng - minLng) / GRID_SIZE;
+                    const dLat = (maxLat - minLat) / GRID_SIZE;
+
+                    if (dLng > 0 && dLat > 0) {
+                        // Ray-casting point-in-polygon
+                        const inPoly = (x: number, y: number): boolean => {
+                            let inside = false;
+                            for (let i = 0, j = sectorCoords.length - 1; i < sectorCoords.length; j = i++) {
+                                const xi = sectorCoords[i][0],
+                                    yi = sectorCoords[i][1];
+                                const xj = sectorCoords[j][0],
+                                    yj = sectorCoords[j][1];
+                                if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+                                    inside = !inside;
+                                }
+                            }
+                            return inside;
+                        };
+
+                        // Build grid cells inside the sector
+                        const gridPoints: BasePositionMessage[] = [];
+                        const gridCoords: {lng: number; lat: number}[] = [];
+                        for (let i = 0; i < GRID_SIZE; i++) {
+                            for (let j = 0; j < GRID_SIZE; j++) {
+                                const cLng = minLng + (i + 0.5) * dLng;
+                                const cLat = minLat + (j + 0.5) * dLat;
+                                if (inPoly(cLng, cLat)) {
+                                    gridPoints.push({t: 0 as Epoch, lat: cLat, lng: cLng, a: 0} as BasePositionMessage);
+                                    gridCoords.push({lng: cLng, lat: cLat});
+                                }
+                            }
+                        }
+
+                        if (gridPoints.length > 0) {
+                            const weights = maxGraph.evaluatePointsInGroup(taskStatus.currentLeg, gridPoints);
+                            const numEdges = task.legs.length - 1;
+                            const grid: number[] = [];
+                            for (let k = 0; k < gridPoints.length; k++) {
+                                grid.push(gridCoords[k].lng, gridCoords[k].lat, numEdges * 1000 - weights[k]);
+                            }
+                            cachedOptimalGrid = grid;
+                            log('optimalGrid computed:', gridPoints.length, 'cells for leg', taskStatus.currentLeg);
+                        } else {
+                            cachedOptimalGrid = undefined;
+                        }
+                    }
+                }
+            }
+            scoredStatus.optimalGrid = cachedOptimalGrid;
 
             // What we optimize in next stage
             //            let scoredPoints: BasePositionMessage[];

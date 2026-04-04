@@ -264,6 +264,7 @@ export interface CalculatedTaskStatus extends TaskStatus {
     minPossible?: DistanceKM; // shortest distance to home (for aat this is smallest task distance based on what has been flown)
     scoringClosestPoint?: BasePositionMessage; // the point used for scoring on uncompleted leg
     optimalNextSectorPoint?: BasePositionMessage; // optimal point in next sector for direction visualization
+    optimalGrid?: number[]; // flat [lng, lat, taskDist, ...] per grid cell for AAT direction heatmap
 }
 
 // points re-ordered if necessary

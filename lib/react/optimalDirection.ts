@@ -10,7 +10,7 @@ interface LatLng {
 
 const deg2rad = (d: number) => (d * Math.PI) / 180;
 
-/** Haversine distance in km — inline to avoid turf overhead for ~1250 calls */
+/** Haversine distance in km — inline to avoid turf overhead */
 function distKm(a: LatLng, b: LatLng): number {
     const R = 6371;
     const dLat = deg2rad(b.lat - a.lat);
@@ -24,85 +24,105 @@ function distKm(a: LatLng, b: LatLng): number {
 const GRID_SIZE = 25;
 
 /**
- * Generate a filled heatmap over the current sector showing the net value
- * of each point: d(A,P) - d(P,C).
+ * Generate a filled heatmap over the current sector showing the net efficiency
+ * of each grid cell:
  *
- * - d(A,P) = scored distance on this leg (what you gain)
- * - d(P,C) = distance to reach the next sector (the transit cost)
+ *   delta(P) = gridTaskDist(P) - scoredTaskDist - d(S, pos) - d(pos, P)
  *
- * The delta is relative to the current scored point S, so:
- * - delta > 0 (green) = improvement over current score
- * - delta = 0 (yellow) = same as current score
- * - delta < 0 (red) = worse than current score
+ * - gridTaskDist(P)  = total task distance (start→finish) if P were the scored
+ *   point in this sector, precomputed in the worker via prefix/suffix DP
+ * - scoredTaskDist   = current total scored task distance (what the pilot "has")
+ * - d(S, pos)        = distance already flown from scored point to current position
+ * - d(pos, P)        = remaining transit distance to reach cell P
  *
- * Points inside the existing convex hull are already enclosed and
- * cannot improve the score, so they are clamped to delta = 0.
+ * Positive (green) = net improvement over current score after transit cost
+ * Negative (red)   = transit cost exceeds any task distance gain
  *
- * @param A - Scored point in the previous sector
- * @param C - Optimal point in the next sector
- * @param S - Current scored point in this sector
- * @param sectorPolygon - Sector geometry for clipping
- * @param hullPolygon - Convex hull of points flown in this sector (null if not yet available)
+ * @param optimalGrid       - Flat [lng, lat, taskDist, ...] from worker
+ * @param S                 - Current scored point in this sector
+ * @param pos               - Pilot's current GPS position
+ * @param scoredTaskDist    - Current total scored task distance (baseline)
+ * @param sectorPolygon     - Sector geometry (for computing grid cell size)
+ * @param hullPolygon       - Convex hull (reserved for future "path out" use)
+ * @param optimalNextSectorPoint - Optimal point in next sector (rendered as marker)
  */
 export function assembleOptimalDirection(
-    A: LatLng,
-    C: LatLng,
+    optimalGrid: number[],
     S: LatLng,
+    pos: LatLng,
+    scoredTaskDist: number,
     sectorPolygon: Feature<Polygon>,
-    hullPolygon: Feature<Polygon> | null
+    hullPolygon: Feature<Polygon> | null,
+    optimalNextSectorPoint?: LatLng
 ): FeatureCollection | null {
+    if (!optimalGrid.length) return null;
+
     const [minLng, minLat, maxLng, maxLat] = bbox(sectorPolygon);
     const dLng = (maxLng - minLng) / GRID_SIZE;
     const dLat = (maxLat - minLat) / GRID_SIZE;
 
     if (dLng <= 0 || dLat <= 0) return null;
 
-    const scoredValue = distKm(A, S) - distKm(S, C);
-    const features: (Feature<Polygon> | Feature)[] = [];
+    // Distance already spent flying from scored point to current position (constant for all cells)
+    const dSPos = distKm(S, pos);
 
-    for (let i = 0; i < GRID_SIZE; i++) {
-        for (let j = 0; j < GRID_SIZE; j++) {
-            const cLng = minLng + (i + 0.5) * dLng;
-            const cLat = minLat + (j + 0.5) * dLat;
+    // First pass: compute raw deltas and find the range
+    const cells: {lng: number; lat: number; delta: number}[] = [];
+    let minDelta = Infinity;
+    let maxDelta = -Infinity;
 
-            if (!booleanPointInPolygon([cLng, cLat], sectorPolygon)) {
-                continue;
-            }
+    for (let k = 0; k + 2 < optimalGrid.length; k += 3) {
+        const cLng = optimalGrid[k];
+        const cLat = optimalGrid[k + 1];
+        const taskDist = optimalGrid[k + 2];
 
-            let delta: number;
-            if (hullPolygon && booleanPointInPolygon([cLng, cLat], hullPolygon)) {
-                // Inside the convex hull — already enclosed, no improvement possible
-                delta = 0;
-            } else {
-                const P: LatLng = {lat: cLat, lng: cLng};
-                const value = distKm(A, P) - distKm(P, C);
-                delta = Math.round((value - scoredValue) * 10) / 10;
-            }
-
-            const l = cLng - dLng / 2;
-            const r = cLng + dLng / 2;
-            const b = cLat - dLat / 2;
-            const t = cLat + dLat / 2;
-
-            features.push(
-                polygon(
-                    [
-                        [
-                            [l, b],
-                            [r, b],
-                            [r, t],
-                            [l, t],
-                            [l, b]
-                        ]
-                    ],
-                    {delta}
-                )
-            );
+        // Skip cells inside the convex hull — already enclosed, no new information
+        if (hullPolygon && booleanPointInPolygon([cLng, cLat], hullPolygon)) {
+            continue;
         }
+
+        const delta = taskDist - scoredTaskDist - dSPos - distKm(pos, {lat: cLat, lng: cLng});
+
+        cells.push({lng: cLng, lat: cLat, delta});
+        if (delta < minDelta) minDelta = delta;
+        if (delta > maxDelta) maxDelta = delta;
     }
 
-    // Add C as a point feature for rendering as a marker
-    features.push(point([C.lng, C.lat], {optimalNextPoint: true}));
+    if (!cells.length) return null;
+
+    // Normalize to [-1, +1] range using the actual min/max
+    // Map: minDelta → -1, maxDelta → +1
+    const range = maxDelta - minDelta;
+    const features: (Feature<Polygon> | Feature)[] = [];
+
+    for (const cell of cells) {
+        const normalized = range > 0 ? ((cell.delta - minDelta) / range) * 2 - 1 : 0;
+
+        const l = cell.lng - dLng / 2;
+        const r = cell.lng + dLng / 2;
+        const b = cell.lat - dLat / 2;
+        const t = cell.lat + dLat / 2;
+
+        features.push(
+            polygon(
+                [
+                    [
+                        [l, b],
+                        [r, b],
+                        [r, t],
+                        [l, t],
+                        [l, b]
+                    ]
+                ],
+                {delta: Math.round(normalized * 100) / 100}
+            )
+        );
+    }
+
+    // Add optimal next sector point as a marker feature
+    if (optimalNextSectorPoint) {
+        features.push(point([optimalNextSectorPoint.lng, optimalNextSectorPoint.lat], {optimalNextPoint: true}));
+    }
 
     return features.length > 0 ? featureCollection(features) : null;
 }

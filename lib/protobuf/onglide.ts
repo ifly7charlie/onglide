@@ -249,6 +249,8 @@ export interface PilotScore {
   optimalNextSectorPoint?:
     | BasePositionMessage
     | undefined;
+  /** Grid of optimal task distances per cell [lng, lat, taskDist, ...] for AAT direction heatmap */
+  optimalGrid: number[];
   /** For rescoring */
   scoreId?: string | undefined;
 }
@@ -2361,6 +2363,7 @@ function createBasePilotScore(): PilotScore {
     maxDistancePoints: [],
     scoringClosestPoint: undefined,
     optimalNextSectorPoint: undefined,
+    optimalGrid: [],
     scoreId: undefined,
   };
 }
@@ -2442,6 +2445,11 @@ export const PilotScore = {
     if (message.optimalNextSectorPoint !== undefined) {
       BasePositionMessage.encode(message.optimalNextSectorPoint, writer.uint32(514).fork()).ldelim();
     }
+    writer.uint32(530).fork();
+    for (const v of message.optimalGrid) {
+      writer.float(v);
+    }
+    writer.ldelim();
     if (message.scoreId !== undefined) {
       writer.uint32(442).string(message.scoreId);
     }
@@ -2649,6 +2657,23 @@ export const PilotScore = {
 
           message.optimalNextSectorPoint = BasePositionMessage.decode(reader, reader.uint32());
           continue;
+        case 66:
+          if (tag === 533) {
+            message.optimalGrid.push(reader.float());
+
+            continue;
+          }
+
+          if (tag === 530) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.optimalGrid.push(reader.float());
+            }
+
+            continue;
+          }
+
+          break;
         case 55:
           if (tag !== 442) {
             break;
@@ -2705,6 +2730,9 @@ export const PilotScore = {
       optimalNextSectorPoint: isSet(object.optimalNextSectorPoint)
         ? BasePositionMessage.fromJSON(object.optimalNextSectorPoint)
         : undefined,
+      optimalGrid: globalThis.Array.isArray(object?.optimalGrid)
+        ? object.optimalGrid.map((e: any) => globalThis.Number(e))
+        : [],
       scoreId: isSet(object.scoreId) ? globalThis.String(object.scoreId) : undefined,
     };
   },
@@ -2786,6 +2814,9 @@ export const PilotScore = {
     if (message.optimalNextSectorPoint !== undefined) {
       obj.optimalNextSectorPoint = BasePositionMessage.toJSON(message.optimalNextSectorPoint);
     }
+    if (message.optimalGrid?.length) {
+      obj.optimalGrid = message.optimalGrid;
+    }
     if (message.scoreId !== undefined) {
       obj.scoreId = message.scoreId;
     }
@@ -2834,6 +2865,7 @@ export const PilotScore = {
       (object.optimalNextSectorPoint !== undefined && object.optimalNextSectorPoint !== null)
         ? BasePositionMessage.fromPartial(object.optimalNextSectorPoint)
         : undefined;
+    message.optimalGrid = object.optimalGrid?.map((e) => e) || [];
     message.scoreId = object.scoreId ?? undefined;
     return message;
   },

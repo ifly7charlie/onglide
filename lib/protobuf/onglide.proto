@@ -200,6 +200,9 @@ message PilotScore {
     // Optimal point in next sector that maximises total distance (for AAT direction visualization)
     optional BasePositionMessage optimalNextSectorPoint = 64;
 
+    // Grid of optimal task distances per cell [lng, lat, taskDist, ...] for AAT direction heatmap
+    repeated float optimalGrid = 66;
+
     // For DH we have a specific task for the pilot
 	//    optional string taskGeoJSON = 53;
 
