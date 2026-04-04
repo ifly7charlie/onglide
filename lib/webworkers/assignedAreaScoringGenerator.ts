@@ -214,12 +214,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             // convex hull. Don't extend to the next sector - that inflates the scored distance.
                             scoredPoints = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
 
-                            // Compute optimal next sector point for direction visualization
-                            if (scoredPoints && scoredPoints.path.length > 0 && taskStatus.currentLeg + 1 < task.legs.length) {
-                                const bestCurrentPoint = scoredPoints.path.at(-1)!;
-                                const forwardPath = maxGraph.shortestFrom(bestCurrentPoint, taskStatus.currentLeg);
-                                if (forwardPath.path.length >= 2) {
-                                    scoredStatus.optimalNextSectorPoint = forwardPath.path[1];
+                            // Compute optimal next sector point for direction visualization.
+                            // Use shortestAll() to get the globally optimal point in the next sector,
+                            // not conditioned on the current hull point — this matches the max distance line.
+                            if (taskStatus.currentLeg + 1 < task.legs.length) {
+                                const globalPath = maxGraph.shortestAll();
+                                if (globalPath.path.length > taskStatus.currentLeg + 1) {
+                                    scoredStatus.optimalNextSectorPoint = globalPath.path[taskStatus.currentLeg + 1];
                                 }
                             }
 

@@ -1,7 +1,7 @@
-import {lineString, featureCollection} from '@turf/helpers';
-import turfDistance from '@turf/distance';
-import turfBearing from '@turf/bearing';
-import type {Feature, LineString, FeatureCollection} from 'geojson';
+import {polygon, point, featureCollection} from '@turf/helpers';
+import bbox from '@turf/bbox';
+import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
+import type {Feature, Polygon, FeatureCollection} from 'geojson';
 
 interface LatLng {
     lat: number;
@@ -9,87 +9,100 @@ interface LatLng {
 }
 
 const deg2rad = (d: number) => (d * Math.PI) / 180;
-const rad2deg = (r: number) => (r * 180) / Math.PI;
 
-/** Project a point along a bearing by a distance (km). Flat-earth approximation, adequate at AAT scales. */
-function destination(from: LatLng, distanceKm: number, bearingDeg: number): [number, number] {
-    const brRad = deg2rad(bearingDeg);
-    const lat = from.lat + (distanceKm * Math.cos(brRad)) / 111.32;
-    const lng = from.lng + (distanceKm * Math.sin(brRad)) / (111.32 * Math.cos(deg2rad(from.lat)));
-    return [lng, lat];
+/** Haversine distance in km — inline to avoid turf overhead for ~1250 calls */
+function distKm(a: LatLng, b: LatLng): number {
+    const R = 6371;
+    const dLat = deg2rad(b.lat - a.lat);
+    const dLng = deg2rad(b.lng - a.lng);
+    const sinLat = Math.sin(dLat / 2);
+    const sinLng = Math.sin(dLng / 2);
+    const h = sinLat * sinLat + Math.cos(deg2rad(a.lat)) * Math.cos(deg2rad(b.lat)) * sinLng * sinLng;
+    return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-/**
- * Generate an ellipse as a closed LineString with the given foci and distance sum.
- * Returns null if the ellipse is degenerate (sum <= focal distance).
- */
-function generateEllipse(A: LatLng, C: LatLng, distanceSum: number, focalDistance: number, rotation: number, steps: number = 72): Feature<LineString> | null {
-    const a = distanceSum / 2; // semi-major axis
-    const c = focalDistance / 2; // half focal distance
-
-    if (a <= c) {
-        return null; // degenerate
-    }
-
-    const b = Math.sqrt(a * a - c * c); // semi-minor axis
-    const center: LatLng = {
-        lat: (A.lat + C.lat) / 2,
-        lng: (A.lng + C.lng) / 2
-    };
-
-    const coords: [number, number][] = [];
-    for (let i = 0; i <= steps; i++) {
-        const theta = (i * 360) / steps;
-        const thetaRad = deg2rad(theta);
-
-        // Ellipse in local coordinates (aligned with A-C axis)
-        const localAlong = a * Math.cos(thetaRad); // along A-C direction
-        const localAcross = b * Math.sin(thetaRad); // perpendicular
-
-        // Convert to distance and bearing from center
-        const dist = Math.sqrt(localAlong * localAlong + localAcross * localAcross);
-        const localAngle = rad2deg(Math.atan2(localAcross, localAlong));
-        const bearing = rotation + localAngle;
-
-        coords.push(destination(center, dist, bearing));
-    }
-
-    return lineString(coords);
-}
+const GRID_SIZE = 25;
 
 /**
- * Assemble iso-distance ellipses showing contours of equal total distance
- * through the current sector. The base ellipse passes through the current
- * scored point S, showing the achieved distance. Additional ellipses at
- * +5km and +10km show where the pilot would need to fly to improve.
+ * Generate a filled heatmap over the current sector showing the net value
+ * of each point: d(A,P) - d(P,C).
  *
- * Foci are A (scored point in previous sector) and C (optimal point in
- * next sector). Every point on a given ellipse yields the same d(A,P)+d(P,C).
+ * - d(A,P) = scored distance on this leg (what you gain)
+ * - d(P,C) = distance to reach the next sector (the transit cost)
  *
- * @param S - Current scored point in this sector (from distance optimiser)
+ * The delta is relative to the current scored point S, so:
+ * - delta > 0 (green) = improvement over current score
+ * - delta = 0 (yellow) = same as current score
+ * - delta < 0 (red) = worse than current score
+ *
+ * Points inside the existing convex hull are already enclosed and
+ * cannot improve the score, so they are clamped to delta = 0.
+ *
  * @param A - Scored point in the previous sector
  * @param C - Optimal point in the next sector
+ * @param S - Current scored point in this sector
+ * @param sectorPolygon - Sector geometry for clipping
+ * @param hullPolygon - Convex hull of points flown in this sector (null if not yet available)
  */
-export function assembleOptimalDirection(S: LatLng, A: LatLng, C: LatLng): FeatureCollection | null {
-    const features: Feature<LineString>[] = [];
+export function assembleOptimalDirection(
+    A: LatLng,
+    C: LatLng,
+    S: LatLng,
+    sectorPolygon: Feature<Polygon>,
+    hullPolygon: Feature<Polygon> | null
+): FeatureCollection | null {
+    const [minLng, minLat, maxLng, maxLat] = bbox(sectorPolygon);
+    const dLng = (maxLng - minLng) / GRID_SIZE;
+    const dLat = (maxLat - minLat) / GRID_SIZE;
 
-    const distAS = turfDistance([A.lng, A.lat], [S.lng, S.lat]);
-    const distSC = turfDistance([S.lng, S.lat], [C.lng, C.lat]);
-    const scoredSum = distAS + distSC;
-    const focalDistance = turfDistance([A.lng, A.lat], [C.lng, C.lat]);
-    const rotation = turfBearing([A.lng, A.lat], [C.lng, C.lat]);
+    if (dLng <= 0 || dLat <= 0) return null;
 
-    for (const delta of [0, 5, 10]) {
-        const ellipse = generateEllipse(A, C, scoredSum + delta, focalDistance, rotation);
-        if (ellipse) {
-            ellipse.properties = {type: 'isoDistance', deltaFromCurrent: delta};
-            features.push(ellipse);
+    const scoredValue = distKm(A, S) - distKm(S, C);
+    const features: (Feature<Polygon> | Feature)[] = [];
+
+    for (let i = 0; i < GRID_SIZE; i++) {
+        for (let j = 0; j < GRID_SIZE; j++) {
+            const cLng = minLng + (i + 0.5) * dLng;
+            const cLat = minLat + (j + 0.5) * dLat;
+
+            if (!booleanPointInPolygon([cLng, cLat], sectorPolygon)) {
+                continue;
+            }
+
+            let delta: number;
+            if (hullPolygon && booleanPointInPolygon([cLng, cLat], hullPolygon)) {
+                // Inside the convex hull — already enclosed, no improvement possible
+                delta = 0;
+            } else {
+                const P: LatLng = {lat: cLat, lng: cLng};
+                const value = distKm(A, P) - distKm(P, C);
+                delta = Math.round((value - scoredValue) * 10) / 10;
+            }
+
+            const l = cLng - dLng / 2;
+            const r = cLng + dLng / 2;
+            const b = cLat - dLat / 2;
+            const t = cLat + dLat / 2;
+
+            features.push(
+                polygon(
+                    [
+                        [
+                            [l, b],
+                            [r, b],
+                            [r, t],
+                            [l, t],
+                            [l, b]
+                        ]
+                    ],
+                    {delta}
+                )
+            );
         }
     }
 
-    if (features.length === 0) {
-        return null;
-    }
+    // Add C as a point feature for rendering as a marker
+    features.push(point([C.lng, C.lat], {optimalNextPoint: true}));
 
-    return featureCollection(features);
+    return features.length > 0 ? featureCollection(features) : null;
 }
