@@ -27,30 +27,27 @@ const GRID_SIZE = 25;
  * Generate a filled heatmap over the current sector showing the net efficiency
  * of each grid cell:
  *
- *   delta(P) = gridTaskDist(P) - scoredTaskDist - d(S, pos) - d(pos, P)
+ *   delta(P) = (gridTaskDist(P) - minPossible) - d(pos, P)
  *
- * - gridTaskDist(P)  = total task distance (start→finish) if P were the scored
+ * - gridTaskDist(P) = total task distance (start→finish) if P were the scored
  *   point in this sector, precomputed in the worker via prefix/suffix DP
- * - scoredTaskDist   = current total scored task distance (what the pilot "has")
- * - d(S, pos)        = distance already flown from scored point to current position
- * - d(pos, P)        = remaining transit distance to reach cell P
+ * - minPossible      = minimum possible task distance (current scored line baseline)
+ * - d(pos, P)        = transit distance from pilot's current position to cell P
  *
- * Positive (green) = net improvement over current score after transit cost
- * Negative (red)   = transit cost exceeds any task distance gain
+ * Positive (green) = flying to P improves task distance beyond transit cost
+ * Negative (red)   = transit cost exceeds any improvement over current scored line
  *
  * @param optimalGrid       - Flat [lng, lat, taskDist, ...] from worker
- * @param S                 - Current scored point in this sector
  * @param pos               - Pilot's current GPS position
- * @param scoredTaskDist    - Current total scored task distance (baseline)
+ * @param minPossible       - Minimum possible task distance (baseline)
  * @param sectorPolygon     - Sector geometry (for computing grid cell size)
- * @param hullPolygon       - Convex hull (reserved for future "path out" use)
+ * @param hullPolygon       - Convex hull — cells inside are skipped
  * @param optimalNextSectorPoint - Optimal point in next sector (rendered as marker)
  */
 export function assembleOptimalDirection(
     optimalGrid: number[],
-    S: LatLng,
     pos: LatLng,
-    scoredTaskDist: number,
+    minPossible: number,
     sectorPolygon: Feature<Polygon>,
     hullPolygon: Feature<Polygon> | null,
     optimalNextSectorPoint?: LatLng
@@ -62,9 +59,6 @@ export function assembleOptimalDirection(
     const dLat = (maxLat - minLat) / GRID_SIZE;
 
     if (dLng <= 0 || dLat <= 0) return null;
-
-    // Distance already spent flying from scored point to current position (constant for all cells)
-    const dSPos = distKm(S, pos);
 
     // First pass: compute raw deltas and find the range
     const cells: {lng: number; lat: number; delta: number}[] = [];
@@ -81,7 +75,7 @@ export function assembleOptimalDirection(
             continue;
         }
 
-        const delta = taskDist - scoredTaskDist - dSPos - distKm(pos, {lat: cLat, lng: cLng});
+        const delta = (taskDist - minPossible) - distKm(pos, {lat: cLat, lng: cLng});
 
         cells.push({lng: cLng, lat: cLat, delta});
         if (delta < minDelta) minDelta = delta;
