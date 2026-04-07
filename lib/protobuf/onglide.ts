@@ -251,6 +251,12 @@ export interface PilotScore {
     | undefined;
   /** Grid of optimal task distances per cell [lng, lat, taskDist, ...] for AAT direction heatmap */
   optimalGrid: number[];
+  /** Live baseline: scored distance to current sector point + max remaining forward */
+  optimalGridBaseline?:
+    | number
+    | undefined;
+  /** Baseline path visualization [lng, lat, ...] from start through scored points + max remaining to finish */
+  optimalGridBaselinePath: number[];
   /** For rescoring */
   scoreId?: string | undefined;
 }
@@ -2364,6 +2370,8 @@ function createBasePilotScore(): PilotScore {
     scoringClosestPoint: undefined,
     optimalNextSectorPoint: undefined,
     optimalGrid: [],
+    optimalGridBaseline: undefined,
+    optimalGridBaselinePath: [],
     scoreId: undefined,
   };
 }
@@ -2447,6 +2455,14 @@ export const PilotScore = {
     }
     writer.uint32(530).fork();
     for (const v of message.optimalGrid) {
+      writer.float(v);
+    }
+    writer.ldelim();
+    if (message.optimalGridBaseline !== undefined) {
+      writer.uint32(541).float(message.optimalGridBaseline);
+    }
+    writer.uint32(546).fork();
+    for (const v of message.optimalGridBaselinePath) {
       writer.float(v);
     }
     writer.ldelim();
@@ -2674,6 +2690,30 @@ export const PilotScore = {
           }
 
           break;
+        case 67:
+          if (tag !== 541) {
+            break;
+          }
+
+          message.optimalGridBaseline = reader.float();
+          continue;
+        case 68:
+          if (tag === 549) {
+            message.optimalGridBaselinePath.push(reader.float());
+
+            continue;
+          }
+
+          if (tag === 546) {
+            const end2 = reader.uint32() + reader.pos;
+            while (reader.pos < end2) {
+              message.optimalGridBaselinePath.push(reader.float());
+            }
+
+            continue;
+          }
+
+          break;
         case 55:
           if (tag !== 442) {
             break;
@@ -2732,6 +2772,12 @@ export const PilotScore = {
         : undefined,
       optimalGrid: globalThis.Array.isArray(object?.optimalGrid)
         ? object.optimalGrid.map((e: any) => globalThis.Number(e))
+        : [],
+      optimalGridBaseline: isSet(object.optimalGridBaseline)
+        ? globalThis.Number(object.optimalGridBaseline)
+        : undefined,
+      optimalGridBaselinePath: globalThis.Array.isArray(object?.optimalGridBaselinePath)
+        ? object.optimalGridBaselinePath.map((e: any) => globalThis.Number(e))
         : [],
       scoreId: isSet(object.scoreId) ? globalThis.String(object.scoreId) : undefined,
     };
@@ -2817,6 +2863,12 @@ export const PilotScore = {
     if (message.optimalGrid?.length) {
       obj.optimalGrid = message.optimalGrid;
     }
+    if (message.optimalGridBaseline !== undefined) {
+      obj.optimalGridBaseline = message.optimalGridBaseline;
+    }
+    if (message.optimalGridBaselinePath?.length) {
+      obj.optimalGridBaselinePath = message.optimalGridBaselinePath;
+    }
     if (message.scoreId !== undefined) {
       obj.scoreId = message.scoreId;
     }
@@ -2866,6 +2918,8 @@ export const PilotScore = {
         ? BasePositionMessage.fromPartial(object.optimalNextSectorPoint)
         : undefined;
     message.optimalGrid = object.optimalGrid?.map((e) => e) || [];
+    message.optimalGridBaseline = object.optimalGridBaseline ?? undefined;
+    message.optimalGridBaselinePath = object.optimalGridBaselinePath?.map((e) => e) || [];
     message.scoreId = object.scoreId ?? undefined;
     return message;
   },

@@ -47,7 +47,6 @@ export function useOptions() {
     const setOptions = useCallback(
         (newOptions: Options) => {
             try {
-                console.log('set options', newOptions);
                 window?.localStorage.setItem('options', JSON.stringify(newOptions));
             } catch (e) {
                 /**/

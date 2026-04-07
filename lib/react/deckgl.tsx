@@ -13,13 +13,13 @@ import {TaskUp} from '../types';
 import {distanceLineLabelStyle} from './distanceLine';
 
 import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
-import {selectPilotScore} from '../redux/scoresSlice';
+import {selectPilotScore, selectOptimalGrid} from '../redux/scoresSlice';
 import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {ErrorBoundary} from 'react-error-boundary';
 
 import {assembleHullLine} from './hullLine';
-import {assembleOptimalDirection} from './optimalDirection';
+import {useOptimalGridLayers, OptimalGridSources} from './optimalGridLayers';
 
 function DeckGLOverlay(
     props: MapboxOverlayProps & {
@@ -71,11 +71,13 @@ export default function MApp(props: {
     const mapRef = useRef<MapRef | null>(null);
     const measure = useMeasure();
 
+
     // So we get some type info
     const {options, setOptions, follow, setFollow, vc, selectedCompno, tz, viewport} = props;
 
     // Score details for selected pilot
     const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
+    const optimalGrid = useSelector((state) => selectOptimalGrid(state, selectedCompno, props.replayTime));
     const latestUpdate = useSelector(selectLatestUpdate);
     const selectedPosition = useSelector((state) => (selectedCompno ? selectPilotPosition(state, selectedCompno, props.replayTime) : undefined));
 
@@ -371,44 +373,15 @@ export default function MApp(props: {
     // If we are on last leg of AAT then we stop showing construction lines
     const lastLeg = task?.rules?.aat && debouncedScore?.currentLeg == task?.legs?.length - 1;
 
-    // Iso-distance ellipses for AAT in-sector visualization, locked to the current scored point
-    const optimalDirectionGeoJSON = useMemo(() => {
-        if (
-            !options.constructionLines ||
-            !task?.rules?.aat ||
-            !debouncedScore?.optimalNextSectorPoint ||
-            (!debouncedScore?.inSector && !debouncedScore?.inPenalty) ||
-            lastLeg
-        ) {
-            return null;
-        }
-
-        const sp = debouncedScore.scoredPoints;
-        const currentLeg = debouncedScore.currentLeg;
-        if (!sp || sp.length < 12 || currentLeg < 1) return null;
-
-        // A = scored point in previous sector (4 floats per point: lng, lat, dist, hdist)
-        const aIdx = (currentLeg - 1) * 4;
-        // S = current scored point in this sector (the optimiser's best point in the hull)
-        const sIdx = currentLeg * 4;
-        if (sIdx + 1 >= sp.length) return null;
-
-        const A = {lng: sp[aIdx], lat: sp[aIdx + 1]};
-        const S = {lng: sp[sIdx], lat: sp[sIdx + 1]};
-        const C = debouncedScore.optimalNextSectorPoint;
-
-        return assembleOptimalDirection(S, A, C);
-    }, [
-        debouncedScore?.optimalNextSectorPoint?.lat,
-        debouncedScore?.optimalNextSectorPoint?.lng,
-        debouncedScore?.scoredPoints,
-        debouncedScore?.currentLeg,
-        debouncedScore?.inSector,
-        debouncedScore?.inPenalty,
-        options.constructionLines,
-        task?.rules?.aat,
-        lastLeg
-    ]);
+    const {optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON, onGridHover, onGridLeave} = useOptimalGridLayers({
+        optimalGrid,
+        debouncedScore,
+        selectedPosition,
+        taskGeoJSONtp,
+        lastLeg,
+        constructionLines: options.constructionLines,
+        aat: task?.rules?.aat
+    });
 
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
@@ -425,6 +398,9 @@ export default function MApp(props: {
                 reuseMaps={true}
                 ref={mapRef}
                 attributionControl={false}
+                interactiveLayerIds={['optimal_heatmap']}
+                onMouseMove={onGridHover}
+                onMouseLeave={onGridLeave}
             >
                 <DeckGLOverlay
                     getTooltip={toolTip}
@@ -469,11 +445,7 @@ export default function MApp(props: {
                                 <Layer {...hullPointStyle} />
                             </Source>
                         ) : null}
-                        {optimalDirectionGeoJSON ? (
-                            <Source type="geojson" data={optimalDirectionGeoJSON} key={'optimal_'} id={'optimal'}>
-                                <Layer {...isoDistanceEllipseStyle} />
-                            </Source>
-                        ) : null}
+                        <OptimalGridSources optimalDirectionGeoJSON={optimalDirectionGeoJSON} baselineGeoJSON={baselineGeoJSON} hoverGeoJSON={hoverGeoJSON} />
                     </>
                 ) : null}
                 {debouncedScore?.scoredGeoJSON ? (
@@ -557,18 +529,6 @@ const hullLineStyle: LayerProps = {
         'line-width': 2,
         'line-opacity': 0.6,
         'line-dasharray': [4, 1]
-    }
-};
-
-const isoDistanceEllipseStyle: LayerProps = {
-    id: 'iso_distance',
-    type: 'line',
-    filter: ['==', ['get', 'type'], 'isoDistance'],
-    paint: {
-        'line-color': ['case', ['==', ['get', 'deltaFromCurrent'], 0], '#ff0', '#ffa500'],
-        'line-width': 2,
-        'line-opacity': 0.6,
-        'line-dasharray': [2, 2]
     }
 };
 
@@ -716,7 +676,6 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean, s
 }
 
 function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean, startOpen: boolean): LayerProps[] {
-    console.log('tps2d', mapLight);
     return [
         {
             // Track line

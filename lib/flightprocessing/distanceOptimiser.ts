@@ -410,6 +410,14 @@ export class DistanceOptimiser<T> {
      * Lower weight ⇒ higher actual distance (when using inverted weights).
      */
     evaluatePointsInGroup(groupIndex: number, points: T[]): number[] {
+        return this.evaluatePointsInGroupWithPaths(groupIndex, points).map((r) => r.weight);
+    }
+
+    /**
+     * Like evaluatePointsInGroup but also returns the full optimal path
+     * (one point per group) through each hypothetical point.
+     */
+    evaluatePointsInGroupWithPaths(groupIndex: number, points: T[]): {weight: number; path: T[]}[] {
         this.assertIndex(groupIndex);
         if (groupIndex === 0 || groupIndex === this.L - 1) {
             throw new Error('Cannot evaluate hypothetical points in the first or last group');
@@ -417,23 +425,50 @@ export class DistanceOptimiser<T> {
         this.ensurePrefixTo(groupIndex - 1);
         this.ensureSuffixFrom(groupIndex + 1);
 
-        const prevGroup = this.groups[groupIndex - 1];
-        const prevCost = this.prefixCost[groupIndex - 1]!;
-        const nextGroup = this.groups[groupIndex + 1];
-        const nextCost = this.suffixCost[groupIndex + 1]!;
+        const g = groupIndex;
+        const prevGroup = this.groups[g - 1];
+        const prevCost = this.prefixCost[g - 1]!;
+        const nextGroup = this.groups[g + 1];
+        const nextCost = this.suffixCost[g + 1]!;
 
         return points.map((p) => {
-            let bestPrefix = Number.POSITIVE_INFINITY;
+            // Best predecessor in group g-1
+            let bestPrefixCost = Number.POSITIVE_INFINITY;
+            let bestQ = 0;
             for (let q = 0; q < prevGroup.length; q++) {
                 const c = prevCost[q] + this.weight(prevGroup[q], p);
-                if (c < bestPrefix) bestPrefix = c;
+                if (c < bestPrefixCost) {
+                    bestPrefixCost = c;
+                    bestQ = q;
+                }
             }
-            let bestSuffix = Number.POSITIVE_INFINITY;
+            // Best successor in group g+1
+            let bestSuffixCost = Number.POSITIVE_INFINITY;
+            let bestR = 0;
             for (let r = 0; r < nextGroup.length; r++) {
                 const c = this.weight(p, nextGroup[r]) + nextCost[r];
-                if (c < bestSuffix) bestSuffix = c;
+                if (c < bestSuffixCost) {
+                    bestSuffixCost = c;
+                    bestR = r;
+                }
             }
-            return bestPrefix + bestSuffix;
+
+            // Trace prefix path: g-1 → g-2 → ... → 0
+            const path: T[] = new Array(this.L);
+            path[g] = p;
+            let idx = bestQ;
+            for (let gi = g - 1; gi >= 0; gi--) {
+                path[gi] = this.groups[gi][idx];
+                if (gi > 0) idx = this.prefixPrev[gi]![idx];
+            }
+            // Trace suffix path: g+1 → g+2 → ... → L-1
+            idx = bestR;
+            for (let gi = g + 1; gi < this.L; gi++) {
+                path[gi] = this.groups[gi][idx];
+                if (gi < this.L - 1) idx = this.suffixNext[gi]![idx];
+            }
+
+            return {weight: bestPrefixCost + bestSuffixCost, path};
         });
     }
 
@@ -465,15 +500,13 @@ export class DistanceOptimiser<T> {
     // ----- summary / visualization -----
 
     /** Print a concise summary to console: sizes, edges, min/max/avg edge weights. */
-    printSummary(log: Function = console.log): void {
+    printSummary(name: string, log: Function = console.log): void {
         // Ensure edge matrices so stats are meaningful
         for (let i = 0; i < this.L - 1; i++) this.ensurePairWeights(i);
 
         const sizes = this.groups.map((g) => g.length);
         const totalEdges = sizes.slice(0, -1).reduce((acc, n, i) => acc + n * sizes[i + 1], 0);
-        console.log(`Groups: ${this.L}`);
-        console.log(`Sizes: [${sizes.join(', ')}]`);
-        console.log(`Total links (edges across adjacencies): ${totalEdges}`);
+        console.log(`${name}: Sizes: [${sizes.join(', ')}] => totalEdges ${totalEdges}`);
 
         let globalMin = Number.POSITIVE_INFINITY;
         let globalMax = Number.NEGATIVE_INFINITY;

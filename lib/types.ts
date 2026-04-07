@@ -265,6 +265,8 @@ export interface CalculatedTaskStatus extends TaskStatus {
     scoringClosestPoint?: BasePositionMessage; // the point used for scoring on uncompleted leg
     optimalNextSectorPoint?: BasePositionMessage; // optimal point in next sector for direction visualization
     optimalGrid?: number[]; // flat [lng, lat, taskDist, ...] per grid cell for AAT direction heatmap
+    optimalGridBaseline?: number; // scored dist to current sector point + max remaining forward
+    optimalGridBaselinePath?: number[]; // flat [lng, lat, ...] for the baseline path visualization
 }
 
 // points re-ordered if necessary

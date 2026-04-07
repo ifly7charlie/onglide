@@ -35,10 +35,16 @@ import type {RootState} from './store';
 const d = (d) => new Date(d * 1000).toISOString();
 
 type HistoricalScoreData = Record<Compno, PilotScoreDisplay[]>;
+interface OptimalGridEntry {
+    t: Epoch;
+    currentLeg: number;
+    grid: number[];
+}
 interface ScoresSliceState {
     className: ClassName;
     scores: ScoreData;
     historical: HistoricalScoreData;
+    optimalGrids: Record<Compno, OptimalGridEntry[]>;
     loading: Record<Epoch, string>; // request id for requests to load - we only remove on error (so it retries) otherwise
     scoreId: string; //  copy of track version set when loading something
     // leave the ID in the structure so we don't keep trying to get missing scores
@@ -49,6 +55,7 @@ const initialState: ScoresSliceState = {
     className: '' as ClassName,
     scores: {},
     historical: {},
+    optimalGrids: {},
     loading: {},
     scoreId: ''
 };
@@ -72,6 +79,7 @@ export const scoresSlice = createSlice({
                     className: className as ClassName,
                     scores: {},
                     historical: {},
+                    optimalGrids: {},
                     loading: {},
                     scoreId
                 };
@@ -220,9 +228,27 @@ export const scoresSlice = createSlice({
                 return index >= 0 ? historical[index] : undefined;
             },
             {
-                //                memoizeOptions: {
-                //                    resultEqualityCheck: (a, b) => a?.t === b?.t // t is enough for a unique time
-                //                }
+                memoizeOptions: {
+                    resultEqualityCheck: (a, b) => a?.t === b?.t
+                }
+            }
+        ),
+        selectOptimalGrid: createSelector(
+            [
+                (_state: ScoresSliceState, _compno: Compno | undefined, t: Epoch | undefined) => t,
+                (_state: ScoresSliceState, compno: Compno | undefined) => compno,
+                (state: ScoresSliceState, compno: Compno | undefined) => (compno ? state.optimalGrids[compno] : undefined)
+            ],
+            (t: Epoch | undefined, compno: Compno | undefined, entries: OptimalGridEntry[] | undefined) => {
+                if (!compno || !entries?.length) return undefined;
+                if (!t) return entries.at(-1);
+                const index = _sortedIndexBy(entries, {t} as OptimalGridEntry, (x) => x.t) - 1;
+                return index >= 0 ? entries[index] : undefined;
+            },
+            {
+                memoizeOptions: {
+                    resultEqualityCheck: (a, b) => a?.t === b?.t
+                }
             }
         )
     }
@@ -276,7 +302,7 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
 
 export default scoresSlice.reducer;
 export const {updateScores} = scoresSlice.actions;
-export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus} = scoresSlice.selectors;
+export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus, selectOptimalGrid} = scoresSlice.selectors;
 
 //////////////////////////////////////////
 // Logic for updates
@@ -292,6 +318,15 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     _reduce(
         action.payload.pilots,
         (result, score: PilotScore, compno) => {
+            // Extract optimal grid into separate storage (emitted once per sector entry)
+            if (score.optimalGrid?.length) {
+                const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: score.optimalGrid};
+                const gh = (state.optimalGrids[compno as Compno] ??= []);
+                const gIdx = _sortedIndexBy(gh, entry, (x) => x.t);
+                gh.splice(gIdx, Infinity, entry);
+            }
+            delete (score as any).optimalGrid;
+
             result[compno] = mapScoresToDisplayScores(score);
 
             // If the scoreId is the current one then we will use that

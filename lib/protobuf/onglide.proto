@@ -203,6 +203,12 @@ message PilotScore {
     // Grid of optimal task distances per cell [lng, lat, taskDist, ...] for AAT direction heatmap
     repeated float optimalGrid = 66;
 
+    // Live baseline: scored distance to current sector point + max remaining forward
+    optional float optimalGridBaseline = 67;
+
+    // Baseline path visualization [lng, lat, ...] from start through scored points + max remaining to finish
+    repeated float optimalGridBaselinePath = 68;
+
     // For DH we have a specific task for the pilot
 	//    optional string taskGeoJSON = 53;
 
