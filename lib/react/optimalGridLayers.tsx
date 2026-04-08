@@ -2,9 +2,6 @@ import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {Source, Layer, LayerProps} from 'react-map-gl';
 
 import {assembleOptimalDirection, distKm} from './optimalDirection';
-import lineIntersect from '@turf/line-intersect';
-import {lineString as turfLineString} from '@turf/helpers';
-
 import type {PilotScoreDisplay} from '../types';
 
 interface OptimalGridEntry {
@@ -60,133 +57,20 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
         const sectorFeature = taskGeoJSONtp?.features?.find((f: any) => f.properties?.leg === currentLeg);
         if (!sectorFeature?.geometry) return null;
 
-        const aIdx = (currentLeg - 1) * 4;
-        const A = {lng: sp[aIdx], lat: sp[aIdx + 1]};
-        const S = {lng: sp[sIdx], lat: sp[sIdx + 1]};
         const pos = {lat: selectedPosition.lat, lng: selectedPosition.lng};
         const C = debouncedScore.optimalNextSectorPoint;
 
-        // Build convex hull polygon from flat [lng, lat, lng, lat, ...] array,
-        // expanded with min distance line / sector boundary intersection points.
-        // Grid cells inside this hull are already enclosed and won't be rendered.
+        // Build convex hull polygon from flat [lng, lat, lng, lat, ...] array.
+        // Grid cells inside the hull are already enclosed and skipped.
         const hullFlat = debouncedScore.legs?.[currentLeg]?.convexHull;
         let hullPolygon: GeoJSON.Feature<GeoJSON.Polygon> | null = null;
         if (hullFlat && hullFlat.length >= 8) {
-            const hullPoints: [number, number][] = [];
+            const coords: [number, number][] = [];
             for (let i = 0; i < hullFlat.length - 2; i += 2) {
-                hullPoints.push([hullFlat[i], hullFlat[i + 1]]);
+                coords.push([hullFlat[i], hullFlat[i + 1]]);
             }
-
-            // Find where the min distance line crosses the sector boundary, and
-            // include the arc of the sector boundary between those crossings on the
-            // A-side. This encloses the "dead zone" that won't improve the score.
-            try {
-                const sectorRing: [number, number][] = (sectorFeature as GeoJSON.Feature<GeoJSON.Polygon>).geometry.coordinates[0] as [number, number][];
-                const sectorLine = turfLineString(sectorRing);
-                const n = sectorRing.length - 1; // exclude closing vertex (same as first)
-
-                // A -> S segment (entry side)
-                const entryLine = turfLineString([
-                    [A.lng, A.lat],
-                    [S.lng, S.lat]
-                ]);
-                const entryHits = lineIntersect(entryLine, sectorLine);
-                const entryPt = entryHits.features[0]?.geometry.coordinates as [number, number] | undefined;
-
-                // S -> next min point segment (exit side)
-                let exitPt: [number, number] | undefined;
-                const minPts = debouncedScore.minDistancePoints;
-                if (minPts && minPts.length >= 8) {
-                    const nextMin: [number, number] = [minPts[4], minPts[5]];
-                    const exitLine = turfLineString([[S.lng, S.lat], nextMin]);
-                    const exitHits = lineIntersect(exitLine, sectorLine);
-                    exitPt = exitHits.features[0]?.geometry.coordinates as [number, number] | undefined;
-                }
-
-                if (entryPt && exitPt) {
-                    hullPoints.push(entryPt);
-                    hullPoints.push(exitPt);
-
-                    // Find which segment each intersection lies on
-                    const segDist2 = (pt: [number, number], a: [number, number], b: [number, number]) => {
-                        const dx = b[0] - a[0],
-                            dy = b[1] - a[1];
-                        const t = Math.max(0, Math.min(1, ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / (dx * dx + dy * dy)));
-                        const px = a[0] + t * dx - pt[0],
-                            py = a[1] + t * dy - pt[1];
-                        return px * px + py * py;
-                    };
-                    let entryIdx = 0,
-                        exitIdx = 0,
-                        bestE = Infinity,
-                        bestX = Infinity;
-                    for (let k = 0; k < n; k++) {
-                        const d = segDist2(entryPt, sectorRing[k], sectorRing[k + 1]);
-                        if (d < bestE) {
-                            bestE = d;
-                            entryIdx = k;
-                        }
-                        const d2 = segDist2(exitPt, sectorRing[k], sectorRing[k + 1]);
-                        if (d2 < bestX) {
-                            bestX = d2;
-                            exitIdx = k;
-                        }
-                    }
-
-                    // Collect vertices in both directions around the ring
-                    const fwd: [number, number][] = [];
-                    for (let k = (entryIdx + 1) % n; k !== (exitIdx + 1) % n; k = (k + 1) % n) {
-                        fwd.push(sectorRing[k]);
-                    }
-                    const bwd: [number, number][] = [];
-                    for (let k = (exitIdx + 1) % n; k !== (entryIdx + 1) % n; k = (k + 1) % n) {
-                        bwd.push(sectorRing[k]);
-                    }
-
-                    // Pick the arc on the A-side using cross product with the entry->exit line
-                    const crossVal = (p: [number, number]) => (p[0] - entryPt[0]) * (exitPt[1] - entryPt[1]) - (p[1] - entryPt[1]) * (exitPt[0] - entryPt[0]);
-                    const aSide = crossVal([A.lng, A.lat]);
-                    const fwdTest = fwd.length > 0 ? crossVal(fwd[Math.floor(fwd.length / 2)]) : 0;
-                    const arcVertices = aSide * fwdTest > 0 ? fwd : bwd;
-
-                    for (const v of arcVertices) {
-                        hullPoints.push(v);
-                    }
-                } else {
-                    // Only got one intersection -- still add it
-                    if (entryPt) hullPoints.push(entryPt);
-                    if (exitPt) hullPoints.push(exitPt);
-                }
-            } catch (_e) {
-                // If intersection computation fails, proceed with hull points only
-            }
-
-            // Rebuild convex hull with the expanded point set
-            if (hullPoints.length >= 3) {
-                const sorted = hullPoints.map((p) => ({lng: p[0], lat: p[1]})).sort((a, b) => (a.lat === b.lat ? a.lng - b.lng : a.lat - b.lat));
-
-                // Simple convex hull (Andrew's monotone chain)
-                const cross = (o: {lat: number; lng: number}, a: {lat: number; lng: number}, b: {lat: number; lng: number}) => (a.lat - o.lat) * (b.lng - o.lng) - (a.lng - o.lng) * (b.lat - o.lat);
-                const lower: {lat: number; lng: number}[] = [];
-                for (const p of sorted) {
-                    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-                    lower.push(p);
-                }
-                const upper: {lat: number; lng: number}[] = [];
-                for (let i = sorted.length - 1; i >= 0; i--) {
-                    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], sorted[i]) <= 0) upper.pop();
-                    upper.push(sorted[i]);
-                }
-                upper.pop();
-                lower.pop();
-                const hull = lower.concat(upper);
-
-                if (hull.length >= 3) {
-                    const coords = hull.map((p) => [p.lng, p.lat] as [number, number]);
-                    coords.push(coords[0]); // close the ring
-                    hullPolygon = {type: 'Feature' as const, properties: {}, geometry: {type: 'Polygon' as const, coordinates: [coords]}};
-                }
-            }
+            coords.push(coords[0]); // close the ring
+            hullPolygon = {type: 'Feature' as const, properties: {}, geometry: {type: 'Polygon' as const, coordinates: [coords]}};
         }
 
         const baseline = debouncedScore.optimalGridBaseline;
@@ -203,7 +87,6 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
         debouncedScore?.optimalNextSectorPoint?.lat,
         debouncedScore?.optimalNextSectorPoint?.lng,
         debouncedScore?.legs,
-        debouncedScore?.minDistancePoints,
         selectedPosition?.lat,
         selectedPosition?.lng,
         constructionLines,
