@@ -319,15 +319,15 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
         action.payload.pilots,
         (result, score: PilotScore, compno) => {
             // Extract optimal grid into separate storage (emitted once per sector entry)
-            if (score.optimalGrid?.length) {
-                const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: score.optimalGrid};
+            const {optimalGrid, ...scoreWithoutGrid} = score;
+            if (optimalGrid?.length) {
+                const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: optimalGrid};
                 const gh = (state.optimalGrids[compno as Compno] ??= []);
                 const gIdx = _sortedIndexBy(gh, entry, (x) => x.t);
                 gh.splice(gIdx, Infinity, entry);
             }
-            delete (score as any).optimalGrid;
 
-            result[compno] = mapScoresToDisplayScores(score);
+            result[compno] = mapScoresToDisplayScores(scoreWithoutGrid as PilotScore);
 
             // If the scoreId is the current one then we will use that
             const sh = (state.historical[compno] ??= []);

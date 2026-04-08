@@ -506,7 +506,7 @@ export class DistanceOptimiser<T> {
 
         const sizes = this.groups.map((g) => g.length);
         const totalEdges = sizes.slice(0, -1).reduce((acc, n, i) => acc + n * sizes[i + 1], 0);
-        console.log(`${name}: Sizes: [${sizes.join(', ')}] => totalEdges ${totalEdges}`);
+        log(`${name}: Sizes: [${sizes.join(', ')}] => totalEdges ${totalEdges}`);
 
         let globalMin = Number.POSITIVE_INFINITY;
         let globalMax = Number.NEGATIVE_INFINITY;

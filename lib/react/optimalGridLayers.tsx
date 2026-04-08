@@ -34,7 +34,7 @@ interface OptimalGridLayersProps {
  * the Map event handlers.
  */
 export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosition, taskGeoJSONtp, lastLeg, constructionLines, aat}: OptimalGridLayersProps) {
-    const [hoverGeoJSON, setHoverGeoJSON] = useState<any>(null);
+    const [hoverGeoJSON, setHoverGeoJSON] = useState<GeoJSON.FeatureCollection | null>(null);
     const hoverThrottleRef = useRef<number>(0);
 
     // Filled gradient heatmap for AAT in-sector visualization showing net efficiency of each point
@@ -70,7 +70,7 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
         // expanded with min distance line / sector boundary intersection points.
         // Grid cells inside this hull are already enclosed and won't be rendered.
         const hullFlat = debouncedScore.legs?.[currentLeg]?.convexHull;
-        let hullPolygon: any = null;
+        let hullPolygon: GeoJSON.Feature<GeoJSON.Polygon> | null = null;
         if (hullFlat && hullFlat.length >= 8) {
             const hullPoints: [number, number][] = [];
             for (let i = 0; i < hullFlat.length - 2; i += 2) {
@@ -81,7 +81,7 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
             // include the arc of the sector boundary between those crossings on the
             // A-side. This encloses the "dead zone" that won't improve the score.
             try {
-                const sectorRing: [number, number][] = (sectorFeature as any).geometry.coordinates[0];
+                const sectorRing: [number, number][] = (sectorFeature as GeoJSON.Feature<GeoJSON.Polygon>).geometry.coordinates[0] as [number, number][];
                 const sectorLine = turfLineString(sectorRing);
                 const n = sectorRing.length - 1; // exclude closing vertex (same as first)
 
@@ -166,13 +166,13 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
                 const sorted = hullPoints.map((p) => ({lng: p[0], lat: p[1]})).sort((a, b) => (a.lat === b.lat ? a.lng - b.lng : a.lat - b.lat));
 
                 // Simple convex hull (Andrew's monotone chain)
-                const cross = (o: any, a: any, b: any) => (a.lat - o.lat) * (b.lng - o.lng) - (a.lng - o.lng) * (b.lat - o.lat);
-                const lower: any[] = [];
+                const cross = (o: {lat: number; lng: number}, a: {lat: number; lng: number}, b: {lat: number; lng: number}) => (a.lat - o.lat) * (b.lng - o.lng) - (a.lng - o.lng) * (b.lat - o.lat);
+                const lower: {lat: number; lng: number}[] = [];
                 for (const p of sorted) {
                     while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
                     lower.push(p);
                 }
-                const upper: any[] = [];
+                const upper: {lat: number; lng: number}[] = [];
                 for (let i = sorted.length - 1; i >= 0; i--) {
                     while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], sorted[i]) <= 0) upper.pop();
                     upper.push(sorted[i]);
@@ -184,7 +184,7 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
                 if (hull.length >= 3) {
                     const coords = hull.map((p) => [p.lng, p.lat] as [number, number]);
                     coords.push(coords[0]); // close the ring
-                    hullPolygon = {type: 'Feature', properties: {}, geometry: {type: 'Polygon', coordinates: [coords]}};
+                    hullPolygon = {type: 'Feature' as const, properties: {}, geometry: {type: 'Polygon' as const, coordinates: [coords]}};
                 }
             }
         }
@@ -192,7 +192,7 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
         const baseline = debouncedScore.optimalGridBaseline;
         if (baseline == null) return null;
 
-        return assembleOptimalDirection(optimalGrid.grid, pos, baseline, sectorFeature as any, hullPolygon, C);
+        return assembleOptimalDirection(optimalGrid.grid, pos, baseline, sectorFeature as GeoJSON.Feature<GeoJSON.Polygon>, hullPolygon, C);
     }, [
         optimalGrid,
         debouncedScore?.optimalGridBaseline,
@@ -297,7 +297,7 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
 }
 
 /** JSX for the optimal grid Sources/Layers. Render inside the Map component. */
-export function OptimalGridSources({optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON}: {optimalDirectionGeoJSON: any; baselineGeoJSON: any; hoverGeoJSON: any}) {
+export function OptimalGridSources({optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON}: {optimalDirectionGeoJSON: GeoJSON.FeatureCollection | null; baselineGeoJSON: GeoJSON.FeatureCollection | null; hoverGeoJSON: GeoJSON.FeatureCollection | null}) {
     return (
         <>
             {optimalDirectionGeoJSON ? (

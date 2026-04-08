@@ -201,7 +201,7 @@ message PilotScore {
     optional BasePositionMessage optimalNextSectorPoint = 64;
 
     // Grid of optimal task distances per cell [lng, lat, taskDist, ...] for AAT direction heatmap
-    repeated float optimalGrid = 66;
+    repeated float optimalGrid = 65;
 
     // Live baseline: scored distance to current sector point + max remaining forward
     optional float optimalGridBaseline = 67;

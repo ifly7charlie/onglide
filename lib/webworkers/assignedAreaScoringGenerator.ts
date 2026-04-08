@@ -237,23 +237,18 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             const cl = taskStatus.currentLeg;
                             // Grid format: per cell [lng, lat, taskDist, prevLng, prevLat, nextLng, nextLat] (stride = 7)
                             const grid: number[] = [];
-                            log(`optimalGrid [t=${taskStatus.t}]: computing ${gridPoints.length} cells for leg ${cl}`);
+                            let minTaskDist = Infinity, maxTaskDist = -Infinity;
                             for (let k = 0; k < results.length; k++) {
                                 // Use sumPath for consistent distance calc with baseline (geodesic + leg adjustments)
                                 const taskDist = sumPath(results[k].path, 0, preparedLegs, true);
                                 const prev = results[k].path[cl - 1];
                                 const next = results[k].path[cl + 1];
                                 grid.push(gridCoords[k].lng, gridCoords[k].lat, taskDist, prev?.lng ?? 0, prev?.lat ?? 0, next?.lng ?? 0, next?.lat ?? 0);
-                                log(
-                                    `  cell[${k}] (${gridCoords[k].lat.toFixed(4)},${gridCoords[k].lng.toFixed(4)})` +
-                                        ` taskDist=${taskDist.toFixed(1)}km (weight=${results[k].weight.toFixed(1)})` +
-                                        ` prev=(${prev?.lat?.toFixed(4)},${prev?.lng?.toFixed(4)})` +
-                                        ` next=(${next?.lat?.toFixed(4)},${next?.lng?.toFixed(4)})` +
-                                        ` fullPath=[${results[k].path.map((p) => `(${p?.lat?.toFixed(4)},${p?.lng?.toFixed(4)})`).join(' → ')}]`
-                                );
+                                if (taskDist < minTaskDist) minTaskDist = taskDist;
+                                if (taskDist > maxTaskDist) maxTaskDist = taskDist;
                             }
                             scoredStatus.optimalGrid = grid;
-                            log('optimalGrid computed:', gridPoints.length, 'cells for leg', taskStatus.currentLeg);
+                            log(`optimalGrid [t=${taskStatus.t}]: ${gridPoints.length} cells for leg ${cl}, taskDist range [${minTaskDist.toFixed(1)}, ${maxTaskDist.toFixed(1)}]km`);
                         }
                     }
                 }

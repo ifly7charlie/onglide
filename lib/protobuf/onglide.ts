@@ -2456,7 +2456,7 @@ export const PilotScore = {
     if (message.optimalNextSectorPoint !== undefined) {
       BasePositionMessage.encode(message.optimalNextSectorPoint, writer.uint32(514).fork()).ldelim();
     }
-    writer.uint32(530).fork();
+    writer.uint32(522).fork();
     for (const v of message.optimalGrid) {
       writer.float(v);
     }
@@ -2681,14 +2681,14 @@ export const PilotScore = {
 
           message.optimalNextSectorPoint = BasePositionMessage.decode(reader, reader.uint32());
           continue;
-        case 66:
-          if (tag === 533) {
+        case 65:
+          if (tag === 525) {
             message.optimalGrid.push(reader.float());
 
             continue;
           }
 
-          if (tag === 530) {
+          if (tag === 522) {
             const end2 = reader.uint32() + reader.pos;
             while (reader.pos < end2) {
               message.optimalGrid.push(reader.float());
