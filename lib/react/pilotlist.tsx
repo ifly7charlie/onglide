@@ -25,6 +25,7 @@ import {
     faHourglassEnd,
     faHouse,
     faPaperPlane,
+    faPenToSquare,
     faQuestion, //
     faRightFromBracket,
     faRightToBracket,
@@ -325,7 +326,7 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining, ho
     );
 });
 
-export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) => {
+export const Details = ({compno, pilot, units, tz, replayTime, onEditHandicap}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined; onEditHandicap?: (compno: Compno, handicap: number) => void}) => {
     let competitionDelay = useMemo(() => {
         if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
             return (
@@ -534,7 +535,30 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
             {flag}
             <h6 style={{width: '100%'}}>
                 {pilot.compno}:<b>{pilot.name}</b>
-                <span style={{float: 'right', paddingRight: '0.5em'}}>{pilot.gliderType.substring(0, 20)}</span>
+                <span style={{float: 'right', paddingRight: '0.5em'}}>
+                    {pilot.gliderType.substring(0, 20)}
+                    {pilot.handicap !== 100 ? ` (${pilot.handicap})` : ''}
+                    {onEditHandicap ? (
+                        <FontAwesomeIcon
+                            icon={faPenToSquare}
+                            size="xs"
+                            style={{cursor: 'pointer', marginLeft: 4, opacity: 0.6}}
+                            onClick={() => {
+                                const value = window.prompt('Enter handicap value (leave empty to clear):', pilot.handicap !== 100 ? String(pilot.handicap) : '');
+                                if (value === null) return;
+                                if (value.trim() === '') {
+                                    onEditHandicap(compno, 100);
+                                } else {
+                                    const h = parseFloat(value);
+                                    if (!isNaN(h) && h > 0) {
+                                        onEditHandicap(compno, h);
+                                    }
+                                }
+                            }}
+                            title="Edit handicap"
+                        />
+                    ) : null}
+                </span>
                 <br />
                 <span className="largeScreen">{pilot.country ? new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) : ''}</span>
                 <br className="largeScreen" />

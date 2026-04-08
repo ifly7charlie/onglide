@@ -197,6 +197,17 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const [follow, setFollow] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
 
+    // Handicaps stored in localStorage, keyed by compno
+    const [handicaps, setHandicaps] = useState<Record<string, number>>(() => {
+        try {
+            const stored = localStorage.getItem('viewerHandicaps');
+            return stored ? JSON.parse(stored) : {};
+        } catch {
+            return {};
+        }
+    });
+    const handicapsRef = useRef(handicaps);
+
     // Override options to disable weather radar (no live data in viewer)
     const viewOptions = useMemo(() => (options ? {...options, rainRadar: false} : options), [options]);
 
@@ -227,7 +238,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                 compno: f.compno,
                 name: f.pilotName || f.fileName,
                 gliderType: f.gliderType || '',
-                handicap: 100,
+                handicap: handicaps[f.compno] ?? 100,
                 country: '',
                 image: '',
                 forceTP: 0,
@@ -240,7 +251,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
             } as API_ClassName_Pilots_PilotDetail;
         }
         return p;
-    }, [flights]);
+    }, [flights, handicaps]);
 
     const processFiles = useCallback(
         async (fileList: FileList) => {
@@ -293,11 +304,16 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     }
 
                     if (taskRef.current) {
+                        const h = handicapsRef.current[compno] ?? 100;
+                        const anyHandicapped = Object.values(handicapsRef.current).some((v) => v !== 100);
+                        taskRef.current.rules.handicapped = anyHandicapped;
+                        taskRef.current.details.handicapped = anyHandicapped ? 'Y' : 'N';
+
                         const allScores = await scoreIGCFlight(
                             taskRef.current,
                             igcData.fixes,
                             compno,
-                            100,
+                            h,
                             0 as Epoch
                         );
 
@@ -385,11 +401,17 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
 
     const handleRescore = useCallback(async () => {
         if (!taskRef.current || flights.length === 0) return;
+
+        const anyHandicapped = Object.values(handicapsRef.current).some((v) => v !== 100);
+        taskRef.current.rules.handicapped = anyHandicapped;
+        taskRef.current.details.handicapped = anyHandicapped ? 'Y' : 'N';
+
         setProcessing(true);
         setError(null);
         try {
             for (const flight of flights) {
-                const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, 100, 0 as Epoch);
+                const h = handicapsRef.current[flight.compno] ?? 100;
+                const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, h, 0 as Epoch);
                 const earliestStart = scores.reduce((min, s) => (s.utcStart && s.utcStart < min ? s.utcStart : min), Infinity) as Epoch;
                 const trackFixes = earliestStart < Infinity ? flight.igcData.fixes.filter((f) => f.t >= earliestStart - 30) : flight.igcData.fixes;
                 dispatchTrack(dispatch, flight.compno, flight.pilotName, trackFixes);
@@ -404,6 +426,26 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
             setProcessing(false);
         }
     }, [dispatch, flights]);
+
+    const handleSetHandicap = useCallback(
+        (compno: Compno, handicap: number) => {
+            const newHandicaps = {...handicapsRef.current};
+            if (handicap === 100) {
+                delete newHandicaps[compno];
+            } else {
+                newHandicaps[compno] = handicap;
+            }
+            handicapsRef.current = newHandicaps;
+            setHandicaps({...newHandicaps});
+            if (Object.keys(newHandicaps).length > 0) {
+                localStorage.setItem('viewerHandicaps', JSON.stringify(newHandicaps));
+            } else {
+                localStorage.removeItem('viewerHandicaps');
+            }
+            handleRescore();
+        },
+        [handleRescore]
+    );
 
     const fitBounds = useCallback(() => {
         if (options) {
@@ -482,7 +524,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             viewport={viewport}
                             setViewport={setViewport}
                             selectedCompno={selectedCompno}
-                            selectedHandicap={100}
+                            selectedHandicap={selectedCompno ? (handicaps[selectedCompno] ?? 100) : 100}
                             status={`${flights.length} flight${flights.length > 1 ? 's' : ''} loaded`}
                         />
                     </div>
@@ -551,7 +593,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                     tz={TZ_DEFAULT}
                                     options={viewOptions}
                                     setOptions={setOptions}
-                                    handicapped={false}
+                                    handicapped={Object.keys(handicaps).length > 0}
                                 />
                             )}
                             <div style={{padding: '4px 8px', textAlign: 'center', display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap'}}>
@@ -590,7 +632,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             tz={TZ_DEFAULT}
                         />
                         {selectedCompno && pilots[selectedCompno] ? (
-                            <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={viewOptions.units} tz={TZ_DEFAULT} replayTime={replayTime} />
+                            <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={viewOptions.units} tz={TZ_DEFAULT} replayTime={replayTime} onEditHandicap={handleSetHandicap} />
                         ) : null}
                     </div>
                 </div>
