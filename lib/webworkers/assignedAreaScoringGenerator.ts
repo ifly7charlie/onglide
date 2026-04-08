@@ -432,6 +432,109 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             }
                         }
                     });
+
+                    // --- Suggested Track Calculation ---
+                    // Compute aim points for remaining sectors based on current speed + 10%
+                    const suggestedElapsed = (current.t - current.utcStart!) as number;
+                    if (
+                        task.details.durationsecs > 0 &&
+                        suggestedElapsed > 300 &&
+                        scoredStatus.distance > 10 &&
+                        suggestedElapsed < task.details.durationsecs &&
+                        current.lastProcessedPoint
+                    ) {
+                        const taskSpeedKph = scoredStatus.distance / (suggestedElapsed / 3600);
+                        const targetSpeed = taskSpeedKph * 1.1;
+                        const remainingTimeSecs = task.details.durationsecs - suggestedElapsed;
+                        const targetRemainingDist = targetSpeed * (remainingTimeSecs / 3600);
+
+                        const lastSectorBeforeFinish = task.legs.length - 2;
+                        // When in sector, skip it — pilot is already there, only aim at future sectors
+                        const firstRemaining = (taskStatus.inSector || taskStatus.inPenalty) ? taskStatus.currentLeg + 1 : taskStatus.currentLeg;
+                        const remainingSectors: {minPoint: BasePositionMessage; maxPoint: BasePositionMessage; isLast: boolean}[] = [];
+
+                        let allPointsAvailable = true;
+                        for (let i = firstRemaining; i <= lastSectorBeforeFinish; i++) {
+                            const leg = scoredStatus.legs[i];
+                            if (!leg?.minPossible?.point || !leg?.maxPossible?.point) {
+                                allPointsAvailable = false;
+                                break;
+                            }
+                            remainingSectors.push({
+                                minPoint: leg.minPossible.point,
+                                maxPoint: leg.maxPossible.point,
+                                isLast: i === lastSectorBeforeFinish
+                            });
+                        }
+
+                        if (allPointsAvailable && remainingSectors.length > 0) {
+                            const lerpPt = (a: BasePositionMessage, b: BasePositionMessage, fraction: number) => ({
+                                t: 0 as Epoch,
+                                lat: a.lat + (b.lat - a.lat) * fraction,
+                                lng: a.lng + (b.lng - a.lng) * fraction,
+                                a: 0
+                            });
+
+                            const finishCenter = {t: 0 as Epoch, lat: task.legs.at(-1)!.nlat, lng: task.legs.at(-1)!.nlng, a: 0};
+
+                            const sectorFraction = (sector: (typeof remainingSectors)[0], fraction: number) =>
+                                Math.max(0, Math.min(1, sector.isLast ? fraction / 4 : fraction));
+
+                            const computeTotalDist = (fraction: number): number => {
+                                let total = 0;
+                                let prev = current.lastProcessedPoint!;
+                                for (const sector of remainingSectors) {
+                                    const aim = lerpPt(sector.minPoint, sector.maxPoint, sectorFraction(sector, fraction));
+                                    total += distHaversine(prev, aim);
+                                    prev = aim;
+                                }
+                                total += distHaversine(prev, finishCenter);
+                                return total;
+                            };
+
+                            // Binary search for fraction where computeTotalDist === targetRemainingDist
+                            let lo = 0,
+                                hi = 1;
+                            const distAtLo = computeTotalDist(0);
+                            const distAtHi = computeTotalDist(1);
+
+                            let bestFraction: number;
+                            if (targetRemainingDist <= distAtLo) {
+                                bestFraction = 0;
+                            } else if (targetRemainingDist >= distAtHi) {
+                                bestFraction = 1;
+                            } else {
+                                for (let iter = 0; iter < 20; iter++) {
+                                    const mid = (lo + hi) / 2;
+                                    if (computeTotalDist(mid) < targetRemainingDist) {
+                                        lo = mid;
+                                    } else {
+                                        hi = mid;
+                                    }
+                                }
+                                bestFraction = (lo + hi) / 2;
+                            }
+
+                            // Build stride-4 flat array: [lng, lat, segDist, 0, ...]
+                            const suggestedPoints: number[] = [current.lastProcessedPoint.lng, current.lastProcessedPoint.lat, 0, 0];
+                            let prev = current.lastProcessedPoint;
+                            for (const sector of remainingSectors) {
+                                const aim = lerpPt(sector.minPoint, sector.maxPoint, sectorFraction(sector, bestFraction));
+                                const segDist = Math.round(distHaversine(prev, aim) * 10) / 10;
+                                suggestedPoints.push(aim.lng, aim.lat, segDist, 0);
+                                prev = aim;
+                            }
+                            const finishDist = Math.round(distHaversine(prev, finishCenter) * 10) / 10;
+                            suggestedPoints.push(finishCenter.lng, finishCenter.lat, finishDist, 0);
+
+                            scoredStatus.suggestedTrackPoints = suggestedPoints;
+                            log(`suggestedTrack: fraction=${bestFraction.toFixed(3)} targetDist=${targetRemainingDist.toFixed(1)} speed=${taskSpeedKph.toFixed(1)}kph`);
+                        } else {
+                            delete scoredStatus.suggestedTrackPoints;
+                        }
+                    } else {
+                        delete scoredStatus.suggestedTrackPoints;
+                    }
                 } /* finished */ else {
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
                     scoredPoints = maxGraph.shortestAll();

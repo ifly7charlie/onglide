@@ -303,9 +303,23 @@ export default function MApp(props: {
     };
 
     //
+    // Track modifier keys for dev tooltip
+    const modifierRef = useRef(false);
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            modifierRef.current = e.shiftKey || e.ctrlKey || e.metaKey;
+        };
+        window.addEventListener('keydown', onKey);
+        window.addEventListener('keyup', onKey);
+        return () => {
+            window.removeEventListener('keydown', onKey);
+            window.removeEventListener('keyup', onKey);
+        };
+    }, []);
+
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, lang, tz: props?.tz, units: props?.options?.units}), //
+        (input) => deckTooltip({...input, map: mapRef?.current, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current}), //
         [vc, props.options.units, props.tz, mapRef?.current]
     );
 
@@ -445,6 +459,12 @@ export default function MApp(props: {
                                 <Layer {...hullPointStyle} />
                             </Source>
                         ) : null}
+                        {debouncedScore.suggestedGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={debouncedScore.suggestedGeoJSON} key={'suggested_'} id={'suggested'}>
+                                <Layer {...suggestedLineStyle} />
+                                <Layer {...distanceLineLabelStyle(suggestedLineStyle)} />
+                            </Source>
+                        ) : null}
                         <OptimalGridSources optimalDirectionGeoJSON={optimalDirectionGeoJSON} baselineGeoJSON={baselineGeoJSON} hoverGeoJSON={hoverGeoJSON} />
                     </>
                 ) : null}
@@ -506,12 +526,23 @@ const maxLineStyle: LayerProps = {
     id: 'maxpossible',
     type: 'line',
     paint: {
+        'line-color': '#f00',
+        'line-width': 4,
+        'line-opacity': 0.7,
+        'line-dasharray': [1, 1]
+    }
+};
+const suggestedLineStyle: LayerProps = {
+    id: 'suggested_track',
+    type: 'line',
+    paint: {
         'line-color': '#0f0',
         'line-width': 4,
         'line-opacity': 0.7,
         'line-dasharray': [2, 1]
     }
 };
+
 const hullPointStyle: LayerProps = {
     id: 'hullPoint',
     type: 'circle',

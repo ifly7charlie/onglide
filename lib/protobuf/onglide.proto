@@ -209,6 +209,9 @@ message PilotScore {
     // Baseline path visualization [lng, lat, ...] from start through scored points + max remaining to finish
     repeated float optimalGridBaselinePath = 68;
 
+    // Suggested track aim points [lng, lat, dist, hdist, ...] for AAT remaining sectors
+    repeated float suggestedTrackPoints = 69;
+
     // For DH we have a specific task for the pilot
 	//    optional string taskGeoJSON = 53;
 

@@ -1,7 +1,7 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {Source, Layer, LayerProps} from 'react-map-gl';
 
-import {assembleOptimalDirection} from './optimalDirection';
+import {assembleOptimalDirection, distKm} from './optimalDirection';
 import lineIntersect from '@turf/line-intersect';
 import {lineString as turfLineString} from '@turf/helpers';
 
@@ -40,6 +40,11 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
     // Filled gradient heatmap for AAT in-sector visualization showing net efficiency of each point
     const optimalDirectionGeoJSON = useMemo(() => {
         if (!constructionLines || !aat || !optimalGrid?.grid?.length || !selectedPosition || (!debouncedScore?.inSector && !debouncedScore?.inPenalty) || lastLeg) {
+            return null;
+        }
+
+        // Don't display grid from a different sector
+        if (optimalGrid.currentLeg !== debouncedScore?.currentLeg) {
             return null;
         }
 
@@ -227,6 +232,9 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
             const pos = selectedPosition;
             if (!pos) return;
 
+            const prevDist = distKm({lat: p.prevLat, lng: p.prevLng}, {lat: cellLat, lng: cellLng});
+            const nextDist = distKm({lat: cellLat, lng: cellLng}, {lat: p.nextLat, lng: p.nextLng});
+
             setHoverGeoJSON({
                 type: 'FeatureCollection',
                 features: [
@@ -237,8 +245,18 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
                     },
                     {
                         type: 'Feature',
-                        properties: {lineType: 'taskPath', label: `${p.taskDist}km (${p.improvement >= 0 ? '+' : ''}${p.improvement}km)`},
-                        geometry: {type: 'LineString', coordinates: [[p.prevLng, p.prevLat], [cellLng, cellLat], [p.nextLng, p.nextLat]]}
+                        properties: {lineType: 'taskLeg', label: `${Math.round(prevDist * 10) / 10}km`},
+                        geometry: {type: 'LineString', coordinates: [[p.prevLng, p.prevLat], [cellLng, cellLat]]}
+                    },
+                    {
+                        type: 'Feature',
+                        properties: {lineType: 'taskLeg', label: `${Math.round(nextDist * 10) / 10}km`},
+                        geometry: {type: 'LineString', coordinates: [[cellLng, cellLat], [p.nextLng, p.nextLat]]}
+                    },
+                    {
+                        type: 'Feature',
+                        properties: {lineType: 'apex', label: `${p.improvement >= 0 ? '+' : ''}${p.improvement}km\n${Math.round(p.ratio * 10) / 10}:1`},
+                        geometry: {type: 'Point', coordinates: [cellLng, cellLat]}
                     }
                 ]
             });
@@ -298,8 +316,9 @@ export function OptimalGridSources({optimalDirectionGeoJSON, baselineGeoJSON, ho
                 <Source type="geojson" data={hoverGeoJSON} key={'optimal_hover_'}>
                     <Layer {...optimalHoverTransitStyle} />
                     <Layer {...optimalHoverTransitLabelStyle} />
-                    <Layer {...optimalHoverPathStyle} />
-                    <Layer {...optimalHoverPathLabelStyle} />
+                    <Layer {...optimalHoverLegStyle} />
+                    <Layer {...optimalHoverLegLabelStyle} />
+                    <Layer {...optimalHoverApexStyle} />
                 </Source>
             ) : null}
         </>
@@ -387,10 +406,10 @@ const optimalHoverTransitLabelStyle: LayerProps = {
     }
 };
 
-const optimalHoverPathStyle: LayerProps = {
-    id: 'optimal_hover_path',
+const optimalHoverLegStyle: LayerProps = {
+    id: 'optimal_hover_leg',
     type: 'line',
-    filter: ['==', ['get', 'lineType'], 'taskPath'],
+    filter: ['==', ['get', 'lineType'], 'taskLeg'],
     paint: {
         'line-color': '#00bfff',
         'line-width': 3,
@@ -398,10 +417,10 @@ const optimalHoverPathStyle: LayerProps = {
     }
 };
 
-const optimalHoverPathLabelStyle: LayerProps = {
-    id: 'optimal_hover_path_label',
+const optimalHoverLegLabelStyle: LayerProps = {
+    id: 'optimal_hover_leg_label',
     type: 'symbol',
-    filter: ['==', ['get', 'lineType'], 'taskPath'],
+    filter: ['==', ['get', 'lineType'], 'taskLeg'],
     layout: {
         'symbol-placement': 'line-center',
         'text-field': ['get', 'label'],
@@ -412,5 +431,23 @@ const optimalHoverPathLabelStyle: LayerProps = {
         'text-color': '#fff',
         'text-halo-color': '#000',
         'text-halo-width': 1.5
+    }
+};
+
+const optimalHoverApexStyle: LayerProps = {
+    id: 'optimal_hover_apex',
+    type: 'symbol',
+    filter: ['==', ['get', 'lineType'], 'apex'],
+    layout: {
+        'text-field': ['get', 'label'],
+        'text-size': 14,
+        'text-allow-overlap': true,
+        'text-anchor': 'bottom',
+        'text-offset': [0, -0.5]
+    },
+    paint: {
+        'text-color': '#ffff00',
+        'text-halo-color': '#000',
+        'text-halo-width': 2
     }
 };

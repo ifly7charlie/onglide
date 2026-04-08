@@ -267,6 +267,7 @@ export interface CalculatedTaskStatus extends TaskStatus {
     optimalGrid?: number[]; // flat [lng, lat, taskDist, ...] per grid cell for AAT direction heatmap
     optimalGridBaseline?: number; // scored dist to current sector point + max remaining forward
     optimalGridBaselinePath?: number[]; // flat [lng, lat, ...] for the baseline path visualization
+    suggestedTrackPoints?: number[]; // flat [lng, lat, segDist, 0, ...] aim points from current pos to finish
 }
 
 // points re-ordered if necessary
@@ -374,6 +375,7 @@ export interface PilotScoreDisplay extends PilotScore {
     scoredGeoJSON?: any;
     minGeoJSON?: any;
     maxGeoJSON?: any;
+    suggestedGeoJSON?: any;
 }
 
 /// Database types

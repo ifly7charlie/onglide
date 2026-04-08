@@ -11,7 +11,7 @@ interface LatLng {
 const deg2rad = (d: number) => (d * Math.PI) / 180;
 
 /** Haversine distance in km — inline to avoid turf overhead */
-function distKm(a: LatLng, b: LatLng): number {
+export function distKm(a: LatLng, b: LatLng): number {
     const R = 6371;
     const dLat = deg2rad(b.lat - a.lat);
     const dLng = deg2rad(b.lng - a.lng);

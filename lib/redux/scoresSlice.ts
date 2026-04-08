@@ -361,6 +361,11 @@ function mapScoresToDisplayScores(p: PilotScore): PilotScoreDisplay {
             ? {
                   maxGeoJSON: assembleLabeledLine(p.maxDistancePoints)
               }
+            : {}),
+        ...(p.suggestedTrackPoints && p.suggestedTrackPoints.length > 7
+            ? {
+                  suggestedGeoJSON: assembleLabeledLine(p.suggestedTrackPoints)
+              }
             : {})
         /*        ...(p.taskGeoJSON
             ? {

@@ -10,7 +10,8 @@ export function deckTooltip({
     //    pilotScores,
     lang,
     tz,
-    units
+    units,
+    modifierHeld
 }: //
 {
     object?: any;
@@ -22,9 +23,10 @@ export function deckTooltip({
     lang: string;
     tz: TZ;
     units: number | boolean;
+    modifierHeld?: boolean;
 }) {
     if (!picked) {
-        if (process.env.NODE_ENV == 'development' && coordinate) {
+        if (process.env.NODE_ENV == 'development' && coordinate && modifierHeld) {
             return `[${coordinate.map((x) => x.toFixed(4))}, ${map?.queryTerrainElevation({lat: coordinate[1], lng: coordinate[0]}, {exaggerated: false})?.toFixed(0)}]`;
         }
         return null;

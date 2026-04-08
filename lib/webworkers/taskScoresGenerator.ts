@@ -97,7 +97,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             optimalNextSectorPoint: item.optimalNextSectorPoint ? {t: item.optimalNextSectorPoint.t, lat: item.optimalNextSectorPoint.lat, lng: item.optimalNextSectorPoint.lng} : undefined,
             optimalGrid: item.optimalGrid?.length ? item.optimalGrid : [],
             optimalGridBaseline: item.optimalGridBaseline,
-            optimalGridBaselinePath: item.optimalGridBaselinePath ?? []
+            optimalGridBaselinePath: item.optimalGridBaselinePath ?? [],
+            suggestedTrackPoints: item.suggestedTrackPoints ?? []
         };
 
         // If we have no start we may have had a tick we should just pass it through and ignore
