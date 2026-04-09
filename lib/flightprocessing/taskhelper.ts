@@ -161,7 +161,7 @@ export function calcHandicap(dist, leg, handicap) {
  *       http://www.census.gov/cgi-bin/geo/gisfaq?Q5.1
  */
 const d2r = Math.PI / 180;
-export function distHaversine(p1: BasePositionMessage, p2: BasePositionMessage): DistanceKM {
+export function distHaversine(p1: {lat: number; lng: number}, p2: {lat: number; lng: number}): DistanceKM {
     const p1lat = p1.lat * d2r;
     const p2lat = p2.lat * d2r;
     const p1long = p1.lng * d2r;

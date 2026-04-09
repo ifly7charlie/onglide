@@ -9,6 +9,8 @@ import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelpe
 
 import {convexHull} from '../flightprocessing/convexHull';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
+import {computeOptimalGrid} from '../flightprocessing/computeOptimalGrid';
+import {computeSuggestedTrack} from '../flightprocessing/computeSuggestedTrack';
 
 /*
  * This is used just for scoring an AAT task
@@ -83,7 +85,6 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
     // Optimal direction grid: computed once per sector entry, stored independently in Redux
     let lastGridLeg = -1;
-    const GRID_SIZE = 25;
 
     for await (const current of taskStatusGenerator) {
         try {
@@ -184,73 +185,15 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             const isFinishLegForGrid = taskStatus.currentLeg === task.legs.length - 1;
             if (taskStatus.currentLeg !== lastGridLeg && taskStatus.currentLeg > 0 && !isFinishLegForGrid) {
                 lastGridLeg = taskStatus.currentLeg;
-                const sectorCoords = task.legs[taskStatus.currentLeg].coordinates as [number, number][];
-                if (sectorCoords?.length >= 3) {
-                    // Bbox of the sector
-                    let minLng = Infinity,
-                        maxLng = -Infinity,
-                        minLat = Infinity,
-                        maxLat = -Infinity;
-                    for (const [lng, lat] of sectorCoords) {
-                        if (lng < minLng) minLng = lng;
-                        if (lng > maxLng) maxLng = lng;
-                        if (lat < minLat) minLat = lat;
-                        if (lat > maxLat) maxLat = lat;
-                    }
-                    const dLng = (maxLng - minLng) / GRID_SIZE;
-                    const dLat = (maxLat - minLat) / GRID_SIZE;
-
-                    if (dLng > 0 && dLat > 0) {
-                        // Ray-casting point-in-polygon
-                        const inPoly = (x: number, y: number): boolean => {
-                            let inside = false;
-                            for (let i = 0, j = sectorCoords.length - 1; i < sectorCoords.length; j = i++) {
-                                const xi = sectorCoords[i][0],
-                                    yi = sectorCoords[i][1];
-                                const xj = sectorCoords[j][0],
-                                    yj = sectorCoords[j][1];
-                                if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
-                                    inside = !inside;
-                                }
-                            }
-                            return inside;
-                        };
-
-                        // Build grid cells inside the sector
-                        const gridPoints: BasePositionMessage[] = [];
-                        const gridCoords: {lng: number; lat: number}[] = [];
-                        for (let i = 0; i < GRID_SIZE; i++) {
-                            for (let j = 0; j < GRID_SIZE; j++) {
-                                const cLng = minLng + (i + 0.5) * dLng;
-                                const cLat = minLat + (j + 0.5) * dLat;
-                                if (inPoly(cLng, cLat)) {
-                                    gridPoints.push({t: 0 as Epoch, lat: cLat, lng: cLng, a: 0} as BasePositionMessage);
-                                    gridCoords.push({lng: cLng, lat: cLat});
-                                }
-                            }
-                        }
-
-                        if (gridPoints.length > 0) {
-                            // Use maxGraph to match the baseline (both maximize task distance)
-                            // maxGraph has flown convex hull points for previous sectors
-                            const results = maxGraph.evaluatePointsInGroupWithPaths(taskStatus.currentLeg, gridPoints);
-                            const cl = taskStatus.currentLeg;
-                            // Grid format: per cell [lng, lat, taskDist, prevLng, prevLat, nextLng, nextLat] (stride = 7)
-                            const grid: number[] = [];
-                            let minTaskDist = Infinity, maxTaskDist = -Infinity;
-                            for (let k = 0; k < results.length; k++) {
-                                // Use sumPath for consistent distance calc with baseline (geodesic + leg adjustments)
-                                const taskDist = sumPath(results[k].path, 0, preparedLegs, true);
-                                const prev = results[k].path[cl - 1];
-                                const next = results[k].path[cl + 1];
-                                grid.push(gridCoords[k].lng, gridCoords[k].lat, taskDist, prev?.lng ?? 0, prev?.lat ?? 0, next?.lng ?? 0, next?.lat ?? 0);
-                                if (taskDist < minTaskDist) minTaskDist = taskDist;
-                                if (taskDist > maxTaskDist) maxTaskDist = taskDist;
-                            }
-                            scoredStatus.optimalGrid = grid;
-                            log(`optimalGrid [t=${taskStatus.t}]: ${gridPoints.length} cells for leg ${cl}, taskDist range [${minTaskDist.toFixed(1)}, ${maxTaskDist.toFixed(1)}]km`);
-                        }
-                    }
+                const grid = computeOptimalGrid(
+                    task.legs[taskStatus.currentLeg].coordinates as [number, number][],
+                    taskStatus.currentLeg,
+                    maxGraph,
+                    preparedLegs,
+                    log
+                );
+                if (grid) {
+                    scoredStatus.optimalGrid = grid;
                 }
             }
 
@@ -428,102 +371,21 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                         }
                     });
 
-                    // --- Suggested Track Calculation ---
                     // Compute aim points for remaining sectors based on current speed + 10%
-                    const suggestedElapsed = (current.t - current.utcStart!) as number;
-                    if (
-                        task.details.durationsecs > 0 &&
-                        suggestedElapsed > 300 &&
-                        scoredStatus.distance > 10 &&
-                        suggestedElapsed < task.details.durationsecs &&
-                        current.lastProcessedPoint
-                    ) {
-                        const taskSpeedKph = scoredStatus.distance / (suggestedElapsed / 3600);
-                        const targetSpeed = taskSpeedKph * 1.1;
-                        const remainingTimeSecs = task.details.durationsecs - suggestedElapsed;
-                        const targetRemainingDist = targetSpeed * (remainingTimeSecs / 3600);
-
-                        const lastSectorBeforeFinish = task.legs.length - 2;
-                        // When in sector, skip it — pilot is already there, only aim at future sectors
-                        const firstRemaining = (taskStatus.inSector || taskStatus.inPenalty) ? taskStatus.currentLeg + 1 : taskStatus.currentLeg;
-                        const remainingSectors: {minPoint: BasePositionMessage; maxPoint: BasePositionMessage; isLast: boolean}[] = [];
-
-                        let allPointsAvailable = true;
-                        for (let i = firstRemaining; i <= lastSectorBeforeFinish; i++) {
-                            const leg = scoredStatus.legs[i];
-                            if (!leg?.minPossible?.point || !leg?.maxPossible?.point) {
-                                allPointsAvailable = false;
-                                break;
-                            }
-                            remainingSectors.push({
-                                minPoint: leg.minPossible.point,
-                                maxPoint: leg.maxPossible.point,
-                                isLast: i === lastSectorBeforeFinish
-                            });
-                        }
-
-                        if (allPointsAvailable && remainingSectors.length > 0) {
-                            const lerpPt = (a: BasePositionMessage, b: BasePositionMessage, fraction: number) => ({
-                                t: 0 as Epoch,
-                                lat: a.lat + (b.lat - a.lat) * fraction,
-                                lng: a.lng + (b.lng - a.lng) * fraction,
-                                a: 0
-                            });
-
-                            const finishCenter = {t: 0 as Epoch, lat: task.legs.at(-1)!.nlat, lng: task.legs.at(-1)!.nlng, a: 0};
-
-                            const sectorFraction = (sector: (typeof remainingSectors)[0], fraction: number) =>
-                                Math.max(0, Math.min(1, sector.isLast ? fraction / 4 : fraction));
-
-                            const computeTotalDist = (fraction: number): number => {
-                                let total = 0;
-                                let prev = current.lastProcessedPoint!;
-                                for (const sector of remainingSectors) {
-                                    const aim = lerpPt(sector.minPoint, sector.maxPoint, sectorFraction(sector, fraction));
-                                    total += distHaversine(prev, aim);
-                                    prev = aim;
-                                }
-                                total += distHaversine(prev, finishCenter);
-                                return total;
-                            };
-
-                            // Binary search for fraction where computeTotalDist === targetRemainingDist
-                            let lo = 0,
-                                hi = 1;
-                            const distAtLo = computeTotalDist(0);
-                            const distAtHi = computeTotalDist(1);
-
-                            let bestFraction: number;
-                            if (targetRemainingDist <= distAtLo) {
-                                bestFraction = 0;
-                            } else if (targetRemainingDist >= distAtHi) {
-                                bestFraction = 1;
-                            } else {
-                                for (let iter = 0; iter < 20; iter++) {
-                                    const mid = (lo + hi) / 2;
-                                    if (computeTotalDist(mid) < targetRemainingDist) {
-                                        lo = mid;
-                                    } else {
-                                        hi = mid;
-                                    }
-                                }
-                                bestFraction = (lo + hi) / 2;
-                            }
-
-                            // Build stride-4 flat array: [lng, lat, segDist, 0, ...]
-                            const suggestedPoints: number[] = [current.lastProcessedPoint.lng, current.lastProcessedPoint.lat, 0, 0];
-                            let prev = current.lastProcessedPoint;
-                            for (const sector of remainingSectors) {
-                                const aim = lerpPt(sector.minPoint, sector.maxPoint, sectorFraction(sector, bestFraction));
-                                const segDist = Math.round(distHaversine(prev, aim) * 10) / 10;
-                                suggestedPoints.push(aim.lng, aim.lat, segDist, 0);
-                                prev = aim;
-                            }
-                            const finishDist = Math.round(distHaversine(prev, finishCenter) * 10) / 10;
-                            suggestedPoints.push(finishCenter.lng, finishCenter.lat, finishDist, 0);
-
+                    if (current.lastProcessedPoint) {
+                        const suggestedPoints = computeSuggestedTrack(
+                            (current.t - current.utcStart!) as number,
+                            task.details.durationsecs,
+                            scoredStatus.distance,
+                            taskStatus.currentLeg,
+                            !!(taskStatus.inSector || taskStatus.inPenalty),
+                            current.lastProcessedPoint,
+                            scoredStatus.legs,
+                            {lat: task.legs.at(-1)!.nlat, lng: task.legs.at(-1)!.nlng},
+                            log
+                        );
+                        if (suggestedPoints) {
                             scoredStatus.suggestedTrackPoints = suggestedPoints;
-                            log(`suggestedTrack: fraction=${bestFraction.toFixed(3)} targetDist=${targetRemainingDist.toFixed(1)} speed=${taskSpeedKph.toFixed(1)}kph`);
                         } else {
                             delete scoredStatus.suggestedTrackPoints;
                         }
@@ -555,8 +417,11 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                         scoredStatus.legs[leg].distance = distance;
                     });
 
-                    // Compute live baseline for optimal grid: scored distance to current sector point
-                    // (without FAI extension) + max remaining from that point forward
+                    // Compute live baseline for optimal grid: the best total task distance
+                    // achievable from the current scored point (scored path to here + max
+                    // remaining forward). This is the reference each grid cell's taskDist
+                    // is compared against — cells where taskDist > baseline are worth
+                    // detouring to, cells below baseline would reduce overall distance.
                     const isInSectorForGrid = (taskStatus.inSector || taskStatus.inPenalty) && taskStatus.currentLeg < task.legs.length - 1;
                     if (isInSectorForGrid) {
                         // Get the original scored path (without FAI Annex A extension to next sector)

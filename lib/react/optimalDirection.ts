@@ -3,25 +3,8 @@ import bbox from '@turf/bbox';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import type {Feature, Polygon, FeatureCollection} from 'geojson';
 
-interface LatLng {
-    lat: number;
-    lng: number;
-}
-
-const deg2rad = (d: number) => (d * Math.PI) / 180;
-
-/** Haversine distance in km — inline to avoid turf overhead */
-export function distKm(a: LatLng, b: LatLng): number {
-    const R = 6371;
-    const dLat = deg2rad(b.lat - a.lat);
-    const dLng = deg2rad(b.lng - a.lng);
-    const sinLat = Math.sin(dLat / 2);
-    const sinLng = Math.sin(dLng / 2);
-    const h = sinLat * sinLat + Math.cos(deg2rad(a.lat)) * Math.cos(deg2rad(b.lat)) * sinLng * sinLng;
-    return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-const GRID_SIZE = 25;
+import {distHaversine} from '../flightprocessing/taskhelper';
+import {OPTIMAL_GRID_SIZE, GRID} from '../constants';
 
 /**
  * Generate a filled heatmap over the current sector showing the net efficiency
@@ -44,17 +27,14 @@ const GRID_SIZE = 25;
  * @param hullPolygon       - Convex hull — cells inside are skipped
  * @param optimalNextSectorPoint - Optimal point in next sector (rendered as marker)
  */
-export function assembleOptimalDirection(optimalGrid: number[], pos: LatLng, baseline: number, sectorPolygon: Feature<Polygon>, hullPolygon: Feature<Polygon> | null, optimalNextSectorPoint?: LatLng): FeatureCollection | null {
+export function assembleOptimalDirection(optimalGrid: number[], pos: {lat: number; lng: number}, baseline: number, sectorPolygon: Feature<Polygon>, hullPolygon: Feature<Polygon> | null, optimalNextSectorPoint?: {lat: number; lng: number}): FeatureCollection | null {
     if (!optimalGrid.length || baseline == null) return null;
 
     const [minLng, minLat, maxLng, maxLat] = bbox(sectorPolygon);
-    const dLng = (maxLng - minLng) / GRID_SIZE;
-    const dLat = (maxLat - minLat) / GRID_SIZE;
+    const dLng = (maxLng - minLng) / OPTIMAL_GRID_SIZE;
+    const dLat = (maxLat - minLat) / OPTIMAL_GRID_SIZE;
 
     if (dLng <= 0 || dLat <= 0) return null;
-
-    // Per-cell stride: lng, lat, taskDist, prevLng, prevLat, nextLng, nextLat = 7
-    const stride = 7;
 
     const cells: {index: number; lng: number; lat: number; ratio: number; taskDist: number; transitDist: number; improvement: number; prevLng: number; prevLat: number; nextLng: number; nextLat: number}[] = [];
     let minRatio = Infinity;
@@ -62,11 +42,11 @@ export function assembleOptimalDirection(optimalGrid: number[], pos: LatLng, bas
     let index = 0;
     let totalCells = 0;
     let hullSkipped = 0;
-    for (let k = 0; k + stride - 1 < optimalGrid.length; k += stride) {
+    for (let k = 0; k + GRID.STRIDE - 1 < optimalGrid.length; k += GRID.STRIDE) {
         totalCells++;
-        const cLng = optimalGrid[k];
-        const cLat = optimalGrid[k + 1];
-        const taskDist = optimalGrid[k + 2];
+        const cLng = optimalGrid[k + GRID.LNG];
+        const cLat = optimalGrid[k + GRID.LAT];
+        const taskDist = optimalGrid[k + GRID.TASK_DIST];
 
         // Skip cells inside the convex hull — already enclosed, no new information
         if (hullPolygon && booleanPointInPolygon([cLng, cLat], hullPolygon)) {
@@ -74,9 +54,11 @@ export function assembleOptimalDirection(optimalGrid: number[], pos: LatLng, bas
             continue;
         }
 
-        const transitDist = distKm(pos, {lat: cLat, lng: cLng});
+        const transitDist = distHaversine(pos, {lat: cLat, lng: cLng});
         const improvement = taskDist - baseline;
-        // Ratio of extra task distance to transit distance (2:1 = best green)
+        // Ratio = km of task distance gained per km of transit flown.
+        // ratio=1 is break-even (1km transit buys 1km task distance),
+        // ratio>1 is net positive (green), ratio<1 is net negative (red).
         const ratio = transitDist > 0.01 ? improvement / transitDist : improvement > 0 ? 2 : 0;
 
         cells.push({
@@ -87,10 +69,10 @@ export function assembleOptimalDirection(optimalGrid: number[], pos: LatLng, bas
             taskDist,
             transitDist,
             improvement,
-            prevLng: optimalGrid[k + 3],
-            prevLat: optimalGrid[k + 4],
-            nextLng: optimalGrid[k + 5],
-            nextLat: optimalGrid[k + 6]
+            prevLng: optimalGrid[k + GRID.PREV_LNG],
+            prevLat: optimalGrid[k + GRID.PREV_LAT],
+            nextLng: optimalGrid[k + GRID.NEXT_LNG],
+            nextLat: optimalGrid[k + GRID.NEXT_LAT]
         });
         if (ratio < minRatio) minRatio = ratio;
         index++;
@@ -98,12 +80,13 @@ export function assembleOptimalDirection(optimalGrid: number[], pos: LatLng, bas
 
     if (!cells.length) return null;
 
-    // Scale: ratio 2 → +1 (green), ratio 1 → 0 (yellow/neutral), ratio 0 → -1 (red)
-    // Ratio 1 means break-even: each km of transit gains 1km of task distance
+    // Map ratio to a normalized [-1, +1] scale for the color ramp:
+    //   ratio 0 or below → -1 (red:  transit cost exceeds any gain)
+    //   ratio 1           →  0 (yellow: break-even)
+    //   ratio 2 or above → +1 (green: each km of transit gains ≥2km task distance)
     const features: (Feature<Polygon> | Feature)[] = [];
 
     for (const cell of cells) {
-        // Map ratio to [-1, +1]: 1 is neutral, 2 is full green, 0 or below is full red
         const normalized = Math.max(-1, Math.min(1, cell.ratio - 1));
 
         const l = cell.lng - dLng / 2;

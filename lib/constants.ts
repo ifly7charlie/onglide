@@ -20,3 +20,18 @@ export const inorderAdditionalDelay = 6;
 
 // How far beyond the finite extent of a start line a near-miss is accepted (metres)
 export const RELAXED_START_TOLERANCE_M = 1500;
+
+// Grid resolution for AAT optimal direction heatmap (cells per axis)
+export const OPTIMAL_GRID_SIZE = 25;
+
+// Flat-array layout for optimal grid cells: [lng, lat, taskDist, prevLng, prevLat, nextLng, nextLat, ...]
+export const GRID = {
+    STRIDE: 7,
+    LNG: 0,
+    LAT: 1,
+    TASK_DIST: 2,
+    PREV_LNG: 3,
+    PREV_LAT: 4,
+    NEXT_LNG: 5,
+    NEXT_LAT: 6
+} as const;

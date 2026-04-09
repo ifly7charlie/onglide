@@ -1,14 +1,9 @@
 import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {Source, Layer, LayerProps} from 'react-map-gl';
 
-import {assembleOptimalDirection, distKm} from './optimalDirection';
-import type {PilotScoreDisplay} from '../types';
-
-interface OptimalGridEntry {
-    t: number;
-    currentLeg: number;
-    grid: number[];
-}
+import {assembleOptimalDirection} from './optimalDirection';
+import {distHaversine} from '../flightprocessing/taskhelper';
+import type {PilotScoreDisplay, OptimalGridEntry} from '../types';
 
 interface SelectedPosition {
     lat: number;
@@ -115,8 +110,8 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
             const pos = selectedPosition;
             if (!pos) return;
 
-            const prevDist = distKm({lat: p.prevLat, lng: p.prevLng}, {lat: cellLat, lng: cellLng});
-            const nextDist = distKm({lat: cellLat, lng: cellLng}, {lat: p.nextLat, lng: p.nextLng});
+            const prevDist = distHaversine({lat: p.prevLat, lng: p.prevLng}, {lat: cellLat, lng: cellLng});
+            const nextDist = distHaversine({lat: cellLat, lng: cellLng}, {lat: p.nextLat, lng: p.nextLng});
 
             setHoverGeoJSON({
                 type: 'FeatureCollection',

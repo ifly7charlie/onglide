@@ -270,6 +270,13 @@ export interface CalculatedTaskStatus extends TaskStatus {
     suggestedTrackPoints?: number[]; // flat [lng, lat, segDist, 0, ...] aim points from current pos to finish
 }
 
+// Optimal direction grid snapshot, stored independently for replay
+export interface OptimalGridEntry {
+    t: Epoch;
+    currentLeg: number;
+    grid: number[];
+}
+
 // points re-ordered if necessary
 export type SoftenGenerator<Type extends TimeStampType> = AsyncGenerator<Type, Type | void, void>;
 

@@ -16,7 +16,7 @@ import {ClassScoreHistory, OnglideWebSocketMessage} from '../protobuf/onglide';
 //const updateScoresAction = createAction<PilotScores>('updateScores');
 import {assembleLabeledLine} from '../react/distanceLine';
 
-import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey} from '../types';
+import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey, OptimalGridEntry} from '../types';
 
 import {
     reduce as _reduce,
@@ -35,11 +35,6 @@ import type {RootState} from './store';
 const d = (d) => new Date(d * 1000).toISOString();
 
 type HistoricalScoreData = Record<Compno, PilotScoreDisplay[]>;
-interface OptimalGridEntry {
-    t: Epoch;
-    currentLeg: number;
-    grid: number[];
-}
 interface ScoresSliceState {
     className: ClassName;
     scores: ScoreData;
