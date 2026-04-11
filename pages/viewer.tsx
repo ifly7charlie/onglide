@@ -1,4 +1,4 @@
-import {useState, useCallback, useRef, useMemo} from 'react';
+import {useState, useCallback, useRef, useMemo, useEffect} from 'react';
 import Head from 'next/head';
 
 import Navbar from 'react-bootstrap/Navbar';
@@ -427,25 +427,33 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         }
     }, [dispatch, flights]);
 
-    const handleSetHandicap = useCallback(
-        (compno: Compno, handicap: number) => {
-            const newHandicaps = {...handicapsRef.current};
+    const handleSetHandicap = useCallback((compno: Compno, handicap: number) => {
+        setHandicaps((prev) => {
+            const next = {...prev};
             if (handicap === 100) {
-                delete newHandicaps[compno];
+                delete next[compno];
             } else {
-                newHandicaps[compno] = handicap;
+                next[compno] = handicap;
             }
-            handicapsRef.current = newHandicaps;
-            setHandicaps({...newHandicaps});
-            if (Object.keys(newHandicaps).length > 0) {
-                localStorage.setItem('viewerHandicaps', JSON.stringify(newHandicaps));
+            handicapsRef.current = next;
+            if (Object.keys(next).length > 0) {
+                localStorage.setItem('viewerHandicaps', JSON.stringify(next));
             } else {
                 localStorage.removeItem('viewerHandicaps');
             }
-            handleRescore();
-        },
-        [handleRescore]
-    );
+            return next;
+        });
+    }, []);
+
+    // Rescore all flights when handicaps change
+    const handicapsInitial = useRef(true);
+    useEffect(() => {
+        if (handicapsInitial.current) {
+            handicapsInitial.current = false;
+            return;
+        }
+        handleRescore();
+    }, [handicaps, handleRescore]);
 
     const fitBounds = useCallback(() => {
         if (options) {

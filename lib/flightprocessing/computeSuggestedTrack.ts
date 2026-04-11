@@ -65,9 +65,10 @@ export function computeSuggestedTrack(
 
     const finishCenter = {t: 0 as Epoch, lat: finishPoint.lat, lng: finishPoint.lng, a: 0};
 
-    // Last sector uses fraction/4: being under time on final glide is much
-    // more costly than over time, so keep the aim point conservative to
-    // reserve room for extending the last sector if needed
+    // Last sector uses 1/4 of the fraction used for other turnpoints:
+    // being under time on final glide is much more costly than over time,
+    // so keep the aim point conservative to reserve room for extending.
+    // computeTotalDist uses the same damping so the binary search distance is consistent.
     const sectorFraction = (sector: (typeof remainingSectors)[0], fraction: number) => Math.max(0, Math.min(1, sector.isLast ? fraction / 4 : fraction));
 
     const computeTotalDist = (fraction: number): number => {
