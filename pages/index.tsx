@@ -259,8 +259,14 @@ export async function getServerSideProps(context) {
         };
     } catch (e) {
         console.log(e);
+        return {
+            props: {
+                lat: 51,
+                lng: 0,
+                tzoffset: 0,
+                tz: 'Etc/UTC',
+                defaultClass: ''
+            }
+        };
     }
-    //    return {
-    //      props: {lat: 52.4393, lng: -1.04162, tzoffset: 3600, tz: 'Europe/London', defaultClass: '18Metre', options: cookies(context).options || {rainRadar: 1, rainRadarAdvance: 0, units: 0, mapType: 3, taskUp: 0, follow: true}}
-    //    };
 }
