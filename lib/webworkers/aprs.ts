@@ -721,7 +721,7 @@ function trackGlider(task: AprsCommandTrack) {
         // Not had a message
         stationary: 0,
         ground: false,
-        lastTick: (getNow() - inorderAdditionalDelay) as Epoch,
+        lastTick: 0 as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
         // Setup logging
