@@ -101,7 +101,8 @@ async function doIt() {
                 host: process.env.MYSQL_HOST,
                 database: db,
                 user: process.env.MYSQL_USER,
-                password: process.env.MYSQL_PASSWORD
+                password: process.env.MYSQL_PASSWORD,
+                decimalNumbers: true
             }
         });
 
