@@ -68,6 +68,7 @@ BEGIN
 			INTO _cwdf
 			FROM global.comprules, classes, competition
 			WHERE classes.class=iclass
+			  AND classes.compid = competition.compid
 			  AND classes.type = comprules.name
 			  AND comprules.country = competition.countrycode;
 			
@@ -217,6 +218,7 @@ daypoints: BEGIN
 		INTO _miny, _maxy, _ypercentageW, _ypercentageU, _Da, _Ta
 		FROM global.comprules, classes, competition
 		WHERE classes.class=_class
+		  AND classes.compid = competition.compid
 		  AND classes.type = comprules.name
 		  AND comprules.country = competition.countrycode;
 

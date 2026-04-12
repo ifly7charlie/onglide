@@ -1,11 +1,18 @@
-import {query, mysqlEnd} from '../../lib/react/db';
+import {query, mysqlEnd} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
-import {getNow} from '../../lib/now';
-import {toDateCode} from '../../lib/datecode';
+import {getNow} from '../../../lib/now';
+import {toDateCode} from '../../../lib/datecode';
 
 export default async function competitionHandler(req, res) {
+    const compid = req.query.compid as string;
+    if (!compid) {
+        res.status(400).end();
+        return;
+    }
+
     const competition = await query(escape`
         SELECT
+            compid,
             name,
             DATE_FORMAT (start, "%M %D") start,
             DATE_FORMAT (end, "%M %D") end,
@@ -16,12 +23,14 @@ export default async function competitionHandler(req, res) {
             lg
         FROM
             competition
+        WHERE
+            compid = ${compid}
     `);
 
     if (!competition[0]) {
         res.setHeader('Cache-Control', 'public, s-maxage=10, stale-while-revalidate=30');
         res.status(404).end();
-        console.log('unable to access competition in db');
+        console.log(`unable to access competition ${compid} in db`);
         return;
     }
 
@@ -58,6 +67,7 @@ export default async function competitionHandler(req, res) {
             compstatus cs
         WHERE
             c.class = cs.class
+            AND c.compid = ${compid}
         ORDER BY
             c.class
     `);

@@ -20,6 +20,7 @@ import {getElevationOffset} from '../lib/getelevationoffset';
 import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
 import {toDateCode} from '../lib/datecode';
+import {makeClassId} from '../lib/classid';
 
 import {groupBy as _groupby, forEach as _forEach} from 'lodash';
 
@@ -60,13 +61,13 @@ async function main() {
     });
 
     // Now get data from soaringspot
-    soaringSpot();
+    soaringSpotAll();
     roboControl();
 
     console.log('Background api download from soaring spot enabled');
     setInterval(
         function () {
-            soaringSpot();
+            soaringSpotAll();
         },
         5 * 60 * 1000
     );
@@ -166,41 +167,56 @@ async function updateTrackers(compno: string, trackerIds: string, feedType: 'rob
 }
 
 //
-// Function to score any type of task - checks the task type field in the database
-// to decide how to delegate to the various different kinds of tasks
-async function soaringSpot(deep = false) {
+// Iterate every soaringspotkey row in scoringsource and process each competition.
+async function soaringSpotAll(deep = false) {
     console.log('Checking SoaringSpot @ ' + new Date().toString());
 
-    let keys: any = {};
-
-    // Allow the use of environment variables to configure the soaring spot endpoint
-    // rather than it being in the database
-    if (process.env.SOARINGSPOT_CLIENT_ID && process.env.SOARINGSPOT_SECRET) {
-        keys.client_id = process.env.SOARINGSPOT_CLIENT_ID;
-        keys.secret = process.env.SOARINGSPOT_SECRET;
-        keys.overwrite = parseInt(process.env.SOARINGSPOT_OVERWRITE || '0');
-        keys.actuals = parseInt(process.env.SOARINGSPOT_ACTUALS || '1');
-        //        console.log('environment variable', keys);
-    } else {
-        // Get the soaring spot keys from database
-        keys = (
-            await mysql_db.query(escape`
-                SELECT
-                    *
-                FROM
-                    scoringsource
-                WHERE
-                    type = 'soaringspotkey'
-            `)
-        )[0];
-    }
-
-    if (!keys || !keys.client_id || !keys.secret) {
-        console.log('no soaringspot keys configured');
-        return {
-            error: 'no soaringspot keys configured'
+    // Allow single-competition env var mode for dev/testing; compid must be supplied
+    if (process.env.SOARINGSPOT_CLIENT_ID && process.env.SOARINGSPOT_SECRET && process.env.COMP_ID) {
+        const keys: any = {
+            compid: process.env.COMP_ID,
+            client_id: process.env.SOARINGSPOT_CLIENT_ID,
+            secret: process.env.SOARINGSPOT_SECRET,
+            overwrite: parseInt(process.env.SOARINGSPOT_OVERWRITE || '0'),
+            actuals: parseInt(process.env.SOARINGSPOT_ACTUALS || '1')
         };
+        await soaringSpot(keys, deep);
+        return;
     }
+
+    // Fetch every configured soaringspotkey source and process each one independently
+    const allKeys = (await mysql_db.query(escape`
+        SELECT
+            *
+        FROM
+            scoringsource
+        WHERE
+            type = 'soaringspotkey'
+    `)) as any[];
+
+    if (!allKeys?.length) {
+        console.log('no soaringspot keys configured');
+        return;
+    }
+
+    for (const keys of allKeys) {
+        if (!keys.client_id || !keys.secret || !keys.compid) {
+            console.log(`skipping soaringspotkey row: missing compid/client_id/secret`);
+            continue;
+        }
+        try {
+            await soaringSpot(keys, deep);
+        } catch (e) {
+            console.log(`soaringspot failed for compid=${keys.compid}:`, e);
+        }
+    }
+}
+
+//
+// Function to score any type of task - checks the task type field in the database
+// to decide how to delegate to the various different kinds of tasks
+async function soaringSpot(keys: any, deep = false) {
+    console.log(`Checking SoaringSpot for compid=${keys.compid} @ ${new Date().toString()}`);
 
     // If we should clean everything out or just update
     keys.deep = keys.overwrite || deep;
@@ -252,11 +268,10 @@ async function update_class(compClass, keys) {
     // Get the name of the class, if not set use the type
     const nameRaw = compClass.name ? compClass.name : compClass.type;
 
-    // Name for URLs and Database
-    const classid = nameRaw
-        .replace(/\s*(class|klasse)/gi, '')
-        .replace(/[^A-Z0-9]/gi, '')
-        .substring(0, 14);
+    // Globally-unique class identifier: hash of compid + raw name so two
+    // competitions running the same SoaringSpot class ("Club", "Standard", ...)
+    // never collide.
+    const classid = makeClassId(keys.compid, nameRaw);
 
     const name = nameRaw.replace(/[_]/gi, ' ');
 
@@ -286,6 +301,7 @@ async function update_class(compClass, keys) {
         INSERT INTO
             classes (
                 class,
+                compid,
                 classname,
                 description,
                 type,
@@ -295,13 +311,17 @@ async function update_class(compClass, keys) {
         VALUES
             (
                 ${classid},
+                ${keys.compid},
                 ${name.substr(0, 29)},
                 ${name},
                 ${compClass.type},
                 ${isHandicapped},
                 ${dm}
             ) ON DUPLICATE KEY
-        UPDATE classname =
+        UPDATE compid =
+        VALUES
+            (compid),
+            classname =
         VALUES
             (classname),
             description =
@@ -1296,33 +1316,40 @@ function randomEarlyMorningTimeDelay() {
 // as you will possibly want to tweak values in it!
 //
 async function update_contest(contest, keys) {
+    const compid = keys.compid;
+
     if (keys.deep) {
         // clear it all down, we will load all of this from soaring spot
         // NOTE: this should not be cleared every time, even though at present it is
         // TBD!!
+        // All of these are scoped to compid so one competition's deep reset
+        // does not touch other competitions' data.
         await mysql_db
             .transaction()
-            .query(escape`DELETE FROM classes`)
+            .query(escape`DELETE FROM pilots WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM pilotresult WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM contestday WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM compstatus WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM taskleg WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM tasks WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM classes WHERE compid = ${compid}`)
             .query(escape`
                 DELETE FROM logindetails
                 WHERE
                     type = "P"
             `)
-            .query(escape`DELETE FROM pilots`)
-            .query(escape`DELETE FROM pilotresult`)
-            .query(escape`DELETE FROM contestday`)
-            .query(escape`DELETE FROM compstatus`)
-            .query(escape`DELETE FROM taskleg`)
-            .query(escape`DELETE FROM tasks`)
             .commit();
-        console.log('deep update requested, deleted everything');
+        console.log(`deep update requested, deleted everything for compid=${compid}`);
     }
 
-    // Add a row if we need to
-    const count = await mysql_db.query('SELECT COUNT(*) cnt FROM competition');
+    // Make sure a competition row exists for this compid
+    const count = await mysql_db.query(escape`SELECT COUNT(*) cnt FROM competition WHERE compid = ${compid}`);
     if (!count || !count[0] || !count[0].cnt) {
-        console.log('Empty competition, pre-populating');
-        await mysql_db.query('INSERT IGNORE INTO competition ( tz, tzoffset ) VALUES ( "Europe/Stockholm", 7200 )');
+        console.log(`Empty competition for compid=${compid}, pre-populating`);
+        await mysql_db.query(escape`
+            INSERT IGNORE INTO competition (compid, tz, tzoffset)
+            VALUES (${compid}, 'Europe/Stockholm', 7200)
+        `);
     }
 
     //
@@ -1334,6 +1361,7 @@ async function update_contest(contest, keys) {
             END = ${contest.end_date},
             countrycode = ${contest.country},
             name = ${contest.name.substring(0, 59)}
+        WHERE compid = ${compid}
     `);
 
     // If we have a location then update
@@ -1347,6 +1375,7 @@ async function update_contest(contest, keys) {
                 lt = ${lat},
                 lg = ${lng},
                 sitename = ${ssLocation.name}
+            WHERE compid = ${compid}
         `);
 
         // Save four our use
@@ -1379,6 +1408,7 @@ async function update_contest(contest, keys) {
                 ) tzoffset
             FROM
                 competition
+            WHERE compid = ${compid}
         `)
     )[0];
 
@@ -1388,6 +1418,7 @@ async function update_contest(contest, keys) {
             SET
                 tz = ${contest.time_zone},
                 tzoffset = ${dbtz.tzoffset}
+            WHERE compid = ${compid}
         `);
     } else {
         console.log('TZ table not installed in mysql Please Correct (https://dev.mysql.com/doc/refman/8.0/en/mysql-tzinfo-to-sql.html)');
@@ -1401,6 +1432,7 @@ async function update_contest(contest, keys) {
             UPDATE competition
             SET
                 mainwebsite = ${url}
+            WHERE compid = ${compid}
         `);
     }
 }

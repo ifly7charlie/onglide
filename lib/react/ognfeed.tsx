@@ -62,6 +62,7 @@ interface WsStatus {
 export const OgnFeed = memo(
     //
     function OgnFeed({
+        compid,
         vc,
         datecode,
         tz,
@@ -75,6 +76,7 @@ export const OgnFeed = memo(
         notes
     }: //
     {
+        compid: string;
         vc: ClassName;
         datecode: Datecode;
         tz: TZ;
@@ -236,7 +238,7 @@ export const OgnFeed = memo(
                                 <br />
                             </>
                         )}
-                        <TaskDetails vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
+                        <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
                         {connectionStatus}
                         {valid && connected ? (
                             <PilotList

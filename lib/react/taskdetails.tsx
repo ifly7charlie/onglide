@@ -21,15 +21,17 @@ import {fromDateCode} from '../datecode';
 import {getNow} from '../now';
 
 //
-export const TaskDetails = memo(function TaskDetails({vc, fitBounds, tz, replayTime}: {vc: ClassName; fitBounds: Function; tz: TZ; replayTime: Epoch}) {
+export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz, replayTime}: {compid: string; vc: ClassName; fitBounds: Function; tz: TZ; replayTime: Epoch}) {
     const task = useSelector((state) => selectTask(state, vc));
     const hasTask = useSelector((state) => selectHasTask(state, vc));
-    const {comp, isLoading} = useContest();
+    const {comp, isLoading} = useContest(compid);
     const [open, setOpen] = useState(false);
 
     const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
-    // And then produce a string to display it locally
-    const fClass = comp.classes.find((c) => c.class == vc);
+    // And then produce a string to display it locally. `comp` is undefined
+    // until useContest() resolves, so guard the lookup — the early return
+    // below handles the unresolved case.
+    const fClass = comp?.classes?.find((c: any) => c.class == vc);
     const dateString = useMemo(() => {
         const date = (task?.details?.calendardate ?? fClass?.datecode) ? fromDateCode(fClass.datecode) : null;
         return date ? `${new Date(date).toLocaleDateString(lang, {day: 'numeric', month: 'short'})}` : '';

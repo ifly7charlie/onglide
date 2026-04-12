@@ -7,6 +7,7 @@
 import {createHash, randomBytes, createHmac} from 'crypto';
 
 import {toDateCode} from '../lib/datecode';
+import {makeClassId} from '../lib/classid';
 
 // Helper
 const fetcher = (url) => fetch(url).then((res) => res.json());
@@ -30,7 +31,7 @@ import {groupBy as _groupby, forEach as _forEach} from 'lodash';
 import escape from 'sql-template-strings';
 const mysql = require('serverless-mysql');
 
-let mysql_db = undefined;
+let mysql_db: any = undefined;
 //const fetch = require('node:fetch');
 
 // Fix the turpoint types so we draw the sectors right
@@ -59,12 +60,12 @@ async function main() {
     });
 
     // Now get data from soaringspot
-    SGP();
+    SGPAll();
 
     console.log('Background download from SGP enabled');
     setInterval(
         function () {
-            SGP();
+            SGPAll();
         },
         5 * 60 * 1000
     );
@@ -73,32 +74,43 @@ async function main() {
 main().then(() => 'exiting');
 
 //
-// Function to score any type of task - checks the task type field in the database
-// to decide how to delegate to the various different kinds of tasks
-async function SGP(deep = false) {
+// Iterate every configured SGP source and process each one independently
+async function SGPAll(deep = false) {
     console.log('Checking SGP @ ' + new Date().toString());
 
-    // Get the soaring spot keys from database
-    let keys = (
-        await mysql_db.query(escape`
-            SELECT
-                *
-            FROM
-                scoringsource
-            WHERE
-                type = 'sgp'
-        `)
-    )[0];
+    const allKeys = (await mysql_db.query(escape`
+        SELECT
+            *
+        FROM
+            scoringsource
+        WHERE
+            type = 'sgp'
+    `)) as any[];
 
-    if (!keys?.url) {
-        console.log('no SGP url configured', keys);
-        return {
-            error: 'no SGP url configured'
-        };
+    if (!allKeys?.length) {
+        console.log('no SGP keys configured');
+        return;
     }
 
+    for (const keys of allKeys) {
+        if (!keys.url || !keys.compid) {
+            console.log('skipping sgp row: missing compid/url');
+            continue;
+        }
+        try {
+            await SGP(keys, deep);
+        } catch (e) {
+            console.log(`sgp failed for compid=${keys.compid}:`, e);
+        }
+    }
+}
+
+async function SGP(keys: any, deep = false) {
     // If we should clean everything out or just update
     keys.deep = keys.overwrite || deep;
+
+    // SGP uses a fixed raw class name; hash it with compid to get a unique classid
+    const classid = makeClassId(keys.compid, 'sgp');
 
     // It's an enumerate API so we start at the top.  Use HTTPS, the rest of the
     // links in this code are HTTP because that is how they are returned in the JSON
@@ -109,14 +121,14 @@ async function SGP(deep = false) {
                 return res.json();
             }
             console.log(`Unable to fetch task ${res.statusText}`);
-            update_class();
+            update_class(keys.compid, classid);
             return null;
         })
         .then((res) => {
             if (res) {
-                update_class();
-                update_task(res.task);
-                update_pilots(res.tracks);
+                update_class(keys.compid, classid);
+                update_task(keys.compid, classid, res.task);
+                update_pilots(classid, res.tracks);
             }
         })
         .catch((err) => {
@@ -140,7 +152,17 @@ overwrites{hostname} = 0;
 }
 */
 
-async function update_class() {
+async function update_class(compid: string, classid: string) {
+    // Make sure a competition row exists for this compid
+    const count = await mysql_db.query(escape`SELECT COUNT(*) cnt FROM competition WHERE compid = ${compid}`);
+    if (!count || !count[0] || !count[0].cnt) {
+        console.log(`Empty competition for compid=${compid}, pre-populating`);
+        await mysql_db.query(escape`
+            INSERT IGNORE INTO competition (compid, tz, tzoffset)
+            VALUES (${compid}, 'Europe/Stockholm', 7200)
+        `);
+    }
+
     const tzoffset = parseInt(
         (
             await mysql_db.query(escape`
@@ -148,6 +170,7 @@ async function update_class() {
                     tzoffset
                 FROM
                     competition
+                WHERE compid = ${compid}
             `)
         )[0]?.tzoffset || '0'
     );
@@ -157,10 +180,13 @@ async function update_class() {
     // Add to the database
     await mysql_db.query(escape`
         INSERT INTO
-            classes (class, classname, description, type)
+            classes (class, compid, classname, description, type)
         VALUES
-            ('sgp', 'SGP', 'SGP', 'grandprix') ON DUPLICATE KEY
-        UPDATE classname =
+            (${classid}, ${compid}, 'SGP', 'SGP', 'grandprix') ON DUPLICATE KEY
+        UPDATE compid =
+        VALUES
+            (compid),
+            classname =
         VALUES
             (classname),
             description =
@@ -174,7 +200,7 @@ async function update_class() {
     await mysql_db.query(escape`
         insert ignore INTO compstatus (class)
         VALUES
-            ('sgp')
+            (${classid})
     `);
 
     // Make sure we have rows for each day and that compstatus is correct
@@ -184,13 +210,14 @@ async function update_class() {
         SET
             status = ':',
             datecode = ${toDateCode(new Date(Date.now() + tzoffset * 1000))}
+        WHERE class = ${classid}
     `);
 }
 
 //
 // generate pilot entries and results for each pilot, this needs to be done before we
 // download the scores
-async function update_pilots(pilots) {
+async function update_pilots(classid: string, pilots: any) {
     // Start a transaction for updating pilots
     let t = mysql_db.transaction();
 
@@ -238,7 +265,7 @@ async function update_pilots(pilots) {
                 )
             VALUES
                 (
-                    'sgp',
+                    ${classid},
                     ${pilot.pilotName?.substring(0, 30) || ''},
                     '',
                     '',
@@ -299,7 +326,7 @@ async function update_pilots(pilots) {
                 tracker (class, compno, type, trackerid)
             VALUES
                 (
-                    'sgp',
+                    ${classid},
                     ${pilot.competitionId.substring(0, 4)},
                     'flarm',
                     ${flarmIds.filter((d) => d?.length).join(',')}
@@ -311,7 +338,7 @@ async function update_pilots(pilots) {
 
         // Download pictures
         if (pilot.portraitUrl) {
-            download_picture(pilot.portraitUrl, pilot.competitionId.substring(0, 4), 'sgp', mysql);
+            download_picture(pilot.portraitUrl, pilot.competitionId.substring(0, 4), classid, mysql);
         }
     }
 
@@ -319,7 +346,7 @@ async function update_pilots(pilots) {
     t.query(escape`
         DELETE FROM pilots
         WHERE
-            class = 'sgp'
+            class = ${classid}
             AND registereddt < DATE_SUB (NOW(), INTERVAL 15 MINUTE)
     `)
 
@@ -405,7 +432,7 @@ async function download_picture(url, compno, classid, mysql) {
 
 //
 // Store the task in the MYSQL
-async function update_task(task) {
+async function update_task(compid: string, classid: string, task: any) {
     console.log(task);
     let rows = 0;
     let [date] = typeof task.compDate == 'string' ? task.compDate.match(/^[0-9-]{10}/) : [new Date(task.compDate).toISOString()];
@@ -422,7 +449,6 @@ async function update_task(task) {
 
     console.log('DATE:', date, startOpen, task.startOpenTs);
 
-    const classid = 'sgp';
     let tasktype = 'S';
 
     // So we don't rebuild tasks if they haven't changed
@@ -465,6 +491,7 @@ async function update_task(task) {
                 )
             WHERE
                 datecode = ${toDateCode(date)}
+                AND class = ${classid}
         `)
 
         // remove any old crud
@@ -555,7 +582,7 @@ async function update_task(task) {
                 console.log(tp);
 
                 values = values.concat([
-                    'sgp',
+                    classid,
                     toDateCode(date),
                     taskid,
                     i, //
@@ -653,7 +680,7 @@ async function update_task(task) {
                 )
             VALUES
                 (
-                    'sgp',
+                    ${classid},
                     LEFT('Sailplane Grand Prix', 60),
                     0,
                     '',

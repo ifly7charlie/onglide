@@ -19,6 +19,12 @@ import {Element} from 'domhandler';
 
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
+import {makeClassId} from '../lib/classid';
+
+// Coordinate -> IANA timezone lookup. Pulled in to derive competition.tz/
+// tzoffset/countrycode without depending on a network call. Ported from the
+// scrape-soaringspot stash.
+const {find: findTz} = require('geo-tz');
 
 // Helper
 const fetcher = (url) => fetch(url).then((res) => res.json());
@@ -58,6 +64,148 @@ const dotenv = require('dotenv');
 var location;
 
 // Set up background fetching of the competition
+//
+// Derive a URL-safe compid from a SoaringSpot URL. Takes the final meaningful
+// path segment and sanitises it to lowercase [a-z0-9-], truncated to 40 chars.
+// e.g. https://www.soaringspot.com/en_gb/lasham-regionals-2026/results
+//   -> 'lasham-regionals-2026'
+//
+// Approximate site location returned by Mapbox geocoding. We use this to
+// seed the competition row with coordinates, country, and timezone before
+// any tasks have been scraped (taskleg coords later refine the timezone).
+interface ApproximateContestLocation {
+    lt: number;
+    lg: number;
+    countrycode: string;
+    timezone: {
+        name: string;
+        offset: number;
+    };
+}
+
+// Geocode a free-text location string (e.g. "Prievidza, Slovakia") via the
+// Mapbox Places API and derive coords + country code + IANA timezone.
+// Returns a safe fallback on any failure so the scrape can still proceed.
+async function findApproximateContestLocation(location: string): Promise<ApproximateContestLocation> {
+    const referrer = 'https://' + (process.env.NEXT_PUBLIC_SITEURL || '') + '/';
+    const accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+
+    if (!accessToken) {
+        console.log('NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN not set, skipping geocode');
+        return {lt: 0, lg: 0, countrycode: '', timezone: {name: 'Europe/London', offset: 0}};
+    }
+
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(location)}.json?limit=1&access_token=${accessToken}`;
+
+    return fetch(url, {headers: {Referer: referrer}})
+        .then((res) => {
+            if (res.status != 200) {
+                console.log(` ${url}: ${res.status}`);
+                throw new Error('mapbox error:' + res.status);
+            }
+            return res.json();
+        })
+        .then((r: any) => {
+            const features = r.features?.[0];
+            if (!features || !features.center) {
+                throw new Error('no features found');
+            }
+            console.log(features);
+
+            const timeZone = findTimezoneFromLocation(features.center[1], features.center[0]);
+
+            return {
+                lt: Math.round(features.center[1] * 100 + 50) / 100,
+                lg: Math.round(features.center[0] * 100 + 50) / 100,
+                countrycode: features.context?.reduce((result: string | undefined, value: any) => {
+                    if (value.id?.match(/^country/)) {
+                        return value.short_code?.toUpperCase();
+                    }
+                    return result;
+                }, undefined),
+                timezone: {
+                    name: timeZone,
+                    offset: getTzOffset(timeZone)
+                }
+            };
+        })
+        .catch((e) => {
+            console.log('findApproximateContestLocation failed:', e);
+            return {lt: 0, lg: 0, countrycode: '', timezone: {name: 'Europe/London', offset: 0}};
+        });
+}
+
+// Wrapper around geo-tz: returns the IANA timezone name for a lat/lng.
+// geo-tz returns an array (in case the point is on a boundary); we take
+// the first match.
+function findTimezoneFromLocation(lat: number, lng: number): string {
+    const result = findTz(lat, lng);
+    return Array.isArray(result) ? result[0] : result;
+}
+
+// Convert an IANA timezone name into the UTC offset in seconds. Uses
+// Intl.DateTimeFormat to format "GMT+01:00" / "GMT-05:00" style strings,
+// then parses the trailing offset.
+function getTzOffset(tzname: string): number {
+    const parts = Intl.DateTimeFormat('ia', {
+        timeZoneName: 'short',
+        timeZone: tzname
+    }).formatToParts();
+    const tzPart = parts.find((i) => i.type === 'timeZoneName');
+    if (!tzPart) return 0;
+    const offset = tzPart.value.slice(3); // strip "GMT"
+    if (!offset) return 0;
+
+    const matchData = offset.match(/([+-])(\d+)(?::(\d+))?/);
+    if (!matchData) {
+        console.log(`cannot parse timezone offset: ${tzPart.value}`);
+        return 0;
+    }
+    const [, sign, hour, minute] = matchData;
+    let result = parseInt(hour) * 60 * 60;
+    if (minute) result += parseInt(minute) * 60;
+    if (sign === '-') result *= -1;
+    return result;
+}
+
+// Normalize a SoaringSpot class label into a canonical form that hashes
+// identically whether it came from the /results `<th>` (usually bare, e.g.
+// "Open") or the /pilots table's Class column (may have a "Class"/"Klasse"
+// suffix, extra whitespace, or varying case). Both call sites MUST run the
+// input through this before calling makeClassId(), otherwise the pilots
+// rows won't share a classid with the classes row and nothing joins.
+function normalizeClassName(raw: string): string {
+    return (raw || '')
+        .replace(/\s*(class|klasse)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function deriveCompIdFromUrl(urlString: string): string | null {
+    try {
+        const u = new URL(urlString);
+        const segments = u.pathname.split('/').filter(Boolean);
+        // Skip trailing known-generic segments like /results, /pilots, /tasks
+        const generic = new Set(['results', 'pilots', 'tasks', 'contestants', 'daily']);
+        while (segments.length && generic.has(segments[segments.length - 1])) {
+            segments.pop();
+        }
+        // SoaringSpot paths start with a locale (en_gb), then the contest slug;
+        // take the last remaining segment.
+        const candidate = segments[segments.length - 1];
+        if (!candidate) return null;
+        const slug = candidate
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '')
+            .substring(0, 40);
+        return slug || null;
+    } catch {
+        return null;
+    }
+}
+
 async function main() {
     if (dotenv.config({path: '.env.local'}).error) {
         console.log('New install: no configuration found, or script not being run in the root directory');
@@ -73,14 +221,60 @@ async function main() {
         }
     });
 
-    // Now get data from soaringspot
-    ssscrape();
+    //
+    // One-shot CLI mode:
+    //   node dist/bin/ssscrape.js <soaringspot-url> [compid]
+    //
+    // If a URL is given on the command line we upsert a scoringsource row for
+    // it and scrape just that one competition, then exit. compid can be passed
+    // explicitly as a second arg; otherwise it's derived from the URL slug.
+    //
+    const cliArgs = process.argv.slice(2).filter((a) => !a.startsWith('-'));
+    const urlArg = cliArgs.find((a) => /^https?:\/\//i.test(a));
+    if (urlArg) {
+        const compidArg = cliArgs.find((a) => a !== urlArg);
+        const compid = compidArg || deriveCompIdFromUrl(urlArg);
+        if (!compid) {
+            console.log(`unable to derive a compid from ${urlArg} — pass one explicitly as the second argument`);
+            process.exit(1);
+        }
+
+        console.log(`one-shot scrape: compid=${compid} url=${urlArg}`);
+
+        // Upsert the scoringsource row so subsequent daemon runs pick it up
+        // too. There's no unique constraint on (compid, type) so do a delete
+        // + insert for that specific pair.
+        await mysql_db.query(escape`
+            DELETE FROM scoringsource
+            WHERE compid = ${compid} AND type = 'soaringspotscrape'
+        `);
+        await mysql_db.query(escape`
+            INSERT INTO scoringsource (compid, type, url)
+            VALUES (${compid}, 'soaringspotscrape', ${urlArg})
+        `);
+
+        try {
+            await ssscrape({compid, url: urlArg});
+            console.log(`scrape complete for compid=${compid}`);
+        } catch (e) {
+            console.log('scrape failed:', e);
+            process.exit(1);
+        }
+        // Give any fire-and-forget fetches (pilot photos etc.) a moment to
+        // land before exiting, then bail out — we don't want the daemon
+        // setInterval loops in CLI mode.
+        setTimeout(() => process.exit(0), 5000);
+        return;
+    }
+
+    // Daemon mode: iterate every configured scoringsource row on a schedule
+    ssscrapeAll();
     roboControl();
 
     console.log('Background scraping from soaring spot enabled');
     setInterval(
         function () {
-            ssscrape();
+            ssscrapeAll();
         },
         5 * 60 * 1000
     );
@@ -181,35 +375,49 @@ async function roboControl() {
         });
 }
 
-async function ssscrape(deep = false) {
-    // Get the soaring spot keys from database
-    let keys: any = {};
-
-    if (process.env.SOARINGSPOT_URL) {
-        keys.url = process.env.SOARINGSPOT_URL;
-        keys.overwrite = process.env.SOARINGSPOT_OVERWRITE || 1;
-        keys.actuals = process.env.SOARINGSPOT_ACTUALS || 1;
-        console.log('environment variable', keys);
-    } else {
-        keys = (
-            await mysql_db.query(escape`
-                SELECT
-                    *
-                FROM
-                    scoringsource
-                WHERE
-                    type = 'soaringspotscrape'
-            `)
-        )[0];
+async function ssscrapeAll(deep = false) {
+    // Env-var fallback for single-competition dev/test; compid must be supplied
+    if (process.env.SOARINGSPOT_URL && process.env.COMP_ID) {
+        await ssscrape(
+            {
+                compid: process.env.COMP_ID,
+                url: process.env.SOARINGSPOT_URL,
+                overwrite: process.env.SOARINGSPOT_OVERWRITE || 1,
+                actuals: process.env.SOARINGSPOT_ACTUALS || 1
+            },
+            deep
+        );
+        return;
     }
 
-    if (!keys) {
-        console.log('no soaringspot url configured');
-        return {
-            error: 'no soaringspot url configured'
-        };
+    const allKeys = (await mysql_db.query(escape`
+        SELECT
+            *
+        FROM
+            scoringsource
+        WHERE
+            type = 'soaringspotscrape'
+    `)) as any[];
+
+    if (!allKeys?.length) {
+        console.log('no soaringspotscrape keys configured');
+        return;
     }
 
+    for (const keys of allKeys) {
+        if (!keys.url || !keys.compid) {
+            console.log('skipping soaringspotscrape row: missing compid/url');
+            continue;
+        }
+        try {
+            await ssscrape(keys, deep);
+        } catch (e) {
+            console.log(`ssscrape failed for compid=${keys.compid}:`, e);
+        }
+    }
+}
+
+async function ssscrape(keys: any, _deep = false) {
     console.log(
         'competition',
         await mysql_db.query(escape`
@@ -217,29 +425,45 @@ async function ssscrape(deep = false) {
                 *
             FROM
                 competition
+            WHERE compid = ${keys.compid}
         `)
     );
 
     await fetch(keys.url + '/pilots')
         .then((res) => res.text())
-        .then((body) => {
+        .then(async (body) => {
             let dom = htmlparser.parseDocument(body);
             console.log(dom);
             const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class != 'contest-title', dom?.children);
 
             console.log(contestInfo);
 
-            const name = textContent(findOne((x) => x.name == 'h1', contestInfo?.children)).trim();
-            const site = textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', contestInfo.children)).trim();
-            const dates = textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', contestInfo.children)).trim();
+            // textContent returns the raw inner text including newlines and
+            // pretty-printing indentation from the SoaringSpot HTML, so .trim()
+            // alone leaves embedded runs of whitespace inside the string.
+            // Collapse internal whitespace and strip trailing punctuation —
+            // SoaringSpot's location span comes through as e.g.
+            // "Prievidza, Slovakia,\n   " which we want as "Prievidza, Slovakia".
+            const cleanText = (s: string) =>
+                (s || '')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .replace(/[\s,;.]+$/, '');
+            const name = cleanText(textContent(findOne((x) => x.name == 'h1', contestInfo?.children)));
+            const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', contestInfo.children)));
+            const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', contestInfo.children)));
 
-            update_contest(name, dates, site, keys.url);
+            await update_contest(keys.compid, name, dates, site, keys.url);
 
             // Now extract the pilots list
             console.log('***********');
             //			const pilots = tabfindAll( (test) => (test.name == 'tr' && test.parent?.name == 'tbody' ),
             const pilots = Tabletojson.convert(getOuterHTML(findOne((x) => x.attribs?.class == 'pilot footable toggle-arrow-tiny', dom.children)));
-            update_pilots(pilots[0]);
+            // MUST await — update_pilots builds a transaction and commits at
+            // the end. Without await, the outer fetch chain resolved while
+            // the transaction's queries were still queued, and the connection
+            // could close before .commit() ran → no rows.
+            await update_pilots(keys.compid, pilots[0]);
 
             console.log(`found ${pilots[0].length} pilots`);
             console.log(name);
@@ -263,28 +487,33 @@ async function ssscrape(deep = false) {
 
             for (const result of allresults) {
                 const nameRaw = textContent(findOne((x) => x.name == 'th', result.children)).trim();
-                // Name for URLs and Database
-                const classid = nameRaw
-                    .replace(/\s*(class|klasse)/gi, '')
-                    .replace(/[^A-Z0-9]/gi, '')
-                    .substring(0, 14);
+                // Normalize before hashing so update_pilots (which sees
+                // pilot.Class with a possibly different "class"/"klasse"
+                // suffix) lands on the same classid.
+                const normalizedName = normalizeClassName(nameRaw);
+                // Globally-unique class identifier: hash of compid + normalized name
+                const classid = makeClassId(keys.compid, normalizedName);
 
-                const className = nameRaw.replace(/[_]/gi, ' ');
+                const className = normalizedName.replace(/[_]/gi, ' ');
 
                 console.log(className);
 
                 // Add to the database
                 await mysql_db.query(escape`
                     INSERT INTO
-                        classes (class, classname, description, type)
+                        classes (class, compid, classname, description, type)
                     VALUES
                         (
                             ${classid},
+                            ${keys.compid},
                             ${className.substr(0, 29)},
                             ${className},
                             'club'
                         ) ON DUPLICATE KEY
-                    UPDATE classname =
+                    UPDATE compid =
+                    VALUES
+                        (compid),
+                        classname =
                     VALUES
                         (classname),
                         description =
@@ -308,6 +537,7 @@ async function ssscrape(deep = false) {
                     SET
                         status = ':',
                         datecode = ${toDateCode()}
+                    WHERE class = ${classid}
                 `);
 
                 const dates = findAll((x) => x.name == 'tr' && x.parent?.nodeType == 1 && x.parent?.name == 'tbody', result.children);
@@ -339,11 +569,16 @@ async function ssscrape(deep = false) {
                     console.log(date, daynumber, url);
                     await fetch('https://www.soaringspot.com' + url)
                         .then((res) => res.text())
-                        .then((body) => {
+                        .then(async (body) => {
                             const task = body.match(extractTask);
                             if (task) {
                                 const taskJSON = JSON.parse(task[1]);
-                                process_day_task(taskJSON, classid, className);
+                                // MUST await — process_day_task runs a
+                                // transaction chain that populates taskleg
+                                // and backfills competition.lt/lg from it.
+                                // Without await, CLI mode exits before the
+                                // commit lands.
+                                await process_day_task(taskJSON, classid, className);
                             }
                         });
 
@@ -352,14 +587,14 @@ async function ssscrape(deep = false) {
                     console.log(date, daynumber, rurl);
                     await fetch('https://www.soaringspot.com' + rurl)
                         .then((res) => res.text())
-                        .then((body) => {
+                        .then(async (body) => {
                             var dom = htmlparser.parseDocument(body);
                             const classTable = new RegExp(/result-daily/);
                             const result_table_fragment = getOuterHTML(findOne((x) => (x.attribs?.class?.match(classTable) ? true : false), dom.children));
                             const results_html = Tabletojson.convert(result_table_fragment, {
                                 stripHtmlFromCells: false
                             });
-                            process_day_results(classid, className, date, daynumber, results_html);
+                            await process_day_results(classid, className, date, daynumber, results_html);
                         });
                 }
             }
@@ -413,30 +648,31 @@ async function findPilot(lastname: string, countrycode: string, classid: string,
     }
 }
 
-async function update_class(className, data, dataHtml) {
+async function update_class(compid: string, className: string, data: any, dataHtml: any) {
     // Get the name of the class, if not set use the type
     const nameRaw = className;
 
-    // Name for URLs and Database
-    const classid = nameRaw
-        .replace(/\s*(class|klasse)/gi, '')
-        .replace(/[^A-Z0-9]/gi, '')
-        .substring(0, 14);
+    // Globally-unique class identifier: hash of compid + raw name
+    const classid = makeClassId(compid, nameRaw);
 
     const name = nameRaw.replace(/[_]/gi, ' ');
 
     // Add to the database
     await mysql_db.query(escape`
         INSERT INTO
-            classes (class, classname, description, type)
+            classes (class, compid, classname, description, type)
         VALUES
             (
                 ${classid},
+                ${compid},
                 ${name.substr(0, 29)},
                 ${name},
                 'club'
             ) ON DUPLICATE KEY
-        UPDATE classname =
+        UPDATE compid =
+        VALUES
+            (compid),
+            classname =
         VALUES
             (classname),
             description =
@@ -460,10 +696,11 @@ async function update_class(className, data, dataHtml) {
         SET
             status = ':',
             datecode = ${toDateCode()}
+        WHERE class = ${classid}
     `);
 
     // Now add details of pilots
-    await update_pilots(data['Piloter']);
+    await update_pilots(compid, data['Piloter']);
 
     // Import the results
     //    await process_class_tasks_and_results(classid, className, dataHtml);
@@ -472,12 +709,12 @@ async function update_class(className, data, dataHtml) {
 //
 // generate pilot entries and results for each pilot, this needs to be done before we
 // download the scores
-async function update_pilots(data) {
+async function update_pilots(compid: string, data: any) {
     let unknowncompno = 0;
     let pilotnumber = 0;
+    let insertedCount = 0;
 
-    // Start a transaction for updating pilots
-    let t = mysql_db.transaction();
+    console.log(`update_pilots: compid=${compid} rows=${data?.length ?? 0}`);
 
     for (const pilot of data) {
         // Make sure it has a comp number
@@ -492,10 +729,16 @@ async function update_pilots(data) {
         const compno = pilot.CN;
         const handicap = correct_handicap(pilot.Handicap);
 
-        // Name for URLs and Database
-        const classid = pilot.Class.replace(/\s*(class|klasse)/gi, '')
-            .replace(/[^A-Z0-9]/gi, '')
-            .substring(0, 14);
+        // Compute the globally-unique class id the same way update_class
+        // does for the /results flow. Both sides run the raw label through
+        // normalizeClassName() first so "Open", "Open Class", "open "
+        // all hash to the same classid.
+        const normalizedClass = normalizeClassName(pilot.Class);
+        if (!normalizedClass) {
+            console.log(`skipping pilot ${compno}: no class label on row`, pilot);
+            continue;
+        }
+        const classid = makeClassId(compid, normalizedClass);
 
         function gravatar(x) {
             const y = createHash('md5')
@@ -531,100 +774,95 @@ async function update_pilots(data) {
             {igc_id: fainumber, compno: pilot.Contestant, class: classid, greg: pilot.Glider?.substring(0, 8)?.trim()}
         );
 
-        await t.query(escape`
-            INSERT INTO
-                pilots (
-                    class,
-                    firstname,
-                    lastname,
-                    homeclub,
-                    username,
-                    fai,
-                    country,
-                    email,
-                    compno,
-                    participating,
-                    glidertype,
-                    greg,
-                    handicap,
-                    registered,
-                    registereddt
-                )
-            VALUES
-                (
-                    ${classid},
-                    ${pilot.Contestant},
-                    ${''},
-                    ${pilot.Club},
-                    NULL,
-                    ${fainumber},
-                    '',
-                    ${gravatar(pilot.Contestant)},
-                    ${compno},
-                    'Y',
-                    ${pilot.Glider},
-                    ${greg},
-                    ${handicap},
-                    'Y',
-                    NOW()
-                ) ON DUPLICATE KEY
-            UPDATE class =
-            VALUES
-                (class),
-                firstname =
-            VALUES
-                (firstname),
-                lastname =
-            VALUES
-                (lastname),
-                homeclub =
-            VALUES
-                (homeclub),
-                fai =
-            VALUES
-                (fai),
-                country =
-            VALUES
-                (country),
-                email =
-            VALUES
-                (email),
-                participating =
-            VALUES
-                (participating),
-                handicap =
-            VALUES
-                (handicap),
-                glidertype =
-            VALUES
-                (glidertype),
-                greg =
-            VALUES
-                (greg),
-                registereddt = NOW()
-        `);
+        try {
+            await mysql_db.query(escape`
+                INSERT INTO
+                    pilots (
+                        class,
+                        firstname,
+                        lastname,
+                        homeclub,
+                        username,
+                        fai,
+                        country,
+                        email,
+                        compno,
+                        participating,
+                        glidertype,
+                        greg,
+                        handicap,
+                        registered,
+                        registereddt
+                    )
+                VALUES
+                    (
+                        ${classid},
+                        ${pilot.Contestant},
+                        ${''},
+                        ${pilot.Club},
+                        NULL,
+                        ${fainumber},
+                        '',
+                        ${gravatar(pilot.Contestant)},
+                        ${compno},
+                        'Y',
+                        ${pilot.Glider},
+                        ${greg},
+                        ${handicap},
+                        'Y',
+                        NOW()
+                    ) ON DUPLICATE KEY
+                UPDATE class =
+                VALUES
+                    (class),
+                    firstname =
+                VALUES
+                    (firstname),
+                    lastname =
+                VALUES
+                    (lastname),
+                    homeclub =
+                VALUES
+                    (homeclub),
+                    fai =
+                VALUES
+                    (fai),
+                    country =
+                VALUES
+                    (country),
+                    email =
+                VALUES
+                    (email),
+                    participating =
+                VALUES
+                    (participating),
+                    handicap =
+                VALUES
+                    (handicap),
+                    glidertype =
+                VALUES
+                    (glidertype),
+                    greg =
+                VALUES
+                    (greg),
+                    registereddt = NOW()
+            `);
+            insertedCount++;
+        } catch (e) {
+            console.log(`pilot INSERT failed ${compno} ${classid}:`, e);
+        }
     }
 
+    console.log(`update_pilots: inserted/updated ${insertedCount}/${data?.length ?? 0}`);
+
     // remove any old pilots as they aren't needed, they may not go immediately but it will be soon enough
-    await t
-        .query(escape`
-            DELETE FROM pilots
-            WHERE
-                registereddt < DATE_SUB (NOW(), INTERVAL 15 MINUTE)
-        `)
+    await mysql_db.query(escape`
+        DELETE FROM pilots
+        WHERE registereddt < DATE_SUB (NOW(), INTERVAL 15 MINUTE)
+    `);
 
-        // Trackers needs a row for each pilot so fill any missing, perhaps we should
-        // also remove unwanted ones
-        .query('INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) select class, compno, "flarm", "unknown" from pilots')
-        //  .query( 'DELETE FROM tracker where concat(class,compno) not in (select concat(class,compno) from pilots)' );
-
-        // And update the pilots picture to the latest one in the image table - this should be set by download_picture
-        //   .query( 'UPDATE PILOTS SET image=(SELECT filename FROM images WHERE keyid=compno AND width IS NOT NULL ORDER BY added DESC LIMIT 1)' );
-
-        .rollback((e) => {
-            console.log('rollback');
-        })
-        .commit();
+    // Trackers needs a row for each pilot so fill any missing
+    await mysql_db.query('INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) select class, compno, "flarm", "unknown" from pilots');
 }
 
 //
@@ -649,6 +887,28 @@ async function process_day_task(day, classid, classname) {
     }
 
     // So we don't rebuild tasks if they haven't changed
+    // Promote compstatus to 'B' (briefed) unconditionally whenever we see
+    // a task for this class, including on re-runs where the task hash is
+    // unchanged and the transaction chain below short-circuits. Doing it
+    // here as a plain awaited query (rather than inside the chain) also
+    // side-steps the flaky transaction-chain commit behaviour that's left
+    // earlier updates queued but uncommitted. The status NOT IN (...)
+    // guard still protects airborne/landed/scrubbed classes.
+    if (day.result_status != 'cancelled') {
+        await mysql_db.query(escape`
+            UPDATE compstatus
+            SET status = 'B', datecode = ${dateCode}
+            WHERE class = ${classid}
+              AND status NOT IN ('L', 'S', 'R', 'H', 'Z')
+        `);
+    } else {
+        await mysql_db.query(escape`
+            UPDATE compstatus
+            SET status = 'Z', datecode = ${dateCode}
+            WHERE class = ${classid}
+        `);
+    }
+
     const hash = createHash('sha256').update(JSON.stringify(day)).digest('base64');
     const dbhashrow = await mysql_db.query(escape`
         SELECT
@@ -683,6 +943,7 @@ async function process_day_task(day, classid, classname) {
                 starttime = COALESCE(${convert_to_mysql(day.no_start)}, starttime)
             WHERE
                 datecode = ${dateCode}
+                AND class = ${classid}
         `)
 
         // remove any old crud
@@ -910,13 +1171,9 @@ async function process_day_task(day, classid, classname) {
                 (calendardate)
         `)
 
-        // if it is today then set the briefing status properly, this is an update so does nothing
-        // if they are marked as flying etc. If the day is cancelled we want that updated here as well
-        // Status not used at present but a way of keeping track of if they are flying etc.
-        .query(() => {
-            if (day.result_status != 'cancelled') return ["UPDATE compstatus SET status='B' WHERE class=? AND datecode=? AND status NOT IN ( 'L', 'S', 'R', 'H', 'Z' )", [classid, dateCode]];
-            else return ["UPDATE compstatus SET status='Z' WHERE class=? AND datecode=?", [classid, dateCode]];
-        })
+        // (compstatus promotion moved out of this transaction chain to
+        // an unconditional awaited UPDATE at the top of process_day_task
+        // — see comment there for rationale.)
 
         // If it was cancelled then mark it as not flown, this will stop the UI from displaying it
         .query(() => {
@@ -954,6 +1211,7 @@ async function process_day_task(day, classid, classname) {
                         nlat
                     FROM
                         taskleg
+                    WHERE taskleg.class = ${classid}
                     ORDER BY
                         legno DESC
                     LIMIT
@@ -964,19 +1222,47 @@ async function process_day_task(day, classid, classname) {
                         nlng
                     FROM
                         taskleg
+                    WHERE taskleg.class = ${classid}
                     ORDER BY
                         legno DESC
                     LIMIT
                         1
                 )
             WHERE
-                lt IS NULL
-                OR lt = 0
+                (lt IS NULL OR lt = 0)
+                AND compid = (SELECT compid FROM classes WHERE class = ${classid})
         `)
         .rollback((e) => {
             console.log('rollback');
         })
         .commit();
+
+    // After the transaction commits, the competition row may have just been
+    // backfilled with lt/lg from taskleg. Re-run the IANA tz lookup against
+    // those (more accurate) coordinates and refresh tz/tzoffset if needed.
+    // Wrapped in try/catch so a tz failure doesn't break the scrape.
+    try {
+        const compRow = (
+            await mysql_db.query(escape`
+                SELECT compid, lt, lg, tz
+                FROM competition
+                WHERE compid = (SELECT compid FROM classes WHERE class = ${classid})
+            `)
+        )?.[0];
+        if (compRow?.lt && compRow?.lg) {
+            const tz = findTimezoneFromLocation(compRow.lt, compRow.lg);
+            if (tz && tz !== compRow.tz) {
+                const tzoffset = getTzOffset(tz);
+                console.log(`${classname}: refining tz from ${compRow.tz} -> ${tz} (${tzoffset}s) based on taskleg (${compRow.lt}, ${compRow.lg})`);
+                await mysql_db.query(escape`
+                    UPDATE competition SET tz = ${tz}, tzoffset = ${tzoffset}
+                    WHERE compid = ${compRow.compid}
+                `);
+            }
+        }
+    } catch (e) {
+        console.log('post-task tz refinement failed:', e);
+    }
 
     // and some logging
     console.log(`${classname}: processed task ${date}`);
@@ -1168,15 +1454,16 @@ async function process_day_results(classid, className, date, day_number, results
 // We will now update the competition object, this isn't a new object
 // as you will possibly want to tweak values in it!
 //
-async function update_contest(contest_name, dates, site_name, url) {
-    // Add a row if we need to
-    const count = await mysql_db.query('SELECT COUNT(*) cnt FROM competition');
+async function update_contest(compid: string, contest_name: string, dates: string, site_name: string, url: string) {
+    // Make sure a competition row exists for this compid
+    const count = await mysql_db.query(escape`SELECT COUNT(*) cnt FROM competition WHERE compid = ${compid}`);
     if (!count || !count[0] || !count[0].cnt) {
-        console.log('Empty competition, pre-populating');
+        console.log(`Empty competition for compid=${compid}, pre-populating`);
         await mysql_db.query(escape`
-            INSERT IGNORE INTO competition (tz, tzoffset, mainwebsite)
+            INSERT IGNORE INTO competition (compid, tz, tzoffset, mainwebsite)
             VALUES
                 (
+                    ${compid},
                     "Europe/London",
                     3600,
                     ${url}
@@ -1192,24 +1479,19 @@ async function update_contest(contest_name, dates, site_name, url) {
         console.log(Date.parse(matches[1] + ' UTC'));
 
         //
-        // Make sure the dates are copied across
+        // Make sure the dates are copied across (countrycode is set later
+        // by the geocoder if we get a hit; leave it untouched otherwise)
         await mysql_db.query(escape`
             UPDATE competition
             SET
                 start = from_unixtime (${Date.parse(matches[1] + ' UTC') / 1000}),
                 END = from_unixtime (${Date.parse(matches[2] + ' UTC') / 1000}),
-                countrycode = 'UK',
                 name = ${contest_name.substring(0, 40)}
+            WHERE compid = ${compid}
         `);
     }
 
-    // If we have a location then update
-    const ssLocation = undefined;
-    //	if( ssLocation && ssLocation.latitude ) {
-    //      const lat = toDeg(ssLocation.latitude);
-    //  //    const lng = toDeg(ssLocation.longitude);
-    //        await mysql_db.query( escape`UPDATE competition SET lt = ${lat}, lg = ${lng},
-    //                                                  sitename = ${ssLocation.name}`);
+    // Look up the competition row to see whether we already have coordinates.
     location = (
         await mysql_db.query(escape`
             SELECT
@@ -1217,10 +1499,55 @@ async function update_contest(contest_name, dates, site_name, url) {
                 lg
             FROM
                 competition
+            WHERE compid = ${compid}
         `)
     )[0];
 
-    if (location.lt) {
+    // First-pass geocoding: if we don't have coordinates yet, hand the
+    // SoaringSpot venue string to Mapbox. We get back coarse coords plus
+    // country code plus an IANA tz derived from those coords. The lat/lng
+    // gets refined later when process_day_task backfills from taskleg.
+    if ((!location || !location.lt) && site_name) {
+        console.log(`geocoding site "${site_name}" for compid=${compid}`);
+        const acl = await findApproximateContestLocation(site_name);
+        console.log(acl);
+        if (acl.lt && acl.lg) {
+            await mysql_db.query(escape`
+                UPDATE competition
+                SET
+                    tz = ${acl.timezone.name},
+                    tzoffset = ${acl.timezone.offset},
+                    countrycode = ${acl.countrycode || null},
+                    lt = ${acl.lt},
+                    lg = ${acl.lg},
+                    sitename = ${site_name.substring(0, 40)}
+                WHERE compid = ${compid}
+            `);
+            location = {lt: acl.lt, lg: acl.lg};
+        }
+    }
+
+    // Second-pass tz refinement: now that we (may) have coordinates from
+    // either the geocoder above OR a previous task backfill, derive the IANA
+    // tz from the actual point and update if it differs from what's stored.
+    // This catches cases where the geocoder snapped to a city centre in a
+    // neighbouring tz than the airfield.
+    if (location?.lt && location?.lg) {
+        try {
+            const tz = findTimezoneFromLocation(location.lt, location.lg);
+            const tzoffset = getTzOffset(tz);
+            await mysql_db.query(escape`
+                UPDATE competition
+                SET tz = ${tz}, tzoffset = ${tzoffset}
+                WHERE compid = ${compid}
+                  AND (tz IS NULL OR tz != ${tz})
+            `);
+        } catch (e) {
+            console.log('tz refinement failed:', e);
+        }
+    }
+
+    if (location?.lt) {
         // Save four our use
         location.point = point([location.lt, location.lg]);
 
@@ -1236,22 +1563,23 @@ async function update_contest(contest_name, dates, site_name, url) {
         // clear it all down, we will load all of this from soaring spot
         // NOTE: this should not be cleared every time, even though at present it is
         // TBD!!
+        // All scoped to compid so one competition's deep reset does not touch other competitions.
         await mysql_db
             .transaction()
-            .query(escape`DELETE FROM classes`)
+            .query(escape`DELETE FROM pilots WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM pilotresult WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM contestday WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM compstatus WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM taskleg WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM tasks WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM classes WHERE compid = ${compid}`)
             .query(escape`
                 DELETE FROM logindetails
                 WHERE
                     type = "P"
             `)
-            .query(escape`DELETE FROM pilots`)
-            .query(escape`DELETE FROM pilotresult`)
-            .query(escape`DELETE FROM contestday`)
-            .query(escape`DELETE FROM compstatus`)
-            .query(escape`DELETE FROM taskleg`)
-            .query(escape`DELETE FROM tasks`)
             .commit();
-        console.log('deep update requested, deleted everything');
+        console.log(`deep update requested, deleted everything for compid=${compid}`);
     }
 }
 

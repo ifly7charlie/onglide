@@ -11,14 +11,16 @@ USE ogn;
 
 DROP TABLE IF EXISTS `classes`;
 CREATE TABLE `classes` (
-  `class` char(15) NOT NULL,
+  `class` char(15) NOT NULL COMMENT 'hash of compid+raw class name, globally unique',
+  `compid` varchar(40) NOT NULL COMMENT 'competition this class belongs to',
   `classname` char(30) NOT NULL,
   `description` varchar(200) DEFAULT '',
   `type` char(20) DEFAULT NULL,
   `handicapped` char(1) DEFAULT 'N',
   `grandprixstart` char(1) DEFAULT 'N',
   `Dm` float DEFAULT NULL,
-  UNIQUE KEY `class` (`class`)
+  UNIQUE KEY `class` (`class`),
+  KEY `compid` (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
@@ -38,20 +40,22 @@ CREATE TABLE `compdayshelper` (
 
 DROP TABLE IF EXISTS `competition`;
 CREATE TABLE `competition` (
+  `compid` varchar(40) NOT NULL COMMENT 'url-safe competition identifier, used in routing',
   `name` varchar(60) DEFAULT NULL COMMENT 'Competition name',
   `sitename` varchar(100) DEFAULT NULL COMMENT 'Site name',
-  
+
   `start` date DEFAULT NULL COMMENT 'Displayed as date range',
   `end` date DEFAULT NULL,
-  
+
   `countrycode` char(2) DEFAULT 'UK',
-  
+
   `tzoffset` int(11) DEFAULT 7200 COMMENT 'TZ offset from GMT in seconds (calculated)',
   `tz` char(40) DEFAULT 'Europe/Stockholm' COMMENT 'TZ offset from SoaringSpot',
-  
+
   `mainwebsite` varchar(240) DEFAULT NULL COMMENT 'Used when clicking on comp name to return to primary website',
   `lt` float DEFAULT NULL COMMENT 'launch/landing location',
-  `lg` float DEFAULT NULL COMMENT 'launch/landing location'
+  `lg` float DEFAULT NULL COMMENT 'launch/landing location',
+  PRIMARY KEY (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 
 --
@@ -254,6 +258,7 @@ CREATE TABLE `pilots` (
 
 DROP TABLE IF EXISTS `scoringsource`;
 CREATE TABLE `scoringsource` (
+  `compid` varchar(40) NOT NULL COMMENT 'competition this scoring source feeds',
   `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','sgp','pictureurl') DEFAULT 'soaringspotkey',
   `url` text,
   `client_id` char(120) DEFAULT NULL,
@@ -262,7 +267,8 @@ CREATE TABLE `scoringsource` (
   `overwrite` int(11) DEFAULT '0',
   `actuals` int(11) DEFAULT '1',
   `portoffset` int(11) DEFAULT '0',
-  `domain` text
+  `domain` text,
+  KEY `compid` (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --

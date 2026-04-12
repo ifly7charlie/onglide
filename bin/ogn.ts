@@ -85,6 +85,13 @@ let scoreFrequency = 60;
 
 process.setMaxListeners(35);
 
+// Which competition this process is currently serving. Set from the COMP_ID env
+// var, or picked from the first row of the competition table at startup. A future
+// refactor will remove this restriction and let a single OGN process track every
+// competition in the shared database (each class using its own per-competition
+// location/timezone).
+let compid: string;
+
 // Where is the comp based
 let location: AirfieldLocation;
 
@@ -276,8 +283,18 @@ async function main() {
     initialiseInsights();
 
     const checkReady = async (): Promise<boolean> => {
-        // Location comes from the competition table in the database
-        location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset, start, end FROM competition LIMIT 1'))?.[0];
+        // Determine which competition this OGN process is serving. Either
+        // COMP_ID is set explicitly, or fall back to the first competition row.
+        const envCompId = process.env.COMP_ID;
+        if (envCompId) {
+            compid = envCompId;
+            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end FROM competition WHERE compid = ?', [compid]))?.[0];
+        } else {
+            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end FROM competition LIMIT 1'))?.[0];
+            if (location) {
+                compid = (location as any).compid;
+            }
+        }
 
         if (!location) {
             console.error('no competition entry in the database, please confirm soaringspot integration is working');
@@ -285,12 +302,16 @@ async function main() {
             return false;
         }
 
-        if (!(await db.query<any[]>('SELECT * FROM compstatus'))?.length || !(await db.query<any[]>('SELECT * FROM classes'))?.length) {
-            console.error('no classes configured');
+        console.log(`OGN running for compid=${compid}`);
+
+        // Only consider classes/compstatus rows that belong to this competition
+        const classesPresent = await db.query<any[]>('SELECT cs.class FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?', [compid]);
+        if (!classesPresent?.length) {
+            console.error(`no classes configured for compid=${compid}`);
             return false;
         }
 
-        if (!replayBase && !(await db.query('SELECT MAX(datecode) as datecode FROM compstatus LIMIT 1'))?.[0]?.datecode) {
+        if (!replayBase && !(await db.query<any[]>('SELECT MAX(cs.datecode) as datecode FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?', [compid]))?.[0]?.datecode) {
             console.warn('no current date found for competition');
 
             const currentExpectedDateCode = await getDCode();
@@ -650,8 +671,13 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         await scoreDb.open().catch((e) => console.log(e));
     }
 
-    // Fetch the trackers from the database and the channel they are supposed to be in
-    const classes = await db.query<{class: ClassName; datecode: Datecode}[]>('SELECT class, datecode FROM compstatus');
+    // Fetch the trackers from the database and the channel they are supposed to be in.
+    // Scoped to this OGN process's compid so we don't pick up other competitions sharing
+    // the same database.
+    const classes = await db.query<{class: ClassName; datecode: Datecode}[]>(
+        'SELECT cs.class, cs.datecode FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?',
+        [compid]
+    );
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
@@ -736,14 +762,23 @@ async function updateClasses(internalName: string, datecode: Datecode) {
             };
             channel.scoreHistory.set(scoreId, new Map<Compno, PilotScore[]>());
 
-            // Read any old history
+            // Read any old history. Pass each parsed record through
+            // PilotScore.fromPartial so the ts-proto factory fills in
+            // defaults for fields that didn't exist when the record was
+            // persisted. In particular every `repeated` field becomes
+            // `[]` rather than `undefined`, which matters because protobuf
+            // encode does `for (const v of message.field)` unconditionally
+            // and explodes with "is not iterable" if the field is missing.
+            // This was blowing up sendAllScores with older leveldb records
+            // that predate optimalGrid (field 65) et al.
             if (channel.scoreDb) {
                 for await (const [compno, scoreJSON] of channel.scoreDb?.iterator() ?? []) {
-                    const score = JSON.parse(scoreJSON);
-                    if (!channel.liveScoreId) {
+                    const raw = JSON.parse(scoreJSON);
+                    const score = PilotScore.fromPartial(raw);
+                    if (!channel.liveScoreId && score.scoreId) {
                         channel.liveScoreId = score.scoreId;
                     }
-                    score.scoreId = channel.liveScoreId;
+                    score.scoreId = channel.liveScoreId ?? score.scoreId ?? '';
                     channel.allScores[compno] = score;
                 }
                 console.log(`${c.class}: ${Object.keys(channel.allScores).length} scores loaded on id ${channel.liveScoreId}`);
@@ -956,6 +991,14 @@ interface CTrackerRow {
 
 async function updateTrackers(datecode: Datecode) {
     // Now get the trackers
+    // Scoped to this OGN process's compid so we don't pick up pilots from
+    // other competitions sharing the same database. updateClasses applies
+    // the same filter when building channels, so without this join the
+    // tracker query returned pilots whose classes we never allocated
+    // channels for — resulting in "no channel" exceptions in the map()
+    // at the bottom of updateTrackers.
+    // Competition.tzoffset also needs to be pinned to this compid, otherwise
+    // the scalar subquery would error on a multi-competition DB.
     let cTrackers = await db.query<CTrackerRow[]>(escape`
         SELECT
             p.compno,
@@ -973,10 +1016,7 @@ async function updateTrackers(datecode: Datecode) {
                         ppr.start
                     )
                 ) - (
-                    SELECT
-                        tzoffset
-                    FROM
-                        competition
+                    SELECT tzoffset FROM competition WHERE compid = ${compid}
                 )
             END utcStart,
             CASE
@@ -988,15 +1028,13 @@ async function updateTrackers(datecode: Datecode) {
                         ppr.finish
                     )
                 ) - (
-                    SELECT
-                        tzoffset
-                    FROM
-                        competition
+                    SELECT tzoffset FROM competition WHERE compid = ${compid}
                 )
             END utcFinish,
             COALESCE(ppr.scoredStatus, 'S') scoredStatus
         FROM
             pilots p
+            JOIN classes cl ON cl.class = p.class
             LEFT OUTER JOIN tracker t ON p.class = t.class
             AND p.compno = t.compno
             LEFT OUTER JOIN (
@@ -1012,6 +1050,7 @@ async function updateTrackers(datecode: Datecode) {
                     pr.datecode = ${datecode}
             ) AS ppr ON ppr.class = p.class
             AND ppr.compno = p.compno
+        WHERE cl.compid = ${compid}
     `);
 
     const initialGliderCount = Object.keys(gliders).length;
@@ -1604,6 +1643,18 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     if (message.g > 100 && !channel.launching) {
         console.log(`Launch detected: ${glider.compno}, class: ${glider.className}`);
         channel.launching = true;
+
+        // Promote compstatus to L (launched) — only if still in a pre-launch
+        // state so we don't clobber a later state set by scoring. ':' is the
+        // initial state set by update_class in the scraper, so it must be in
+        // the allow-list alongside the briefing/pre-flight states.
+        if (!readOnly) {
+            db.query('UPDATE compstatus SET status = ? WHERE class = ? AND status IN (?, ?, ?, ?, ?)', ['L', glider.className, ':', '?', 'P', 'B', 'X'])
+                .then((r: any) => {
+                    console.log(`compstatus -> L for ${glider.className}: ${r?.affectedRows ?? 0} row(s) updated`);
+                })
+                .catch((e) => console.log('compstatus L update failed:', e));
+        }
     }
 
     // Merge into the display data structure
