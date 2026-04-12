@@ -56,7 +56,8 @@ async function main() {
             host: process.env.MYSQL_HOST || 'db',
             database: process.env.MYSQL_DATABASE || 'ogn',
             user: process.env.MYSQL_USER || 'ogn',
-            password: process.env.MYSQL_PASSWORD
+            password: process.env.MYSQL_PASSWORD,
+            decimalNumbers: true
         }
     });
 
