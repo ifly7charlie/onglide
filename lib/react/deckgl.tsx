@@ -287,20 +287,41 @@ export default function MApp(props: {
     // Do we have a loaded set of details?
     const valid = taskGeoJSON?.tp && taskGeoJSON?.track;
 
-    const skyLayer: any = {
-        id: 'sky',
-        type: 'sky',
-        paint: {
-            'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1],
-            // set up the sky layer for atmospheric scattering
-            'sky-type': 'atmosphere',
-            // explicitly set the position of the sun rather than allowing the sun to be attached to the main light source
-            'sky-atmosphere-sun': getSunPosition(mapRef),
-            // set the intensity of the sun as a light source (0-100 with higher values corresponding to brighter skies)
-            'sky-atmosphere-sun-intensity': 5,
-            'sky-atmosphere-color': 'rgba(135, 206, 235, 1.0)'
-        }
-    };
+    // Sun position for the 3D sky layer — refreshed every 15 minutes (plenty for a
+    // gently-moving sun) instead of on every render. In 2D the sky layer is off and
+    // this state never changes.
+    const [sunPos, setSunPos] = useState<[number, number]>(() => getSunPosition(props.viewport.latitude, props.viewport.longitude));
+    useEffect(() => {
+        if (map2d) return;
+        const refresh = () => {
+            const center = mapRef.current?.getCenter();
+            if (center) setSunPos(getSunPosition(center.lat, center.lng));
+        };
+        refresh();
+        const id = setInterval(refresh, 15 * 60 * 1000);
+        return () => clearInterval(id);
+    }, [map2d]);
+
+    // Only construct the sky layer when we're actually in 3D — in 2D mode the <Layer>
+    // below is gated off anyway, and we don't want to hand a fresh paint object to
+    // react-map-gl each render.
+    const skyLayer = useMemo<LayerProps | null>(
+        () =>
+            map2d
+                ? null
+                : {
+                      id: 'sky',
+                      type: 'sky',
+                      paint: {
+                          'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1],
+                          'sky-type': 'atmosphere',
+                          'sky-atmosphere-sun': sunPos,
+                          'sky-atmosphere-sun-intensity': 5,
+                          'sky-atmosphere-color': 'rgba(135, 206, 235, 1.0)'
+                      }
+                  },
+        [map2d, sunPos]
+    );
 
     //
     // Track modifier keys for dev tooltip
@@ -611,17 +632,11 @@ const DmPointStyle: LayerProps = {
     }
 };
 
-function getSunPosition(mapRef, date?) {
-    const map = mapRef?.current; //?.getMap();
-    if (map) {
-        const center = map.getCenter();
-        const sunPos = SunCalc.getPosition(date || Date.now(), center.lat, center.lng);
-        const sunAzimuth = 180 + (sunPos.azimuth * 180) / Math.PI;
-        const sunAltitude = 90 - (sunPos.altitude * 180) / Math.PI;
-        return [Math.round(sunAzimuth * 10) / 10, Math.round(sunAltitude * 10) / 10];
-    } else {
-        return [0, 0];
-    }
+function getSunPosition(lat: number, lng: number, date?: number): [number, number] {
+    const sunPos = SunCalc.getPosition(date ?? Date.now(), lat, lng);
+    const sunAzimuth = 180 + (sunPos.azimuth * 180) / Math.PI;
+    const sunAltitude = 90 - (sunPos.altitude * 180) / Math.PI;
+    return [Math.round(sunAzimuth * 10) / 10, Math.round(sunAltitude * 10) / 10];
 }
 
 const attributionStyle = {
