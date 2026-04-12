@@ -2011,26 +2011,25 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
         console.log(`${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
 
-        const mcs = channelGliders.reduce(
-            (all, glider) => {
-                if (glider.scoredStart) {
-                    const ti = Math.trunc(glider.scoredStart / 300) * 300;
-                    all[ti] = (all[ti] ?? 0) + 1;
-                }
-                return all;
-            },
-            {} as Record<number, number>
-        );
+        if (channel.task?.rules?.grandprixstart) {
+            const mcs = channelGliders.reduce(
+                (all, glider) => {
+                    if (glider.scoredStart) {
+                        const ti = Math.trunc(glider.scoredStart / 300) * 300;
+                        all[ti] = (all[ti] ?? 0) + 1;
+                    }
+                    return all;
+                },
+                {} as Record<number, number>
+            );
 
-        const likelyA = Object.keys(mcs)
-            .sort((a, b) => mcs[a] - mcs[b])
-            .filter((a) => mcs[a] > channelGliders.length / 2);
-        const likely = Object.keys(mcs)
-            .sort((a, b) => mcs[a] - mcs[b])
-            .filter((a) => mcs[a] > channelGliders.length / 2)?.[0];
+            const likely = Object.keys(mcs)
+                .sort((a, b) => mcs[a] - mcs[b])
+                .filter((a) => mcs[a] > channelGliders.length / 2)?.[0];
 
-        console.log(`${channel.displayName} likely GP start ${d(Number(likely))}`);
-        console.table(mcs);
+            console.log(`${channel.displayName} likely GP start ${d(Number(likely))}`);
+            console.table(mcs);
+        }
     }
 
     if (glider && glider.scoredFinish != (score.utcFinish as Epoch)) {
