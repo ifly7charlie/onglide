@@ -322,7 +322,7 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
                 gh.splice(gIdx, Infinity, entry);
             }
 
-            result[compno] = mapScoresToDisplayScores(scoreWithoutGrid as PilotScore);
+            result[compno] = mapScoresToDisplayScores(result[compno], scoreWithoutGrid as PilotScore);
 
             // If the scoreId is the current one then we will use that
             const sh = (state.historical[compno] ??= []);
@@ -339,35 +339,56 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     );
 }
 
-function mapScoresToDisplayScores(p: PilotScore): PilotScoreDisplay {
-    return {
-        ...p,
-        ...(p.scoredPoints && p.scoredPoints.length > 3
-            ? {
-                  scoredGeoJSON: assembleLabeledLine(p.scoredPoints, p.scoringClosestPoint)
-              }
-            : {}),
-        ...(p.minDistancePoints && p.minDistancePoints.length > 2
-            ? {
-                  minGeoJSON: assembleLabeledLine(p.minDistancePoints)
-              }
-            : {}),
-        ...(p.maxDistancePoints && p.maxDistancePoints.length > 2
-            ? {
-                  maxGeoJSON: assembleLabeledLine(p.maxDistancePoints)
-              }
-            : {}),
-        ...(p.suggestedTrackPoints && p.suggestedTrackPoints.length > 7
-            ? {
-                  suggestedGeoJSON: assembleLabeledLine(p.suggestedTrackPoints)
-              }
-            : {})
-        /*        ...(p.taskGeoJSON
-            ? {
-                  taskGeoJSON: JSON.parse(p.taskGeoJSON)
-              }
-            : {}) */
-    };
+function sameNumberArray(a: number[] | undefined, b: number[] | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+}
+
+// Reducer-shaped: takes the previously-displayed score for this pilot plus the
+// incoming raw score and returns the new display score. When the underlying
+// point arrays are content-identical to `prev`, the prior FeatureCollection
+// references are reused so mapbox's <Source data> ref stays stable and tiles
+// don't reparse when the scorer re-emits an identical path.
+function mapScoresToDisplayScores(prev: PilotScoreDisplay | undefined, p: PilotScore): PilotScoreDisplay {
+    const result: PilotScoreDisplay = {...p};
+
+    if (p.scoredPoints && p.scoredPoints.length > 3) {
+        const cspLat = p.scoringClosestPoint?.lat;
+        const cspLng = p.scoringClosestPoint?.lng;
+        if (prev?.scoredGeoJSON && sameNumberArray(p.scoredPoints, prev.scoredPoints) && prev.scoringClosestPoint?.lat === cspLat && prev.scoringClosestPoint?.lng === cspLng) {
+            result.scoredGeoJSON = prev.scoredGeoJSON;
+        } else {
+            result.scoredGeoJSON = assembleLabeledLine(p.scoredPoints, p.scoringClosestPoint);
+        }
+    }
+
+    if (p.minDistancePoints && p.minDistancePoints.length > 2) {
+        if (prev?.minGeoJSON && sameNumberArray(p.minDistancePoints, prev.minDistancePoints)) {
+            result.minGeoJSON = prev.minGeoJSON;
+        } else {
+            result.minGeoJSON = assembleLabeledLine(p.minDistancePoints);
+        }
+    }
+
+    if (p.maxDistancePoints && p.maxDistancePoints.length > 2) {
+        if (prev?.maxGeoJSON && sameNumberArray(p.maxDistancePoints, prev.maxDistancePoints)) {
+            result.maxGeoJSON = prev.maxGeoJSON;
+        } else {
+            result.maxGeoJSON = assembleLabeledLine(p.maxDistancePoints);
+        }
+    }
+
+    if (p.suggestedTrackPoints && p.suggestedTrackPoints.length > 7) {
+        if (prev?.suggestedGeoJSON && sameNumberArray(p.suggestedTrackPoints, prev.suggestedTrackPoints)) {
+            result.suggestedGeoJSON = prev.suggestedGeoJSON;
+        } else {
+            result.suggestedGeoJSON = assembleLabeledLine(p.suggestedTrackPoints);
+        }
+    }
+
+    return result;
 }
 
 function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: ClassScoreHistory}>) {
@@ -413,7 +434,7 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
                 const ns = newScores.at(newIndex);
                 // take from the new score if it's there, otherwise it's a reference to one we have decoded
                 // so use that instead
-                resultScores.push(mapScoresToDisplayScores(ns!));
+                resultScores.push(mapScoresToDisplayScores(resultScores.at(-1), ns!));
                 resultIndex.push(n!);
                 newIndex++;
             }

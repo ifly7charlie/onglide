@@ -1,4 +1,4 @@
-import React, {useCallback, useMemo, useRef, useState} from 'react';
+import {useCallback, useMemo, useRef, useState} from 'react';
 import {Source, Layer, LayerProps} from 'react-map-gl';
 
 import {assembleOptimalDirection} from './optimalDirection';
@@ -90,77 +90,97 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
         taskGeoJSONtp
     ]);
 
+    // Keep selectedPosition reachable without churning the hover callback identity every tick
+    const selectedPositionRef = useRef(selectedPosition);
+    selectedPositionRef.current = selectedPosition;
+
     // Handle hover on optimal direction grid cells -- throttled, builds GeoJSON directly
-    const onGridHover = useCallback(
-        (e: any) => {
-            const now = performance.now();
-            const feature = e.features?.[0];
-            if (!feature?.properties?.prevLng) {
-                setHoverGeoJSON(null);
-                return;
-            }
-            // Throttle to ~50ms
-            if (now - hoverThrottleRef.current < 50) return;
-            hoverThrottleRef.current = now;
+    const onGridHover = useCallback((e: any) => {
+        const now = performance.now();
+        const feature = e.features?.[0];
+        if (!feature?.properties?.prevLng) {
+            setHoverGeoJSON((prev) => (prev === null ? prev : null));
+            return;
+        }
+        // Throttle to ~50ms
+        if (now - hoverThrottleRef.current < 50) return;
+        hoverThrottleRef.current = now;
 
-            const coords = feature.geometry.coordinates[0];
-            const p = feature.properties;
-            const cellLng = (coords[0][0] + coords[2][0]) / 2;
-            const cellLat = (coords[0][1] + coords[2][1]) / 2;
-            const pos = selectedPosition;
-            if (!pos) return;
+        const coords = feature.geometry.coordinates[0];
+        const p = feature.properties;
+        const cellLng = (coords[0][0] + coords[2][0]) / 2;
+        const cellLat = (coords[0][1] + coords[2][1]) / 2;
+        const pos = selectedPositionRef.current;
+        if (!pos) return;
 
-            const prevDist = distHaversine({lat: p.prevLat, lng: p.prevLng}, {lat: cellLat, lng: cellLng});
-            const nextDist = distHaversine({lat: cellLat, lng: cellLng}, {lat: p.nextLat, lng: p.nextLng});
+        const prevDist = distHaversine({lat: p.prevLat, lng: p.prevLng}, {lat: cellLat, lng: cellLng});
+        const nextDist = distHaversine({lat: cellLat, lng: cellLng}, {lat: p.nextLat, lng: p.nextLng});
 
-            setHoverGeoJSON({
-                type: 'FeatureCollection',
-                features: [
-                    {
-                        type: 'Feature',
-                        properties: {lineType: 'transit', label: `${p.transitDist}km`},
-                        geometry: {type: 'LineString', coordinates: [[pos.lng, pos.lat], [cellLng, cellLat]]}
-                    },
-                    {
-                        type: 'Feature',
-                        properties: {lineType: 'taskLeg', label: `${Math.round(prevDist * 10) / 10}km`},
-                        geometry: {type: 'LineString', coordinates: [[p.prevLng, p.prevLat], [cellLng, cellLat]]}
-                    },
-                    {
-                        type: 'Feature',
-                        properties: {lineType: 'taskLeg', label: `${Math.round(nextDist * 10) / 10}km`},
-                        geometry: {type: 'LineString', coordinates: [[cellLng, cellLat], [p.nextLng, p.nextLat]]}
-                    },
-                    {
-                        type: 'Feature',
-                        properties: {lineType: 'apex', label: `${p.improvement >= 0 ? '+' : ''}${p.improvement}km\n${Math.round(p.ratio * 10) / 10}:1`},
-                        geometry: {type: 'Point', coordinates: [cellLng, cellLat]}
-                    }
-                ]
-            });
-        },
-        [selectedPosition]
-    );
-    const onGridLeave = useCallback(() => setHoverGeoJSON(null), []);
+        setHoverGeoJSON({
+            type: 'FeatureCollection',
+            features: [
+                {
+                    type: 'Feature',
+                    properties: {lineType: 'transit', label: `${p.transitDist}km`},
+                    geometry: {type: 'LineString', coordinates: [[pos.lng, pos.lat], [cellLng, cellLat]]}
+                },
+                {
+                    type: 'Feature',
+                    properties: {lineType: 'taskLeg', label: `${Math.round(prevDist * 10) / 10}km`},
+                    geometry: {type: 'LineString', coordinates: [[p.prevLng, p.prevLat], [cellLng, cellLat]]}
+                },
+                {
+                    type: 'Feature',
+                    properties: {lineType: 'taskLeg', label: `${Math.round(nextDist * 10) / 10}km`},
+                    geometry: {type: 'LineString', coordinates: [[cellLng, cellLat], [p.nextLng, p.nextLat]]}
+                },
+                {
+                    type: 'Feature',
+                    properties: {lineType: 'apex', label: `${p.improvement >= 0 ? '+' : ''}${p.improvement}km\n${Math.round(p.ratio * 10) / 10}:1`},
+                    geometry: {type: 'Point', coordinates: [cellLng, cellLat]}
+                }
+            ]
+        });
+    }, []);
+    const onGridLeave = useCallback(() => setHoverGeoJSON((prev) => (prev === null ? prev : null)), []);
 
-    // Baseline path visualization: scored path + max remaining forward
-    const baselineGeoJSON = useMemo(() => {
+    // Baseline path visualization: scored path + max remaining forward.
+    // The worker emits a fresh array reference every score tick even when
+    // the path is unchanged, so we content-compare to reuse the prior
+    // FeatureCollection — otherwise mapbox reparses this Source every second.
+    const baselineCacheRef = useRef<{bp: number[] | undefined; baseline: number | undefined; result: GeoJSON.FeatureCollection | null}>({bp: undefined, baseline: undefined, result: null});
+    const baselineGeoJSON = useMemo<GeoJSON.FeatureCollection | null>(() => {
         const bp = debouncedScore?.optimalGridBaselinePath;
-        if (!bp || bp.length < 4) return null;
+        const baseline = debouncedScore?.optimalGridBaseline;
+        const cache = baselineCacheRef.current;
+        const prevBp = cache.bp;
+        let sameContent = cache.baseline === baseline && !!prevBp === !!bp && (prevBp?.length ?? 0) === (bp?.length ?? 0);
+        if (sameContent && bp && prevBp) {
+            for (let i = 0; i < bp.length; i++) {
+                if (prevBp[i] !== bp[i]) {
+                    sameContent = false;
+                    break;
+                }
+            }
+        }
+        if (sameContent) return cache.result;
+
+        if (!bp || bp.length < 4) {
+            baselineCacheRef.current = {bp, baseline, result: null};
+            return null;
+        }
         const coords: [number, number][] = [];
         for (let i = 0; i + 1 < bp.length; i += 2) {
             coords.push([bp[i], bp[i + 1]]);
         }
         const features: any[] = [];
-        // First leg with distance label
         if (coords.length >= 2) {
             features.push({
                 type: 'Feature' as const,
-                properties: {label: `${Math.round(debouncedScore?.optimalGridBaseline || 0)}km`},
+                properties: {label: `${Math.round(baseline || 0)}km`},
                 geometry: {type: 'LineString' as const, coordinates: coords.slice(0, 2)}
             });
         }
-        // Remaining legs without label
         if (coords.length > 2) {
             features.push({
                 type: 'Feature' as const,
@@ -168,10 +188,13 @@ export function useOptimalGridLayers({optimalGrid, debouncedScore, selectedPosit
                 geometry: {type: 'LineString' as const, coordinates: coords.slice(1)}
             });
         }
-        return features.length ? {type: 'FeatureCollection' as const, features} : null;
+        const result = features.length ? {type: 'FeatureCollection' as const, features} : null;
+        baselineCacheRef.current = {bp, baseline, result};
+        return result;
     }, [debouncedScore?.optimalGridBaselinePath, debouncedScore?.optimalGridBaseline]);
 
-    return {optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON, onGridHover, onGridLeave};
+    const gridHoverEnabled = optimalDirectionGeoJSON != null;
+    return {optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON, onGridHover, onGridLeave, gridHoverEnabled};
 }
 
 /** JSX for the optimal grid Sources/Layers. Render inside the Map component. */
