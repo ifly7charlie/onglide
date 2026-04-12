@@ -736,14 +736,23 @@ async function updateClasses(internalName: string, datecode: Datecode) {
             };
             channel.scoreHistory.set(scoreId, new Map<Compno, PilotScore[]>());
 
-            // Read any old history
+            // Read any old history. Pass each parsed record through
+            // PilotScore.fromPartial so the ts-proto factory fills in
+            // defaults for fields that didn't exist when the record was
+            // persisted. In particular every `repeated` field becomes
+            // `[]` rather than `undefined`, which matters because protobuf
+            // encode does `for (const v of message.field)` unconditionally
+            // and explodes with "is not iterable" if the field is missing.
+            // This was blowing up sendAllScores with older leveldb records
+            // that predate optimalGrid (field 65) et al.
             if (channel.scoreDb) {
                 for await (const [compno, scoreJSON] of channel.scoreDb?.iterator() ?? []) {
-                    const score = JSON.parse(scoreJSON);
-                    if (!channel.liveScoreId) {
+                    const raw = JSON.parse(scoreJSON);
+                    const score = PilotScore.fromPartial(raw);
+                    if (!channel.liveScoreId && score.scoreId) {
                         channel.liveScoreId = score.scoreId;
                     }
-                    score.scoreId = channel.liveScoreId;
+                    score.scoreId = channel.liveScoreId ?? score.scoreId ?? '';
                     channel.allScores[compno] = score;
                 }
                 console.log(`${c.class}: ${Object.keys(channel.allScores).length} scores loaded on id ${channel.liveScoreId}`);
