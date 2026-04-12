@@ -337,7 +337,21 @@ const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining, ho
     );
 });
 
-export const Details = ({compno, pilot, units, tz, replayTime, onEditHandicap}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined; onEditHandicap?: (compno: Compno, handicap: number) => void}) => {
+export const Details = ({
+    compno,
+    pilot,
+    units,
+    tz,
+    replayTime,
+    onEditHandicap
+}: {
+    compno: Compno;
+    pilot: API_ClassName_Pilots_PilotDetail;
+    tz: TZ;
+    units: Units;
+    replayTime: Epoch | undefined;
+    onEditHandicap?: (compno: Compno, handicap: number) => void;
+}) => {
     let competitionDelay = useMemo(() => {
         if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
             return (

@@ -2,7 +2,7 @@
 // This slice maintains the deck.gl data for scores
 //
 
-import {createSlice, createAsyncThunk, createSelector} from '@reduxjs/toolkit';
+import {createSlice, createAsyncThunk, createSelector, original} from '@reduxjs/toolkit';
 
 import type {PayloadAction} from '@reduxjs/toolkit';
 
@@ -322,7 +322,11 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
                 gh.splice(gIdx, Infinity, entry);
             }
 
-            result[compno] = mapScoresToDisplayScores(result[compno], scoreWithoutGrid as PilotScore);
+            // Read the prior display score via original() so we get the plain
+            // pre-draft value — passing an Immer draft as prev risks smuggling
+            // draft references into the new object.
+            const prev = result[compno] ? (original(result[compno]) as PilotScoreDisplay | undefined) : undefined;
+            result[compno] = mapScoresToDisplayScores(prev, scoreWithoutGrid as PilotScore);
 
             // If the scoreId is the current one then we will use that
             const sh = (state.historical[compno] ??= []);
@@ -347,45 +351,29 @@ function sameNumberArray(a: number[] | undefined, b: number[] | undefined): bool
 }
 
 // Reducer-shaped: takes the previously-displayed score for this pilot plus the
-// incoming raw score and returns the new display score. When the underlying
-// point arrays are content-identical to `prev`, the prior FeatureCollection
+// incoming raw score and returns a new display score. `prev` must be a plain
+// pre-draft value (see original() at the call site). When the underlying point
+// arrays are content-identical to `prev`, the prior FeatureCollection
 // references are reused so mapbox's <Source data> ref stays stable and tiles
-// don't reparse when the scorer re-emits an identical path.
+// don't reparse on a tick that emitted an identical path.
 function mapScoresToDisplayScores(prev: PilotScoreDisplay | undefined, p: PilotScore): PilotScoreDisplay {
     const result: PilotScoreDisplay = {...p};
 
     if (p.scoredPoints && p.scoredPoints.length > 3) {
-        const cspLat = p.scoringClosestPoint?.lat;
-        const cspLng = p.scoringClosestPoint?.lng;
-        if (prev?.scoredGeoJSON && sameNumberArray(p.scoredPoints, prev.scoredPoints) && prev.scoringClosestPoint?.lat === cspLat && prev.scoringClosestPoint?.lng === cspLng) {
+        if (prev?.scoredGeoJSON && sameNumberArray(p.scoredPoints, prev.scoredPoints) && prev.scoringClosestPoint?.lat === p.scoringClosestPoint?.lat && prev.scoringClosestPoint?.lng === p.scoringClosestPoint?.lng) {
             result.scoredGeoJSON = prev.scoredGeoJSON;
         } else {
             result.scoredGeoJSON = assembleLabeledLine(p.scoredPoints, p.scoringClosestPoint);
         }
     }
-
     if (p.minDistancePoints && p.minDistancePoints.length > 2) {
-        if (prev?.minGeoJSON && sameNumberArray(p.minDistancePoints, prev.minDistancePoints)) {
-            result.minGeoJSON = prev.minGeoJSON;
-        } else {
-            result.minGeoJSON = assembleLabeledLine(p.minDistancePoints);
-        }
+        result.minGeoJSON = prev?.minGeoJSON && sameNumberArray(p.minDistancePoints, prev.minDistancePoints) ? prev.minGeoJSON : assembleLabeledLine(p.minDistancePoints);
     }
-
     if (p.maxDistancePoints && p.maxDistancePoints.length > 2) {
-        if (prev?.maxGeoJSON && sameNumberArray(p.maxDistancePoints, prev.maxDistancePoints)) {
-            result.maxGeoJSON = prev.maxGeoJSON;
-        } else {
-            result.maxGeoJSON = assembleLabeledLine(p.maxDistancePoints);
-        }
+        result.maxGeoJSON = prev?.maxGeoJSON && sameNumberArray(p.maxDistancePoints, prev.maxDistancePoints) ? prev.maxGeoJSON : assembleLabeledLine(p.maxDistancePoints);
     }
-
     if (p.suggestedTrackPoints && p.suggestedTrackPoints.length > 7) {
-        if (prev?.suggestedGeoJSON && sameNumberArray(p.suggestedTrackPoints, prev.suggestedTrackPoints)) {
-            result.suggestedGeoJSON = prev.suggestedGeoJSON;
-        } else {
-            result.suggestedGeoJSON = assembleLabeledLine(p.suggestedTrackPoints);
-        }
+        result.suggestedGeoJSON = prev?.suggestedGeoJSON && sameNumberArray(p.suggestedTrackPoints, prev.suggestedTrackPoints) ? prev.suggestedGeoJSON : assembleLabeledLine(p.suggestedTrackPoints);
     }
 
     return result;
