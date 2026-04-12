@@ -387,7 +387,7 @@ export default function MApp(props: {
     // If we are on last leg of AAT then we stop showing construction lines
     const lastLeg = task?.rules?.aat && debouncedScore?.currentLeg == task?.legs?.length - 1;
 
-    const {optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON, onGridHover, onGridLeave} = useOptimalGridLayers({
+    const {optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON, onGridHover, onGridLeave, gridHoverEnabled} = useOptimalGridLayers({
         optimalGrid,
         debouncedScore,
         selectedPosition,
@@ -396,6 +396,10 @@ export default function MApp(props: {
         constructionLines: options.constructionLines,
         aat: task?.rules?.aat
     });
+
+    // Stable array ref for interactiveLayerIds — otherwise a new literal each render
+    // makes react-map-gl re-register hit testing on the Map every render.
+    const gridInteractiveLayerIds = useMemo(() => (gridHoverEnabled ? ['optimal_heatmap'] : undefined), [gridHoverEnabled]);
 
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
@@ -412,9 +416,9 @@ export default function MApp(props: {
                 reuseMaps={true}
                 ref={mapRef}
                 attributionControl={false}
-                interactiveLayerIds={['optimal_heatmap']}
-                onMouseMove={onGridHover}
-                onMouseLeave={onGridLeave}
+                interactiveLayerIds={gridInteractiveLayerIds}
+                onMouseMove={gridHoverEnabled ? onGridHover : undefined}
+                onMouseLeave={gridHoverEnabled ? onGridLeave : undefined}
             >
                 <DeckGLOverlay
                     getTooltip={toolTip}
