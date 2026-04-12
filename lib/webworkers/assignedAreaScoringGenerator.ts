@@ -86,6 +86,12 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     // Optimal direction grid: computed once per sector entry, stored independently in Redux
     let lastGridLeg = -1;
 
+    // Skip key: set to the leg-fingerprint + flight-state hash of the last iteration
+    // that made it through to a yield. If the next iteration hashes to the same value,
+    // nothing the scoring calculation actually depends on has changed, so we `continue`
+    // and the downstream viewer keeps showing the previous score.
+    let lastScoredKey = '';
+
     for await (const current of taskStatusGenerator) {
         try {
             const taskStatus = Object.assign(scoredStatus, current);
@@ -181,17 +187,27 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 leg.convexHull.push(...leg.convexHull.slice(0, 2));
             }
 
+            // If no leg has new hull points and flight state is unchanged since the last
+            // yield, skip the full dijkstra block — the previously-emitted score is still
+            // correct. Forced ticks still fall through so time-based heartbeats keep firing.
+            const newScoredKey = [
+                ...aatLegStatus.map((l) => l.fingerPrint),
+                taskStatus.currentLeg,
+                taskStatus.inSector ? '1' : '0',
+                taskStatus.inPenalty ? '1' : '0',
+                taskStatus.utcFinish || 0,
+                taskStatus.startFound ? 1 : 0
+            ].join('|');
+            if (!isTick(taskStatus) && newScoredKey === lastScoredKey) {
+                continue;
+            }
+            lastScoredKey = newScoredKey;
+
             // Compute optimal direction grid once per sector entry (when previous hull is finalized)
             const isFinishLegForGrid = taskStatus.currentLeg === task.legs.length - 1;
             if (taskStatus.currentLeg !== lastGridLeg && taskStatus.currentLeg > 0 && !isFinishLegForGrid) {
                 lastGridLeg = taskStatus.currentLeg;
-                const grid = computeOptimalGrid(
-                    task.legs[taskStatus.currentLeg].coordinates as [number, number][],
-                    taskStatus.currentLeg,
-                    maxGraph,
-                    preparedLegs,
-                    log
-                );
+                const grid = computeOptimalGrid(task.legs[taskStatus.currentLeg].coordinates as [number, number][], taskStatus.currentLeg, maxGraph, preparedLegs, log);
                 if (grid) {
                     scoredStatus.optimalGrid = grid;
                 }
