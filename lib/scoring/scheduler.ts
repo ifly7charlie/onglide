@@ -1,0 +1,577 @@
+// Copyright 2026- (c) Melissa Jenkins
+// Part of Onglide.com competition tracking service
+// BSD licence
+
+//
+// Competition-aware scoring scheduler.
+//
+// The old scraper hammered every configured competition every 5 minutes,
+// re-fetching pilots and walking every historical day on /results
+// regardless of where the competition was in its day. This scheduler is
+// the inverse: a 60-second heartbeat that consults per-competition state
+// and only fires the fetches that are actually due, all in the
+// competition's local timezone (rules 2/3/4) with jitter so adjacent
+// competitions never lock-step (rule 7).
+//
+// State is in-memory, per-process. On restart, decisions reset to "fetch
+// soon" so any time-sensitive recovery happens within a heartbeat or two.
+// The DB itself remains the source of truth for compstatus and
+// compstatus.starttime.
+//
+
+import escape from 'sql-template-strings';
+
+import {toDateCode} from '../datecode';
+import type {ClassId, ScoringSource, SkipDayPredicate, SourceCtx} from './source';
+import {SourceRegistry} from './source';
+import {applyJitter, localDateISO, nowInTz, type LocalTime} from './shared/timezone';
+import {diffAndRemoveClasses} from './shared/classes';
+import {pruneOldDays, dropDeadCompetition} from './shared/tasks';
+
+// ---------- intervals (rules 2/3/4) ----------
+
+const HEARTBEAT_MS = 60 * 1000;
+
+const INTERVAL_RESULTS_FAST_MS = 10 * 60 * 1000; // pre-task / briefed / first hour after launch
+const INTERVAL_RESULTS_SLOW_MS = 30 * 60 * 1000; // after launch+1h until end-of-day
+const INTERVAL_PILOTS_HOURLY_MS = 60 * 60 * 1000; // task day, before launch
+
+const STOP_RESULTS_LOCAL_MINUTE = 20 * 60; // 20:00 local — stop results checks
+const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
+const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: starttime - 30m
+
+// "After launch" cadence drops from fast→slow at +1h.
+const LAUNCH_FAST_TAIL_MS = 60 * 60 * 1000;
+
+// ---------- per-class status helpers ----------
+
+// compstatus.status values that mean "we have a task for this date".
+const TASK_STATES = new Set<string>(['B', 'L', 'S', 'R', 'H', 'Z']);
+// compstatus.status values that mean "launching has begun".
+const LAUNCHED_STATES = new Set<string>(['L', 'S', 'R', 'H']);
+
+// ---------- in-memory state ----------
+
+interface ClassObservation {
+    classid: ClassId;
+    status: string; // single-char compstatus.status
+    datecode: string | null;
+    starttimeMinutes: number | null; // minute-of-day (local), parsed from compstatus.starttime
+    isToday: boolean; // does compstatus.datecode match today's local datecode?
+}
+
+interface CompState {
+    compid: string;
+    url: string;
+    type: string;
+    raw: Record<string, any>;
+    tz: string;
+    metadataLoaded: boolean;
+
+    // last successful fetches (epoch ms)
+    lastPilotsFetch: number;
+    lastResultsFetch: number;
+    // local-day bookkeeping
+    lastPilotsLocalDate: string | null;
+
+    // per-class first-seen 'L' for today (epoch ms). Cleared when the
+    // local date rolls over.
+    firstLaunch: Map<ClassId, number>;
+    // The local date the firstLaunch map is keyed against — when this
+    // changes we wipe the map.
+    firstLaunchDate: string | null;
+
+    // Computed next-due (epoch ms). Defaults to 0 so the first heartbeat
+    // fires both fetches.
+    nextPilotsAt: number;
+    nextResultsAt: number;
+
+    // observations from the most recent compstatus snapshot
+    observations: ClassObservation[];
+
+    // book-keeping for the once-per-day rule-1 prune
+    lastPruneDay: string | null;
+    // book-keeping for the dead-competition check (don't run it every
+    // heartbeat — once per hour is plenty)
+    nextDeadCheckAt: number;
+}
+
+// ---------- decisions ----------
+
+interface SchedulerDecisions {
+    fetchPilots: boolean;
+    fetchResults: boolean;
+    pruneOldDays: boolean;
+    dropDeadComp: boolean;
+    // rationale (for logging)
+    reasons: string[];
+}
+
+//
+// computeDecisions — pure function over `state` + `localNow`. Encapsulates
+// rules 2/3/4. No DB calls, no IO — designed to be unit-testable.
+//
+// Inputs:
+//   - state: the per-competition CompState (read-only)
+//   - localNow: precomputed local time in the competition's tz
+//   - nowMs: Date.now() (passed in for testability)
+//
+export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: number): SchedulerDecisions {
+    const reasons: string[] = [];
+
+    // ----- pilots -----
+
+    // Bucket the classes by where they are in the day:
+    //   - anyTaskToday: any class whose compstatus shows we have a task for today
+    //   - anyLaunchedToday: any class whose status is in LAUNCHED_STATES today
+    let anyTaskToday = false;
+    let anyLaunchedToday = false;
+    for (const obs of state.observations) {
+        if (!obs.isToday) continue;
+        if (TASK_STATES.has(obs.status)) anyTaskToday = true;
+        if (LAUNCHED_STATES.has(obs.status)) anyLaunchedToday = true;
+    }
+
+    let fetchPilots = false;
+
+    // Rule 2: pre-task daily fetch — only if no class has a task today,
+    // we're past 10:00 local, and we haven't already fetched today.
+    if (!anyTaskToday && localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE && state.lastPilotsLocalDate !== localNow.iso && nowMs >= state.nextPilotsAt) {
+        fetchPilots = true;
+        reasons.push('pilots:daily-10am');
+    }
+
+    // Rule 4: hourly pilots fetch on a task day until first launch.
+    // After first launch, stop until next day (lastPilotsLocalDate gates
+    // re-firing tomorrow).
+    if (!fetchPilots && anyTaskToday && !anyLaunchedToday && nowMs >= state.nextPilotsAt) {
+        fetchPilots = true;
+        reasons.push('pilots:task-hourly');
+    }
+
+    // ----- results -----
+
+    let fetchResults = false;
+    if (localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
+        if (nowMs >= state.nextResultsAt) {
+            fetchResults = true;
+            reasons.push('results:due');
+        }
+    } else {
+        reasons.push('results:after-20:00-stop');
+    }
+
+    // ----- maintenance -----
+
+    // Rule 1 prune runs at most once per local day, after 10:00, on the
+    // first heartbeat that satisfies that window.
+    const pruneEligible = localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE && state.lastPruneDay !== localNow.iso;
+    if (pruneEligible) {
+        reasons.push('prune:daily');
+    }
+
+    // Dead-competition check: cheap-ish (a few SELECTs) but not free —
+    // run hourly per competition.
+    const deadCheck = nowMs >= state.nextDeadCheckAt;
+    if (deadCheck) reasons.push('dead-comp:check');
+
+    return {
+        fetchPilots,
+        fetchResults,
+        pruneOldDays: pruneEligible,
+        dropDeadComp: deadCheck,
+        reasons
+    };
+}
+
+// ----- schedule next-due times -----
+
+// scheduleNextResults — figure out the right cadence for the next results
+// fetch. Chooses the *fastest* (lowest interval) cadence across all
+// observed classes today, then jitters it. Stops entirely (returns
+// Infinity) once we're past 20:00 local.
+function scheduleNextResults(state: CompState, localNow: LocalTime, nowMs: number): number {
+    if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE) {
+        // Wake again at 04:00 local tomorrow — early enough to catch
+        // anything that gets briefed overnight.
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, 4 * 60);
+    }
+
+    let fastest = INTERVAL_RESULTS_SLOW_MS;
+    let anyClassToday = false;
+    for (const obs of state.observations) {
+        if (!obs.isToday) continue;
+        anyClassToday = true;
+        const interval = perClassResultsInterval(state, obs, localNow, nowMs);
+        if (interval < fastest) fastest = interval;
+    }
+    if (!anyClassToday) {
+        // Nothing today yet — keep the fast cadence so we notice
+        // briefing as soon as it appears.
+        fastest = INTERVAL_RESULTS_FAST_MS;
+    }
+    return nowMs + applyJitter(fastest);
+}
+
+// perClassResultsInterval — rule-3 cadence for a single class. Returns
+// the *minimum gap* until the next fetch, NOT an absolute deadline. The
+// caller folds it across all classes via min().
+function perClassResultsInterval(state: CompState, obs: ClassObservation, localNow: LocalTime, nowMs: number): number {
+    if (!TASK_STATES.has(obs.status)) {
+        // No task yet — fast cadence so we catch one when it appears.
+        return INTERVAL_RESULTS_FAST_MS;
+    }
+
+    if (!LAUNCHED_STATES.has(obs.status)) {
+        // Briefed but not launched — fast cadence.
+        return INTERVAL_RESULTS_FAST_MS;
+    }
+
+    // Launched. Look up the launch anchor: prefer the in-memory
+    // first-observed-L epoch, fall back to (starttime - 30 min) if no
+    // OGN coverage ever set status=L.
+    const anchor = launchAnchorMs(state, obs, localNow);
+    if (anchor != null) {
+        const tail = anchor + LAUNCH_FAST_TAIL_MS;
+        if (nowMs < tail) return INTERVAL_RESULTS_FAST_MS;
+        return INTERVAL_RESULTS_SLOW_MS;
+    }
+    // Status is L but we don't know when — assume +1h has passed and
+    // back off. This is the conservative branch.
+    return INTERVAL_RESULTS_SLOW_MS;
+}
+
+// launchAnchorMs — when did launching start for this class today, in
+// epoch ms? Either the in-memory first-L observation, or the fallback
+// "starttime - 30 min" if we never saw L.
+function launchAnchorMs(state: CompState, obs: ClassObservation, localNow: LocalTime): number | null {
+    const seen = state.firstLaunch.get(obs.classid);
+    if (seen) return seen;
+    if (obs.starttimeMinutes != null) {
+        const fallbackMin = obs.starttimeMinutes - LAUNCH_GRID_LEAD_MINUTES;
+        return localMinuteToEpochMs(state.tz, localNow, fallbackMin);
+    }
+    return null;
+}
+
+// scheduleNextPilots — when should the next pilots fetch fire?
+function scheduleNextPilots(state: CompState, localNow: LocalTime, nowMs: number, anyTaskToday: boolean, anyLaunchedToday: boolean): number {
+    if (anyLaunchedToday) {
+        // Done for today — wake at 04:00 local tomorrow so the next
+        // local-day kicks off on schedule.
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, 4 * 60);
+    }
+    if (anyTaskToday) {
+        // Hourly until launch.
+        return nowMs + applyJitter(INTERVAL_PILOTS_HOURLY_MS);
+    }
+    // Pre-task. If we're already past 10:00 today, the next chance is
+    // 10:00 tomorrow. Otherwise wake at 10:00 today.
+    if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
+        return localMinuteToEpochMs(state.tz, localNow, PILOTS_PRETASK_LOCAL_MINUTE);
+    }
+    return scheduleAtLocalMinuteTomorrow(state.tz, localNow, PILOTS_PRETASK_LOCAL_MINUTE);
+}
+
+// scheduleAtLocalMinuteTomorrow — "wake at HH:MM local tomorrow" with
+// jitter. Coarse-grained: assumes the day after `localNow` is exactly
+// 24h away, which is fine for ±1h DST drift since the heartbeat will
+// re-evaluate once the wakeup fires.
+function scheduleAtLocalMinuteTomorrow(_tz: string, localNow: LocalTime, targetMinute: number): number {
+    const minutesIntoDay = localNow.minuteOfDay;
+    const minutesUntilTomorrow = 24 * 60 - minutesIntoDay + targetMinute;
+    return localNow.epoch + applyJitter(minutesUntilTomorrow * 60 * 1000);
+}
+
+// localMinuteToEpochMs — convert "minute X today, in this tz" to an
+// epoch-ms wakeup, applying jitter. If the target is in the past
+// relative to localNow, wraps to tomorrow.
+function localMinuteToEpochMs(_tz: string, localNow: LocalTime, targetMinute: number): number {
+    let delta = targetMinute - localNow.minuteOfDay;
+    if (delta <= 0) delta += 24 * 60;
+    return localNow.epoch + applyJitter(delta * 60 * 1000);
+}
+
+// ----- compstatus refresh + first-launch tracking -----
+
+// Read compstatus rows for `compid` and populate state.observations.
+// Also detect L transitions so state.firstLaunch is updated.
+async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: LocalTime): Promise<void> {
+    let rows: any[] = [];
+    try {
+        rows = (await ctx.db.query(escape`
+            SELECT
+                cs.class,
+                cs.status,
+                cs.datecode,
+                TIME_TO_SEC(cs.starttime) AS starttimeSecs
+            FROM compstatus cs
+            JOIN classes cl ON cl.class = cs.class
+            WHERE cl.compid = ${ctx.compid}
+        `)) as any[];
+    } catch (e) {
+        ctx.log(`refreshObservations: query failed for ${ctx.compid}:`, e);
+        return;
+    }
+
+    const todayDc = toDateCodeForLocal(localNow);
+
+    // If the local date has rolled over, drop yesterday's first-launch
+    // observations.
+    if (state.firstLaunchDate !== localNow.iso) {
+        state.firstLaunch.clear();
+        state.firstLaunchDate = localNow.iso;
+    }
+
+    const observations: ClassObservation[] = [];
+    for (const row of rows ?? []) {
+        const status = String(row.status ?? ':');
+        const isToday = row.datecode === todayDc;
+        const starttimeMinutes = row.starttimeSecs != null ? Math.floor(Number(row.starttimeSecs) / 60) : null;
+        const obs: ClassObservation = {
+            classid: row.class,
+            status,
+            datecode: row.datecode ?? null,
+            starttimeMinutes,
+            isToday
+        };
+        observations.push(obs);
+
+        // First-launch capture: if status indicates launched and we
+        // haven't recorded a first-L for today, stamp it now.
+        if (isToday && LAUNCHED_STATES.has(status) && !state.firstLaunch.has(obs.classid)) {
+            state.firstLaunch.set(obs.classid, Date.now());
+            ctx.log(`scheduler: first-launch for class ${obs.classid} captured`);
+        }
+    }
+
+    state.observations = observations;
+}
+
+// Approximate "today's datecode in the competition's local tz". The
+// existing toDateCode() helper takes a UTC date, so we synthesise a UTC
+// midnight using the local Y/M/D pieces — the resulting datecode is
+// stable enough for compstatus comparisons (which are coarse-grained,
+// per-day labels).
+function toDateCodeForLocal(localNow: LocalTime): string {
+    const utcMidnight = new Date(Date.UTC(localNow.year, localNow.month - 1, localNow.day));
+    return toDateCode(utcMidnight);
+}
+
+// ----- skip-day predicate (rule 1) -----
+
+function makeSkipDayPredicate(localNow: LocalTime, anyTaskToday: boolean): SkipDayPredicate {
+    const todayDc = toDateCodeForLocal(localNow);
+    const past10am = localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE;
+    return (_classid, datecode, _dateISO) => {
+        if (datecode === todayDc) return false;
+        // It's not today. Skip if we're past 10am local OR if we already
+        // know there's a task for today.
+        return past10am || anyTaskToday;
+    };
+}
+
+// ---------- main scheduler entrypoint ----------
+
+export interface SchedulerOptions {
+    db: any;
+    registry: SourceRegistry;
+    log?: (msg: string, ...args: unknown[]) => void;
+    heartbeatMs?: number;
+}
+
+const state = new Map<string, CompState>();
+
+export async function runScheduler(opts: SchedulerOptions): Promise<void> {
+    const log = opts.log ?? ((msg: string, ...args: unknown[]) => console.log(msg, ...args));
+    const interval = opts.heartbeatMs ?? HEARTBEAT_MS;
+
+    log(`scheduler: starting; types=${opts.registry.types().join(',')} heartbeat=${interval}ms`);
+
+    // Run the first heartbeat immediately so a fresh process picks up
+    // work before the first interval elapses.
+    await heartbeat(opts.db, opts.registry, log);
+
+    setInterval(() => {
+        heartbeat(opts.db, opts.registry, log).catch((e) => log('scheduler heartbeat failed:', e));
+    }, interval);
+}
+
+async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, ...args: unknown[]) => void): Promise<void> {
+    let sources: any[] = [];
+    try {
+        sources = (await db.query(escape`SELECT * FROM scoringsource WHERE type IN (${registry.types()})`)) as any[];
+    } catch (e) {
+        log('scheduler: scoringsource read failed:', e);
+        return;
+    }
+
+    for (const src of sources ?? []) {
+        if (!src.compid || !src.url) continue;
+        const adapter = registry.get(src.type);
+        if (!adapter) continue;
+        try {
+            await processCompetition(db, adapter, src, log);
+        } catch (e) {
+            log(`scheduler: competition ${src.compid} failed:`, e);
+        }
+    }
+}
+
+async function processCompetition(
+    db: any, //
+    adapter: ScoringSource,
+    src: any,
+    log: (msg: string, ...args: unknown[]) => void
+): Promise<void> {
+    let st = state.get(src.compid);
+    if (!st) {
+        st = await initState(db, src, log);
+        state.set(src.compid, st);
+    } else {
+        // Refresh tz from DB in case it was updated by a previous fetch.
+        st.tz = (await readCompetitionTz(db, src.compid)) ?? st.tz;
+    }
+
+    const ctx: SourceCtx = {
+        compid: src.compid,
+        url: src.url,
+        tz: st.tz,
+        db,
+        log: (msg: string, ...args: unknown[]) => log(`[${src.compid}] ${msg}`, ...args),
+        raw: src
+    };
+
+    // First time: ensure metadata so we have a competition row + tz.
+    if (!st.metadataLoaded) {
+        await adapter.ensureMetadata(ctx);
+        st.tz = (await readCompetitionTz(db, src.compid)) ?? st.tz;
+        ctx.tz = st.tz;
+        st.metadataLoaded = true;
+    }
+
+    const localNow = nowInTz(st.tz);
+    await refreshObservations(st, ctx, localNow);
+
+    const decisions = computeDecisions(st, localNow, Date.now());
+
+    // Compute "anyTaskToday" / "anyLaunchedToday" once for both the
+    // skipDay predicate and the scheduling.
+    let anyTaskToday = false;
+    let anyLaunchedToday = false;
+    for (const obs of st.observations) {
+        if (!obs.isToday) continue;
+        if (TASK_STATES.has(obs.status)) anyTaskToday = true;
+        if (LAUNCHED_STATES.has(obs.status)) anyLaunchedToday = true;
+    }
+
+    if (decisions.fetchPilots || decisions.fetchResults) {
+        ctx.log(`scheduler: ${decisions.reasons.join(', ')}`);
+    }
+
+    if (decisions.fetchPilots) {
+        try {
+            await adapter.fetchPilots(ctx);
+            st.lastPilotsFetch = Date.now();
+            st.lastPilotsLocalDate = localDateISO(st.tz);
+        } catch (e) {
+            ctx.log('fetchPilots threw:', e);
+        }
+        // Reschedule whether or not we got results.
+        st.nextPilotsAt = scheduleNextPilots(st, localNow, Date.now(), anyTaskToday, anyLaunchedToday);
+    }
+
+    if (decisions.fetchResults) {
+        const skipDay = makeSkipDayPredicate(localNow, anyTaskToday);
+        try {
+            const result = await adapter.fetchResultsAndTasks(ctx, skipDay);
+            await diffAndRemoveClasses(db, ctx.log, src.compid, result.observedClasses);
+            // Refresh observations after the fetch — compstatus may have
+            // been promoted to 'B' by the task install, which changes
+            // the next-due interval.
+            await refreshObservations(st, ctx, nowInTz(st.tz));
+        } catch (e) {
+            ctx.log('fetchResultsAndTasks threw:', e);
+        }
+        st.lastResultsFetch = Date.now();
+        st.nextResultsAt = scheduleNextResults(st, nowInTz(st.tz), Date.now());
+    }
+
+    if (decisions.pruneOldDays) {
+        try {
+            await pruneOldDays(db, ctx.log, src.compid, toDateCodeForLocal(localNow));
+            st.lastPruneDay = localNow.iso;
+        } catch (e) {
+            ctx.log('pruneOldDays threw:', e);
+        }
+    }
+
+    if (decisions.dropDeadComp) {
+        try {
+            const dropped = await dropDeadCompetition(db, ctx.log, src.compid);
+            if (dropped) {
+                state.delete(src.compid);
+                return;
+            }
+        } catch (e) {
+            ctx.log('dropDeadCompetition threw:', e);
+        }
+        st.nextDeadCheckAt = Date.now() + applyJitter(60 * 60 * 1000);
+    }
+
+    // If we did neither a pilots nor a results fetch and we don't have
+    // a next-time set yet (fresh process), prime them now so subsequent
+    // heartbeats skip cheaply.
+    if (st.nextPilotsAt === 0) {
+        st.nextPilotsAt = scheduleNextPilots(st, localNow, Date.now(), anyTaskToday, anyLaunchedToday);
+    }
+    if (st.nextResultsAt === 0) {
+        st.nextResultsAt = scheduleNextResults(st, localNow, Date.now());
+    }
+    if (st.nextDeadCheckAt === 0) {
+        st.nextDeadCheckAt = Date.now() + applyJitter(60 * 60 * 1000);
+    }
+}
+
+async function initState(
+    db: any, //
+    src: any,
+    log: (msg: string, ...args: unknown[]) => void
+): Promise<CompState> {
+    const tz = (await readCompetitionTz(db, src.compid)) ?? 'Europe/London';
+    log(`scheduler: registering compid=${src.compid} type=${src.type} tz=${tz}`);
+    return {
+        compid: src.compid,
+        url: src.url,
+        type: src.type,
+        raw: src,
+        tz,
+        metadataLoaded: false,
+        lastPilotsFetch: 0,
+        lastResultsFetch: 0,
+        lastPilotsLocalDate: null,
+        firstLaunch: new Map(),
+        firstLaunchDate: null,
+        nextPilotsAt: 0,
+        nextResultsAt: 0,
+        observations: [],
+        lastPruneDay: null,
+        nextDeadCheckAt: 0
+    };
+}
+
+async function readCompetitionTz(db: any, compid: string): Promise<string | null> {
+    try {
+        const row = (
+            await db.query(escape`
+                SELECT tz FROM competition WHERE compid = ${compid}
+            `)
+        )?.[0];
+        return row?.tz ?? null;
+    } catch {
+        return null;
+    }
+}
+
+// Re-export for the entry binary.
+export {SourceRegistry};

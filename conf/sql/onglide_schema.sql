@@ -211,6 +211,7 @@ CREATE TABLE `pilots` (
   `class` char(15) NOT NULL COMMENT 'classid',
   `compno` char(4) NOT NULL,
   `fai` int(11) DEFAULT '0',
+  `idsig` varchar(64) DEFAULT NULL COMMENT 'hash of fullName|compno used by the scoring scheduler to gate FAI re-resolution; only re-resolved when sig changes',
   `firstname` char(30) DEFAULT NULL,
   `lastname` char(30) DEFAULT NULL,
   `homeclub` char(80) DEFAULT NULL,
