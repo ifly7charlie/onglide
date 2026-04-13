@@ -207,17 +207,14 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                         ) : null}
                     </tbody>
                 </table>
-            ) : (
+            ) : null}
+            {score.wind?.speed ? (
                 <>
                     <br style={{clear: 'both'}} />
-                    {score.wind?.speed ? (
-                        <>
-                            Recent Wind {score.wind.speed} kph @ {score.wind.direction}
-                        </>
-                    ) : null}
+                    Recent Wind {score.wind.speed} kph @ {score.wind.direction}°
                     <br />
                 </>
-            )}
+            ) : null}
         </>
     );
 });

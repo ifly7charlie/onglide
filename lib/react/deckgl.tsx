@@ -13,7 +13,7 @@ import {TaskUp} from '../types';
 import {distanceLineLabelStyle} from './distanceLine';
 
 import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
-import {selectPilotScore} from '../redux/scoresSlice';
+import {selectPilotScore, selectAllScores} from '../redux/scoresSlice';
 import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {ErrorBoundary} from 'react-error-boundary';
@@ -75,6 +75,7 @@ export default function MApp(props: {
 
     // Score details for selected pilot
     const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
+    const pilotScores = useSelector((state) => selectAllScores(state, props.replayTime));
     const latestUpdate = useSelector(selectLatestUpdate);
     const selectedPosition = useSelector((state) => (selectedCompno ? selectPilotPosition(state, selectedCompno, props.replayTime) : undefined));
 
@@ -302,8 +303,8 @@ export default function MApp(props: {
     //
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, lang, tz: props?.tz, units: props?.options?.units}), //
-        [vc, props.options.units, props.tz, mapRef?.current]
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units}), //
+        [vc, props.options.units, props.tz, mapRef?.current, pilotScores]
     );
 
     const attribution = useMemo(

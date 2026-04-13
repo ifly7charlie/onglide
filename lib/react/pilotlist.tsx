@@ -24,6 +24,7 @@ import {
     faHourglassHalf,
     faHourglassEnd,
     faHouse,
+    faLocationArrow,
     faPaperPlane,
     faQuestion, //
     faRightFromBracket,
@@ -35,6 +36,7 @@ import {
     faTachometerAlt,
     faTriangleExclamation,
     faTrophy,
+    faWind,
     IconDefinition
 } from '@fortawesome/free-solid-svg-icons';
 
@@ -183,6 +185,18 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
             id="climb"
             title="vario" //
             main={{value: null, icon: faSignal, units: ''}}
+        />
+    );
+}
+
+function WindComponent({wind}: {wind: {speed: number; direction: number} | undefined}) {
+    if (!wind?.speed) return null;
+    return (
+        <SummaryComponent
+            id="wind"
+            title="wind" //
+            main={{value: wind.speed, units: 'kph', icon: faWind, description: 'recent wind speed'}}
+            data1={{value: wind.direction, units: '°', icon: faLocationArrow, description: 'wind bearing'}}
         />
     );
 }
@@ -368,6 +382,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
             <ActualGRComponent actualGrRemaining={score.actual.grRemaining} homeGr={score.home?.grRemaining} />
         )
     ) : null;
+    const wind = score?.stats ? <WindComponent wind={score.wind} /> : null;
 
     let times = null;
     if (score?.utcStart) {
@@ -456,6 +471,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
                         {distance}
                         {times}
                         {gr}
+                        {wind}
                     </ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </>
