@@ -277,7 +277,7 @@ async function main() {
 
     const checkReady = async (): Promise<boolean> => {
         // Location comes from the competition table in the database
-        location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset, start, end FROM competition LIMIT 1'))?.[0];
+        location = (await db.query('SELECT name, lt as lat,lg as lng,tz,tzoffset, start, end, flightstats FROM competition LIMIT 1'))?.[0];
 
         if (!location) {
             console.error('no competition entry in the database, please confirm soaringspot integration is working');
@@ -768,7 +768,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 
         // Prep for scoring
         if (!channel.scoring) {
-            channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
+            channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location, flightstats: (location as any)?.flightstats === 'Y'});
             channel.scoring.hookScore(({compno, score, recentStart, t, scoreId, migrateFrom}) => sendScore(channel, compno, score, recentStart, scoreId, t, migrateFrom));
         }
     }

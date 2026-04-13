@@ -45,7 +45,8 @@ CREATE TABLE `competition` (
   
   `mainwebsite` varchar(240) DEFAULT NULL COMMENT 'Used when clicking on comp name to return to primary website',
   `lt` float DEFAULT NULL COMMENT 'launch/landing location',
-  `lg` float DEFAULT NULL COMMENT 'launch/landing location'
+  `lg` float DEFAULT NULL COMMENT 'launch/landing location',
+  `flightstats` char(1) DEFAULT 'N' COMMENT 'Compute per-flight statistics (thermals, wind, etc.) - Y/N'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 
 --

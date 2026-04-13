@@ -17,6 +17,7 @@ import {enrichedPositionGenerator} from '../lib/webworkers/enrichedPositionGener
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from '../lib/webworkers/taskpositiongenerator';
 import {taskScoresGenerator} from '../lib/webworkers/taskScoresGenerator';
+import {createFlightStatistics} from '../lib/webworkers/flightStatistics';
 
 import type {Aircraft, Tracker} from '../lib/webworkers/aprs';
 import {loadPointsForTracker, initDB, processMessageQueue} from '../lib/webworkers/aprs';
@@ -263,11 +264,16 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     const start = process.hrtime.bigint();
     const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, simplifiedQueue, iterative, !iterative);
 
+    // Optional flight statistics — opt in via FLIGHTSTATS=1 or argv.flightstats
+    const flightstats = !!(argv as any).flightstats || process.env.FLIGHTSTATS === '1';
+    const stats = flightstats ? createFlightStatistics(compno as Compno, log) : null;
+
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(location, inorder(getNow), log);
+    const observed = stats ? stats.observer(epg) : epg;
 
     // 1. Figure out where in the task we are
-    const tpg = taskPositionGenerator(task, 0 as Epoch, epg, log);
+    const tpg = taskPositionGenerator(task, 0 as Epoch, observed, log);
 
     // 2. Figure out what that means for leg distances
     const distances = task.rules.aat // what kind of scoring do we do
@@ -276,7 +282,8 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
     // 3. Once we have distances we can calculate task lengths
     //    and therefore speeds
-    const scores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
+    const rawScores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
+    const scores = stats ? stats.attacher(rawScores) : rawScores;
 
     let lastScore: PilotScore | undefined;
     let numberOfScores = 0;
