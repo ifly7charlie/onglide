@@ -36,6 +36,9 @@ import {taskPositionGenerator} from './taskpositiongenerator';
 import {taskScoresGenerator} from './taskScoresGenerator';
 import {scoreCollector} from './scoreCollector';
 
+// Optional flight statistics (thermals/straights/wind), per competition flag
+import {createFlightStatistics} from './flightStatistics';
+
 import {cloneDeep as _clonedeep} from 'lodash';
 
 import {getNow} from '../now';
@@ -76,6 +79,7 @@ export interface ScoringConfig {
     className: ClassName;
     datecode: Datecode;
     airfield: AirfieldLocation;
+    flightstats?: boolean;
 }
 
 export class ScoringController {
@@ -301,7 +305,7 @@ if (!isMainThread) {
                 };
 
                 if (alreadyScoring) {
-                    rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+                    rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, task.handicap, task.utcStart, task.scoreId);
                 }
 
                 break;
@@ -310,7 +314,7 @@ if (!isMainThread) {
             // Actually start scoring the task, will score all the gliders we have tracks for
             case ScoringCommandEnum.newTask:
                 console.log(`${task.className}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})} [${task.scoreId}]`);
-                startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task, task.scoreId);
+                startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, task.task, task.scoreId);
                 break;
 
             case ScoringCommandEnum.clearTask:
@@ -324,7 +328,7 @@ if (!isMainThread) {
 
             case ScoringCommandEnum.rescoreGlider:
                 console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.handicap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
-                rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+                rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, task.handicap, task.utcStart, task.scoreId);
                 break;
 
             case ScoringCommandEnum.updateScoreId:
@@ -398,11 +402,17 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
         //        handicap = 100;
     }
 
+    // Optional: per-flight statistics (thermals/straights/wind). When
+    // enabled we build a single FlightStatistics instance and wrap the
+    // chain with it at both ends so the rest of the pipeline is unaware.
+    const stats = config.flightstats ? createFlightStatistics(glider.compno, log) : null;
+
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
+    const observed = stats ? stats.observer(epg) : epg;
 
     // 1. Figure out where in the task we are
-    const tpg = taskPositionGenerator(task, glider.utcStart, epg, log);
+    const tpg = taskPositionGenerator(task, glider.utcStart, observed, log);
 
     // 2. Figure out what that means for leg distances
     const distances = task.rules.aat // what kind of scoring do we do
@@ -413,5 +423,5 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
     //    and therefore speeds
     const scores = taskScoresGenerator(task, glider.compno, handicap, distances, log);
 
-    return scores;
+    return stats ? stats.attacher(scores) : scores;
 }

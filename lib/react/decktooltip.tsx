@@ -7,7 +7,7 @@ export function deckTooltip({
     layer,
     coordinate,
     map,
-    //    pilotScores,
+    pilotScores,
     lang,
     tz,
     units,
@@ -19,7 +19,7 @@ export function deckTooltip({
     layer: any;
     coordinate?: number[];
     map: any;
-    //    pilotScores: ScoreData;
+    pilotScores: ScoreData;
     lang: string;
     tz: TZ;
     units: number | boolean;
@@ -50,12 +50,12 @@ export function deckTooltip({
         }
 
         if (time) {
-            /*            if (compno && pilotScores[compno]?.stats?.segments) {
-                const segment = pilotScores[compno].stats?.segments.find((c) => c.start <= time && time <= c.end);
+            if (compno && pilotScores?.[compno]?.stats?.segments) {
+                const segment = pilotScores[compno].stats.segments.find((c) => c.start <= time && time <= c.end);
                 if (segment) {
                     object.stats = segment;
                 }
-            } */
+            }
             // Figure out what the local language is for international date strings
             const dt = new Date(time * 1000);
             response += `✈️ ${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
@@ -95,8 +95,8 @@ export function deckTooltip({
                 } else if (stats.state == 'straight') {
                     response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
                 }
-                if (stats.wind.direction) {
-                    response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
+                if (stats.wind?.direction) {
+                    response += `<br/>wind speed: ${stats.wind.speed?.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
                 }
             }
         }

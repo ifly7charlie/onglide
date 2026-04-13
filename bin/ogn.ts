@@ -288,9 +288,9 @@ async function main() {
         const envCompId = process.env.COMP_ID;
         if (envCompId) {
             compid = envCompId;
-            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end FROM competition WHERE compid = ?', [compid]))?.[0];
+            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end, flightstats FROM competition WHERE compid = ?', [compid]))?.[0];
         } else {
-            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end FROM competition LIMIT 1'))?.[0];
+            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end, flightstats FROM competition LIMIT 1'))?.[0];
             if (location) {
                 compid = (location as any).compid;
             }
@@ -803,7 +803,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 
         // Prep for scoring
         if (!channel.scoring) {
-            channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location});
+            channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location, flightstats: (location as any)?.flightstats === 'Y'});
             channel.scoring.hookScore(({compno, score, recentStart, t, scoreId, migrateFrom}) => sendScore(channel, compno, score, recentStart, scoreId, t, migrateFrom));
         }
     }
