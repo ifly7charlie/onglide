@@ -33,13 +33,17 @@ type ClassRow = {
 
 // Derive a per-class displayStatus from its compstatus.status + the
 // competition window. Same semantics as the competition-wide rollup, but
-// applied to a single class row.
-function classDisplayStatus(status: string, inWindow: boolean): ClassDisplayStatus {
+// applied to a single class row. `endPast` short-circuits the "upcoming"
+// fallback when the competition's end date has already passed — without
+// it, a finished comp with a blank class status would keep showing as
+// "upcoming" until the scheduler's dead-comp cleanup removes it.
+function classDisplayStatus(status: string, inWindow: boolean, endPast: boolean): ClassDisplayStatus {
     if (status === 'L' || status === 'S') return 'flying';
     if (status === 'O') return 'over';
     if (status === 'R' || status === 'H') return 'landed';
     if (inWindow && (status === 'B' || status === 'P')) return 'today';
     if (inWindow) return 'notask';
+    if (endPast) return 'over';
     return 'upcoming';
 }
 
@@ -138,10 +142,11 @@ export default async function competitionsHandler(_req, res) {
         })
         .map((comp) => {
             const inWindow = comp.start && comp.end && comp.start <= todayIso && todayIso <= comp.end;
+            const endPast = !!(comp.end && comp.end < todayIso);
 
             // Annotate each class with its own displayStatus.
             for (const cls of comp.classes as ClassRow[]) {
-                cls.displayStatus = classDisplayStatus(cls.status, inWindow);
+                cls.displayStatus = classDisplayStatus(cls.status, inWindow, endPast);
             }
             const classDisplayStatuses = (comp.classes as ClassRow[]).map((c) => c.displayStatus);
             const statuses: string[] = (comp.classes as ClassRow[]).map((c) => c.status).filter(Boolean);
@@ -162,6 +167,8 @@ export default async function competitionsHandler(_req, res) {
                 displayStatus = 'today';
             } else if (inWindow) {
                 displayStatus = 'notask';
+            } else if (endPast) {
+                displayStatus = 'over';
             } else {
                 displayStatus = 'upcoming';
             }

@@ -11,7 +11,6 @@
 
 import escape from 'sql-template-strings';
 
-import {toDateCode} from '../../datecode';
 import type {ClassId} from '../source';
 
 //
@@ -22,12 +21,18 @@ import type {ClassId} from '../source';
 // `displayName` is the human label (after _ → space conversion); the
 // 30-char `classname` column gets truncated.
 //
+// `todayDatecode` is always computed in the *competition's* local tz —
+// critical for competitions that straddle UTC midnight (NZ, AU, JP),
+// where a briefing at 09:00 local would otherwise tag the next day's
+// datecode under a host running in UTC.
+//
 export async function upsertClass(
     db: any, //
     log: (msg: string, ...args: unknown[]) => void,
     compid: string,
     classid: ClassId,
-    displayName: string
+    displayName: string,
+    todayDatecode: string
 ): Promise<void> {
     try {
         await db.query(escape`
@@ -67,7 +72,7 @@ export async function upsertClass(
             UPDATE compstatus
             SET
                 status = ':',
-                datecode = ${toDateCode()}
+                datecode = ${todayDatecode}
             WHERE
                 class = ${classid}
                 AND status IN ('?', ':')
@@ -109,6 +114,46 @@ export async function cascadeDeleteClass(
         }
     }
     log(`cascade-deleted class ${classid}`);
+}
+
+//
+// resetStaleCompStatus — if a class's compstatus.status is a "daily"
+// value from a previous local day (L/S/R/H/B/Z with a stale datecode),
+// and no task row exists for today, clear it back to ':' so the frontend
+// doesn't keep showing yesterday's "flying"/"briefed"/"scrubbed" state on
+// a new day that hasn't yet had a task installed.
+//
+// Called from the scheduler once per local day after the 10:00 local
+// gate, alongside pruneOldDays. If a task for today DOES exist, the
+// task-install path in upsertTaskAndLegs owns the state machine — we
+// stay out of its way.
+//
+export async function resetStaleCompStatus(
+    db: any, //
+    log: (msg: string, ...args: unknown[]) => void,
+    compid: string,
+    todayDatecode: string
+): Promise<void> {
+    try {
+        const r = await db.query(escape`
+            UPDATE compstatus cs
+            JOIN classes cl ON cl.class = cs.class
+            LEFT JOIN tasks t ON t.class = cs.class AND t.datecode = ${todayDatecode}
+            SET
+                cs.status = ':',
+                cs.datecode = ${todayDatecode}
+            WHERE
+                cl.compid = ${compid}
+                AND t.class IS NULL
+                AND cs.status IN ('B', 'L', 'S', 'R', 'H', 'Z')
+                AND (cs.datecode IS NULL OR cs.datecode <> ${todayDatecode})
+        `);
+        if (r?.affectedRows) {
+            log(`resetStaleCompStatus: cleared ${r.affectedRows} stale class status row(s) in compid=${compid} → ${todayDatecode}`);
+        }
+    } catch (e) {
+        log(`resetStaleCompStatus failed for compid=${compid}:`, e);
+    }
 }
 
 //

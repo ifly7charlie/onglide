@@ -26,8 +26,8 @@ import {toDateCode} from '../../datecode';
 import {getElevationOffset} from '../../getelevationoffset';
 import {processIGC, checkForOGNMatches} from '../../flightprocessing/launchlanding';
 
-import type {ClassId, CompNo, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
-import {findTimezoneFromLocation, getTzOffset} from '../shared/timezone';
+import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
+import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctHandicap, type PilotRecord} from '../shared/pilots';
 import {upsertClass} from '../shared/classes';
 import {upsertTaskAndLegs} from '../shared/tasks';
@@ -36,6 +36,37 @@ const https = require('node:https');
 
 function toElement(x: any): Element | null {
     return x?.nodeType == 1 ? (x as Element) : null;
+}
+
+//
+// deriveSoaringspotCompId — turn a SoaringSpot URL into a URL-safe
+// compid slug for use as the primary key in `competition` /
+// `scoringsource`. Shared with bin/ssscrape.ts's CLI one-shot mode and
+// with the daily discovery hook below.
+//
+//   https://www.soaringspot.com/en_gb/fcc2026/           → 'fcc2026'
+//   https://www.soaringspot.com/en_gb/lasham-2026/pilots → 'lasham-2026'
+//
+export function deriveSoaringspotCompId(urlString: string): string | null {
+    try {
+        const u = new URL(urlString);
+        const segments = u.pathname.split('/').filter(Boolean);
+        const generic = new Set(['results', 'pilots', 'tasks', 'contestants', 'daily', 'en_gb', 'en', 'cs', 'de', 'fr', 'sl']);
+        while (segments.length && generic.has(segments[segments.length - 1])) {
+            segments.pop();
+        }
+        const candidate = segments[segments.length - 1];
+        if (!candidate) return null;
+        const slug = candidate
+            .toLowerCase()
+            .replace(/[^a-z0-9-]+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^-|-$/g, '')
+            .substring(0, 40);
+        return slug || null;
+    } catch {
+        return null;
+    }
 }
 
 // Approximate site location returned by Mapbox geocoding. Used to seed
@@ -222,7 +253,7 @@ async function processDayResults(
     results: any
 ): Promise<void> {
     let rows = 0;
-    let doCheckForOGNMatches = false;
+    // let doCheckForOGNMatches = false; // disabled — IGC download check is gated off below
     const dateCode = toDateCode(date);
 
     if (!results || !results[0]) {
@@ -351,22 +382,24 @@ async function processDayResults(
                     `)
                 )[0] || {igcavailable: false, trackerid: 'unknown'};
 
-            if ((pilotInfo.igcavailable || 'Y') == 'N' && url && (pilotInfo.trackerid ?? 'unknown') == 'unknown') {
-                // processIGC's signature is over-strict (branded
-                // ClassName/Compno + a populated location). The legacy
-                // call site passed in raw strings and a possibly-null
-                // location and worked because the file was untyped — we
-                // mirror that behaviour with a single any-cast rather
-                // than pretend to know the real types here.
-                await (processIGC as any)(classid, pilot, undefined, date, url, https, db, () => undefined);
-                doCheckForOGNMatches = true;
-            }
+            // IGC download checking disabled — leaving the pilotInfo
+            // select above in place so re-enabling is a one-block flip.
+            // if ((pilotInfo.igcavailable || 'Y') == 'N' && url && (pilotInfo.trackerid ?? 'unknown') == 'unknown') {
+            //     // processIGC's signature is over-strict (branded
+            //     // ClassName/Compno + a populated location). The legacy
+            //     // call site passed in raw strings and a possibly-null
+            //     // location and worked because the file was untyped — we
+            //     // mirror that behaviour with a single any-cast rather
+            //     // than pretend to know the real types here.
+            //     await (processIGC as any)(classid, pilot, undefined, date, url, https, db, () => undefined);
+            //     doCheckForOGNMatches = true;
+            // }
         }
     }
 
-    if (doCheckForOGNMatches) {
-        checkForOGNMatches(classid, date, db);
-    }
+    // if (doCheckForOGNMatches) {
+    //     checkForOGNMatches(classid, date, db);
+    // }
 
     if (rows) {
         await db.query(escape`
@@ -435,7 +468,6 @@ export class SoaringSpotScrapeSource implements ScoringSource {
 
             for (const raw of pilotsList) {
                 if (!raw.CN || raw.CN == '') {
-                    ctx.log(`skipping pilot row with no CN`, raw);
                     continue;
                 }
                 const compno = raw.CN as CompNo;
@@ -446,9 +478,11 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                 }
                 const classid = makeClassId(ctx.compid, normalizedClass) as ClassId;
                 const handicap = correctHandicap(raw.Handicap);
+                const className = normalizedClass.replace(/[_]/gi, ' ');
 
                 const pilot: PilotRecord = {
                     classid,
+                    className,
                     compno,
                     fullName: raw.Contestant,
                     club: raw.Club ?? null,
@@ -472,6 +506,11 @@ export class SoaringSpotScrapeSource implements ScoringSource {
     async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate): Promise<FetchResultsResult> {
         const observedClasses = new Set<ClassId>();
         const extractTask = /taskNormalize\((\{.+\}), \[.*\)/;
+        // Datecode "today in the competition's local tz" — we always
+        // compute per-day state in competition-local time so competitions
+        // that straddle UTC midnight don't tag briefings under yesterday's
+        // datecode.
+        const todayDatecode = localDatecode(ctx.tz);
 
         try {
             const body = await fetch(ctx.url + '/results').then((res) => res.text());
@@ -487,7 +526,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
 
                 const className = normalizedName.replace(/[_]/gi, ' ');
 
-                await upsertClass(ctx.db, ctx.log, ctx.compid, classid, className);
+                await upsertClass(ctx.db, ctx.log, ctx.compid, classid, className, todayDatecode);
 
                 const dates = findAll((x) => x.name == 'tr' && x.parent?.nodeType == 1 && (x.parent as any)?.name == 'tbody', result.children);
 
@@ -498,8 +537,14 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                         continue;
                     }
 
-                    const daynumber = textContent(cells[1])?.trim();
-                    if (daynumber == 'No task') {
+                    const daynumber = textContent(cells[1])?.trim() ?? '';
+                    // Find the task anchor anywhere inside cells[1] — the
+                    // old `cells[1].children[1]` index-lookup was fragile
+                    // when SoaringSpot changed wrapping whitespace.
+                    const taskAnchor = findOne((x) => x.name == 'a', cells[1].children ?? []);
+                    if (!taskAnchor) {
+                        // "No task" / "—" / any row with no task link at
+                        // all. Skip; there's nothing to scrape or cancel.
                         continue;
                     }
 
@@ -514,14 +559,20 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                         continue;
                     }
 
-                    // Task fetch
-                    const taskUrlAttr = getAttributeValue(toElement(cells[1].children[1]) as any, 'href');
+                    // Task fetch. If the cell text mentions "cancelled"
+                    // (e.g. the row says "Task 1 cancelled"), we trust that
+                    // regardless of whatever result_status the task JSON
+                    // ships — some sources show cancelled on the overview
+                    // row but still serve a normal task JSON.
+                    const cancelled = /cancell?ed|scrubbed/i.test(daynumber);
+                    const taskUrlAttr = getAttributeValue(taskAnchor as any, 'href');
                     if (taskUrlAttr) {
                         try {
                             const taskBody = await fetch('https://www.soaringspot.com' + taskUrlAttr).then((res) => res.text());
                             const task = taskBody.match(extractTask);
                             if (task) {
                                 const taskJSON = JSON.parse(task[1]);
+                                if (cancelled) taskJSON.result_status = 'cancelled';
                                 await upsertTaskAndLegs(ctx.db, ctx.log, classid, className, taskJSON);
                             }
                         } catch (e) {
@@ -529,8 +580,13 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                         }
                     }
 
+                    // A cancelled task has no daily results, so don't even
+                    // try to chase the (usually-missing) results link.
+                    if (cancelled) continue;
+
                     // Results fetch
-                    const resultUrlAttr = getAttributeValue(toElement(cells[3]?.children?.[1]) as any, 'href');
+                    const resultsAnchor = cells[3] ? findOne((x) => x.name == 'a', cells[3].children ?? []) : null;
+                    const resultUrlAttr = resultsAnchor ? getAttributeValue(resultsAnchor as any, 'href') : null;
                     if (resultUrlAttr) {
                         try {
                             const resBody = await fetch('https://www.soaringspot.com' + resultUrlAttr).then((res) => res.text());
@@ -553,5 +609,63 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         }
 
         return {observedClasses};
+    }
+
+    //
+    // discoverCompetitions — pull the SoaringSpot public index and return
+    // every competition currently listed under "Competitions in progress"
+    // or "Upcoming competitions". The scheduler diffs these against the
+    // existing `scoringsource` rows and inserts any newcomers so the
+    // normal heartbeat will start tracking them on the next tick.
+    //
+    // We deliberately skip the "Recent competitions" section — those have
+    // already ended and would only add dead comps the dead-comp cleanup
+    // would immediately reap.
+    //
+    async discoverCompetitions(ctx: DiscoverCtx): Promise<DiscoveredCompetition[]> {
+        const INDEX_URL = 'https://www.soaringspot.com/en_gb/';
+        const discovered: DiscoveredCompetition[] = [];
+        const seen = new Set<string>();
+
+        try {
+            const body = await fetch(INDEX_URL).then((res) => res.text());
+            const dom = htmlparser.parseDocument(body);
+
+            // One <div class="contest-list"> per section; each contains an
+            // <h2> heading + <ul><li><h3><a href="/en_gb/<slug>/">…</a>.
+            const contestLists = findAll(
+                (x) => x.name == 'div' && x.attribs?.class == 'contest-list', //
+                dom.children
+            );
+            const wantedHeading = /(in progress|upcoming)/i;
+
+            for (const list of contestLists) {
+                const h2 = findOne((x) => x.name == 'h2', list.children ?? []);
+                const heading = h2 ? textContent(h2).trim() : '';
+                if (!wantedHeading.test(heading)) continue;
+
+                const anchors = findAll(
+                    (x) => x.name == 'a' && (x.parent as any)?.name == 'h3', //
+                    list.children ?? []
+                );
+
+                for (const a of anchors) {
+                    const href = getAttributeValue(a as any, 'href');
+                    if (!href || !href.startsWith('/en_gb/')) continue;
+                    // Strip any trailing slash so compid derivation sees
+                    // a clean final path segment.
+                    const fullUrl = ('https://www.soaringspot.com' + href).replace(/\/$/, '');
+                    const compid = deriveSoaringspotCompId(fullUrl);
+                    if (!compid || seen.has(compid)) continue;
+                    seen.add(compid);
+                    discovered.push({compid, url: fullUrl});
+                }
+            }
+            ctx.log(`discoverCompetitions[soaringspotscrape]: found ${discovered.length} competition(s) across in-progress + upcoming`);
+        } catch (e) {
+            ctx.log(`discoverCompetitions[soaringspotscrape] failed:`, e);
+        }
+
+        return discovered;
     }
 }

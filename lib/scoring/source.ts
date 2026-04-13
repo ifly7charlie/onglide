@@ -68,6 +68,23 @@ export interface FetchResultsResult {
 export type SkipDayPredicate = (classid: ClassId, datecode: Datecode, dateISO: string) => boolean;
 
 //
+// DiscoverCtx / DiscoveredCompetition — handed to the (optional) daily
+// discovery hook. Each adapter exposing `discoverCompetitions()` returns
+// the (compid, url) pairs it currently sees as "in progress" or
+// "upcoming" on its upstream index page; the scheduler INSERT IGNOREs
+// them into `scoringsource` so the normal heartbeat picks them up.
+//
+export interface DiscoverCtx {
+    db: any;
+    log: (msg: string, ...args: unknown[]) => void;
+}
+
+export interface DiscoveredCompetition {
+    compid: string;
+    url: string;
+}
+
+//
 // The interface itself. Three idempotent methods; all may be called many
 // times on the same compid across a process's lifetime.
 //
@@ -89,6 +106,14 @@ export interface ScoringSource {
     // tasks/taskleg/contestday/pilotresult via the shared helpers; the
     // scheduler hands in a `skipDay` so old days are not refetched.
     fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate): Promise<FetchResultsResult>;
+
+    // Optional daily competition discovery. The scheduler calls this at
+    // most once per UTC day (at or after 05:00 UTC) and INSERT IGNOREs
+    // each returned `{compid, url}` into `scoringsource` so any new
+    // competitions become visible to the regular heartbeat on the next
+    // tick. Implementations that don't have a sensible global index can
+    // simply omit this method.
+    discoverCompetitions?(ctx: DiscoverCtx): Promise<DiscoveredCompetition[]>;
 }
 
 //

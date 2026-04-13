@@ -15,7 +15,8 @@ import {createHash} from 'crypto';
 import escape from 'sql-template-strings';
 
 import type {ClassId, CompNo} from '../source';
-import {findPilotByName} from './fai';
+import {enqueueFaiLookup} from './fai';
+import {FAI_SYNTHETIC_FLOOR} from './faiApi';
 import {downloadPictureCached} from './images';
 
 //
@@ -25,6 +26,7 @@ import {downloadPictureCached} from './images';
 //
 export interface PilotRecord {
     classid: ClassId;
+    className?: string; // human-readable class label, log-only
     compno: CompNo;
     fullName: string; // "First Last" — used for FAI search and gravatar
     club: string | null;
@@ -34,18 +36,32 @@ export interface PilotRecord {
     handicap: number;
 }
 
+// Helper used by the various per-pilot log lines so we never have to
+// stare at a raw classid hash. Falls back to the classid alone when no
+// name has been threaded through.
+function pilotTag(pilot: Pick<PilotRecord, 'classid' | 'className' | 'compno'>): string {
+    return pilot.className ? `${pilot.className}/${pilot.compno}` : `${pilot.classid}:${pilot.compno}`;
+}
+
 // Wrap a single fetch's worth of upserts so the adapter can hand the
 // observed set straight back to the scheduler for diff-based pruning.
+// Also remembers the human-readable class name per classid so that
+// downstream log lines (eg. pruneUnseenPilots) can show something more
+// useful than the hashed classid.
 export class PilotFetchAccumulator {
     readonly observed = new Map<ClassId, Set<CompNo>>();
+    readonly classNames = new Map<ClassId, string>();
 
-    record(classid: ClassId, compno: CompNo): void {
+    record(classid: ClassId, compno: CompNo, className?: string): void {
         let set = this.observed.get(classid);
         if (!set) {
             set = new Set();
             this.observed.set(classid, set);
         }
         set.add(compno);
+        if (className && !this.classNames.has(classid)) {
+            this.classNames.set(classid, className);
+        }
     }
 }
 
@@ -116,29 +132,53 @@ export async function upsertPilot(
 
     let fainumber = existing[0]?.fai ?? 0;
     const sigChanged = !existing.length || existing[0]?.idsig !== newSig;
-    const needsResolve = sigChanged || !fainumber || fainumber > 3000000;
+    const needsResolve = sigChanged || !fainumber || fainumber >= FAI_SYNTHETIC_FLOOR;
 
     if (needsResolve) {
         const country = pilot.country || existing[0]?.country || '';
-        const resolved = sigChanged ? await findPilotByName(db, log, pilot.fullName, country, pilot.classid, pilot.compno) : undefined;
-        if (resolved) {
-            fainumber = resolved;
-        } else if (!fainumber) {
+        // Hand the FAI lookup off to the background queue — it
+        // throttles to ~1/min so initial loads of a fresh competition
+        // don't hammer the ranking site. In the meantime we UPSERT
+        // with a synthetic id; the worker writes the real fai back
+        // later via a targeted UPDATE.
+        enqueueFaiLookup({
+            db,
+            log,
+            fullName: pilot.fullName,
+            country,
+            classid: pilot.classid,
+            className: pilot.className,
+            compno: pilot.compno
+        });
+        if (!fainumber) {
             // Synthetic id — reserved range starts at 3,000,000 and is
             // bumped per call so distinct unresolved pilots get distinct
             // ids within a single fetch.
-            fainumber = 3000000 + ++syntheticCounterRef.n;
+            fainumber = FAI_SYNTHETIC_FLOOR + ++syntheticCounterRef.n;
         }
     }
 
-    // fire-and-forget image refresh; downloadPictureCached has its own
-    // 24h debounce so this is a no-op on hot paths.
-    downloadPictureCached(db, log, pilot.classid, pilot.compno, {
-        igc_id: fainumber,
-        compno: pilot.fullName,
-        class: pilot.classid,
-        greg: pilot.greg ?? undefined
-    }).catch((e) => log(`image refresh failed for ${pilot.classid}:${pilot.compno}:`, e));
+    // Image refresh is now driven by the FAI background worker in
+    // shared/fai.ts — it calls downloadPictureCached with a directUrl
+    // pulled off the ranking row as soon as it resolves the pilot.
+    // Firing an extra call here with no FAI id yet just produces "image
+    // update failed" noise for every pilot on a fresh comp and poisons
+    // the 24h cache before the worker gets its chance, so we skip it.
+    //
+    // Existing pilots with a real fai (< FAI_SYNTHETIC_FLOOR) whose
+    // idsig hasn't changed go through downloadPictureCached with the
+    // `igc_id` context — the image worker looks up the authoritative
+    // URL stored on the previous successful download from the images
+    // table (`images.url`) and only falls back to the guessed
+    // `{id}.jpg` when that column is NULL.
+    if (fainumber && fainumber < FAI_SYNTHETIC_FLOOR) {
+        downloadPictureCached(db, log, pilot.classid, pilot.compno, {
+            igc_id: fainumber,
+            compno: pilot.fullName,
+            class: pilot.classid,
+            greg: pilot.greg ?? undefined
+        }).catch((e) => log(`image refresh failed for ${pilotTag(pilot)}:`, e));
+    }
 
     try {
         await db.query(escape`
@@ -218,9 +258,9 @@ export async function upsertPilot(
                 (greg),
                 registereddt = NOW()
         `);
-        accumulator.record(pilot.classid, pilot.compno);
+        accumulator.record(pilot.classid, pilot.compno, pilot.className);
     } catch (e) {
-        log(`pilot INSERT failed ${pilot.compno} ${pilot.classid}:`, e);
+        log(`pilot INSERT failed ${pilotTag(pilot)}:`, e);
     }
 }
 
@@ -253,10 +293,12 @@ export async function pruneUnseenPilots(
                 [classid, ...compnoList]
             );
             if (r?.affectedRows) {
-                log(`pruned ${r.affectedRows} unseen pilot(s) from class ${classid}`);
+                const label = accumulator.classNames.get(classid) ?? classid;
+                log(`pruned ${r.affectedRows} unseen pilot(s) from class ${label}`);
             }
         } catch (e) {
-            log(`pruneUnseenPilots failed for class ${classid}:`, e);
+            const label = accumulator.classNames.get(classid) ?? classid;
+            log(`pruneUnseenPilots failed for class ${label}:`, e);
         }
     }
 

@@ -131,6 +131,7 @@ CREATE TABLE `images` (
   `compno` char(4) NOT NULL,
   `image` mediumblob,
   `updated` int(11) NOT NULL,
+  `url` varchar(256) DEFAULT NULL COMMENT 'source URL of the last successful download, used as the preferred candidate on refresh',
   PRIMARY KEY (`class`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 

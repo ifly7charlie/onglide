@@ -18,6 +18,9 @@
 
 import {find as findTz} from 'geo-tz';
 
+import {toDateCode} from '../../datecode';
+import type {Datecode} from '../../types';
+
 // Wrapper around geo-tz: returns the IANA timezone name for a lat/lng.
 // geo-tz returns an array (in case the point is on a boundary); take the
 // first match.
@@ -118,6 +121,15 @@ export function nowInTz(tz: string, atEpochMs: number = Date.now()): LocalTime {
 // Convenience: 'YYYY-MM-DD' for "today" in the competition's tz.
 export function localDateISO(tz: string, atEpochMs: number = Date.now()): string {
     return nowInTz(tz, atEpochMs).iso;
+}
+
+// Convenience: 3-char Datecode for "today" in the competition's tz. Used
+// anywhere the scheduler or an adapter needs to write to `compstatus`,
+// `tasks`, `contestday` etc. — always computed in competition-local time
+// so comps straddling UTC midnight don't tag rows under the wrong day.
+export function localDatecode(tz: string, atEpochMs: number = Date.now()): Datecode {
+    const ln = nowInTz(tz, atEpochMs);
+    return toDateCode(new Date(Date.UTC(ln.year, ln.month - 1, ln.day)));
 }
 
 // Convenience: minute-of-day in the competition's tz (0..1439).

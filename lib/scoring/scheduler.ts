@@ -21,11 +21,10 @@
 
 import escape from 'sql-template-strings';
 
-import {toDateCode} from '../datecode';
 import type {ClassId, ScoringSource, SkipDayPredicate, SourceCtx} from './source';
 import {SourceRegistry} from './source';
-import {applyJitter, localDateISO, nowInTz, type LocalTime} from './shared/timezone';
-import {diffAndRemoveClasses} from './shared/classes';
+import {applyJitter, localDateISO, localDatecode, nowInTz, type LocalTime} from './shared/timezone';
+import {diffAndRemoveClasses, resetStaleCompStatus} from './shared/classes';
 import {pruneOldDays, dropDeadCompetition} from './shared/tasks';
 
 // ---------- intervals (rules 2/3/4) ----------
@@ -39,6 +38,10 @@ const INTERVAL_PILOTS_HOURLY_MS = 60 * 60 * 1000; // task day, before launch
 const STOP_RESULTS_LOCAL_MINUTE = 20 * 60; // 20:00 local — stop results checks
 const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
 const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: starttime - 30m
+
+// Daily SoaringSpot-style index discovery runs at or after this UTC
+// hour, plus once on startup regardless of wall-clock time.
+const DISCOVERY_UTC_HOUR = 5;
 
 // "After launch" cadence drops from fast→slow at +1h.
 const LAUNCH_FAST_TAIL_MS = 60 * 60 * 1000;
@@ -314,7 +317,7 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
         return;
     }
 
-    const todayDc = toDateCodeForLocal(localNow);
+    const todayDc = localDatecode(state.tz, localNow.epoch);
 
     // If the local date has rolled over, drop yesterday's first-launch
     // observations.
@@ -348,20 +351,10 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
     state.observations = observations;
 }
 
-// Approximate "today's datecode in the competition's local tz". The
-// existing toDateCode() helper takes a UTC date, so we synthesise a UTC
-// midnight using the local Y/M/D pieces — the resulting datecode is
-// stable enough for compstatus comparisons (which are coarse-grained,
-// per-day labels).
-function toDateCodeForLocal(localNow: LocalTime): string {
-    const utcMidnight = new Date(Date.UTC(localNow.year, localNow.month - 1, localNow.day));
-    return toDateCode(utcMidnight);
-}
-
 // ----- skip-day predicate (rule 1) -----
 
-function makeSkipDayPredicate(localNow: LocalTime, anyTaskToday: boolean): SkipDayPredicate {
-    const todayDc = toDateCodeForLocal(localNow);
+function makeSkipDayPredicate(tz: string, localNow: LocalTime, anyTaskToday: boolean): SkipDayPredicate {
+    const todayDc = localDatecode(tz, localNow.epoch);
     const past10am = localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE;
     return (_classid, datecode, _dateISO) => {
         if (datecode === todayDc) return false;
@@ -382,6 +375,12 @@ export interface SchedulerOptions {
 
 const state = new Map<string, CompState>();
 
+// Per-adapter bookkeeping for the daily discovery hook. `null` means
+// "never run yet in this process" — the first heartbeat always fires
+// discovery so a freshly-started daemon picks up new competitions
+// immediately instead of waiting until 05:00 UTC.
+const lastDiscoveryUtcDate = new Map<string, string>();
+
 export async function runScheduler(opts: SchedulerOptions): Promise<void> {
     const log = opts.log ?? ((msg: string, ...args: unknown[]) => console.log(msg, ...args));
     const interval = opts.heartbeatMs ?? HEARTBEAT_MS;
@@ -398,6 +397,11 @@ export async function runScheduler(opts: SchedulerOptions): Promise<void> {
 }
 
 async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, ...args: unknown[]) => void): Promise<void> {
+    // Daily competition discovery. Runs once at process startup (so a
+    // fresh daemon picks up new comps immediately), and thereafter once
+    // per UTC day on the first heartbeat at/after 05:00 UTC.
+    await maybeRunDiscovery(db, registry, log);
+
     let sources: any[] = [];
     try {
         sources = (await db.query(escape`SELECT * FROM scoringsource WHERE type IN (${registry.types()})`)) as any[];
@@ -414,6 +418,69 @@ async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, .
             await processCompetition(db, adapter, src, log);
         } catch (e) {
             log(`scheduler: competition ${src.compid} failed:`, e);
+        }
+    }
+}
+
+//
+// maybeRunDiscovery — iterate the adapters that implement the optional
+// `discoverCompetitions` hook and INSERT IGNORE any newly-listed
+// competitions into `scoringsource` so the next heartbeat pass picks
+// them up naturally. Per-adapter gating lets a registry with mixed
+// sources schedule each source's discovery independently.
+//
+async function maybeRunDiscovery(
+    db: any, //
+    registry: SourceRegistry,
+    log: (msg: string, ...args: unknown[]) => void
+): Promise<void> {
+    const now = new Date();
+    const utcDate = now.toISOString().substring(0, 10);
+    const utcHour = now.getUTCHours();
+
+    for (const type of registry.types()) {
+        const adapter = registry.get(type);
+        if (!adapter?.discoverCompetitions) continue;
+
+        const last = lastDiscoveryUtcDate.get(type);
+        if (last != null) {
+            // Not a first run — require both a new UTC day AND to be
+            // past the 05:00 UTC trigger hour before firing again.
+            if (last === utcDate) continue;
+            if (utcHour < DISCOVERY_UTC_HOUR) continue;
+        }
+        lastDiscoveryUtcDate.set(type, utcDate);
+
+        log(`scheduler: running discovery for type=${type}`);
+        let discovered: {compid: string; url: string}[] = [];
+        try {
+            discovered = await adapter.discoverCompetitions({db, log});
+        } catch (e) {
+            log(`scheduler: discovery[${type}] threw:`, e);
+            continue;
+        }
+
+        let added = 0;
+        for (const d of discovered) {
+            if (!d.compid || !d.url) continue;
+            try {
+                const existing = (await db.query(escape`
+                    SELECT compid FROM scoringsource
+                    WHERE compid = ${d.compid} AND type = ${type}
+                `)) as any[];
+                if (existing?.length) continue;
+                await db.query(escape`
+                    INSERT IGNORE INTO scoringsource (compid, type, url)
+                    VALUES (${d.compid}, ${type}, ${d.url})
+                `);
+                log(`scheduler: discovered new competition ${d.compid} (${type}) → ${d.url}`);
+                added++;
+            } catch (e) {
+                log(`scheduler: discovery insert failed for ${d.compid}:`, e);
+            }
+        }
+        if (!added) {
+            log(`scheduler: discovery[${type}] returned ${discovered.length}, none new`);
         }
     }
 }
@@ -482,7 +549,7 @@ async function processCompetition(
     }
 
     if (decisions.fetchResults) {
-        const skipDay = makeSkipDayPredicate(localNow, anyTaskToday);
+        const skipDay = makeSkipDayPredicate(st.tz, localNow, anyTaskToday);
         try {
             const result = await adapter.fetchResultsAndTasks(ctx, skipDay);
             await diffAndRemoveClasses(db, ctx.log, src.compid, result.observedClasses);
@@ -498,12 +565,18 @@ async function processCompetition(
     }
 
     if (decisions.pruneOldDays) {
+        const todayDc = localDatecode(st.tz, localNow.epoch);
         try {
-            await pruneOldDays(db, ctx.log, src.compid, toDateCodeForLocal(localNow));
-            st.lastPruneDay = localNow.iso;
+            await pruneOldDays(db, ctx.log, src.compid, todayDc);
         } catch (e) {
             ctx.log('pruneOldDays threw:', e);
         }
+        try {
+            await resetStaleCompStatus(db, ctx.log, src.compid, todayDc);
+        } catch (e) {
+            ctx.log('resetStaleCompStatus threw:', e);
+        }
+        st.lastPruneDay = localNow.iso;
     }
 
     if (decisions.dropDeadComp) {

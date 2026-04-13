@@ -24,8 +24,20 @@
 import escape from 'sql-template-strings';
 
 import type {ClassId, CompNo} from '../source';
+import {FAI_SYNTHETIC_FLOOR} from './faiApi';
+import {ThrottledQueue} from './throttledQueue';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// Throttle window for the background image-download worker. A fresh
+// competition with 100 pilots used to fire 100 near-simultaneous
+// downloads at the moment upsertPilot ran; the queue below drains them
+// one at a time, jittered across this window, so we stay polite to
+// whichever host the picture URLs resolve to (usually but not always
+// rankingdata.fai.org). Order of magnitude picked to finish a ~100-pilot
+// comp in ~15 minutes, well within the first scoring heartbeat cycle.
+const IMAGE_THROTTLE_MIN_MS = 5 * 1000;
+const IMAGE_THROTTLE_MAX_MS = 15 * 1000;
 
 // Memoised "we already looked at this pilot in this process within the
 // last 24h". Keyed `class:compno`. Values are epoch ms of last check.
@@ -34,6 +46,34 @@ const memCache = new Map<string, number>();
 function memKey(classid: ClassId, compno: CompNo): string {
     return `${classid}:${compno}`;
 }
+
+//
+// Background image-download queue. Dedup by `class:compno` so that
+// re-firing upsertPilot while a download is already queued is a no-op.
+// Drained sequentially by the shared ThrottledQueue helper.
+//
+interface ImageRequest {
+    db: any;
+    log: (msg: string, ...args: unknown[]) => void;
+    classid: ClassId;
+    compno: CompNo;
+    context: PictureContext;
+}
+
+const imageQueue = new ThrottledQueue<ImageRequest>({
+    name: 'image worker',
+    log: (...args) => console.log(...args),
+    minMs: IMAGE_THROTTLE_MIN_MS,
+    maxMs: IMAGE_THROTTLE_MAX_MS,
+    keyOf: (req) => memKey(req.classid, req.compno),
+    handle: async (req) => {
+        try {
+            await performImageDownload(req.db, req.log, req.classid, req.compno, req.context);
+        } catch (e) {
+            req.log(`image worker: download failed for ${req.classid}:${req.compno}:`, e);
+        }
+    }
+});
 
 //
 // Context handed to the URL templater. The `pictureurl` rows in
@@ -51,12 +91,40 @@ export interface PictureContext {
 }
 
 //
-// downloadPictureCached — cache-friendly entrypoint. Returns silently if
-// the cache is fresh, otherwise tries each `pictureurl` template (or the
-// supplied `directUrl`) until one succeeds. Errors never throw out — a
-// failed image is not a fatal scrape error.
+// downloadPictureCached — public entrypoint. Resolves immediately after
+// enqueueing; the actual HTTP fetch happens in a background worker that
+// drains the queue one at a time with a jittered throttle so we don't
+// hammer whichever host the configured `pictureurl` templates resolve
+// to. Dedup is by `class:compno`, so re-calling during the worker's
+// drain window is a no-op.
+//
+// Errors never throw out — a failed image is not a fatal scrape error,
+// and the worker loop logs and moves on.
 //
 export async function downloadPictureCached(
+    db: any, //
+    log: (msg: string, ...args: unknown[]) => void,
+    classid: ClassId,
+    compno: CompNo,
+    context: PictureContext
+): Promise<void> {
+    // Cheap in-memory short-circuit so a repeat enqueue during the same
+    // process window never even makes it into the queue. The DB and
+    // HTTP layers of the cache are applied inside the worker's handler
+    // so both enqueue paths see a consistent view.
+    const memHit = memCache.get(memKey(classid, compno));
+    if (memHit && Date.now() - memHit < ONE_DAY_MS) {
+        return;
+    }
+    imageQueue.enqueue({db, log, classid, compno, context});
+}
+
+//
+// performImageDownload — the actual cache + fetch work that used to live
+// inline in downloadPictureCached. Called from the worker handler above,
+// one item at a time.
+//
+async function performImageDownload(
     db: any, //
     log: (msg: string, ...args: unknown[]) => void,
     classid: ClassId,
@@ -69,38 +137,57 @@ export async function downloadPictureCached(
         return;
     }
 
-    // Layer 2 — DB row freshness check. Mirrors the previous behaviour
-    // exactly: only SELECT rows that have a non-NULL image AND were
-    // touched within the last 24h. NULL rows still trigger a re-attempt
-    // (mediated by the in-memory cache above).
+    // Layer 2 — DB row freshness check. Also reads the stored `url`
+    // column so subsequent refreshes hit exactly the URL we last
+    // successfully downloaded from instead of guessing.
+    let storedUrl: string | null = null;
     try {
-        const lastUpdated = (
+        const row = (
             await db.query(escape`
                 SELECT
-                    updated
+                    url,
+                    image IS NOT NULL AS hasImage,
+                    unix_timestamp() - updated AS age
                 FROM
                     images
                 WHERE
                     class = ${classid}
                     AND compno = ${compno}
-                    AND image IS NOT NULL
-                    AND unix_timestamp () - updated < 86400
             `)
         )?.[0];
 
-        if (lastUpdated) {
+        if (row?.hasImage && row?.age != null && Number(row.age) < 86400) {
             memCache.set(memKey(classid, compno), Date.now());
             return;
         }
+        if (row?.url) storedUrl = String(row.url);
     } catch (e) {
         log(`images cache check failed for ${classid}:${compno}:`, e);
     }
 
-    // Layer 3 — try the configured templates (or the explicit directUrl).
+    // Layer 3 — ordered candidate list.
+    //   1. explicit directUrl from the caller (FAI resolver path)
+    //   2. previously-successful URL we already stored on this row
+    //   3. guessed FAI `{id}.jpg` fallback — only when no real URL is
+    //      known yet AND we have a resolved FAI id
+    //   4. configured `scoringsource.pictureurl` templates
     const candidates: string[] = [];
     if (context.directUrl) candidates.push(context.directUrl);
+    if (storedUrl && !candidates.includes(storedUrl)) candidates.push(storedUrl);
 
-    if (!context.directUrl) {
+    if (!context.directUrl && !storedUrl) {
+        // Built-in FAI fallback: if the context has a real FAI id
+        // (anything below the synthetic floor), try the standard pilot
+        // photo URL on rankingdata.fai.org. This means a freshly-
+        // installed Onglide with no `pictureurl` rows still gets photos
+        // for every pilot the FAI resolver placed in the real-id range.
+        // A 404 is handled cleanly by fetchAndStore and the next
+        // successful download replaces this guess with the real URL
+        // in the `images.url` column.
+        if (context.igc_id && context.igc_id > 0 && context.igc_id < FAI_SYNTHETIC_FLOOR) {
+            candidates.push(`https://rankingdata.fai.org/PilotImages/${context.igc_id}.jpg`);
+        }
+
         try {
             const urlRows = (await db.query(escape`
                 SELECT
@@ -136,6 +223,9 @@ export async function downloadPictureCached(
     if (!success) {
         log(`${classid}:${compno}: image update failed`);
         try {
+            // Failed-state upsert leaves the `url` column alone — a
+            // previously-known good URL shouldn't be wiped just because
+            // one retry failed.
             await db.query(escape`
                 INSERT INTO
                     images (class, compno, image, updated)
@@ -181,22 +271,29 @@ async function fetchAndStore(
             log(`${classid}:${compno}: ${url} returned no data`);
             return false;
         }
+        // Store the successful source URL alongside the blob so a
+        // subsequent refresh reuses the known-good URL instead of
+        // re-walking the candidate list.
         await db.query(escape`
             INSERT INTO
-                images (class, compno, image, updated)
+                images (class, compno, image, updated, url)
             VALUES
                 (
                     ${classid},
                     ${compno},
                     ${data},
-                    unix_timestamp ()
+                    unix_timestamp (),
+                    ${url}
                 ) ON DUPLICATE KEY
             UPDATE image =
             VALUES
                 (image),
                 updated =
             VALUES
-                (updated)
+                (updated),
+                url =
+            VALUES
+                (url)
         `);
         return true;
     } catch (e) {
