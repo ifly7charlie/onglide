@@ -62,7 +62,6 @@ import {createHash, randomBytes, createHmac} from 'crypto';
 
 // Communication with the workers
 import {BroadcastChannel} from 'node:worker_threads';
-let unknownChannel: BroadcastChannel | undefined;
 let aprsController: AprsController | undefined;
 
 // The authoritative list of airfields known to the APRS worker. The filter
@@ -96,15 +95,22 @@ let scoreFrequency = 60;
 
 process.setMaxListeners(35);
 
-// Which competition this process is currently serving. Set from the COMP_ID env
-// var, or picked from the first row of the competition table at startup. A future
-// refactor will remove this restriction and let a single OGN process track every
-// competition in the shared database (each class using its own per-competition
-// location/timezone).
-let compid: string;
+// Per-competition state. Channels, gliders, scoreDb, and the APRS worker
+// remain process-wide, but everything that varies across comps — location,
+// timezone, internal name, the set of channel keys this comp owns — lives
+// in a CompetitionContext. PR 4 restructures but stays single-comp; PR 5
+// walks this map to support multiple concurrent comps.
+interface CompetitionContext {
+    compid: string;
+    internalName: string;
+    location: AirfieldLocation;
+    ownedChannels: Set<ChannelName>;
+    unknownChannel?: BroadcastChannel;
+    lastDatecode?: Datecode;
+    state: 'starting' | 'running' | 'stopping' | 'stopped';
+}
 
-// Where is the comp based
-let location: AirfieldLocation;
+const contexts: Record<string, CompetitionContext> = {};
 
 interface Statistics {
     periodStart: Epoch;
@@ -297,62 +303,71 @@ async function main() {
     // and we do a LOT of them
     initialiseInsights();
 
-    const checkReady = async (): Promise<boolean> => {
+    const checkReady = async (): Promise<CompetitionContext | null> => { // (competition lookup)
         // Determine which competition this OGN process is serving. Either
         // COMP_ID is set explicitly, or fall back to the first competition row.
         const envCompId = process.env.COMP_ID;
+        let location: AirfieldLocation;
         if (envCompId) {
-            compid = envCompId;
-            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end, flightstats FROM competition WHERE compid = ?', [compid]))?.[0];
+            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end, flightstats FROM competition WHERE compid = ?', [envCompId]))?.[0];
         } else {
             location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end, flightstats FROM competition LIMIT 1'))?.[0];
-            if (location) {
-                compid = (location as any).compid;
-            }
         }
 
         if (!location) {
             console.error('no competition entry in the database, please confirm soaringspot integration is working');
             console.table(await db.query<any[]>('SELECT * FROM competition'));
-            return false;
+            return null;
         }
 
+        const compid = (location as any).compid as string;
         console.log(`OGN running for compid=${compid}`);
 
         // Only consider classes/compstatus rows that belong to this competition
         const classesPresent = await db.query<any[]>('SELECT cs.class FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?', [compid]);
         if (!classesPresent?.length) {
             console.error(`no classes configured for compid=${compid}`);
-            return false;
+            return null;
         }
+
+        location.point = point([location.lng, location.lat]);
+        location.officialDelay = getDelay();
+        location.tzoffset = parseInt(location.tzoffset as unknown as string);
+
+        const competition: CompetitionContext = {
+            compid,
+            internalName: location.name.replace(/[^a-z]/gi, '').substring(0, 10),
+            location,
+            ownedChannels: new Set(),
+            state: 'starting'
+        };
 
         if (!replayBase && !(await db.query<any[]>('SELECT MAX(cs.datecode) as datecode FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?', [compid]))?.[0]?.datecode) {
             console.warn('no current date found for competition');
 
-            const currentExpectedDateCode = await getDCode();
+            const currentExpectedDateCode = await getDCode(competition);
             if (toDateCode(new Date(location.start)) > currentExpectedDateCode || toDateCode(new Date(location.end)) < currentExpectedDateCode) {
                 console.error(
                     `Today  ${currentExpectedDateCode}/${fromDateCode(currentExpectedDateCode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
                         location.end
                     } and no task configured - not tracking`
                 );
-                return false;
+                return null;
             }
             console.info(`Today  ${currentExpectedDateCode}/${fromDateCode(currentExpectedDateCode)} is inside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${location.end}`);
         }
-        return true;
+        return competition;
     };
 
-    while (!(await checkReady())) {
+    let competition: CompetitionContext | null = null;
+    while (!(competition = await checkReady())) {
         await setTimeoutPromise(60000);
     }
+    contexts[competition.compid] = competition;
 
-    location.point = point([location.lng, location.lat]);
-    location.officialDelay = getDelay();
-    location.tzoffset = parseInt(location.tzoffset as unknown as string);
-
-    // Save the tz for use
-    setSiteTz(location.tz);
+    // Save the tz for use (single-comp only; multi-comp tz handling is
+    // a known landmine — see plan §9).
+    setSiteTz(competition.location.tz);
 
     console.log('Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL);
     console.log(`db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}`);
@@ -360,30 +375,29 @@ async function main() {
 
     // Set the altitude offset for launching, this will take time to return
     // so there is a period when location altitude will be wrong for launches
-    getElevationOffset(location.lat, location.lng, (agl) => {
-        location.altitude = agl;
+    getElevationOffset(competition.location.lat, competition.location.lng, (agl) => {
+        competition!.location.altitude = agl;
         console.log('SITE:' + agl);
     });
 
     // Download the list of trackers so we know who to look for
     await updateDDB();
 
-    // Generate a short internal name
-    const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
-
     aprsController = new AprsController({airfields: []});
-    setAirfields([{compid, lt: location.lat, lg: location.lng}]);
+    setAirfields([{compid: competition.compid, lt: competition.location.lat, lg: competition.location.lng}]);
 
     {
-        const datecode = await getDCode();
-        getSunset(datecode);
-        getProposedScoreId();
-        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${internalName}-${datecode}.txt`, {flags: 'a'});
+        const datecode = await getDCode(competition);
+        getSunset(competition, datecode);
+        getProposedScoreId(competition);
+        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${competition.internalName}-${datecode}.txt`, {flags: 'a'});
         aprsController?.datecode(datecode);
-        await updateClasses(internalName, datecode);
-        await updateTrackers(datecode);
-        await updateTasks();
-        await finaliseScoreId();
+        await updateClasses(competition, datecode);
+        await updateTrackers(competition, datecode);
+        await updateTasks(competition);
+        await finaliseScoreId(competition);
+        rebuildAprsFilter();
+        competition.state = 'running';
     }
 
     if ('PM2_HOME' in process.env || existsSync('.docker')) {
@@ -591,21 +605,27 @@ async function main() {
     //    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
 
     //
-    // Update competition information
+    // Update competition information - iterates every active context.
+    // PR 5 flips this into the discovery loop that creates and destroys
+    // contexts as comps come and go; today the map always has one entry.
     setInterval(async function () {
-        const datecode = await getDCode();
-        const oldStream = userLogStream;
-        userLogStream = null;
-        oldStream?.end(() => {
-            userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${datecode}.txt`, {flags: 'a'});
-        });
-        getSunset(datecode);
-        getProposedScoreId();
-        aprsController?.datecode(datecode);
-        await updateClasses(internalName, datecode);
-        await updateTrackers(datecode);
-        await updateTasks();
-        await finaliseScoreId();
+        for (const competition of Object.values(contexts)) {
+            if (competition.state === 'stopping' || competition.state === 'stopped') continue;
+            const datecode = await getDCode(competition);
+            const oldStream = userLogStream;
+            userLogStream = null;
+            oldStream?.end(() => {
+                userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${datecode}.txt`, {flags: 'a'});
+            });
+            getSunset(competition, datecode);
+            getProposedScoreId(competition);
+            aprsController?.datecode(datecode);
+            await updateClasses(competition, datecode);
+            await updateTrackers(competition, datecode);
+            await updateTasks(competition);
+            await finaliseScoreId(competition);
+        }
+        rebuildAprsFilter();
     }, 60 * 1000);
 }
 
@@ -621,6 +641,10 @@ process.on('SIGTERM', handleExit);
 // and then kill of any timers
 async function handleExit(signal: string) {
     console.log(`received signal: ${signal}`);
+    for (const competition of Object.values(contexts)) {
+        competition.state = 'stopping';
+        competition.unknownChannel?.close();
+    }
     scoreDb?.close();
     aprsController?.shutdown();
     userLogStream?.end();
@@ -628,12 +652,13 @@ async function handleExit(signal: string) {
 }
 main().then(() => console.log('Started'));
 
-function getSunset(datecode: Datecode) {
-    const localMidday = new Date(fromDateCode(datecode)).getTime() - (location.tzoffset - 12 * 3600) * 1000;
-    const sunset = Math.round(SunCalc.getTimes(new Date(localMidday), location.lat, location.lng).night.getTime() / 1000) as Epoch;
-    if (sunset != location.sunset) {
-        console.log(`Site sunset: ${d(sunset)} (site:${dateToText(sunset)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch)})`);
-        location.sunset = sunset;
+function getSunset(competition: CompetitionContext, datecode: Datecode) {
+    const loc = competition.location;
+    const localMidday = new Date(fromDateCode(datecode)).getTime() - (loc.tzoffset - 12 * 3600) * 1000;
+    const sunset = Math.round(SunCalc.getTimes(new Date(localMidday), loc.lat, loc.lng).night.getTime() / 1000) as Epoch;
+    if (sunset != loc.sunset) {
+        console.log(`${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch)})`);
+        loc.sunset = sunset;
     }
 }
 
@@ -652,14 +677,14 @@ function compShort(compid: string): string {
 
 //
 // Get current date code
-async function getDCode(): Promise<Datecode> {
+async function getDCode(competition: CompetitionContext): Promise<Datecode> {
     if (replayBase) {
         return getReplayDatecode();
-        toDateCode(new Date(replayBase * 1000));
     }
 
+    const tzoffset = competition.location.tzoffset;
     const now = new Date();
-    const nowLocalMs = now.getTime() + location.tzoffset * 1000;
+    const nowLocalMs = now.getTime() + tzoffset * 1000;
 
     const local10am = new Date(
         now.getFullYear(),
@@ -673,8 +698,8 @@ async function getDCode(): Promise<Datecode> {
     if (nowLocalMs < local10am.getTime()) {
         local10am.setDate(local10am.getDate() - 1);
     }
-    const utcTime = local10am.getTime() - location.tzoffset * 1000;
-    console.log('DateCode at 10am local:', utcTime, new Date(utcTime).toISOString());
+    const utcTime = local10am.getTime() - tzoffset * 1000;
+    console.log(`${compShort(competition.compid)} datecode at 10am local:`, utcTime, new Date(utcTime).toISOString());
     return toDateCode(new Date(utcTime));
 }
 
@@ -685,22 +710,24 @@ let scoreDb: ClassicLevel<Compno, string> | undefined = undefined;
 
 //
 // Fetch the trackers from the database
-async function updateClasses(internalName: string, datecode: Datecode) {
-    console.log(`updateClasses(${internalName}, ${datecode})`);
+async function updateClasses(competition: CompetitionContext, datecode: Datecode) {
+    console.log(`updateClasses(${competition.internalName}, ${datecode})`);
 
     if (!scoreDb) {
-        const path = `${process.env.DB_PATH ?? './db/'}/scores-${internalName}.db`;
+        const path = `${process.env.DB_PATH ?? './db/'}/scores-${competition.internalName}.db`;
         console.log(`opening scoreDB ${path}`);
         scoreDb = new ClassicLevel(path);
         await scoreDb.open().catch((e) => console.log(e));
     }
+
+    const location = competition.location;
 
     // Fetch the trackers from the database and the channel they are supposed to be in.
     // Scoped to this OGN process's compid so we don't pick up other competitions sharing
     // the same database.
     const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string; classname: string}[]>(
         'SELECT cs.class, cs.datecode, cl.compid, cl.classname FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?',
-        [compid]
+        [competition.compid]
     );
 
     // Make sure the class structure is correct, this won't touch existing connections
@@ -830,33 +857,40 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         // Prep for scoring
         if (!channel.scoring) {
             channel.scoring = new ScoringController({className: channel.className, datecode: channel.datecode, airfield: location, flightstats: (location as any)?.flightstats === 'Y'});
+            competition.ownedChannels.add(cname as ChannelName);
             channel.scoring.hookScore(({compno, score, recentStart, t, scoreId, migrateFrom}) => sendScore(channel, compno, score, recentStart, scoreId, t, migrateFrom));
         }
     }
 
     // Any channels left here are old and can be removed - the current ones are moved from channels
-    // and added to newchannels
-    if (Object.keys(channels).length) {
-        console.log('closing channels: ', Object.values(channels).map((c) => c.displayName).join(','));
-        Object.values(channels).forEach((channel) => {
+    // and added to newchannels. Only touch channels belonging to this competition.
+    const stale = Object.values(channels).filter((c) => c.compid === competition.compid && !newchannels[channelName(c.className, c.datecode)]);
+    if (stale.length) {
+        console.log('closing channels: ', stale.map((c) => c.displayName).join(','));
+        stale.forEach((channel) => {
             channel.broadcastChannel?.close();
             channel.scoring?.shutdown();
+            delete channels[channelName(channel.className, channel.datecode)];
+            competition.ownedChannels.delete(channelName(channel.className, channel.datecode));
         });
-        unknownChannel?.close();
-        unknownChannel = undefined;
+        competition.unknownChannel?.close();
+        competition.unknownChannel = undefined;
     }
 
     // Subscribe to the feed of unknown gliders for this competition. The
     // APRS worker dispatches unknowns to Unknown_<compid> based on the
     // nearest airfield, so we listen on the per-compid channel.
-    if (!unknownChannel) {
-        unknownChannel = new BroadcastChannel('Unknown_' + compid);
-        unknownChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(ev.data, datecode)) as any;
+    if (!competition.unknownChannel) {
+        competition.unknownChannel = new BroadcastChannel('Unknown_' + competition.compid);
+        competition.unknownChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(competition, ev.data, datecode)) as any;
     }
 
-    // replace (do we need to close the old ones?)
-    channels = newchannels;
-    console.log(`Updated Channels: ${_map(channels, (c) => `${c.displayName}${c.datecode}`).join(',')}`);
+    // Merge the new channels for this competition into the global map. Channels
+    // from other competitions (if any) are left alone.
+    for (const [cname, channel] of Object.entries(newchannels)) {
+        channels[cname as ChannelName] = channel;
+    }
+    console.log(`${compShort(competition.compid)} channels: ${_map(newchannels, (c) => `${c.displayName}${c.datecode}`).join(',')}`);
 
     if (!Object.keys(newchannels).length && scoreDb) {
         console.log('closing scoredb, no channels');
@@ -865,7 +899,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     }
 }
 
-async function updateTasks(): Promise<void> {
+async function updateTasks(competition: CompetitionContext): Promise<void> {
     // Get the details for the task
     const getTask = async (channel: Channel, maxHandicap: number) => {
         const className = channel.className;
@@ -947,8 +981,9 @@ async function updateTasks(): Promise<void> {
         return task;
     };
 
-    // Go through all the channels and check for a change of task
+    // Go through this competition's channels and check for a change of task
     for (const channel of Object.values(channels)) {
+        if (channel.compid !== competition.compid) continue;
         //
         // Determine max handicap (dh)
         const maxHandicap = Object.values(gliders)
@@ -990,14 +1025,15 @@ async function updateTasks(): Promise<void> {
             }
         }
     }
+}
 
-    // rebuildAprsFilter - walks the active channels for task bboxes and
-    // the currentAirfields list for airfield-radius fallbacks so pre-task
-    // ground traffic is still heard. Airfields whose 30km radius is
-    // already fully inside the (10km-expanded) task bbox are dropped as
-    // redundant. When there is neither task nor airfield we emit r/0/0/1
-    // — a 1km null-island placeholder that matches nothing, to keep the
-    // worker idle rather than open the filter up.
+// Walks the active channels for task bboxes and the currentAirfields list
+// for airfield-radius fallbacks so pre-task ground traffic is still heard.
+// Airfields whose 30km radius is already fully inside the (10km-expanded)
+// task bbox are dropped as redundant. When there is neither task nor
+// airfield we emit r/0/0/1 — a 1km null-island placeholder that matches
+// nothing, to keep the worker idle rather than open the filter up.
+function rebuildAprsFilter() {
     const AIRFIELD_RADIUS_KM = 30;
     const withTasks = Object.values(channels).filter((c) => c.task);
     const boxes = withTasks.map((c) => taskBbox(c.task!)).filter((b): b is Bbox => b !== null);
@@ -1044,7 +1080,9 @@ interface CTrackerRow {
     scoredStatus: 'H' | 'F' | 'S';
 }
 
-async function updateTrackers(datecode: Datecode) {
+async function updateTrackers(competition: CompetitionContext, datecode: Datecode) {
+    const {compid} = competition;
+    const location = competition.location;
     // Now get the trackers
     // Scoped to this OGN process's compid so we don't pick up pilots from
     // other competitions sharing the same database. updateClasses applies
@@ -1258,8 +1296,9 @@ async function updateTrackers(datecode: Datecode) {
     });
 }
 
-async function finaliseScoreId() {
+async function finaliseScoreId(competition: CompetitionContext) {
     for (const channel of Object.values(channels)) {
+        if (channel.compid !== competition.compid) continue;
         if (channel.scoreIdUpdateRequired) {
             channel.scoring?.updateScoreId(channel.scoreId, channel.proposedScoreId);
             channel.scoreId = channel.proposedScoreId;
@@ -1267,8 +1306,9 @@ async function finaliseScoreId() {
         }
     }
 }
-function getProposedScoreId() {
+function getProposedScoreId(competition: CompetitionContext) {
     for (const channel of Object.values(channels)) {
+        if (channel.compid !== competition.compid) continue;
         channel.proposedScoreId = (Math.random() * 10000).toFixed(1);
         channel.scoreIdUpdateRequired = false;
     }
@@ -1732,7 +1772,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
 
 // If we don't know the glider then we need to figure out who it is and make sure we
 // process it properly
-function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void {
+function identifyUnknownGlider(competition: CompetitionContext, data: PositionMessage, datecode: Datecode): void {
     //
     // We will get the flarm id in 'c' as there is no known compno
     const flarmId = data.c;
@@ -1756,10 +1796,14 @@ function identifyUnknownGlider(data: PositionMessage, datecode: Datecode): void 
         return;
     }
 
-    // This works by checking what is configured in the ddb
+    // This works by checking what is configured in the ddb. Only consider
+    // gliders that belong to this competition — with multi-comp we'll see
+    // the nearest-airfield's Unknown_<compid> channel so the glider really
+    // must match a pilot entered in this competition, not a sibling one.
     if (ddbf && (ddbf.cn != '' || ddbf.registration != '')) {
         // Find all our gliders that could match, may be 0, 1 or possibly 2
         const matches = _filter(gliders, (x) => {
+            if (x.compid !== competition.compid) return false;
             return (!x.duplicate && ddbf.cn == x.compno) || (ddbf.registration == x.greg && (x.greg || '') != '');
         });
 
