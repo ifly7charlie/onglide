@@ -598,11 +598,36 @@ main().then(() => console.log('Started'));
 // grace for overnight replay / scoring jobs.
 async function discoverCompetitions(): Promise<any[]> {
     const envCompId = process.env.COMP_ID;
+    // Compare against the competition's LOCAL date, not the DB server's.
+    // tzoffset is seconds east of UTC (same convention as getDCode uses);
+    // DATE(UTC_TIMESTAMP() + INTERVAL c.tzoffset SECOND) gives today in
+    // the comp's own local time. Without this, an evening flight on the
+    // last day of a westbound comp could be dropped when DB-server-UTC
+    // rolls over, and a morning flight on day 1 of an eastbound comp
+    // could be delayed until DB-server-UTC catches up.
+    //
+    // End is strict: once the last local day is past, the comp is done.
+    //
+    // Start is normally strict too, with one exception: if any class in
+    // the comp already has a task wired up for its current scoring
+    // datecode (tasks JOIN compstatus on datecode, flown='Y') then
+    // tracking begins even if start is still in the future — this
+    // supports pre-comp practice days where a task is already set. The
+    // exception does NOT apply after end.
     const base = `SELECT c.compid, c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats
                   FROM competition c
                   WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)
-                    AND c.end   >= DATE_SUB(CURDATE(), INTERVAL 2 DAY)
-                    AND c.start <= DATE_ADD(CURDATE(), INTERVAL 1 DAY)`;
+                    AND c.end >= DATE(UTC_TIMESTAMP() + INTERVAL c.tzoffset SECOND)
+                    AND (
+                        c.start <= DATE(UTC_TIMESTAMP() + INTERVAL c.tzoffset SECOND)
+                        OR EXISTS (
+                            SELECT 1
+                            FROM tasks t
+                            JOIN compstatus cs ON cs.class = t.class AND cs.datecode = t.datecode
+                            JOIN classes cl2 ON cl2.class = t.class
+                            WHERE cl2.compid = c.compid AND t.flown = 'Y'
+                        )
+                    )`;
     if (envCompId) {
         return db.query<any[]>(base + ' AND c.compid = ?', [envCompId]);
     }
