@@ -369,11 +369,24 @@ export class AprsController {
         };
         this.worker.postMessage?.(command);
     }
-    shutdown() {
-        const command: AprsCommandShutdown = {
-            action: AprsCommandEnum.shutdown
-        };
-        this.worker.postMessage?.(command);
+    // Send the shutdown command to the worker and return a promise that
+    // resolves when the worker process has actually exited, or after a
+    // 5-second timeout (so teardown doesn't hang if the worker is stuck).
+    shutdown(): Promise<void> {
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                resolve();
+            };
+            this.worker.once('exit', finish);
+            const command: AprsCommandShutdown = {
+                action: AprsCommandEnum.shutdown
+            };
+            this.worker.postMessage?.(command);
+            setTimeout(finish, 5000);
+        });
     }
 }
 

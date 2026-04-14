@@ -579,14 +579,36 @@ process.on('SIGTERM', handleExit);
 // and then kill of any timers
 async function handleExit(signal: string) {
     console.log(`received signal: ${signal}`);
-    for (const competition of Object.values(contexts)) {
-        competition.state = 'stopping';
-        competition.unknownChannel?.close();
+
+    // Fan out over every active context so each one gets its full
+    // destroy path — reload clients, close broadcast channels, wait
+    // for scoring workers to exit, drop channels and gliders from
+    // the global maps. destroyCompetitionContext internally awaits
+    // the scoring workers with a 5s timeout so a stuck one can't
+    // hang the whole shutdown.
+    const teardowns = Object.values(contexts).map((c) =>
+        destroyCompetitionContext(c).catch((e) => console.error(`destroy(${c.compid}) during exit:`, e))
+    );
+    await Promise.allSettled(teardowns);
+
+    // Close the shared resources once no context is holding them open.
+    try {
+        await scoreDb?.close();
+    } catch (e) {
+        console.error('scoreDb close during exit:', e);
     }
-    scoreDb?.close();
-    aprsController?.shutdown();
-    userLogStream?.end();
-    setTimeout(() => process.exit(), 1000);
+    try {
+        await aprsController?.shutdown();
+    } catch (e) {
+        console.error('aprsController shutdown during exit:', e);
+    }
+    try {
+        userLogStream?.end();
+    } catch (e) {
+        /**/
+    }
+    // Give any flushing I/O a last beat then go.
+    setTimeout(() => process.exit(0), 200);
 }
 main().then(() => console.log('Started'));
 
@@ -707,12 +729,14 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
 
 async function destroyCompetitionContext(competition: CompetitionContext) {
     if (competition.state === 'stopped' || competition.state === 'stopping') return;
-    console.log(`${compShort(competition.compid)}: stopping competition context`);
+    const tag = compShort(competition.compid);
+    console.log(`${tag}: stopping competition context (${competition.ownedChannels.size} channels)`);
     competition.state = 'stopping';
 
-    // Tell every client on this comp's channels to reconnect, then drop
-    // all of them so the next position flush doesn't pick them up.
-    for (const cname of competition.ownedChannels) {
+    // Step 1: notify every client on this comp's channels and drop them
+    // so the next position flush doesn't pick them up.
+    const ownedCnames = Array.from(competition.ownedChannels);
+    for (const cname of ownedCnames) {
         const channel = channels[cname];
         if (!channel) continue;
         try {
@@ -730,6 +754,7 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
         } catch (e) {
             /* best effort */
         }
+        console.log(`${tag}/${channel.displayName}: closing ${channel.clients.length} clients`);
         for (const client of channel.clients) {
             try {
                 (client as any).close?.();
@@ -738,23 +763,62 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
             }
         }
         channel.clients = [];
-        channel.broadcastChannel?.close();
-        channel.scoring?.shutdown();
-        delete channels[cname];
     }
 
-    // Drop every glider that belonged to this comp from the global map.
+    // Step 2: close each broadcast channel so no more APRS packets land
+    // on the scoring workers, then fire the shutdown command at every
+    // scoring worker in parallel and wait for them to actually exit.
+    // If a worker is stuck the 5-second timeout in ScoringController
+    // .shutdown() unblocks us.
+    const shutdowns: Promise<void>[] = [];
+    for (const cname of ownedCnames) {
+        const channel = channels[cname];
+        if (!channel) continue;
+        try {
+            channel.broadcastChannel?.close();
+        } catch (e) {
+            /**/
+        }
+        if (channel.scoring) {
+            shutdowns.push(channel.scoring.shutdown());
+        }
+    }
+    if (shutdowns.length) {
+        console.log(`${tag}: awaiting ${shutdowns.length} scoring worker(s) to exit`);
+        await Promise.allSettled(shutdowns);
+    }
+
+    // Step 3: drop the channels and the owned gliders from the global
+    // maps. Nothing downstream references them any more.
+    for (const cname of ownedCnames) {
+        delete channels[cname];
+    }
+    competition.ownedChannels.clear();
+
+    let droppedGliders = 0;
     for (const key of Object.keys(gliders)) {
         if (gliders[key as ClassName_Compno].compid === competition.compid) {
             delete gliders[key as ClassName_Compno];
+            droppedGliders++;
         }
     }
+    if (droppedGliders) {
+        console.log(`${tag}: dropped ${droppedGliders} glider(s) from global map`);
+    }
 
-    competition.unknownChannel?.close();
+    // Step 4: close the unknown-glider channel, mark stopped, remove
+    // from the contexts map. reconcileContexts() follows up with a
+    // setAirfields() push and rebuildAprsFilter() rewrites the APRS
+    // filter without this comp's clauses.
+    try {
+        competition.unknownChannel?.close();
+    } catch (e) {
+        /**/
+    }
     competition.unknownChannel = undefined;
     competition.state = 'stopped';
     delete contexts[competition.compid];
-    console.log(`${compShort(competition.compid)}: competition context stopped`);
+    console.log(`${tag}: competition context stopped`);
 }
 
 async function tickCompetition(competition: CompetitionContext) {

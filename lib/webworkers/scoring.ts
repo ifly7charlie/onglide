@@ -144,8 +144,21 @@ export class ScoringController {
         this.worker.postMessage({action: ScoringCommandEnum.clearGlider, className: this.className, datecode: this.datecode, compno} as ScoringCommand);
     }
 
-    shutdown() {
-        this.worker.postMessage({action: ScoringCommandEnum.shutdown} as ScoringCommand);
+    // Send the shutdown command to the worker and return a promise that
+    // resolves when the worker process has actually exited, or after a
+    // 5-second timeout (so teardown doesn't hang if the worker is stuck).
+    shutdown(): Promise<void> {
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                resolve();
+            };
+            this.worker.once('exit', finish);
+            this.worker.postMessage({action: ScoringCommandEnum.shutdown} as ScoringCommand);
+            setTimeout(finish, 5000);
+        });
     }
 
     hookScore(callback: scoreCallback) {
