@@ -303,101 +303,40 @@ async function main() {
     // and we do a LOT of them
     initialiseInsights();
 
-    const checkReady = async (): Promise<CompetitionContext | null> => { // (competition lookup)
-        // Determine which competition this OGN process is serving. Either
-        // COMP_ID is set explicitly, or fall back to the first competition row.
-        const envCompId = process.env.COMP_ID;
-        let location: AirfieldLocation;
-        if (envCompId) {
-            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end, flightstats FROM competition WHERE compid = ?', [envCompId]))?.[0];
-        } else {
-            location = (await db.query<any[]>('SELECT compid, name, lt as lat, lg as lng, tz, tzoffset, start, end, flightstats FROM competition LIMIT 1'))?.[0];
-        }
-
-        if (!location) {
-            console.error('no competition entry in the database, please confirm soaringspot integration is working');
-            console.table(await db.query<any[]>('SELECT * FROM competition'));
-            return null;
-        }
-
-        const compid = (location as any).compid as string;
-        console.log(`OGN running for compid=${compid}`);
-
-        // Only consider classes/compstatus rows that belong to this competition
-        const classesPresent = await db.query<any[]>('SELECT cs.class FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?', [compid]);
-        if (!classesPresent?.length) {
-            console.error(`no classes configured for compid=${compid}`);
-            return null;
-        }
-
-        location.point = point([location.lng, location.lat]);
-        location.officialDelay = getDelay();
-        location.tzoffset = parseInt(location.tzoffset as unknown as string);
-
-        const competition: CompetitionContext = {
-            compid,
-            internalName: location.name.replace(/[^a-z]/gi, '').substring(0, 10),
-            location,
-            ownedChannels: new Set(),
-            state: 'starting'
-        };
-
-        if (!replayBase && !(await db.query<any[]>('SELECT MAX(cs.datecode) as datecode FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?', [compid]))?.[0]?.datecode) {
-            console.warn('no current date found for competition');
-
-            const currentExpectedDateCode = await getDCode(competition);
-            if (toDateCode(new Date(location.start)) > currentExpectedDateCode || toDateCode(new Date(location.end)) < currentExpectedDateCode) {
-                console.error(
-                    `Today  ${currentExpectedDateCode}/${fromDateCode(currentExpectedDateCode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
-                        location.end
-                    } and no task configured - not tracking`
-                );
-                return null;
-            }
-            console.info(`Today  ${currentExpectedDateCode}/${fromDateCode(currentExpectedDateCode)} is inside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${location.end}`);
-        }
-        return competition;
-    };
-
-    let competition: CompetitionContext | null = null;
-    while (!(competition = await checkReady())) {
-        await setTimeoutPromise(60000);
-    }
-    contexts[competition.compid] = competition;
-
-    // Save the tz for use (single-comp only; multi-comp tz handling is
-    // a known landmine — see plan §9).
-    setSiteTz(competition.location.tz);
-
     console.log('Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL);
     console.log(`db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}`);
     process.title = process.env.MYSQL_DATABASE ?? 'unknown';
 
-    // Set the altitude offset for launching, this will take time to return
-    // so there is a period when location altitude will be wrong for launches
-    getElevationOffset(competition.location.lat, competition.location.lng, (agl) => {
-        competition!.location.altitude = agl;
-        console.log('SITE:' + agl);
-    });
-
-    // Download the list of trackers so we know who to look for
+    // Download the list of trackers so we know who to look for. The DDB is
+    // global across comps.
     await updateDDB();
 
+    // One APRS worker for the whole process. Airfields are added by
+    // createCompetitionContext as each competition starts.
     aprsController = new AprsController({airfields: []});
-    setAirfields([{compid: competition.compid, lt: competition.location.lat, lg: competition.location.lng}]);
 
+    // Wait until we can see at least one competition before we start the
+    // web server. After that the discovery loop runs on the 60s tick and
+    // adds or removes comps as the DB changes.
+    while (Object.keys(contexts).length === 0) {
+        await reconcileContexts();
+        if (Object.keys(contexts).length === 0) {
+            console.log('waiting for an eligible competition to appear in the database');
+            await setTimeoutPromise(60000);
+        }
+    }
+    for (const c of Object.values(contexts)) {
+        await tickCompetition(c);
+    }
+    rebuildAprsFilter();
+
+    // Open an append-mode log shared across all comps for the lifetime of
+    // the process. Filename uses the first active comp's datecode for
+    // continuity with the old single-comp layout.
     {
-        const datecode = await getDCode(competition);
-        getSunset(competition, datecode);
-        getProposedScoreId(competition);
-        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${competition.internalName}-${datecode}.txt`, {flags: 'a'});
-        aprsController?.datecode(datecode);
-        await updateClasses(competition, datecode);
-        await updateTrackers(competition, datecode);
-        await updateTasks(competition);
-        await finaliseScoreId(competition);
-        rebuildAprsFilter();
-        competition.state = 'running';
+        const first = Object.values(contexts)[0];
+        const datecode = await getDCode(first);
+        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${first.internalName}-${datecode}.txt`, {flags: 'a'});
     }
 
     if ('PM2_HOME' in process.env || existsSync('.docker')) {
@@ -449,52 +388,59 @@ async function main() {
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
     // time we run the callback (every second), as we only update the screen on data it should
-    // be sufficient to bundle them even though we are receiving as a stream
+    // be sufficient to bundle them even though we are receiving as a stream.
+    //
+    // Channels are grouped by compid before encoding so the ClassPositions
+    // message sent to each per-class socket only contains sibling classes
+    // from its own competition. Without this, comp A's positions would
+    // leak to comp B's clients (and vice versa) whenever both are active.
     setInterval(function () {
-        // For each channel (aka class)
         const now = getNow();
 
-        const positions = Object.values(channels).reduce(
-            (a, c: Channel) => {
-                a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
-                return a;
-            },
-            {} as Record<string, Positions>
-        );
+        const byComp: Record<string, Channel[]> = {};
+        for (const ch of Object.values(channels)) {
+            (byComp[ch.compid] ??= []).push(ch);
+        }
 
-        const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
+        for (const compChannels of Object.values(byComp)) {
+            const positions = compChannels.reduce(
+                (a, c: Channel) => {
+                    a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+                    return a;
+                },
+                {} as Record<string, Positions>
+            );
+            const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
-        for (const channelName in channels) {
-            const channel = channels[channelName];
+            for (const channel of compChannels) {
+                channel.statistics.activeListeners += channel.clients.length;
+                channel.statistics.listenerCycles++;
 
-            channel.statistics.activeListeners += channel.clients.length;
-            channel.statistics.listenerCycles++;
-
-            if (channel.clients.length) {
-                // We don't need to send empty packets but we should
-                // occasionally as it keeps socket alive
-                if (!channel.toSend.length) {
-                    if (now - channel.lastSentPositions < 15) {
-                        continue;
+                if (channel.clients.length) {
+                    // We don't need to send empty packets but we should
+                    // occasionally as it keeps socket alive
+                    if (!channel.toSend.length) {
+                        if (now - channel.lastSentPositions < 15) {
+                            continue;
+                        }
+                    } else {
+                        // if we sent an actual coordinate then this will ensure
+                        // that the webPathData is regenerated
+                        channel.mostRecentPosition = now;
                     }
+
+                    // Metrics are helpful
+                    channel.statistics.positionsSent += channel.toSend.length;
+                    channel.statistics.positionsSentCycles++;
+                    // We don't want to send it twice so it can go
+                    channel.toSend = [];
+                    channel.lastSentPositions = now;
+
+                    // Send to each client and if they don't respond they will be cleaned up next time around
+                    channel.sendBinary(msg);
                 } else {
-                    // if we sent an actual coordinate then this will ensure
-                    // that the webPathData is regenerated
-                    channel.mostRecentPosition = now;
+                    channel.toSend = [];
                 }
-
-                // Metrics are helpful
-                channel.statistics.positionsSent += channel.toSend.length;
-                channel.statistics.positionSentCycles++;
-                // We don't want to send it twice so it can go
-                channel.toSend = [];
-                channel.lastSentPositions = now;
-
-                // Send to each client and if they don't respond they will be cleaned up next time around
-                channel.sendBinary(msg);
-                //              }
-            } else {
-                channel.toSend = [];
             }
         }
     }, 500);
@@ -605,25 +551,17 @@ async function main() {
     //    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
 
     //
-    // Update competition information - iterates every active context.
-    // PR 5 flips this into the discovery loop that creates and destroys
-    // contexts as comps come and go; today the map always has one entry.
+    // Update competition information - runs discovery to pick up new
+    // or finished comps, then ticks every running context, then rebuilds
+    // the APRS filter once across all comps.
     setInterval(async function () {
+        await reconcileContexts();
         for (const competition of Object.values(contexts)) {
-            if (competition.state === 'stopping' || competition.state === 'stopped') continue;
-            const datecode = await getDCode(competition);
-            const oldStream = userLogStream;
-            userLogStream = null;
-            oldStream?.end(() => {
-                userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${datecode}.txt`, {flags: 'a'});
-            });
-            getSunset(competition, datecode);
-            getProposedScoreId(competition);
-            aprsController?.datecode(datecode);
-            await updateClasses(competition, datecode);
-            await updateTrackers(competition, datecode);
-            await updateTasks(competition);
-            await finaliseScoreId(competition);
+            try {
+                await tickCompetition(competition);
+            } catch (e) {
+                console.error(`tickCompetition(${competition.compid}) failed:`, e);
+            }
         }
         rebuildAprsFilter();
     }, 60 * 1000);
@@ -651,6 +589,161 @@ async function handleExit(signal: string) {
     setTimeout(() => process.exit(), 1000);
 }
 main().then(() => console.log('Started'));
+
+// Discover every eligible competition in the database. COMP_ID, if set,
+// acts as an optional filter rather than a hard constraint — existing
+// single-comp deployments keep their .env.local unchanged and behave
+// identically. Multi-comp deployments just omit it. The date window
+// opens the day before start and closes two days after end to give
+// grace for overnight replay / scoring jobs.
+async function discoverCompetitions(): Promise<any[]> {
+    const envCompId = process.env.COMP_ID;
+    const base = `SELECT c.compid, c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats
+                  FROM competition c
+                  WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)
+                    AND c.end   >= DATE_SUB(CURDATE(), INTERVAL 2 DAY)
+                    AND c.start <= DATE_ADD(CURDATE(), INTERVAL 1 DAY)`;
+    if (envCompId) {
+        return db.query<any[]>(base + ' AND c.compid = ?', [envCompId]);
+    }
+    return db.query<any[]>(base);
+}
+
+// Walk the discovery result against the current contexts map and start
+// or stop contexts to match. Called at startup and from the 60s tick.
+async function reconcileContexts() {
+    let rows: any[];
+    try {
+        rows = await discoverCompetitions();
+    } catch (e) {
+        console.error('discoverCompetitions failed:', e);
+        return;
+    }
+
+    const seen = new Set<string>();
+    for (const row of rows) {
+        const compid = row.compid as string;
+        seen.add(compid);
+        if (!contexts[compid]) {
+            try {
+                await createCompetitionContext(row);
+            } catch (e) {
+                console.error(`createCompetitionContext(${compid}) failed:`, e);
+            }
+        }
+    }
+
+    for (const compid of Object.keys(contexts)) {
+        if (!seen.has(compid)) {
+            try {
+                await destroyCompetitionContext(contexts[compid]);
+            } catch (e) {
+                console.error(`destroyCompetitionContext(${compid}) failed:`, e);
+            }
+        }
+    }
+
+    // Push the combined airfield list to the APRS worker in one shot.
+    const af: AirfieldSpec[] = Object.values(contexts).map((c) => ({compid: c.compid, lt: c.location.lat, lg: c.location.lng}));
+    setAirfields(af);
+}
+
+async function createCompetitionContext(row: any): Promise<CompetitionContext> {
+    const location: AirfieldLocation = {...row};
+    location.point = point([location.lng, location.lat]);
+    location.officialDelay = getDelay();
+    location.tzoffset = parseInt(location.tzoffset as unknown as string);
+
+    const competition: CompetitionContext = {
+        compid: row.compid,
+        internalName: location.name.replace(/[^a-z]/gi, '').substring(0, 10),
+        location,
+        ownedChannels: new Set(),
+        state: 'starting'
+    };
+
+    console.log(`${compShort(competition.compid)}: creating competition context (internalName=${competition.internalName})`);
+
+    // Elevation is fetched async; it lands on the context whenever the
+    // getElevationOffset callback fires.
+    getElevationOffset(location.lat, location.lng, (agl: any) => {
+        competition.location.altitude = agl;
+        console.log(`${compShort(competition.compid)} site altitude: ${agl}`);
+    });
+
+    // Timezone is a process-wide global today (landmine — see plan §9).
+    // Setting it from whichever comp just started means the last one
+    // wins. Fine for single-comp; multi-comp tz needs a follow-up.
+    setSiteTz(location.tz);
+
+    contexts[competition.compid] = competition;
+    return competition;
+}
+
+async function destroyCompetitionContext(competition: CompetitionContext) {
+    if (competition.state === 'stopped' || competition.state === 'stopping') return;
+    console.log(`${compShort(competition.compid)}: stopping competition context`);
+    competition.state = 'stopping';
+
+    // Tell every client on this comp's channels to reconnect, then drop
+    // all of them so the next position flush doesn't pick them up.
+    for (const cname of competition.ownedChannels) {
+        const channel = channels[cname];
+        if (!channel) continue;
+        try {
+            const msg = OnglideWebSocketMessage.encode({
+                identifiers: {
+                    className: channel.className,
+                    datecode: channel.datecode,
+                    competition: channel.compid,
+                    earliestScore: getNow(),
+                    latestScore: getNow(),
+                    scoreId: channel.liveScoreId ?? ''
+                }
+            }).finish();
+            channel.sendBinary(msg);
+        } catch (e) {
+            /* best effort */
+        }
+        for (const client of channel.clients) {
+            try {
+                (client as any).close?.();
+            } catch (e) {
+                /**/
+            }
+        }
+        channel.clients = [];
+        channel.broadcastChannel?.close();
+        channel.scoring?.shutdown();
+        delete channels[cname];
+    }
+
+    // Drop every glider that belonged to this comp from the global map.
+    for (const key of Object.keys(gliders)) {
+        if (gliders[key as ClassName_Compno].compid === competition.compid) {
+            delete gliders[key as ClassName_Compno];
+        }
+    }
+
+    competition.unknownChannel?.close();
+    competition.unknownChannel = undefined;
+    competition.state = 'stopped';
+    delete contexts[competition.compid];
+    console.log(`${compShort(competition.compid)}: competition context stopped`);
+}
+
+async function tickCompetition(competition: CompetitionContext) {
+    if (competition.state === 'stopping' || competition.state === 'stopped') return;
+    const datecode = await getDCode(competition);
+    getSunset(competition, datecode);
+    getProposedScoreId(competition);
+    aprsController?.datecode(datecode);
+    await updateClasses(competition, datecode);
+    await updateTrackers(competition, datecode);
+    await updateTasks(competition);
+    await finaliseScoreId(competition);
+    if (competition.state === 'starting') competition.state = 'running';
+}
 
 function getSunset(competition: CompetitionContext, datecode: Datecode) {
     const loc = competition.location;
