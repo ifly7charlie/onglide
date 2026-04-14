@@ -350,14 +350,14 @@ if (!isMainThread && parentPort) {
     startAprsListener(<AprsListenerConfig>workerData);
 }
 
-export async function initDB(datecode: Datecode, competitionName?: string) {
+export async function initDB(datecode: Datecode) {
     if (db && dbDatecode == datecode) {
         return db;
     }
 
     const old = db;
 
-    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}-${competitionName ?? workerData.competition}.db`;
+    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}.db`;
     const openedDb = (db = new DB(path));
     console.log('opening points database', path);
     dbDatecode = datecode;

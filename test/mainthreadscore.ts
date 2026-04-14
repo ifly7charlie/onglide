@@ -132,7 +132,7 @@ async function run() {
     const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
 
     // Make sure we have the latest datecode for the database
-    db = await initDB(argv.datecode as Datecode, internalName);
+    db = await initDB(argv.datecode as Datecode);
 
     const results = (await Promise.allSettled(pilots.map((p) => runScore(argv.datecode as Datecode, p.class, p.compno, p.trackerid, p.handicap))))
         .filter((r) => r.status == 'fulfilled')

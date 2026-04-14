@@ -83,7 +83,7 @@ async function main() {
     }
 
     // Load track points from LevelDB
-    const db = await initDB(datecode, internalName);
+    const db = await initDB(datecode);
     const messageQueue: any[] = [];
 
     const glider: Aircraft = {
