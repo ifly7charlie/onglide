@@ -46,9 +46,18 @@ import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, C
 let connection: ISSocket & {valid: boolean; aprsc: string};
 const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern5.glidernet.org'];
 
-// Pending filter string, set if setFilter is called before we're connected.
-// Applied in the connect handler after sendLogin().
+// Pending filter string, set if setFilter is called before we're connected
+// and logged in. Drained in the connect handler after sendLogin().
 let pendingFilter: string | null = null;
+
+// True from the moment the connect handler has fired and sendLogin() has
+// been called. This gates #filter — aprsc only accepts in-band filter
+// updates after login. Note: connection.valid is set in the packet
+// handler on first received line, so we can't use it here — with a
+// minimal initial filter (r/0/0/1) no packets arrive until the filter
+// is updated, so valid stays false and applyFilter would loop deferring
+// itself forever.
+let loggedIn = false;
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
@@ -473,12 +482,12 @@ function applyFilter(filter: string) {
     if (filter.length > 900) {
         console.log(`aprs filter length warning: ${filter.length} bytes (aprsc practical cap ~1KB)`);
     }
-    if (connection && connection.valid === true) {
+    if (loggedIn && connection) {
         connection.send(`#filter ${filter}\r\n`);
-        console.log(`aprs filter updated: ${filter.length} bytes`);
+        console.log(`aprs filter updated: ${filter.length} bytes: ${filter}`);
     } else {
         pendingFilter = filter;
-        console.log('aprs filter deferred (not connected)');
+        console.log(`aprs filter deferred until login: ${filter}`);
     }
 }
 
@@ -517,6 +526,8 @@ function startAprsListener(config: AprsListenerConfig) {
     connection.on('connect', () => {
         connection.sendLogin();
         connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+        loggedIn = true;
+        console.log(`aprs connected and logged in to ${APRSSERVER}`);
         // If main thread handed us a narrower filter while we were still
         // connecting, apply it now that we're logged in.
         if (pendingFilter !== null) {
