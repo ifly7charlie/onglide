@@ -64,10 +64,11 @@ export enum AprsCommandEnum {
     finish,
     untrack,
     datecode,
-    setFilter
+    setFilter,
+    setAirfields
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandDatecode | AprsCommandSetFilter;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandDatecode | AprsCommandSetFilter | AprsCommandSetAirfields;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
@@ -113,12 +114,19 @@ export interface AprsCommandSetFilter {
     filter: string;
 }
 
+export interface AirfieldSpec {
+    compid: string;
+    lt: number;
+    lg: number;
+}
+
+export interface AprsCommandSetAirfields {
+    action: AprsCommandEnum.setAirfields;
+    airfields: AirfieldSpec[];
+}
+
 export interface AprsListenerConfig {
-    competition: string;
-    location: {
-        lt: number;
-        lg: number;
-    };
+    airfields: AirfieldSpec[];
 }
 
 // Keep track of some basic statistics
@@ -178,12 +186,63 @@ export interface Tracker {
     db: AbstractSublevel<DB, string | Uint8Array | Buffer, string, string> | undefined;
 }
 
-// Where is the airfield?
-let airfieldLocation: Coord;
-let airfieldElevation: AltitudeAgl;
+// All active airfields with their elevation. Populated from the initial
+// config and updated at runtime via AprsCommandEnum.setAirfields.
+interface Airfield {
+    compid: string;
+    point: Coord;
+    elevation: AltitudeAgl;
+}
+const airfields: Airfield[] = [];
 
-// And where to send unknown gliders close to the airfield
-let unknownChannel: BroadcastChannel;
+// Per-comp channels for unknown gliders that land near that comp's airfield.
+// Lazily created on first dispatch; closed when the airfield goes away.
+const unknownChannels: Record<string, BroadcastChannel> = {};
+
+function nearestAirfield(jPoint: Coord): {field: Airfield; distance: number} | null {
+    let best: Airfield | null = null;
+    let bestD = Infinity;
+    for (const a of airfields) {
+        const d = distance(jPoint, a.point);
+        if (d < bestD) {
+            bestD = d;
+            best = a;
+        }
+    }
+    return best ? {field: best, distance: bestD} : null;
+}
+
+function getUnknownChannel(compid: string): BroadcastChannel {
+    return (unknownChannels[compid] ??= new BroadcastChannel('Unknown_' + compid));
+}
+
+function setAirfields(specs: AirfieldSpec[]) {
+    const keep = new Set(specs.map((s) => s.compid));
+
+    // Drop airfields that are no longer configured, closing their unknown channel
+    for (let i = airfields.length - 1; i >= 0; i--) {
+        if (!keep.has(airfields[i].compid)) {
+            const compid = airfields[i].compid;
+            airfields.splice(i, 1);
+            unknownChannels[compid]?.close();
+            delete unknownChannels[compid];
+        }
+    }
+
+    // Add or update each spec
+    for (const s of specs) {
+        const existing = airfields.find((a) => a.compid === s.compid);
+        const p = point([s.lt, s.lg]);
+        if (existing) {
+            existing.point = p;
+        } else {
+            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl};
+            airfields.push(a);
+            getElevationOffset(s.lt, s.lg, (e: any) => (a.elevation = e));
+        }
+    }
+    console.log(`aprs airfields: ${airfields.map((a) => a.compid).join(',') || 'none'}`);
+}
 
 // Mapping by class/compno to aircraft record
 const allAircraft: Record<ClassName_Compno, Aircraft> = {};
@@ -294,6 +353,13 @@ export class AprsController {
         };
         this.worker.postMessage?.(command);
     }
+    setAirfields(airfields: AirfieldSpec[]) {
+        const command: AprsCommandSetAirfields = {
+            action: AprsCommandEnum.setAirfields,
+            airfields
+        };
+        this.worker.postMessage?.(command);
+    }
     shutdown() {
         const command: AprsCommandShutdown = {
             action: AprsCommandEnum.shutdown
@@ -341,11 +407,11 @@ if (!isMainThread && parentPort) {
             case AprsCommandEnum.setFilter:
                 applyFilter(task.filter);
                 break;
+            case AprsCommandEnum.setAirfields:
+                setAirfields(task.airfields);
+                break;
         }
     });
-
-    // Any unknown gliders get sent to this for identification
-    unknownChannel = new BroadcastChannel('Unknown_' + workerData.competition);
 
     startAprsListener(<AprsListenerConfig>workerData);
 }
@@ -427,22 +493,30 @@ function startAprsListener(config: AprsListenerConfig) {
     const PASSCODE = -1;
     const APRSSERVER = (statistics.server = process.env.APRS_SERVER || possibleServers[Math.trunc(possibleServers.length * Math.random())]);
     const PORTNUMBER = 14580;
-    const FILTER = `r/${config.location.lt}/${config.location.lg}/250`;
+
+    // Seed the airfield list. The main thread follows up with setAirfields
+    // whenever the set of active competitions changes.
+    setAirfields(config.airfields);
+
+    // Initial FILTER: minimise bandwidth until the main thread pushes the
+    // real filter after updateTasks. aprsc requires a filter in the login
+    // for -1 passcode clients, so we can't omit it — use a 1km radius
+    // around (0,0) which matches effectively nothing and lets the worker
+    // sit idle until #filter comes in. Once the main thread knows which
+    // comps are active it calls setFilter() with the union of task
+    // bboxes + 10km margin + 30km airfield fallback.
+    const FILTER = 'r/0/0/1';
 
     let unstableCount = 0;
 
-    // Save away where we are
-    airfieldLocation = point([config.location.lt, config.location.lg]);
-    getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
-
     // Connect to the APRS server
-    connection = new ISSocket(`onglide ${config.competition.substring(0, 6)}/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
+    connection = new ISSocket(`onglide/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
     let parser = new aprsParser();
 
     // Handle a connect
     connection.on('connect', () => {
         connection.sendLogin();
-        connection.send(`# onglide ${config.competition}`);
+        connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
         // If main thread handed us a narrower filter while we were still
         // connecting, apply it now that we're logged in.
         if (pendingFilter !== null) {
@@ -552,7 +626,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
             try {
                 // Send APRS keep alive or we will get dumped
-                connection.send(`# ${config.competition}`);
+                connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
             } catch (x) {
                 console.log('unable to send keepalive', x);
                 connection.valid = false;
@@ -786,7 +860,8 @@ export async function processPacket(packet: aprsPacket) {
             db: db ? db.sublevel(flarmId, {}) : undefined
         });
     const aircraftList = tracker?.aircraftList;
-    const airfieldDistance = distance(jPoint, airfieldLocation);
+    const nearest = nearestAirfield(jPoint);
+    const airfieldDistance = nearest?.distance ?? Infinity;
     const agl = await getElevationOffset(packet.latitude, packet.longitude).then((e) => Math.round(Math.max(altitude - e, 0)));
 
     if (altitude > 7500) {
@@ -818,11 +893,12 @@ export async function processPacket(packet: aprsPacket) {
     }
 
     // If it is undefined then we will enrich and send to the
-    // airfield channel if it's close enough
+    // airfield channel if it's close enough. Dispatch goes to the
+    // Unknown_<compid> channel of the nearest airfield.
     if (!aircraftList.length) {
-        if (airfieldDistance < 20 && packet.altitude < airfieldElevation + 750) {
+        if (nearest && airfieldDistance < 20 && packet.altitude < nearest.field.elevation + 750) {
             statistics.unknownReceived++;
-            unknownChannel.postMessage(message);
+            getUnknownChannel(nearest.field.compid).postMessage(message);
         }
         return;
     }

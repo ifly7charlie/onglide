@@ -54,7 +54,7 @@ import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, f
 import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 'lodash';
 
 // Launch our listener
-import {AprsController} from '../lib/webworkers/aprs';
+import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
 
 import {webPathBaseTimeDuration, scoreChunkSize} from '../lib/constants';
 
@@ -64,6 +64,16 @@ import {createHash, randomBytes, createHmac} from 'crypto';
 import {BroadcastChannel} from 'node:worker_threads';
 let unknownChannel: BroadcastChannel | undefined;
 let aprsController: AprsController | undefined;
+
+// The authoritative list of airfields known to the APRS worker. The filter
+// rebuild walks this to add per-airfield radius fallbacks so pre-task
+// ground traffic is still heard, and it's kept in lockstep with the
+// worker via setAirfields(). PR 5 extends this to multi-comp.
+let currentAirfields: AirfieldSpec[] = [];
+function setAirfields(airfields: AirfieldSpec[]) {
+    currentAirfields = airfields;
+    aprsController?.setAirfields(airfields);
+}
 
 // Data sources
 
@@ -361,7 +371,8 @@ async function main() {
     // Generate a short internal name
     const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
 
-    aprsController = new AprsController({competition: internalName, location: {lt: location.lat, lg: location.lng}});
+    aprsController = new AprsController({airfields: []});
+    setAirfields([{compid, lt: location.lat, lg: location.lng}]);
 
     {
         const datecode = await getDCode();
@@ -835,10 +846,11 @@ async function updateClasses(internalName: string, datecode: Datecode) {
         unknownChannel = undefined;
     }
 
-    // Subscribe to the feed of unknown gliders
-    // Any unknown gliders get sent to this for identification
+    // Subscribe to the feed of unknown gliders for this competition. The
+    // APRS worker dispatches unknowns to Unknown_<compid> based on the
+    // nearest airfield, so we listen on the per-compid channel.
     if (!unknownChannel) {
-        unknownChannel = new BroadcastChannel('Unknown_' + internalName);
+        unknownChannel = new BroadcastChannel('Unknown_' + compid);
         unknownChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(ev.data, datecode)) as any;
     }
 
@@ -979,16 +991,18 @@ async function updateTasks(): Promise<void> {
         }
     }
 
-    // rebuildAprsFilter - single-comp flavor for now; PR 5 extends this to
-    // walk a CompetitionContext map. Union every known task bbox, expand by
-    // 10 km, and add a 30 km airfield-radius fallback so pre-task ground
-    // traffic still reaches us.
+    // rebuildAprsFilter - walks the active channels for task bboxes and
+    // the currentAirfields list for airfield-radius fallbacks so pre-task
+    // ground traffic is still heard. When currentAirfields is empty we
+    // emit r/0/0/1 — a 1km null-island placeholder that matches nothing,
+    // to keep the worker idle rather than open the filter up.
     const withTasks = Object.values(channels).filter((c) => c.task);
     const boxes = withTasks.map((c) => taskBbox(c.task!)).filter((b): b is Bbox => b !== null);
     const union = unionBboxes(boxes);
     const clauses: string[] = [];
     if (union) clauses.push(bboxToAprsArea(expandBbox(union, 10)));
-    clauses.push(`r/${location.lat}/${location.lng}/30`);
+    for (const af of currentAirfields) clauses.push(`r/${af.lt}/${af.lg}/30`);
+    if (clauses.length === 0) clauses.push('r/0/0/1');
     const filter = clauses.join(' ');
     console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
     aprsController?.setFilter(filter);
