@@ -120,6 +120,7 @@ interface ChannelTask {}
 interface Channel {
     //    name: string
     className: ClassName;
+    compid: string;
     launching: boolean;
     datecode: Datecode;
 
@@ -172,6 +173,7 @@ let channels: Record<ChannelName, Channel> = {};
 interface Glider {
     compno: Compno;
     className: ClassName;
+    compid: string;
     channelName: ChannelName;
 
     flarmIdRegex: RegExp;
@@ -674,8 +676,8 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     // Fetch the trackers from the database and the channel they are supposed to be in.
     // Scoped to this OGN process's compid so we don't pick up other competitions sharing
     // the same database.
-    const classes = await db.query<{class: ClassName; datecode: Datecode}[]>(
-        'SELECT cs.class, cs.datecode FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?',
+    const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string}[]>(
+        'SELECT cs.class, cs.datecode, cl.compid FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?',
         [compid]
     );
 
@@ -723,6 +725,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 toSend: [],
                 lastSentPositions: 0 as Epoch,
                 className: c.class,
+                compid: c.compid,
                 datecode: datecode,
                 gliderHash: '',
                 statistics: {
@@ -985,6 +988,7 @@ interface CTrackerRow {
     duplicate: number;
     handicap: number;
     className: ClassName;
+    compid: string;
     utcStart: Epoch;
     scoredStatus: 'H' | 'F' | 'S';
 }
@@ -1007,6 +1011,7 @@ async function updateTrackers(datecode: Datecode) {
             0 duplicate,
             p.handicap,
             p.class className,
+            cl.compid,
             CASE
                 WHEN ppr.start = '00:00:00' THEN 0
                 ELSE UNIX_TIMESTAMP (
@@ -1109,7 +1114,7 @@ async function updateTrackers(datecode: Datecode) {
                 // to see if it's changed on existing object)
                 const glider: Glider = (gliders[gliderKey] = Object.assign(
                     gliders[gliderKey] || {}, //
-                    {...t, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
+                    {...t, compid: t.compid, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
                 ));
                 const channel = channels[glider.channelName];
                 if (!channel) {
@@ -1369,7 +1374,7 @@ function getIdentifiers(channel: Channel) {
     return {
         className: channel.className,
         datecode: channel.datecode,
-        competition: '1', //
+        competition: channel.compid, //
         earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
         latestScore: channel.latestScore,
         scoreId: channel.liveScoreId
