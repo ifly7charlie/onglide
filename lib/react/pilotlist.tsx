@@ -140,7 +140,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
                     {data1.units ? <div className="units">{data1.units}</div> : null}
                     <div className="data-icon">
                         <a href="#" title={data1.description} className="tooltipicon">
-                            <FontAwesomeIcon icon={data1.icon} />
+                            <FontAwesomeIcon icon={data1.icon} style={data1.iconStyle} />
                         </a>
                     </div>
                 </div>
@@ -197,7 +197,7 @@ function WindComponent({wind}: {wind: {speed: number; direction: number} | undef
             id="wind"
             title="wind" //
             main={{value: wind.speed, units: 'kph', icon: faWind, description: 'recent wind speed'}}
-            data1={{value: wind.direction, units: '°', icon: faLocationArrow, description: 'wind bearing'}}
+            data1={{value: wind.direction, units: '°', icon: faLocationArrow, description: 'wind bearing', iconStyle: {transform: `rotate(${wind.direction + 135}deg)`}}}
         />
     );
 }

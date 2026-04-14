@@ -445,7 +445,29 @@ export async function initDB(datecode: Datecode) {
 
     const old = db;
 
-    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}.db`;
+    const basePath = `${process.env.DB_PATH ?? './db/'}`;
+    let path = `${basePath}/aprs-${datecode}.db`;
+
+    // If the shared points db doesn't exist yet, look for a legacy
+    // aprs-<datecode>-<competition>.db directory. This keeps replay
+    // working against historical data collected before the multi-comp
+    // refactor renamed the file. In single-comp replay there's only
+    // going to be one match; if there are several, pick the first and
+    // log the choice.
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const fs = require('fs');
+        if (!fs.existsSync(path)) {
+            const entries: string[] = fs.readdirSync(basePath);
+            const legacy = entries.find((e) => e.startsWith(`aprs-${datecode}-`) && e.endsWith('.db'));
+            if (legacy) {
+                path = `${basePath}/${legacy}`;
+                console.log(`initDB: falling back to legacy points db ${path}`);
+            }
+        }
+    } catch (e) {
+        /* best effort — if the scan fails we just open the primary path */
+    }
     const openedDb = (db = new DB(path));
     console.log('opening points database', path);
     dbDatecode = datecode;

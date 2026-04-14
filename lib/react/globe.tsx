@@ -188,8 +188,9 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             lineWidthMinPixels: 1,
             getLineWidth: (c) => (c.compid === highlightedCompid ? 3 : 1),
             onClick: (info) => {
-                if (info.object) {
-                    Router.push('/' + (info.object as Competition).compid + '/');
+                const comp = info.object as Competition | undefined;
+                if (comp && comp.displayStatus !== 'upcoming') {
+                    Router.push('/' + comp.compid + '/');
                 }
             },
             onHover: (info) => setHighlightedCompid(((info.object as Competition) ?? null)?.compid ?? null),
@@ -328,6 +329,50 @@ function CompetitionListPanel({
 }) {
     if (!competitions.length) return null;
 
+    // Group competitions into Live / Upcoming / Finished so users can tell
+    // at a glance which ones are clickable. Upcoming entries stay in the
+    // list (so pilots can find their comp) but navigation is disabled.
+    const live = competitions.filter((c) => c.displayStatus !== 'upcoming' && c.displayStatus !== 'over');
+    const upcoming = competitions.filter((c) => c.displayStatus === 'upcoming');
+    const finished = competitions.filter((c) => c.displayStatus === 'over');
+
+    const renderSection = (title: string, comps: Competition[], clickable: boolean) => {
+        if (!comps.length) return null;
+        return (
+            <>
+                <div
+                    style={{
+                        padding: '12px 16px 6px 16px',
+                        fontSize: 11,
+                        opacity: 0.7,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.5,
+                        borderTop: '1px solid rgba(255,255,255,0.12)',
+                        marginTop: 4
+                    }}
+                >
+                    {title} · {comps.length}
+                </div>
+                {comps.map((c) => (
+                    <CompetitionListEntry
+                        key={c.compid}
+                        comp={c}
+                        highlighted={c.compid === highlightedCompid}
+                        clickable={clickable}
+                        onHover={() => {
+                            setHighlightedCompid(c.compid);
+                            flyTo(c);
+                        }}
+                        onLeave={() => setHighlightedCompid(null)}
+                        onClick={() => {
+                            if (clickable) Router.push('/' + c.compid + '/');
+                        }}
+                    />
+                ))}
+            </>
+        );
+    };
+
     return (
         <div
             style={{
@@ -344,22 +389,9 @@ function CompetitionListPanel({
                 boxShadow: '-2px 0 8px rgba(0,0,0,0.4)'
             }}
         >
-            <div style={{padding: '0 16px 8px 16px', fontSize: 12, opacity: 0.7, textTransform: 'uppercase', letterSpacing: 0.5}}>
-                {competitions.length} {competitions.length === 1 ? 'competition' : 'competitions'}
-            </div>
-            {competitions.map((c) => (
-                <CompetitionListEntry
-                    key={c.compid}
-                    comp={c}
-                    highlighted={c.compid === highlightedCompid}
-                    onHover={() => {
-                        setHighlightedCompid(c.compid);
-                        flyTo(c);
-                    }}
-                    onLeave={() => setHighlightedCompid(null)}
-                    onClick={() => Router.push('/' + c.compid + '/')}
-                />
-            ))}
+            {renderSection('Live', live, true)}
+            {renderSection('Upcoming', upcoming, false)}
+            {renderSection('Finished', finished, true)}
         </div>
     );
 }
@@ -373,12 +405,14 @@ function CompetitionListPanel({
 function CompetitionListEntry({
     comp,
     highlighted,
+    clickable,
     onHover,
     onLeave,
     onClick
 }: {
     comp: Competition;
     highlighted: boolean;
+    clickable: boolean;
     onHover: () => void;
     onLeave: () => void;
     onClick: () => void;
@@ -399,7 +433,7 @@ function CompetitionListEntry({
             onClick={onClick}
             style={{
                 padding: '10px 16px',
-                cursor: 'pointer',
+                cursor: clickable ? 'pointer' : 'default',
                 background: highlighted ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
                 borderLeft: highlighted ? '3px solid #fff' : '3px solid transparent',
                 transition: 'background 120ms'

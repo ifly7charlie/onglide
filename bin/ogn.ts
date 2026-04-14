@@ -620,40 +620,58 @@ main().then(() => console.log('Started'));
 // grace for overnight replay / scoring jobs.
 async function discoverCompetitions(): Promise<any[]> {
     const envCompId = process.env.COMP_ID;
-    // Compare against the competition's LOCAL date, not the DB server's.
-    // tzoffset is seconds east of UTC (same convention as getDCode uses);
-    // DATE(UTC_TIMESTAMP() + INTERVAL c.tzoffset SECOND) gives today in
-    // the comp's own local time. Without this, an evening flight on the
-    // last day of a westbound comp could be dropped when DB-server-UTC
-    // rolls over, and a morning flight on day 1 of an eastbound comp
-    // could be delayed until DB-server-UTC catches up.
+
+    // Fetch every competition that has at least one class, plus a flag
+    // that says whether any class already has a task wired up for its
+    // current scoring datecode (the "pre-comp practice day" escape hatch
+    // on the start side). Date window filtering is done in TypeScript
+    // below so replay mode can bypass it.
+    const base = `SELECT c.compid, c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats,
+                         (SELECT COUNT(*)
+                          FROM tasks t
+                          JOIN compstatus cs ON cs.class = t.class AND cs.datecode = t.datecode
+                          JOIN classes cl2 ON cl2.class = t.class
+                          WHERE cl2.compid = c.compid AND t.flown = 'Y') AS currentTaskCount
+                  FROM competition c
+                  WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)`;
+    const rows: any[] = envCompId //
+        ? await db.query<any[]>(base + ' AND c.compid = ?', [envCompId])
+        : await db.query<any[]>(base);
+
+    // Replay mode: wall-clock dates are meaningless (the operator has
+    // explicitly set REPLAY to a historical moment), let every comp
+    // through. Used to test FE changes and benchmark scoring when no
+    // live competition is running.
+    if (replayBase > 0) {
+        return rows;
+    }
+
+    // Live mode: each comp's date window is evaluated in its own local
+    // time (tzoffset is seconds east of UTC, same convention as getDCode).
+    // Without this, an evening flight on the last day of a westbound comp
+    // could be dropped when DB-server-UTC rolls over, and a morning flight
+    // on day 1 of an eastbound comp could be delayed.
     //
     // End is strict: once the last local day is past, the comp is done.
-    //
-    // Start is normally strict too, with one exception: if any class in
-    // the comp already has a task wired up for its current scoring
-    // datecode (tasks JOIN compstatus on datecode, flown='Y') then
-    // tracking begins even if start is still in the future — this
-    // supports pre-comp practice days where a task is already set. The
-    // exception does NOT apply after end.
-    const base = `SELECT c.compid, c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats
-                  FROM competition c
-                  WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)
-                    AND c.end >= DATE(UTC_TIMESTAMP() + INTERVAL c.tzoffset SECOND)
-                    AND (
-                        c.start <= DATE(UTC_TIMESTAMP() + INTERVAL c.tzoffset SECOND)
-                        OR EXISTS (
-                            SELECT 1
-                            FROM tasks t
-                            JOIN compstatus cs ON cs.class = t.class AND cs.datecode = t.datecode
-                            JOIN classes cl2 ON cl2.class = t.class
-                            WHERE cl2.compid = c.compid AND t.flown = 'Y'
-                        )
-                    )`;
-    if (envCompId) {
-        return db.query<any[]>(base + ' AND c.compid = ?', [envCompId]);
+    // Start is strict too, except when the currentTaskCount escape hatch
+    // fires (a task is already wired up for today's scoring datecode).
+    const ymd = (v: any): string => {
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === 'string') return v.slice(0, 10);
+        return '';
+    };
+    const nowUtcMs = Date.now();
+    const result: any[] = [];
+    for (const row of rows) {
+        const tzoffset = parseInt(row.tzoffset as unknown as string) || 0;
+        const localToday = new Date(nowUtcMs + tzoffset * 1000).toISOString().slice(0, 10);
+        const start = ymd(row.start);
+        const end = ymd(row.end);
+        if (end && end < localToday) continue; // past the end, done
+        if (start && start > localToday && (Number(row.currentTaskCount) || 0) === 0) continue; // future, no task yet
+        result.push(row);
     }
-    return db.query<any[]>(base);
+    return result;
 }
 
 // Walk the discovery result against the current contexts map and start
@@ -1215,6 +1233,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
 // task bbox are dropped as redundant. When there is neither task nor
 // airfield we emit r/0/0/1 — a 1km null-island placeholder that matches
 // nothing, to keep the worker idle rather than open the filter up.
+let lastAprsFilter: string | null = null;
 function rebuildAprsFilter() {
     const AIRFIELD_RADIUS_KM = 30;
     const withTasks = Object.values(channels).filter((c) => c.task);
@@ -1228,7 +1247,14 @@ function rebuildAprsFilter() {
         clauses.push(`r/${af.lt}/${af.lg}/${AIRFIELD_RADIUS_KM}`);
     }
     if (clauses.length === 0) clauses.push('r/0/0/1');
+    // Sort so the memo key is stable across insertion-order churn in
+    // channels / currentAirfields (e.g. a comp removed and re-added
+    // lands at the end of the contexts map and would otherwise produce
+    // a different filter string for the same logical filter set).
+    clauses.sort();
     const filter = clauses.join(' ');
+    if (filter === lastAprsFilter) return;
+    lastAprsFilter = filter;
     console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
     aprsController?.setFilter(filter);
 }

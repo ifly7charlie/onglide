@@ -1,9 +1,6 @@
-import {Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task} from '../lib/types';
-
-import {point} from '@turf/helpers';
+import {Compno, ClassName, Datecode, Epoch, Task} from '../lib/types';
 
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
-import {PreparedTurnpoint} from '../lib/flightprocessing/preparedTurnpoint';
 
 import type {Aircraft, Tracker} from '../lib/webworkers/aprs';
 import {loadPointsForTracker, initDB, processMessageQueue} from '../lib/webworkers/aprs';
@@ -58,10 +55,11 @@ async function main() {
     const className = argv.className as ClassName;
     const compno = argv.compno as Compno;
 
-    // Get competition location (for DB name)
-    const location: AirfieldLocation = ((await mysql.query('SELECT name, lt as lat, lg as lng, tz FROM competition LIMIT 1')) as any)[0];
-    location.point = point([location.lng, location.lat]);
-    const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
+    // Since the refactor the track points leveldb is shared across all
+    // competitions and keyed only by datecode (aprs-<datecode>.db), so
+    // we don't need any competition lookup here — className is already
+    // a globally-unique hash of compid + raw name, so the SELECT for
+    // pilots.class below is sufficient to identify the pilot.
 
     // Get tracker for this pilot
     const pilots = await mysql.query<{compno: Compno; trackerid: string}[]>(escape`
