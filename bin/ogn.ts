@@ -122,6 +122,7 @@ interface Channel {
     //    name: string
     className: ClassName;
     compid: string;
+    displayName: string; // "<compShort>/<classname>" — for log lines
     launching: boolean;
     datecode: Datecode;
 
@@ -175,6 +176,7 @@ interface Glider {
     compno: Compno;
     className: ClassName;
     compid: string;
+    displayName: string; // mirrors channel.displayName for log clarity
     channelName: ChannelName;
 
     flarmIdRegex: RegExp;
@@ -525,7 +527,7 @@ async function main() {
                 notValid.forEach((client: OgnWebSocket) => {
                     client.terminate();
                 });
-                console.log(`${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`);
+                console.log(`${channel.displayName}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`);
             }
 
             // Send keep alive and reset the stats/status
@@ -629,6 +631,14 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
     return (className + datecode).toUpperCase() as ChannelName;
 }
 
+// Shorten a compid for log prefixes by taking the leading alphabetic
+// "word" (e.g. "bristol2024" -> "bristol", "2024-junior" -> "junior").
+// Falls back to a 6-char truncation when no alphabetic run is present.
+function compShort(compid: string): string {
+    const m = compid.match(/[a-z]+/i);
+    return (m ? m[0] : compid.substring(0, 6)).toLowerCase();
+}
+
 //
 // Get current date code
 async function getDCode(): Promise<Datecode> {
@@ -677,8 +687,8 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     // Fetch the trackers from the database and the channel they are supposed to be in.
     // Scoped to this OGN process's compid so we don't pick up other competitions sharing
     // the same database.
-    const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string}[]>(
-        'SELECT cs.class, cs.datecode, cl.compid FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?',
+    const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string; classname: string}[]>(
+        'SELECT cs.class, cs.datecode, cl.compid, cl.classname FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?',
         [compid]
     );
 
@@ -691,7 +701,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
             if (!c.datecode) {
                 if (toDateCode(new Date(location.start)) > datecode) {
                     console.error(
-                        `${c.class}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
+                        `${compShort(c.compid)}/${c.classname}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
                             location.end
                         } and no task configured - not tracking`
                     );
@@ -702,7 +712,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
             else {
                 if (toDateCode(new Date(location.end)) < datecode) {
                     console.error(
-                        `${c.class}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
+                        `${compShort(c.compid)}/${c.classname}: today  ${datecode}/${fromDateCode(datecode)} is outside of expected range ${toDateCode(location.start)}/${location.start} - ${toDateCode(location.end)}/${
                             location.end
                         } and no task configured - not tracking`
                     );
@@ -727,6 +737,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                 lastSentPositions: 0 as Epoch,
                 className: c.class,
                 compid: c.compid,
+                displayName: `${compShort(c.compid)}/${c.classname}`,
                 datecode: datecode,
                 gliderHash: '',
                 statistics: {
@@ -785,9 +796,9 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     score.scoreId = channel.liveScoreId ?? score.scoreId ?? '';
                     channel.allScores[compno] = score;
                 }
-                console.log(`${c.class}: ${Object.keys(channel.allScores).length} scores loaded on id ${channel.liveScoreId}`);
+                console.log(`${channel.displayName}: ${Object.keys(channel.allScores).length} scores loaded on id ${channel.liveScoreId}`);
             } else {
-                console.log(`${c.class}: no score db`);
+                console.log(`${channel.displayName}: no score db`);
             }
         } else {
             // We move it to the new list
@@ -815,7 +826,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
     // Any channels left here are old and can be removed - the current ones are moved from channels
     // and added to newchannels
     if (Object.keys(channels).length) {
-        console.log('closing channels: ', Object.keys(channels).join(','));
+        console.log('closing channels: ', Object.values(channels).map((c) => c.displayName).join(','));
         Object.values(channels).forEach((channel) => {
             channel.broadcastChannel?.close();
             channel.scoring?.shutdown();
@@ -833,7 +844,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 
     // replace (do we need to close the old ones?)
     channels = newchannels;
-    console.log(`Updated Channels: ${_map(channels, (c) => channelName(c.className, c.datecode)).join(',')}`);
+    console.log(`Updated Channels: ${_map(channels, (c) => `${c.displayName}${c.datecode}`).join(',')}`);
 
     if (!Object.keys(newchannels).length && scoreDb) {
         console.log('closing scoredb, no channels');
@@ -844,7 +855,10 @@ async function updateClasses(internalName: string, datecode: Datecode) {
 
 async function updateTasks(): Promise<void> {
     // Get the details for the task
-    const getTask = async (className: ClassName, datecode: Datecode, maxHandicap: number) => {
+    const getTask = async (channel: Channel, maxHandicap: number) => {
+        const className = channel.className;
+        const datecode = channel.datecode;
+        const displayName = channel.displayName;
         const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow)[]>(escape`
             SELECT
                 tasks.*,
@@ -881,7 +895,7 @@ async function updateTasks(): Promise<void> {
         `)) || {})[0];
 
         if (!taskdetails || !taskdetails.type) {
-            console.log(`${className}/${datecode}: no active task`, taskdetails);
+            console.log(`${displayName}/${datecode}: no active task`, taskdetails);
             return null;
         }
 
@@ -900,7 +914,7 @@ async function updateTasks(): Promise<void> {
         `);
 
         if (tasklegs.length < 2) {
-            console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
+            console.log(`${displayName}: task ${taskid} is invalid - too few turnpoints`);
             return null;
         }
 
@@ -930,19 +944,19 @@ async function updateTasks(): Promise<void> {
             .reduce((highest, g) => Math.max(highest, g.handicap), 0);
 
         // Update the task from the db
-        const updatedTask = await getTask(channel.className, channel.datecode, maxHandicap);
+        const updatedTask = await getTask(channel, maxHandicap);
 
         if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
             console.log(
-                `new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs
+                `new task for ${channel.displayName}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs
                     ?.reduce((a, l) => a + l.length, 0)
                     .toFixed(1)}km`
             );
-            console.log(`${channel.className}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
+            console.log(`${channel.displayName}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
 
             // If it had a task, and doesn't any longer then just stop it scoring
             if (channel.task && !updatedTask) {
-                console.log(`${channel.className}: ** clear task`);
+                console.log(`${channel.displayName}: ** clear task`);
                 channel.scoring?.clearTask();
                 channel.scoreHistory.clear();
                 channel.allScores = {};
@@ -956,7 +970,7 @@ async function updateTasks(): Promise<void> {
             if (updatedTask) {
                 channel.task = updatedTask;
                 channel.geoTask = taskGeoJSON(updatedTask);
-                console.log(`${channel.className}: ** rescore ** ${channel.scoreId} => ${channel.proposedScoreId} (task changed)`);
+                console.log(`${channel.displayName}: ** rescore ** ${channel.scoreId} => ${channel.proposedScoreId} (task changed)`);
                 channel.scoreHistory.set(channel.proposedScoreId, new Map());
                 channel.scoring?.setTask(channel.task, channel.proposedScoreId);
                 channel.scoreIdUpdateRequired = true;
@@ -969,15 +983,14 @@ async function updateTasks(): Promise<void> {
     // walk a CompetitionContext map. Union every known task bbox, expand by
     // 10 km, and add a 30 km airfield-radius fallback so pre-task ground
     // traffic still reaches us.
-    const boxes = Object.values(channels)
-        .map((c) => (c.task ? taskBbox(c.task) : null))
-        .filter((b): b is Bbox => b !== null);
+    const withTasks = Object.values(channels).filter((c) => c.task);
+    const boxes = withTasks.map((c) => taskBbox(c.task!)).filter((b): b is Bbox => b !== null);
     const union = unionBboxes(boxes);
     const clauses: string[] = [];
     if (union) clauses.push(bboxToAprsArea(expandBbox(union, 10)));
     clauses.push(`r/${location.lat}/${location.lng}/30`);
     const filter = clauses.join(' ');
-    console.log(`aprs filter (${filter.length} bytes): ${filter}`);
+    console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
     aprsController?.setFilter(filter);
 }
 
@@ -1005,6 +1018,7 @@ interface CTrackerRow {
     handicap: number;
     className: ClassName;
     compid: string;
+    classname: string;
     utcStart: Epoch;
     scoredStatus: 'H' | 'F' | 'S';
 }
@@ -1028,6 +1042,7 @@ async function updateTrackers(datecode: Datecode) {
             p.handicap,
             p.class className,
             cl.compid,
+            cl.classname,
             CASE
                 WHEN ppr.start = '00:00:00' THEN 0
                 ELSE UNIX_TIMESTAMP (
@@ -1095,7 +1110,7 @@ async function updateTrackers(datecode: Datecode) {
 
     // Now unsubsribe from each of them
     removedGliders.forEach((g) => {
-        console.log(`${g.className}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
+        console.log(`${g.displayName}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
         if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
             aprsController?.untrackGlider(g.compno, g.className, g.channelName, g.dbTrackerId);
         }
@@ -1130,7 +1145,7 @@ async function updateTrackers(datecode: Datecode) {
                 // to see if it's changed on existing object)
                 const glider: Glider = (gliders[gliderKey] = Object.assign(
                     gliders[gliderKey] || {}, //
-                    {...t, compid: t.compid, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
+                    {...t, compid: t.compid, displayName: `${compShort(t.compid)}/${t.classname}`, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
                 ));
                 const channel = channels[glider.channelName];
                 if (!channel) {
@@ -1443,14 +1458,14 @@ async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = fa
 // information
 async function sendScore(channel: Channel, compno: Compno, score: PilotScore, recentStart: Epoch | undefined, scoreId: string, t: Epoch | undefined, migrateFrom: string) {
     if (compno == '_live') {
-        console.log(`${channel.className}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
+        console.log(`${channel.displayName}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
         if (channel.liveScoreId != scoreId) {
             channel.scoreHistory.delete(channel.liveScoreId);
         }
         channel.liveScoreId = scoreId;
         channel.webPathBaseTime = 0 as Epoch; // we rescored so probably all the tracks have changed
         sendIdentifiersToAll(channel, true);
-        console.log(`${channel.className}/${channel.datecode}: updating all tracks`);
+        console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
         channel.sendBinary(await generateRecentPilotTracks(channel));
 
         const pendingChannels = Object.values(channels).filter((c) => !c.liveScoreId);
@@ -1572,7 +1587,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             .sort((a, b) => mcs[a] - mcs[b])
             .filter((a) => mcs[a] > channelGliders.length / 2)?.[0];
 
-        console.log(`${channel.className} likely GP start ${d(Number(likely))}`);
+        console.log(`${channel.displayName} likely GP start ${d(Number(likely))}`);
         console.table(mcs);
     }
 
@@ -1591,9 +1606,9 @@ async function sendKeepalive(channel: Channel) {
 
     // If we have nothing then do nothing...
     if (!channel.clients.length) {
-        console.log(`${channel.className}: no clients subscribed`);
+        console.log(`${channel.displayName}: no clients subscribed`);
     } else {
-        console.log(`${channel.className}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
+        console.log(`${channel.displayName}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
     }
 
     // For sending the keepalive
@@ -1631,13 +1646,13 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     const glider = gliders[makeClassname_Compno(channel.className, message.c as Compno)];
 
     if (!glider) {
-        console.log(`${className}/${message.c}: unexpected position ${d(message.t)}`);
+        console.log(`${channel.displayName}/${message.c}: unexpected position ${d(message.t)}`);
         return;
     }
 
     // If we have a reset message
     if (message.t == (0 as Epoch)) {
-        console.log(`${className}/${message.c}: new track start received`);
+        console.log(`${channel.displayName}/${message.c}: new track start received`);
         initialiseDeck(message.c as Compno, glider, randomBytes(4).readUInt32BE(0));
         return;
     }
@@ -1647,7 +1662,7 @@ async function processAprsMessage(className: string, channel: Channel, message: 
         console.log(`${className}/${message.c}: track up to date, setting a resend`);
         channel.webPathBaseTime = 0 as Epoch;
         channel.resendTracks = async () => {
-            console.log(`${channel.className}/${channel.datecode}: updating all tracks`);
+            console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
             channel.resendTracks = null; // we will shortly have done it so no need to
             // keep this function.
             channel.sendBinary(await generateRecentPilotTracks(channel));
