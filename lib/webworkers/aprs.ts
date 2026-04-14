@@ -46,6 +46,10 @@ import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, C
 let connection: ISSocket & {valid: boolean; aprsc: string};
 const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern5.glidernet.org'];
 
+// Pending filter string, set if setFilter is called before we're connected.
+// Applied in the connect handler after sendLogin().
+let pendingFilter: string | null = null;
+
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
 import {trackMetric, initialiseInsights} from '../insights';
@@ -59,10 +63,11 @@ export enum AprsCommandEnum {
     track,
     finish,
     untrack,
-    datecode
+    datecode,
+    setFilter
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandDatecode;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandDatecode | AprsCommandSetFilter;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
@@ -101,6 +106,11 @@ export interface AprsCommandShutdown {
 export interface AprsCommandDatecode {
     action: AprsCommandEnum.datecode;
     datecode: Datecode;
+}
+
+export interface AprsCommandSetFilter {
+    action: AprsCommandEnum.setFilter;
+    filter: string;
 }
 
 export interface AprsListenerConfig {
@@ -277,6 +287,13 @@ export class AprsController {
         };
         this.worker.postMessage?.(command);
     }
+    setFilter(filter: string) {
+        const command: AprsCommandSetFilter = {
+            action: AprsCommandEnum.setFilter,
+            filter
+        };
+        this.worker.postMessage?.(command);
+    }
     shutdown() {
         const command: AprsCommandShutdown = {
             action: AprsCommandEnum.shutdown
@@ -320,6 +337,9 @@ if (!isMainThread && parentPort) {
                 break;
             case AprsCommandEnum.datecode:
                 setupDatecode(task);
+                break;
+            case AprsCommandEnum.setFilter:
+                applyFilter(task.filter);
                 break;
         }
     });
@@ -376,6 +396,27 @@ export async function initDB(datecode: Datecode, competitionName?: string) {
 }
 
 //
+// Apply a new aprsc filter string in-band. aprsc supports `#filter <string>`
+// on an authenticated connection with no reconnect required.
+//
+// If we're not yet connected (or the connection hasn't been authenticated
+// and marked valid), we stash the filter and the connect handler will
+// re-emit it once sendLogin() completes.
+//
+function applyFilter(filter: string) {
+    if (filter.length > 900) {
+        console.log(`aprs filter length warning: ${filter.length} bytes (aprsc practical cap ~1KB)`);
+    }
+    if (connection && connection.valid === true) {
+        connection.send(`#filter ${filter}\r\n`);
+        console.log(`aprs filter updated: ${filter.length} bytes`);
+    } else {
+        pendingFilter = filter;
+        console.log('aprs filter deferred (not connected)');
+    }
+}
+
+//
 // Connect to the APRS Server
 function startAprsListener(config: AprsListenerConfig) {
     if (process.env.REPLAY_DB || process.env.NEXT_PUBLIC_REPLAY) {
@@ -402,6 +443,13 @@ function startAprsListener(config: AprsListenerConfig) {
     connection.on('connect', () => {
         connection.sendLogin();
         connection.send(`# onglide ${config.competition}`);
+        // If main thread handed us a narrower filter while we were still
+        // connecting, apply it now that we're logged in.
+        if (pendingFilter !== null) {
+            const f = pendingFilter;
+            pendingFilter = null;
+            applyFilter(f);
+        }
     });
 
     // Handle a data packet

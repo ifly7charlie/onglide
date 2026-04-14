@@ -34,6 +34,7 @@ import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
+import {taskBbox, unionBboxes, expandBbox, bboxToAprsArea, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
@@ -963,6 +964,21 @@ async function updateTasks(): Promise<void> {
             }
         }
     }
+
+    // rebuildAprsFilter - single-comp flavor for now; PR 5 extends this to
+    // walk a CompetitionContext map. Union every known task bbox, expand by
+    // 10 km, and add a 30 km airfield-radius fallback so pre-task ground
+    // traffic still reaches us.
+    const boxes = Object.values(channels)
+        .map((c) => (c.task ? taskBbox(c.task) : null))
+        .filter((b): b is Bbox => b !== null);
+    const union = unionBboxes(boxes);
+    const clauses: string[] = [];
+    if (union) clauses.push(bboxToAprsArea(expandBbox(union, 10)));
+    clauses.push(`r/${location.lat}/${location.lng}/30`);
+    const filter = clauses.join(' ');
+    console.log(`aprs filter (${filter.length} bytes): ${filter}`);
+    aprsController?.setFilter(filter);
 }
 
 function sendTask(sendTo: Channel | OgnWebSocket, channel: Channel) {
