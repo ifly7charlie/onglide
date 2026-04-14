@@ -120,3 +120,14 @@ export function bboxToAprsArea(b: Bbox): string {
     const E = maxLng.toFixed(2);
     return `a/${N}/${W}/${S}/${E}`;
 }
+
+//
+// Returns true if a circle of `km` radius centred at (lat, lng) lies
+// entirely inside the bbox. Used to dedupe airfield radius clauses
+// when the airfield is already covered by a task bbox.
+//
+export function bboxContainsCircle(b: Bbox, lat: number, lng: number, km: number): boolean {
+    const [minLat, minLng, maxLat, maxLng] = b;
+    const {dLat, dLng} = kmToDegrees(km, lat);
+    return lat - dLat >= minLat && lat + dLat <= maxLat && lng - dLng >= minLng && lng + dLng <= maxLng;
+}

@@ -34,7 +34,7 @@ import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
-import {taskBbox, unionBboxes, expandBbox, bboxToAprsArea, Bbox} from '../lib/flightprocessing/taskBbox';
+import {taskBbox, unionBboxes, expandBbox, bboxToAprsArea, bboxContainsCircle, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
@@ -993,15 +993,22 @@ async function updateTasks(): Promise<void> {
 
     // rebuildAprsFilter - walks the active channels for task bboxes and
     // the currentAirfields list for airfield-radius fallbacks so pre-task
-    // ground traffic is still heard. When currentAirfields is empty we
-    // emit r/0/0/1 — a 1km null-island placeholder that matches nothing,
-    // to keep the worker idle rather than open the filter up.
+    // ground traffic is still heard. Airfields whose 30km radius is
+    // already fully inside the (10km-expanded) task bbox are dropped as
+    // redundant. When there is neither task nor airfield we emit r/0/0/1
+    // — a 1km null-island placeholder that matches nothing, to keep the
+    // worker idle rather than open the filter up.
+    const AIRFIELD_RADIUS_KM = 30;
     const withTasks = Object.values(channels).filter((c) => c.task);
     const boxes = withTasks.map((c) => taskBbox(c.task!)).filter((b): b is Bbox => b !== null);
     const union = unionBboxes(boxes);
+    const expanded = union ? expandBbox(union, 10) : null;
     const clauses: string[] = [];
-    if (union) clauses.push(bboxToAprsArea(expandBbox(union, 10)));
-    for (const af of currentAirfields) clauses.push(`r/${af.lt}/${af.lg}/30`);
+    if (expanded) clauses.push(bboxToAprsArea(expanded));
+    for (const af of currentAirfields) {
+        if (expanded && bboxContainsCircle(expanded, af.lt, af.lg, AIRFIELD_RADIUS_KM)) continue;
+        clauses.push(`r/${af.lt}/${af.lg}/${AIRFIELD_RADIUS_KM}`);
+    }
     if (clauses.length === 0) clauses.push('r/0/0/1');
     const filter = clauses.join(' ');
     console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
