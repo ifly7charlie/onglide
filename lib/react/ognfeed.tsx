@@ -28,6 +28,8 @@ import {OptionalDurationMM} from './optional';
 
 import Sponsors from './sponsors';
 
+import {SidePanel} from './sidepanel';
+
 import {proposedUrl} from './fixupUrls';
 
 import {useWebsocketDecoder} from './useWebsocketDecoder';
@@ -62,6 +64,7 @@ interface WsStatus {
 export const OgnFeed = memo(
     //
     function OgnFeed({
+        comp,
         compid,
         vc,
         datecode,
@@ -76,6 +79,7 @@ export const OgnFeed = memo(
         notes
     }: //
     {
+        comp: any;
         compid: string;
         vc: ClassName;
         datecode: Datecode;
@@ -157,8 +161,14 @@ export const OgnFeed = memo(
         });
 
         // Do we have a loaded set of details?
-        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
+        const pilotKeys = pilots ? Object.keys(pilots) : [];
+        const valid = !isPLoading && pilotKeys.length > 0;
         const connected = wsStatus.state == 'open' || (wsStatus.state == 'retry' && (wsStatus.retry ?? 0) < 16);
+
+        // If only a single pilot is available, treat them as implicitly
+        // selected. The user-explicit `selectedCompno` still wins so
+        // click-to-toggle behaviour is preserved when there are more.
+        const effectiveSelectedCompno = (selectedCompno ?? (pilotKeys.length === 1 ? (pilotKeys[0] as Compno) : undefined)) as Compno;
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
@@ -206,8 +216,16 @@ export const OgnFeed = memo(
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
         useEffect(() => {
-            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime}));
-        }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, selectedCompno, sendMessage]); //
+            sendMessage(JSON.stringify({compno: effectiveSelectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime}));
+        }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, effectiveSelectedCompno, sendMessage]); //
+
+        const onClassChange = useCallback(
+            (nextClass: string) => {
+                setSelectedCompno(null);
+                router.push('/' + compid + '?className=' + nextClass, undefined, {shallow: true}).then(() => setOptions({...options, zoomTask: true}));
+            },
+            [compid, options, router, setOptions, setSelectedCompno]
+        );
 
         return (
             <>
@@ -225,26 +243,44 @@ export const OgnFeed = memo(
                         setReplayTime={setReplayTime}
                         viewport={viewport}
                         setViewport={setViewport}
-                        selectedCompno={selectedCompno}
-                        selectedHandicap={selectedCompno ? pilots?.[selectedCompno]?.handicap : undefined}
+                        selectedCompno={effectiveSelectedCompno}
+                        selectedHandicap={effectiveSelectedCompno ? pilots?.[effectiveSelectedCompno]?.handicap : undefined}
                         status={status}
                     />
                 </div>
-                <div className="resultsOverlay" key="results">
-                    <div className="resultsUnderlay">
-                        {notes && notes != '' && (
-                            <>
-                                <span style={{clear: 'both', color: 'red'}}>{notes}</span>
-                                <br />
-                            </>
-                        )}
-                        <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
-                        {connectionStatus}
-                        {valid && connected ? (
+                <SidePanel //
+                    comp={comp}
+                    vc={vc}
+                    onClassChange={onClassChange}
+                    options={options}
+                    setOptions={setOptions}
+                    head={
+                        <>
+                            {notes && notes != '' && (
+                                <div className="sidepanel-section" style={{color: 'red'}}>
+                                    {notes}
+                                </div>
+                            )}
+                            <div className="sidepanel-section">
+                                <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
+                                {connectionStatus}
+                            </div>
+                        </>
+                    }
+                    footer={
+                        effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? ( //
+                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
+                        ) : (
+                            <Sponsors at={wsStatus.at} />
+                        )
+                    }
+                >
+                    {valid && connected ? (
+                        <div className="sidepanel-section">
                             <PilotList
                                 key="pilotList"
                                 pilots={pilots}
-                                selectedPilot={selectedCompno}
+                                selectedPilot={effectiveSelectedCompno}
                                 setSelectedCompno={setCompno}
                                 now={replayTime}
                                 live={availableScores.live}
@@ -253,11 +289,11 @@ export const OgnFeed = memo(
                                 setOptions={setOptions}
                                 handicapped={handicapped}
                             />
-                        ) : null}
-                    </div>
-                </div>
-                <div className="details" style={{paddingTop: '5px'}}>
-                    {valid && connected && (replayTime || !selectedCompno) ? (
+                        </div>
+                    ) : null}
+                </SidePanel>
+                <div className="playbackbar">
+                    {valid && connected ? (
                         <PlaybackControls //
                             {...availableScores}
                             replayTime={replayTime}
@@ -265,11 +301,6 @@ export const OgnFeed = memo(
                             tz={tz}
                         />
                     ) : null}
-                    {selectedCompno ? ( //
-                        <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
-                    ) : (
-                        <Sponsors at={wsStatus.at} />
-                    )}
                 </div>
             </>
         );

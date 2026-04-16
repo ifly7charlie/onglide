@@ -15,7 +15,7 @@ import {PathLength, Units, MapType, TaskUp} from '../lib/types';
 
 const defaultOptions: Options = {
     //
-    rainRadar: true,
+    rainRadar: false,
     rainRadarAdvance: 0,
     units: Units.metric,
     mapType: MapType.satellite,
@@ -37,7 +37,7 @@ export function useOptions() {
         const saved = window?.localStorage.getItem('options');
         if (saved) {
             try {
-                set({...JSON.parse(saved), zoomTask: true});
+                set({...JSON.parse(saved), zoomTask: true, rainRadar: false});
             } catch (e) {
                 set(defaultOptions);
             }

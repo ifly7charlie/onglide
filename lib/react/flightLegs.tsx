@@ -12,10 +12,6 @@ import {useState} from 'react';
 import {OptionalTimeHHMM, OptionalDurationHHMM} from './optional';
 import {displayHeight} from './displayunits';
 
-import ButtonGroup from 'react-bootstrap/ButtonGroup';
-
-import Button from 'react-bootstrap/Button';
-
 import {
     //
     faCow,
@@ -111,29 +107,28 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
     return (
         <>
             <br style={{clear: 'both'}} />
-            <ButtonGroup key="taskleg" role="group" aria-label="task or leg" className={'smallbuttons goleft'}>
+            <div className="btn-group-mini" role="group" aria-label="task or leg" style={{float: 'left'}}>
                 {['leg', 'task'].map((radio, idx) => (
-                    <Button key={idx} variant={idx == viewOptions.task ? 'primary' : 'secondary'} value={idx} onClick={(e) => setViewOptions({...viewOptions, task: idx})}>
+                    <button key={idx} className={idx == viewOptions.task ? 'active' : ''} onClick={() => setViewOptions({...viewOptions, task: idx})}>
                         {radio}
-                    </Button>
+                    </button>
                 ))}
-            </ButtonGroup>
+            </div>
 
             {hasHandicappedResults ? (
-                <ButtonGroup key="hcapped" role="group" aria-label="actual or handicapped" className={'smallbuttons goright'}>
+                <div className="btn-group-mini" role="group" aria-label="actual or handicapped" style={{float: 'right'}}>
                     {['actuals', 'handicapped'].map((radio, idx) => (
-                        <Button
+                        <button
                             key={radio}
-                            variant={idx == viewOptions.hcapped ? 'primary' : 'secondary'}
-                            value={idx}
-                            onClick={(e) => {
+                            className={idx == viewOptions.hcapped ? 'active' : ''}
+                            onClick={() => {
                                 setViewOptions({...viewOptions, hcapped: idx});
                             }}
                         >
                             {radio}
-                        </Button>
+                        </button>
                     ))}
-                </ButtonGroup>
+                </div>
             ) : null}
 
             {viewOptions.task < 2 ? (

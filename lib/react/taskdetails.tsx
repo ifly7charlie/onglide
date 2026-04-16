@@ -4,12 +4,10 @@
 import {memo, useMemo} from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
-import {faMagnifyingGlassLocation, faTasks, faCaretUp, faCaretDown} from '@fortawesome/free-solid-svg-icons';
+import {faMagnifyingGlassLocation, faCaretUp, faCaretDown} from '@fortawesome/free-solid-svg-icons';
 
 import {useState} from 'react';
 import {useContest, Spinner, Error} from './loaders';
-
-import Collapse from 'react-bootstrap/Collapse';
 
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
@@ -82,45 +80,40 @@ export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz,
     const classNameSentenceCased = fClass.classname.replace(matchWords, (r) => r.toUpperCase());
 
     return (
-        <>
-            <div className={'d-lg-inline d-none'}>
-                <h5 style={{fontSize: '1.2vw'}}>
+        <div>
+            <h5 className="task-heading">
+                <button title="Zoom to task" onClick={fitBounds as any}>
+                    <FontAwesomeIcon icon={faMagnifyingGlassLocation} />
+                </button>
+                <span className="task-title">
                     {dateString}: {taskDescription}
-                    <span className="sorting" style={{fontSize: 'medium'}}>
-                        <button title="Zoom to task" onClick={fitBounds as any}>
-                            <FontAwesomeIcon icon={faMagnifyingGlassLocation} />
-                        </button>
-                        &nbsp;
-                        <button className="d-lg-inline d-none" onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
-                            <FontAwesomeIcon icon={faTasks} size="sm" />
-                            <FontAwesomeIcon icon={open ? faCaretUp : faCaretDown} size="sm" />
-                        </button>
-                    </span>
-                </h5>
-                {task?.rules?.nostartutc ? <>{noStart}</> : null}
-                <Collapse in={open}>
-                    <div id="task-collapse">
-                        <p>{task?.details?.nostart != '00:00:00' ? `Start open ${task.details.nostart.substring(0, 5)}` : ''}</p>
-                        <Tasklegs legs={task.legs} />
+                </span>
+                <button onClick={() => setOpen(!open)} title={open ? 'Hide Task Details' : 'Show Task Details'} aria-controls="task-collapse" aria-expanded={open}>
+                    <FontAwesomeIcon icon={open ? faCaretUp : faCaretDown} />
+                </button>
+            </h5>
+            {task?.rules?.nostartutc ? <>{noStart}</> : null}
+            {open ? (
+                <div id="task-collapse">
+                    <p>{task?.details?.nostart != '00:00:00' ? `Start open ${task.details.nostart.substring(0, 5)}` : ''}</p>
+                    <Tasklegs legs={task.legs} />
 
-                        {task.details.info && (
-                            <>
-                                <hr />
-                                <div>{task.details.info}</div>
-                            </>
-                        )}
-                    </div>
-                </Collapse>
-                <hr />
-            </div>
-        </>
+                    {task.details.info && (
+                        <>
+                            <hr />
+                            <div>{task.details.info}</div>
+                        </>
+                    )}
+                </div>
+            ) : null}
+        </div>
     );
 });
 
 // Internal: details on the leg
 function Tasklegs(props: {legs: TaskLeg[]}) {
     return (
-        <table className="table table-condensed" style={{marginBottom: '0px'}}>
+        <table className="legs-mini" style={{marginBottom: '0px'}}>
             <thead>
                 <tr>
                     <td colSpan={2}>Turnpoint</td>

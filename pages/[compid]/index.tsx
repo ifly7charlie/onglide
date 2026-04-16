@@ -1,134 +1,24 @@
-///import next from 'next';
-import {memo} from 'react';
 import {useRouter} from 'next/router';
 import Head from 'next/head';
 
-// What do we need to render the bootstrap part of the page
-import Navbar from 'react-bootstrap/Navbar';
-import Nav from 'react-bootstrap/Nav';
-
 import {useState} from 'react';
-
-import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faLink, faGears, faPaperPlane, faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 // Helpers for loading contest information etc
 import {useContest, Spinner} from '../../lib/react/loaders';
-import {Nbsp} from '../../lib/react/htmlhelper';
 
 // And connect to websockets...
 import {OgnFeed} from '../../lib/react/ognfeed';
 
-import Router from 'next/router';
-
 import {query} from '../../lib/react/db';
 import escape from 'sql-template-strings';
-import {Options} from '../../lib/react/options';
 
 import {MeasureContext} from '../../lib/react/measure';
 import {ClassName} from '../../lib/types';
 
-import {find as _find, isEqual as _isEqual} from 'lodash';
+import {find as _find} from 'lodash';
 
 import {Provider} from 'react-redux';
 import store from '../../lib/redux/store';
-
-const Menu = memo(
-    function Menu(props: {comp: any; compid: string; setSelectedPilot: Function; options: any; setOptions: Function; vc: string}) {
-        const comp = props.comp;
-        const compid = props.compid;
-        const classes =
-            comp.classes.length > 1
-                ? comp.classes.map((c) => (
-                      <Nav.Item key={'navitem' + c.class}>
-                          <Nav.Link
-                              href="#"
-                              key={'navlink' + c.class}
-                              eventKey={c.class}
-                              onClick={() => {
-                                  props.setSelectedPilot(null);
-                                  Router.push('/' + compid + '?className=' + c.class, undefined, {shallow: true}).then(() => props.setOptions({...props.options, zoomTask: true}));
-                              }}
-                          >
-                              {c.classname.replace(/\s+(meter|metre)/, 'm')}
-                          </Nav.Link>
-                      </Nav.Item>
-                  ))
-                : null;
-
-        // Try and extract a short form of the name, only letters and spaces stop at first number
-        const shortNameStart = (
-            comp.competition.name
-                .replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
-                .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
-                .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
-                .replace(/.*Sailplane Grandprix]*/gi, 'SGP')
-                //                .match(new RegExp(/^([0-9]*[\p{L}\s]*)/u, 'u'))?.[1]
-                ?.trim() || comp.competition.name
-        ).substring(0, 13);
-        const shortName = shortNameStart + (shortNameStart.length === 13 ? '...' : '');
-
-        return (
-            <>
-                <Navbar bg="light" expand="lg" fixed="top" collapseOnSelect>
-                    {/*
-                     * Back-to-globe button. Sits as the very first navbar
-                     * child so it reserves space in the flex layout rather
-                     * than floating over the competition title.
-                     */}
-                    <a
-                        href="/"
-                        title="Back to globe"
-                        aria-label="Back to globe"
-                        style={{
-                            width: 32,
-                            height: 32,
-                            marginLeft: 8,
-                            marginRight: 8,
-                            borderRadius: '50%',
-                            background: 'rgba(0, 0, 0, 0.65)',
-                            color: '#fff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            textDecoration: 'none',
-                            flexShrink: 0
-                        }}
-                    >
-                        <FontAwesomeIcon icon={faGlobe} />
-                    </a>
-                    <Navbar.Brand className="d-lg-none">
-                        <FontAwesomeIcon icon={faLink} />
-                        <Nbsp />
-                        {shortName}
-                        <span className="d-lg-none">{classes ? ' - ' + comp.classes.find((c) => c.class == props.vc)?.classname.replace(/\s+(meter|metre)/, 'm') : null}</span>
-                    </Navbar.Brand>
-                    <Navbar.Brand className="d-name d-xl-block">
-                        <Nav.Link href={comp.competition.mainwebsite} className="d-none d-lg-block" style={{paddingTop: 0, paddingBottom: 0, paddingLeft: 5}}>
-                            {comp.competition.name}
-                            <div style={{fontSize: '70%'}}>
-                                {comp.competition.start} to {comp.competition.end}
-                                <FontAwesomeIcon icon={faLink} />{' '}
-                            </div>
-                        </Nav.Link>
-                    </Navbar.Brand>
-                    <Navbar.Toggle aria-controls="responsive-nav-bar" />
-                    <Navbar.Collapse id="responsive-nav-bar" className="justify-content-end" style={{paddingRight: 15}}>
-                        <Nav fill variant="underline" defaultActiveKey={props.vc} style={{width: '40vw'}}>
-                            {classes}
-                        </Nav>
-                        <Nav.Item key="settings">
-                            <Options {...props} multipleClasses={comp.classes.length > 1} />
-                        </Nav.Item>
-                    </Navbar.Collapse>
-                </Navbar>
-                <br style={{clear: 'both'}} />
-            </>
-        );
-    },
-    // Memo comparison, skip all the functions
-    (o, n) => o.vc === n.vc && o.comp === n.comp && o.compid === n.compid && _isEqual(o.options, n.options)
-);
 
 //
 // Main page rendering :)
@@ -186,14 +76,6 @@ export default function CombinePage(props) {
                 <Head>
                     <title>{comp.competition.name}</title>
                 </Head>
-                <Menu //
-                    comp={comp}
-                    compid={compid}
-                    vc={className}
-                    setSelectedPilot={setSelectedCompno}
-                    options={props.options}
-                    setOptions={props.setOptions}
-                />
                 <h1>Please choose a class from the menu bar</h1>
             </>
         );
@@ -208,18 +90,11 @@ export default function CombinePage(props) {
                         {selectedClass?.classname ? ' - ' + selectedClass.classname : ''}
                     </title>
                 </Head>
-                <Menu
-                    comp={comp}
-                    compid={compid}
-                    vc={className} //
-                    setSelectedPilot={setSelectedCompno}
-                    options={props.options}
-                    setOptions={props.setOptions}
-                />
                 {selectedClass?.datecode ? (
                     <div className="resizingContainer">
                         <Provider store={store}>
                             <OgnFeed
+                                comp={comp}
                                 compid={compid}
                                 vc={className as ClassName} //
                                 tz={props.tz}

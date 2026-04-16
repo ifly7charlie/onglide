@@ -1,6 +1,4 @@
-// What do we need to render the bootstrap part of the page
 import {memo, useMemo} from 'react';
-import Collapse from 'react-bootstrap/Collapse';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {
     faBackward,
@@ -701,9 +699,6 @@ export const PilotList = memo(function PilotList({
     now: Epoch | undefined;
     tz: TZ;
 }) {
-    // These are the rendering options
-    const [visible, setVisible] = useState(true);
-
     const order = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
 
     // ensure they sort keys are correct for each pilot, we don't actually
@@ -733,9 +728,6 @@ export const PilotList = memo(function PilotList({
         },
         [order, handicapped, options]
     );
-    const toggleVisible = useCallback(() => {
-        setVisible(!visible);
-    }, [visible]);
 
     // Generate the pilot list, sorted by the correct key
     const pilotComponents = pilotList.map((pilot) => {
@@ -751,13 +743,18 @@ export const PilotList = memo(function PilotList({
         );
     });
 
-    // Output the whole of the pilots list component
-    return pilotList?.length ? (
+    // With a single pilot there's nothing to sort or choose between, so
+    // suppress the whole list (ognfeed auto-selects that pilot via a
+    // derived `effectiveSelectedCompno`, so the footer details pane
+    // still surfaces them).
+    if (!pilotList?.length || pilotList.length <= 1) {
+        return null;
+    }
+
+    return (
         <>
-            <Sorting setSort={setSort} sortOrder={order} visible={visible} toggleVisible={toggleVisible} handicapped={handicapped || false} />
-            <Collapse in={visible}>
-                <ul className="pilots">{pilotComponents}</ul>
-            </Collapse>
+            <Sorting setSort={setSort} sortOrder={order} handicapped={handicapped || false} />
+            <ul className="pilots">{pilotComponents}</ul>
         </>
-    ) : null;
+    );
 });

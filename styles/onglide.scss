@@ -1,260 +1,636 @@
-@import 'bootstrap/scss/bootstrap';
+@font-face {
+    font-family: 'Atkinson Hyperlegible Next';
+    font-style: normal;
+    font-weight: 300;
+    font-display: swap;
+    src: url('/fonts/AtkinsonHyperlegibleNext-Light.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Atkinson Hyperlegible Next';
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url('/fonts/AtkinsonHyperlegibleNext-ExtraBold.woff2') format('woff2');
+}
+
+:root {
+    --panel-bg: rgba(255, 255, 255, 0.88);
+    --panel-fg: #111;
+    --panel-border: rgba(0, 0, 0, 0.1);
+    --panel-hover: rgba(0, 0, 0, 0.06);
+    --panel-accent: #0066cc;
+    --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+
+    // Info cards (pilot data, vario/speed tiles, leg tables) use a
+    // distinct palette. In light mode we keep the original white card
+    // + dark caption bar look; in dark mode we tint them off the panel.
+    --card-bg: #fff;
+    --card-fg: #111;
+    --card-border: #eee;
+    --card-caption-bg: #444;
+    --card-caption-fg: #fff;
+
+    --font-family-ui: 'Atkinson Hyperlegible Next', system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --panel-bg: rgba(20, 20, 20, 0.78);
+        --panel-fg: #f5f5f5;
+        --panel-border: rgba(255, 255, 255, 0.14);
+        --panel-hover: rgba(255, 255, 255, 0.12);
+        --panel-accent: #4da6ff;
+        --panel-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+
+        --card-bg: rgba(255, 255, 255, 0.08);
+        --card-fg: #f5f5f5;
+        --card-border: rgba(255, 255, 255, 0.14);
+        --card-caption-bg: rgba(255, 255, 255, 0.18);
+        --card-caption-fg: #f5f5f5;
+    }
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
 
 body {
-    padding-top: 1.6rem; //40px;
     position: relative;
     overflow: hidden;
     width: 100vw;
+    font-family: var(--font-family-ui);
+    font-size: 16px;
+    font-weight: 300;
+    color: var(--panel-fg);
+}
+
+strong,
+b,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-weight: 800;
+}
+
+h6 {
+    font-size: 1em;
+    margin: 0 0 6px 0;
+}
+
+button {
+    font: inherit;
+    color: inherit;
+}
+
+.sidepanel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 380px;
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: -2px 0 12px rgba(0, 0, 0, 0.35);
+    overflow-y: auto;
+    overflow-x: hidden;
+    z-index: 20;
+    font-size: 16px;
+    line-height: 1.45;
+    display: flex;
+    flex-direction: column;
+
+    .sidepanel-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--panel-border);
+
+        .sidepanel-back {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+            border-radius: 50%;
+            background: var(--panel-hover);
+            color: inherit;
+            text-decoration: none;
+            font-size: 18px;
+        }
+
+        .sidepanel-title {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+
+            .sidepanel-comp-name {
+                font-weight: 800;
+                font-size: 19px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .sidepanel-comp-dates {
+                opacity: 0.7;
+                font-size: 13px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+        }
+    }
+
+    .sidepanel-classes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--panel-border);
+
+        button {
+            background: transparent;
+            border: 1px solid var(--panel-border);
+            color: inherit;
+            padding: 6px 14px;
+            border-radius: 4px;
+            font: inherit;
+            font-size: 16px;
+            cursor: pointer;
+
+            &:hover {
+                background: var(--panel-hover);
+            }
+
+            &.active {
+                background: var(--panel-accent);
+                color: #fff;
+                border-color: var(--panel-accent);
+            }
+        }
+    }
+
+    .sidepanel-tools {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--panel-border);
+
+        .options {
+            margin: 0;
+            font-size: 18px;
+        }
+    }
+
+    .sidepanel-section {
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--panel-border);
+
+        &:last-child {
+            border-bottom: none;
+        }
+
+        &:empty {
+            display: none;
+        }
+    }
+
+    .sidepanel-fixed-head {
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--panel-border);
+
+        .sidepanel-section {
+            border-bottom: none;
+        }
+    }
+
+    .sidepanel-body {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    .sidepanel-footer {
+        flex-shrink: 0;
+        padding: 14px 18px;
+        border-top: 1px solid var(--panel-border);
+    }
+
+    // Grouped list sections (used by globe home page)
+    .sidepanel-section-header {
+        padding: 16px 18px 6px 18px;
+        font-size: 12px;
+        opacity: 0.7;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        font-weight: 800;
+        border-top: 1px solid var(--panel-border);
+        margin-top: 4px;
+    }
+
+    .sidepanel-entry {
+        padding: 12px 18px;
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        transition: background 120ms;
+
+        &.non-clickable {
+            cursor: default;
+        }
+
+        &.highlighted {
+            background: var(--panel-hover);
+            border-left-color: var(--panel-fg);
+        }
+
+        .entry-title {
+            font-size: 17px;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-bottom: 2px;
+        }
+
+        .entry-sitename {
+            opacity: 0.85;
+            font-size: 15px;
+        }
+
+        .entry-dates {
+            opacity: 0.65;
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+
+        .entry-classrow {
+            display: flex;
+            align-items: center;
+            margin-top: 3px;
+            font-size: 14px;
+            padding: 3px 6px;
+            margin-left: -6px;
+            margin-right: -6px;
+            border-radius: 3px;
+            cursor: pointer;
+
+            &:hover {
+                background: var(--panel-hover);
+            }
+
+            .name {
+                opacity: 0.95;
+                margin-right: 6px;
+            }
+
+            .count {
+                opacity: 0.55;
+                margin-left: auto;
+            }
+        }
+
+        .entry-rollup {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+    }
+}
+
+// Chrome overlays floating over a full-viewport map or globe.
+.map-legend {
+    position: fixed;
+    left: 20px;
+    bottom: 20px;
+    padding: 10px 14px;
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    font-size: 14px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 15;
+
+    .legend-row {
+        display: flex;
+        align-items: center;
+        margin-top: 2px;
+
+        .status-dot {
+            display: inline-block;
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+    }
+}
+
+.map-attribution {
+    position: fixed;
+    right: 8px;
+    bottom: 8px;
+    padding: 3px 8px;
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    border: 1px solid var(--panel-border);
+    border-radius: 3px;
+    font-size: 12px;
+    line-height: 16px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 15;
+    pointer-events: auto;
+
+    a {
+        color: var(--panel-accent);
+    }
+}
+
+@media (max-width: 991.98px) {
+    .sidepanel {
+        left: 0;
+        right: 0;
+        top: auto;
+        bottom: 0;
+        width: auto;
+        height: 50vh;
+        box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+    }
+}
+
+.playbackbar {
+    position: fixed;
+    left: 0;
+    right: 380px;
+    bottom: 12px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 15;
+
+    > * {
+        pointer-events: auto;
+        width: 85%;
+        max-width: 560px;
+    }
+}
+
+@media (max-width: 991.98px) {
+    .playbackbar {
+        right: 0;
+        bottom: calc(50vh + 8px);
+    }
+}
+
+.btn-group-mini {
+    display: inline-flex;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--panel-border);
+
+    button {
+        background: transparent;
+        border: none;
+        border-right: 1px solid var(--panel-border);
+        color: inherit;
+        padding: 3px 10px;
+        font: inherit;
+        cursor: pointer;
+
+        &:last-child {
+            border-right: none;
+        }
+
+        &:hover {
+            background: var(--panel-hover);
+        }
+
+        &.active {
+            background: var(--panel-accent);
+            color: #fff;
+        }
+    }
+}
+
+.legs-mini {
+    width: 100%;
+    margin-bottom: 0;
+    border-collapse: collapse;
+    font-size: 12px;
+
+    thead td {
+        font-weight: 600;
+        border-bottom: 1px solid var(--panel-border);
+        padding: 4px 6px;
+    }
+
+    tbody td {
+        padding: 3px 6px;
+        border-top: 1px solid var(--panel-border);
+    }
+}
+
+.task-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 19px;
+    font-weight: 800;
+    margin: 0 0 8px 0;
+
+    .task-title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    > button {
+        flex-shrink: 0;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 16px;
+        line-height: 1;
+        cursor: pointer;
+
+        &:hover {
+            background: var(--panel-hover);
+        }
+    }
 }
 
 .resizingMap {
-    height: 96vh;
-    height: 100dvh;
-    min-height: 96vh;
-    min-height: 100dvh;
-    width: 100vw;
     position: absolute;
-    top: 0px;
+    top: 0;
+    left: 0;
+    right: 380px;
+    height: 100dvh;
+    min-height: 100dvh;
 }
+
+@media (max-width: 991.98px) {
+    .resizingMap {
+        right: 0;
+    }
+}
+
 .resizingContainer {
-    min-height: 96vh;
     min-height: 100dvh;
     width: 100vw;
-    //    position: relative;
     z-index: 10;
-    bottom: 0px;
-    left: 0px;
+    bottom: 0;
+    left: 0;
 }
 
 .options {
-    vertical-align: middle;
-    text-height: 10px !important;
-    margin-top: 7px;
-}
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
 
-// These are tweaks for small screens
-@include media-breakpoint-down(lg) {
-    body {
-        padding-top: 0px !important;
-    }
-    .navbar-nav.pull-right {
-        float: none !important;
-    }
-    /*    button {
-        border: 0px;
-        padding-left: 4px;
-        padding-right: 4px;
-    }
-    button.active {
-        border: 0px;
-        padding-left: 4px;
-        padding-right: 4px;
-    } */
+    button {
+        flex: 1 1 0;
+        min-width: 0;
+        max-width: 40px;
+        height: 36px;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        padding: 0;
+        font-size: 18px;
+        line-height: 1;
+        cursor: pointer;
 
-    .resizingMap {
-        height: 96vh;
-        height: 100dvh;
-    }
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
 
-    .navbar {
-        --bs-navbar-padding-y: 0.15rem;
-        padding: 0px;
-    }
+        &:hover {
+            background: var(--panel-hover);
+        }
 
-    div.options {
-        padding: 0px !important;
-        margin: 7px 0px 0px 0px !important;
-        height: 100%;
-    }
+        &.active {
+            background: var(--panel-accent);
+            color: #fff;
+        }
 
-    .sponsor {
-        display: none;
-    }
+        // Make the bare-icon and `.fa-layers` stacks render at the same
+        // visual width. FontAwesome defaults `.fa-layers` to 1.25em wide
+        // so a slashed icon visibly grows on toggle; clamp it to 1em.
+        // Width only — do NOT touch font-size; the inner transform math
+        // (e.g. fa1 shrink-4 left-4 up-8) is calibrated against the
+        // inherited em size.
+        > .fa-layers {
+            width: 1em;
+        }
 
-    .resultsOverlay {
-        left: 0px;
-        width: 100%;
-        overflow-x: auto;
-        overflow-y: hidden;
-        position: relative;
-        z-index: 20;
-        clear: both;
-        background-color: rgba(255, 255, 255, 0.7);
-        //        background-color: red;
-        margin-top: 14px;
-    }
-
-    .connectionStatus {
-        display: block;
-        //        width: 9%;
-        margin-top: 8px;
-        margin-left: 1%;
-    }
-
-    .sorting {
-        display: none;
-    }
-
-    .results {
-        font-size: 90%;
-        top: 90px;
-    }
-
-    .details {
-        left: 0;
-        bottom: 0px;
-        padding: 2px;
-        padding-left: 45px;
-        width: 100vw;
-        position: absolute;
-        color: black !important;
-        overflow-y: auto;
-        overflow-x: clip;
-        max-height: 20vh;
-        z-index: 20;
-    }
-
-    .pilotdetails {
-        background-color: rgba(255, 255, 255, 0.7);
-        padding: 4px;
-        border-radius: 8px;
-        backdrop-filter: 'blur(40px)';
-    }
-
-    ul.pilots {
-        list-style-type: none;
-        padding: 0px;
-        margin: 0px;
-        clear: both;
-        margin-top: 0.2em;
-        display: flex;
-        flex-wrap: none;
-    }
-
-    ul.status {
-        list-style-type: none;
-        padding: 0px;
-        margin: 0px;
-        clear: both;
-        margin-top: 0.2em;
-        display: flex;
-        flex-wrap: none;
-    }
-
-    .navbar {
-        //        font-size: 0.75em;
-        //        font-size: 3vw;
-    }
-    html {
-        height: -webkit-fill-available;
-    }
-
-    .largeScreen {
-        display: none;
+        &.units-toggle {
+            font-weight: 800;
+            font-size: 16px;
+        }
     }
 }
 
-@media (min-width: 1600px) {
-    .sorting {
-        font-size: small !important;
-    }
+ul.pilots {
+    width: 100%;
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    padding-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
 }
 
-@include media-breakpoint-up(sm) {
-    br.smallScreen {
-        display: none;
-    }
+ul.status {
+    width: 100%;
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+    padding-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
 }
 
-@include media-breakpoint-up(lg) {
-    .resultsOverlay {
-        top: 75px;
-        right: 15px;
-        display: block;
-        position: absolute;
-        width: 30vw;
-        min-width: 270px;
-        border-radius: 8px;
-        border-style: solid white;
-        background-color: rgba(255, 255, 255, 0.7);
-        box-shadow: 7px 7px 5px rgb(0 0 0 / 30%);
-        padding: 5px;
-        overflow-y: auto;
-        overflow-x: clip;
-        max-height: 40vh;
-        z-index: 20;
-    }
-    .navbar {
-        --bs-navbar-padding-y: 0.15rem;
-    }
+.sponsor {
+    padding: 5px;
+    text-align: center;
 
-    .sponsor {
-        padding: 5px;
-        text-align: center;
-        overflow: none;
-    }
-
-    .sponsor > span > img {
-        //        max-width: 80%;
+    img {
         max-height: 130px;
         max-width: 80%;
         height: auto;
         width: auto;
     }
+}
 
-    ul.pilots {
-        width: 100%;
-        list-style-type: none;
-        padding-left: 0px;
-        padding-right: 0px;
-        padding-top: 4px;
-        padding-bottom: 0px;
-        margin: 0px;
-        display: flex;
-        flex-wrap: wrap;
-    }
+.pilotdetails {
+    font-size: 15px;
+}
 
-    ul.status {
-        width: 105%;
-        list-style-type: none;
-        padding-left: 0px;
-        padding-right: 0px;
-        padding-top: 6px;
-        padding-bottom: 0px;
-        margin: 0px;
-        margin-left: -15px;
-        margin-right: 15px;
-        display: flex;
-        flex-wrap: wrap;
-    }
+.connectionStatus {
+    display: block;
+    margin-top: 8px;
+    margin-left: 4px;
+    font-size: 14px;
+}
 
-    .sorting {
-        float: right;
-        font-size: 1vw;
-    }
+.sorting {
+    float: right;
+    font-size: 16px;
 
-    .details {
-        clear: both;
-        right: 15px;
-        bottom: 75px;
-        padding: 20px;
-        padding-bottom: 5px;
-        padding-top: 5px;
-        position: absolute;
-        color: black !important;
-        background-color: rgba(255, 255, 255, 0.7);
-        box-shadow: 7px 7px 5px rgb(0 0 0 / 30%);
-        border-radius: 8px;
-        border-style: solid white;
-        width: 30vw;
-        min-width: 270px;
-        max-height: 40vh;
-        overflow-y: auto;
-        overflow-x: clip;
-        z-index: 20;
+    button {
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        padding: 4px 6px;
+        cursor: pointer;
+
+        &:hover {
+            background: var(--panel-hover);
+        }
+
+        &.active {
+            background: var(--panel-accent);
+            color: #fff;
+        }
     }
-    html {
-        height: -webkit-fill-available;
+}
+
+html {
+    height: -webkit-fill-available;
+}
+
+@media (min-width: 576px) {
+    br.smallScreen {
+        display: none;
+    }
+}
+
+@media (max-width: 991.98px) {
+    .largeScreen {
+        display: none;
     }
 }
 
@@ -262,11 +638,6 @@ button.active {
     background-color: grey;
     color: white;
     border: 0px;
-}
-
-.smallbuttons .btn {
-    padding-top: 0px;
-    padding-bottom: 0px;
 }
 
 hr {
@@ -278,11 +649,12 @@ hr {
 }
 
 .legs {
-    border: 1px solid grey;
+    border: 1px solid var(--card-border);
     width: 100%;
     overflow-x: scroll;
     display: block;
-    background: white;
+    background: var(--card-bg);
+    color: var(--card-fg);
 }
 .legs thead tr td,
 .legs tbody tr td {
@@ -296,7 +668,7 @@ hr {
     font-weight: bold;
     width: 8rem;
     min-width: 8rem;
-    background: white;
+    background: var(--card-bg);
 }
 
 .doclearboth:after {
@@ -345,8 +717,9 @@ td.small img {
     margin-left: 1px !important;
     margin-right: 3px !important;
     margin-bottom: 5px !important;
-    border: 1px solid #eee;
-    background: white !important;
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+    color: var(--card-fg);
     width: 58px;
     height: 85px;
     flex-grow: initial;
@@ -358,8 +731,9 @@ td.small img {
     margin-left: 1px !important;
     margin-right: 3px !important;
     margin-bottom: 5px !important;
-    border: 1px solid #eee;
-    background: white !important;
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+    color: var(--card-fg);
     width: 90px;
     height: 100px;
     flex-grow: initial;
@@ -619,14 +993,14 @@ td.small img {
 .status > li > a {
     text-align: center;
     vertical-align: bottom;
-    color: #49604c;
+    color: inherit;
 }
 
 .tooltipicon,
 .tooltipicon :hover,
 .tooltipicon :focus {
     text-decoration: none !important;
-    color: #333;
+    color: inherit;
     cursor: help;
 }
 
@@ -635,7 +1009,7 @@ td.small img {
 .status > li > a:hover,
 .status > li > a:focus {
     text-decoration: none;
-    color: #49604c;
+    color: var(--panel-accent);
 }
 
 .small-pic div p {
@@ -659,7 +1033,7 @@ ul.status li {
 }
 
 .status {
-    font-size: 15px;
+    font-size: 16px;
 }
 
 .status hr {
@@ -672,8 +1046,8 @@ ul.status li {
 }
 
 .status .caption {
-    color: white;
-    background: #444;
+    color: var(--card-caption-fg);
+    background: var(--card-caption-bg);
 }
 
 .signalpoor {
@@ -704,7 +1078,7 @@ a.selectimage:hover {
     left: 0px;
     width: 90vw;
     height: 90vh;
-    background: white;
+    background: var(--panel-bg);
 }
 .loadingspinner {
     background: url('/outline.gif');

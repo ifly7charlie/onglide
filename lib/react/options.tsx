@@ -85,6 +85,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
+            {/* Rain radar temporarily disabled — upstream tiles not working.
             {props.options.rainRadar ? (
                 <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance] + ', click to change timing or disable'} onClick={radarFunction}>
                     <FontAwesomeIcon icon={faUmbrella} />
@@ -102,6 +103,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                 </button>
             )}
             &nbsp;
+            */}
             {props.options.constructionLines ? (
                 <button title="Click to hide Construction Lines" onClick={constructionLines}>
                     <FontAwesomeIcon icon={faCompassDrafting} />
@@ -171,8 +173,8 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </button>,
                     <button title="Show full path for selected pilot" onClick={toggleFullPaths}>
                         <span className="fa-layers">
-                            <FontAwesomeIcon icon={fa1} size="xs" transform="shrink-4 left-4 up-8" />
                             <FontAwesomeIcon icon={faRoute} />
+                            <FontAwesomeIcon icon={fa1} transform="shrink-8 left-4 up-4" />
                         </span>
                     </button>,
                     <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
@@ -197,11 +199,11 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             )}
             &nbsp;
             {props.options.units ? (
-                <button title="Switch to metric units" onClick={toggleUnits}>
-                    <span className="fa-layers">ft</span>
+                <button title="Switch to metric units" onClick={toggleUnits} className="units-toggle">
+                    ft
                 </button>
             ) : (
-                <button title="Switch to imperial units" onClick={toggleUnits}>
+                <button title="Switch to imperial units" onClick={toggleUnits} className="units-toggle">
                     m
                 </button>
             )}

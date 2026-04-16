@@ -1364,9 +1364,13 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     console.log(`updateTrackers: ${afterSunset ? 'after sunset' : 'before sunset'} ${d(getNow())} > ${d(location.sunset)}`);
 
     // Filter out anything that doesn't match the input set, doesn't matter if it matches
-    // unknowns as they won't be in the trackers pick
+    // unknowns as they won't be in the trackers pick. Scope to this comp's own gliders —
+    // cTrackers only contains rows for this compid, so without the compid guard we'd
+    // treat every other comp's gliders as "removed" and wipe them from the global map,
+    // leaving the APRS worker still ticking for compnos main-thread no longer knows about.
     const keyedDb = keyBy<CTrackerRow>(cTrackers, makeClassname_Compno);
     const removedGliders = _filter(gliders, (g) => {
+        if (g.compid !== compid) return false;
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
             console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);

@@ -257,53 +257,18 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
                 flyTo={flyTo}
             />
 
-            {/* Legend */}
-            <div
-                style={{
-                    position: 'fixed',
-                    left: 20,
-                    bottom: 20,
-                    padding: '10px 14px',
-                    background: 'rgba(0, 0, 0, 0.6)',
-                    color: '#fff',
-                    borderRadius: 6,
-                    fontSize: 12
-                }}
-            >
+            <div className="map-legend">
                 {(['flying', 'landed', 'today', 'notask', 'upcoming', 'over'] as const).map((s) => (
-                    <div key={s} style={{display: 'flex', alignItems: 'center', marginTop: 2}}>
-                        <span
-                            style={{
-                                display: 'inline-block',
-                                width: 10,
-                                height: 10,
-                                borderRadius: '50%',
-                                background: statusCss(s),
-                                marginRight: 8
-                            }}
-                        />
+                    <div key={s} className="legend-row">
+                        <span className="status-dot" style={{background: statusCss(s)}} />
                         {STATUS_LABELS[s]}
                     </div>
                 ))}
             </div>
 
-            {/* Attribution */}
-            <div
-                style={{
-                    position: 'fixed',
-                    right: 6,
-                    bottom: 6,
-                    padding: '2px 6px',
-                    background: 'rgba(255, 255, 255, 0.75)',
-                    color: '#222',
-                    borderRadius: 3,
-                    fontSize: 11,
-                    lineHeight: '14px',
-                    pointerEvents: 'auto'
-                }}
-            >
+            <div className="map-attribution">
                 Land data:{' '}
-                <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener noreferrer" style={{color: '#0645ad'}}>
+                <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener noreferrer">
                     Natural Earth
                 </a>
             </div>
@@ -340,17 +305,7 @@ function CompetitionListPanel({
         if (!comps.length) return null;
         return (
             <>
-                <div
-                    style={{
-                        padding: '12px 16px 6px 16px',
-                        fontSize: 11,
-                        opacity: 0.7,
-                        textTransform: 'uppercase',
-                        letterSpacing: 0.5,
-                        borderTop: '1px solid rgba(255,255,255,0.12)',
-                        marginTop: 4
-                    }}
-                >
+                <div className="sidepanel-section-header">
                     {title} · {comps.length}
                 </div>
                 {comps.map((c) => (
@@ -374,25 +329,13 @@ function CompetitionListPanel({
     };
 
     return (
-        <div
-            style={{
-                position: 'fixed',
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: 340,
-                padding: '16px 0 48px 0',
-                background: 'rgba(0, 0, 0, 0.72)',
-                color: '#fff',
-                overflowY: 'auto',
-                fontSize: 13,
-                boxShadow: '-2px 0 8px rgba(0,0,0,0.4)'
-            }}
-        >
-            {renderSection('Live', live, true)}
-            {renderSection('Upcoming', upcoming, false)}
-            {renderSection('Finished', finished, true)}
-        </div>
+        <aside className="sidepanel">
+            <div className="sidepanel-body">
+                {renderSection('Live', live, true)}
+                {renderSection('Upcoming', upcoming, false)}
+                {renderSection('Finished', finished, true)}
+            </div>
+        </aside>
     );
 }
 
@@ -426,90 +369,35 @@ function CompetitionListEntry({
     const inActiveWindow = comp.displayStatus === 'flying' || comp.displayStatus === 'landed' || comp.displayStatus === 'today' || comp.displayStatus === 'notask';
     const totalPilots = classes.reduce((sum, cls) => sum + (cls.pilotCount || 0), 0);
 
+    const entryClass = ['sidepanel-entry', highlighted ? 'highlighted' : '', !clickable ? 'non-clickable' : ''].filter(Boolean).join(' ');
+
     return (
-        <div
-            onMouseEnter={onHover}
-            onMouseLeave={onLeave}
-            onClick={onClick}
-            style={{
-                padding: '10px 16px',
-                cursor: clickable ? 'pointer' : 'default',
-                background: highlighted ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                borderLeft: highlighted ? '3px solid #fff' : '3px solid transparent',
-                transition: 'background 120ms'
-            }}
-        >
-            <div style={{fontSize: 15, fontWeight: 600, marginBottom: 2, lineHeight: 1.2}}>{comp.name}</div>
-            {comp.sitename ? <div style={{opacity: 0.8}}>{comp.sitename}</div> : null}
-            <div style={{opacity: 0.7, fontSize: 12}}>
+        <div onMouseEnter={onHover} onMouseLeave={onLeave} onClick={onClick} className={entryClass}>
+            <div className="entry-title">{comp.name}</div>
+            {comp.sitename ? <div className="entry-sitename">{comp.sitename}</div> : null}
+            <div className="entry-dates">
                 {comp.start} – {comp.end}
             </div>
-            <div style={{marginTop: 6}}>
-                {inActiveWindow && classes.length > 0 ? (
-                    // Per-class rows: status dot + classname + pilot count.
-                    // The whole row is a click target that navigates straight
-                    // to that class's view within the competition, using the
-                    // existing `?className=<classid>` query-param pattern
-                    // that the Menu component already uses internally.
-                    // stopPropagation prevents the parent row's onClick from
-                    // also firing and overriding the class selection.
-                    classes.map((cls) => (
-                        <div
-                            key={cls.class}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                Router.push('/' + comp.compid + '?className=' + cls.class);
-                            }}
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                marginTop: 2,
-                                fontSize: 12,
-                                cursor: 'pointer',
-                                padding: '2px 4px',
-                                marginLeft: -4,
-                                marginRight: -4,
-                                borderRadius: 3
-                            }}
-                            onMouseEnter={(e) => {
-                                (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.08)';
-                            }}
-                            onMouseLeave={(e) => {
-                                (e.currentTarget as HTMLElement).style.background = 'transparent';
-                            }}
-                        >
-                            <span
-                                style={{
-                                    display: 'inline-block',
-                                    width: 9,
-                                    height: 9,
-                                    borderRadius: '50%',
-                                    background: statusCss(cls.displayStatus),
-                                    marginRight: 7,
-                                    flexShrink: 0
-                                }}
-                            />
-                            <span style={{opacity: 0.9, marginRight: 6}}>{cls.classname}</span>
-                            <span style={{opacity: 0.5, marginLeft: 'auto'}}>
-                                {cls.pilotCount} {cls.pilotCount === 1 ? 'pilot' : 'pilots'}
-                            </span>
-                        </div>
-                    ))
-                ) : (
-                    // Rollup row for future/over competitions:
-                    //   <dot> N classes · M pilots
-                    <div style={{display: 'flex', alignItems: 'center', fontSize: 12}}>
-                        <span
-                            style={{
-                                display: 'inline-block',
-                                width: 10,
-                                height: 10,
-                                borderRadius: '50%',
-                                background: statusCss(comp.displayStatus),
-                                marginRight: 8,
-                                flexShrink: 0
-                            }}
-                        />
+            {inActiveWindow && classes.length > 0
+                ? classes.map((cls) => (
+                      <div
+                          key={cls.class}
+                          className="entry-classrow"
+                          onClick={(e) => {
+                              e.stopPropagation();
+                              Router.push('/' + comp.compid + '?className=' + cls.class);
+                          }}
+                      >
+                          <span className="status-dot" style={{background: statusCss(cls.displayStatus)}} />
+                          <span className="name">{cls.classname}</span>
+                          <span className="count">
+                              {cls.pilotCount} {cls.pilotCount === 1 ? 'pilot' : 'pilots'}
+                          </span>
+                      </div>
+                  ))
+                : (
+                    <div className="entry-rollup">
+                        <span className="status-dot" style={{background: statusCss(comp.displayStatus)}} />
                         {STATUS_LABELS[comp.displayStatus]}
                         {' · '}
                         {comp.classCount} {comp.classCount === 1 ? 'class' : 'classes'}
@@ -521,7 +409,6 @@ function CompetitionListEntry({
                         ) : null}
                     </div>
                 )}
-            </div>
         </div>
     );
 }

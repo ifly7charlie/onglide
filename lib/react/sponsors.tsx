@@ -1,10 +1,15 @@
 import {useMemo} from 'react';
 
-export default function Sponsor(props) {
-    const sponsorList = [
-        <img width="150" height="150" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />,
+const OGN_LOGO = (
+    <a href="http://www.glidernet.org/" title="OGN Network" target="_blank" rel="noreferrer">
+        <img width="120" height="120" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" />
+    </a>
+);
 
-        ...(process.env.NEXT_PUBLIC_SITEURL.startsWith('sgp')
+export default function Sponsor(props: {at: number}) {
+    const sponsorList = [
+        OGN_LOGO,
+        ...(process.env.NEXT_PUBLIC_SITEURL?.startsWith('sgp')
             ? [
                   // FAI SPECIFIC
                   <img
@@ -19,36 +24,13 @@ export default function Sponsor(props) {
                   <img width="145" height="57" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/6b810832-df21-45b1-b338-5fd5d9e37b75/silentwings-1.jpg" />,
                   <img width="150" height="100" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/c71be420-e253-4b7d-8dec-d45f3a4ccd6b/TopMeteo.jpg" />,
                   <img width="150" height="50" src="https://images.squarespace-cdn.com/content/v1/5c2deead5b409b58c72bdba6/1546529524834-R3V7HCK516GTSOVJK696/Southern-Sailplanes-medium.png?format=150w" />,
-                  <img
-                      width="150"
-                      height="150"
-                      src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/1bf29bf3-c7cd-42fa-b6b9-927a6bc41e82/LogFAI-SGP.png?format=150w"
-                      alt="FAI Sailplane Grand Prix"
-                      title="FAI Sailplane Grand Prix"
-                  />,
                   <img width="145" height="46" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/4e86848d-8e4e-4e19-a18a-229ef2522d6c/CrosscountryAero-1.jpg" />,
                   <img width="150" height="150" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/7b75e0da-ff81-4b3f-965b-91b08f60d9bf/AS-1.jpg" />
               ]
-            : process.env.NEXT_PUBLIC_SITEURL.startsWith('wgc')
-              ? []
-              : [
-                    <div>
-                        If you would like to use onglide for your competition please ask your scorer to send the SoaringSpot API keys to setup@onglide.com
-                        <hr />
-                        For feedback, bug reports etc please use <a href="https://github.com/ifly7charlie/onglide/issues">GitHub issues reporting</a>
-                        <br />
-                        Pull Requests welcome
-                    </div>
-                ]),
-
-        <img width="150" height="150" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />
+            : [])
     ];
 
     const currentSponsor = useMemo(() => sponsorList[Math.trunc(props.at / 60) % sponsorList.length], [Math.trunc(props.at / 60)]);
 
-    return (
-        <div className="sponsor">
-            <span style={{padding: '2px', border: '5px solid white'}}>{currentSponsor}</span>
-        </div>
-    );
+    return <div className="sponsor">{currentSponsor}</div>;
 }
