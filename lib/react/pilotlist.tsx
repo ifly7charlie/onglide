@@ -61,7 +61,7 @@ import {selectLatestUpdate} from '../redux/tracksSlice';
 import {sortKeyEqualityCheck, sortOrders, type AllNormalDisplayKeys} from '../redux/selectPilotResult';
 
 // Helpers for sorting pilot list
-import {nextSortOrder, getValidSortOrder} from './pilot-sorting';
+import {getValidSortOrder} from './pilot-sorting';
 import {displayHeight, convertHeight, convertClimb} from './displayunits';
 
 import {offlineTime} from '../constants';
@@ -226,7 +226,7 @@ const StartComponent = memo(function StartComponent({
         <SummaryComponent
             id="times"
             title="times" //
-            width="130px"
+            width="120px"
             main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: faStopwatch, description: 'elapsed time'}}
             data1={{value: OptionalTime('', utcStart, tz), icon: faHourglassStart, description: 'start time'}}
             data2={{value: endTime, icon, description: description}}
@@ -274,7 +274,7 @@ const ActualSpeedComponent = memo(function ActualSpeedComponent({
 function HandicappedDistanceComponent({score}: {score: PilotScore}) {
     return (
         <SummaryComponent
-            width="100px"
+            width="90px"
             id="hdistance"
             title="distance" //
             main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'handicapped distance done'}}
@@ -292,7 +292,7 @@ function HandicappedDistanceComponent({score}: {score: PilotScore}) {
 function ActualDistanceComponent({score}: {score: PilotScore}) {
     return (
         <SummaryComponent
-            width="100px"
+            width="90px"
             id="distance"
             title="distance" //
             main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'actual distance done'}}
@@ -721,12 +721,11 @@ export const PilotList = memo(function PilotList({
         [selectedPilot]
     );
 
-    // Prevent unneeded re-render by using callbacks
     const setSort = useCallback(
-        (o) => {
-            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
+        (key: SortKey) => {
+            setOptions(_cloneDeep({...options, sortKey: key}));
         },
-        [order, handicapped, options]
+        [options]
     );
 
     // Generate the pilot list, sorted by the correct key

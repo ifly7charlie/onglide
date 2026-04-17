@@ -29,7 +29,7 @@ const handicappedDescriptions = {
     //    delay: 'Tracking delay'
 };
 
-const handicappedSortOrders = {
+export const handicappedSortOrders: Record<string, SortKey[]> = {
     auto: ['auto'],
     speed: ['speed', 'aspeed', 'fspeed', 'faspeed'],
     height: ['height', 'aheight'],
@@ -37,7 +37,7 @@ const handicappedSortOrders = {
     ld: ['ld', 'ald'],
     remaining: ['remaining', 'aremaining'],
     distance: ['distance', 'adistance'],
-    times: ['start', 'duration', 'finish' /*, 'delay'*/]
+    times: ['start', 'duration', 'finish']
 };
 
 // list of descriptions
@@ -57,7 +57,7 @@ const descriptions = {
     //    delay: 'Tracking delay'
 };
 
-const sortOrders = {
+export const nonHandicappedSortOrders: Record<string, SortKey[]> = {
     auto: ['auto'],
     speed: ['aspeed', 'faspeed'],
     height: ['height', 'aheight'],
@@ -65,7 +65,27 @@ const sortOrders = {
     ld: ['ald'],
     remaining: ['aremaining'],
     distance: ['adistance'],
-    times: ['start', 'duration', 'finish' /*, 'delay'*/]
+    times: ['start', 'duration', 'finish']
+};
+
+export const shortLabels: Record<string, string> = {
+    auto: 'Auto',
+    speed: 'Hcap',
+    aspeed: 'Actual',
+    fspeed: 'Fin. H',
+    faspeed: 'Fin. A',
+    height: 'AMSL',
+    aheight: 'AGL',
+    climb: 'Avg',
+    ld: 'Hcap',
+    ald: 'Actual',
+    remaining: 'Hcap',
+    aremaining: 'Actual',
+    distance: 'Hcap',
+    adistance: 'Actual',
+    start: 'Start',
+    finish: 'Finish',
+    duration: 'Duration'
 };
 
 const whichSortOrder = {
@@ -106,7 +126,7 @@ export function getValidSortOrder(type: SortKey, handicapped: boolean): SortKey 
         return type;
     } else {
         const key = getSortOrderType(type);
-        const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
+        const orders = handicapped ? handicappedSortOrders[key] : nonHandicappedSortOrders[key];
         return orders[0];
     }
 }
@@ -115,7 +135,7 @@ export function getValidSortOrder(type: SortKey, handicapped: boolean): SortKey 
 // This will figure out what the next sort order should be based on the current one
 export function nextSortOrder(key: SortKey, current: SortKey, handicapped: boolean) {
     // Toggle through the options
-    const orders = handicapped ? handicappedSortOrders[key] : sortOrders[key];
+    const orders = handicapped ? handicappedSortOrders[key] : nonHandicappedSortOrders[key];
     const index = orders.indexOf(current) || 0;
     const order = orders[(index + 1) % orders.length];
 

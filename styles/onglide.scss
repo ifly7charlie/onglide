@@ -21,6 +21,7 @@
     --panel-hover: rgba(0, 0, 0, 0.06);
     --panel-accent: #0066cc;
     --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    --dropdown-bg: rgba(255, 255, 255, 0.96);
 
     // Info cards (pilot data, vario/speed tiles, leg tables) use a
     // distinct palette. In light mode we keep the original white card
@@ -42,6 +43,7 @@
         --panel-hover: rgba(255, 255, 255, 0.12);
         --panel-accent: #4da6ff;
         --panel-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+        --dropdown-bg: rgba(30, 30, 30, 0.96);
 
         --card-bg: rgba(255, 255, 255, 0.08);
         --card-fg: #f5f5f5;
@@ -111,7 +113,7 @@ button {
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 14px 18px;
+        padding: 8px 16px;
         border-bottom: 1px solid var(--panel-border);
 
         .sidepanel-back {
@@ -155,7 +157,7 @@ button {
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
-        padding: 12px 16px;
+        padding: 6px 16px;
         border-bottom: 1px solid var(--panel-border);
 
         button {
@@ -181,7 +183,7 @@ button {
     }
 
     .sidepanel-tools {
-        padding: 10px 14px;
+        padding: 4px 14px;
         border-bottom: 1px solid var(--panel-border);
 
         .options {
@@ -191,7 +193,7 @@ button {
     }
 
     .sidepanel-section {
-        padding: 14px 18px;
+        padding: 6px 16px;
         border-bottom: 1px solid var(--panel-border);
 
         &:last-child {
@@ -220,7 +222,7 @@ button {
 
     .sidepanel-footer {
         flex-shrink: 0;
-        padding: 14px 18px;
+        padding: 6px 16px;
         border-top: 1px solid var(--panel-border);
     }
 
@@ -568,9 +570,9 @@ ul.status {
     list-style-type: none;
     padding: 0;
     margin: 0;
-    padding-top: 4px;
     display: flex;
     flex-wrap: wrap;
+    gap: 2px;
 }
 
 .sponsor {
@@ -596,24 +598,102 @@ ul.status {
     font-size: 14px;
 }
 
-.sorting {
-    float: right;
-    font-size: 16px;
+.sort-dropdown {
+    position: relative;
+    width: 100%;
 
-    button {
+    .sort-trigger {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
         background: transparent;
-        border: 1px solid transparent;
-        border-radius: 4px;
-        padding: 4px 6px;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 12px;
+        font: inherit;
+        font-size: 14px;
+        color: inherit;
         cursor: pointer;
 
         &:hover {
             background: var(--panel-hover);
         }
 
-        &.active {
-            background: var(--panel-accent);
-            color: #fff;
+        .sort-label {
+            flex: 1;
+            text-align: left;
+        }
+
+        .sort-caret {
+            transition: transform 150ms;
+            opacity: 0.6;
+
+            &.open {
+                transform: rotate(180deg);
+            }
+        }
+    }
+
+    .sort-menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        background: var(--dropdown-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        z-index: 30;
+        padding: 6px 0;
+
+        .sort-row {
+            display: flex;
+            align-items: center;
+            padding: 4px 10px;
+            gap: 8px;
+
+            .sort-row-label {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                width: 90px;
+                flex-shrink: 0;
+                font-size: 13px;
+                opacity: 0.9;
+            }
+
+            .sort-row-options {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px;
+                flex: 1;
+                min-width: 0;
+
+                button {
+                    background: transparent;
+                    border: 1px solid var(--panel-border);
+                    border-radius: 4px;
+                    padding: 3px 8px;
+                    font: inherit;
+                    font-size: 12px;
+                    color: inherit;
+                    cursor: pointer;
+                    white-space: nowrap;
+
+                    &:hover {
+                        background: var(--panel-border);
+                    }
+
+                    &.active {
+                        background: var(--panel-accent);
+                        color: #fff;
+                        border-color: var(--panel-accent);
+                    }
+                }
+            }
         }
     }
 }
@@ -728,17 +808,19 @@ td.small img {
 }
 
 .status li {
-    margin-left: 1px !important;
-    margin-right: 3px !important;
-    margin-bottom: 5px !important;
+    margin: 0 2px 2px 0 !important;
     border: 1px solid var(--card-border);
     background: var(--card-bg);
     color: var(--card-fg);
     width: 90px;
-    height: 100px;
+    height: auto;
     flex-grow: initial;
-    padding-right: 3px;
-    padding-left: 3px;
+    padding: 0 !important;
+    overflow: hidden;
+
+    .summarycomponent {
+        padding: 0 3px;
+    }
 }
 
 .small-pic > a {
@@ -974,8 +1056,9 @@ td.small img {
 .status > li > .caption {
     font-weight: bold;
     font-size: x-large;
-    padding: 0px;
-    line-height: 1rem;
+    padding: 0;
+    margin: 0;
+    line-height: 1;
 }
 
 .small-pic .info {
@@ -1037,17 +1120,15 @@ ul.status li {
 }
 
 .status hr {
-    margin: 0px;
-    margin-top: 1px;
-    margin-bottom: 1px;
-    left: 0px;
-    right: 0px;
-    border-top: 1px solid grey;
+    margin: 0;
+    border: none;
+    border-top: 1px solid var(--card-border);
 }
 
 .status .caption {
     color: var(--card-caption-fg);
     background: var(--card-caption-bg);
+    padding: 1px 3px;
 }
 
 .signalpoor {
