@@ -582,7 +582,6 @@ export const Details = ({compno, pilot, units, tz, replayTime, onEditHandicap}: 
                     <span>{altitude}</span>
                 </span>
             </h6>
-            <hr style={{borderColor: 'white', height: '1px', margin: '0'}} />
             {flightDetails}
         </div>
     );
