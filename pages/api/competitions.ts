@@ -60,8 +60,8 @@ export default async function competitionsHandler(_req, res) {
             c.sitename,
             c.lt,
             c.lg,
-            DATE_FORMAT(c.start, '%Y-%m-%d') start,
-            DATE_FORMAT(c.end, '%Y-%m-%d') end,
+            DATE_FORMAT (c.start, '%Y-%m-%d') start,
+            DATE_FORMAT (c.end, '%Y-%m-%d') AS endDate,
             c.countrycode,
             c.tz,
             c.tzoffset,
@@ -70,15 +70,21 @@ export default async function competitionsHandler(_req, res) {
             cl.classname,
             COALESCE(cs.status, '') AS status,
             (
-                SELECT COUNT(*)
-                FROM pilots p
-                WHERE p.class = cl.class
+                SELECT
+                    COUNT(*)
+                FROM
+                    pilots p
+                WHERE
+                    p.class = cl.class
             ) AS pilotCount,
             (
-                SELECT MAX(cd2.calendardate)
-                FROM contestday cd2
-                WHERE cd2.class = cl.class
-                  AND cd2.status = 'Y'
+                SELECT
+                    MAX(cd2.calendardate)
+                FROM
+                    contestday cd2
+                WHERE
+                    cd2.class = cl.class
+                    AND cd2.status = 'Y'
             ) AS lastTaskDate
         FROM
             competition c
@@ -108,7 +114,7 @@ export default async function competitionsHandler(_req, res) {
                 lt: r.lt,
                 lg: r.lg,
                 start: r.start,
-                end: r.end,
+                end: r.endDate,
                 countrycode: r.countrycode,
                 tz: r.tz,
                 tzoffset: r.tzoffset,
@@ -126,12 +132,17 @@ export default async function competitionsHandler(_req, res) {
             // displayStatus is filled in below once we know inWindow.
             displayStatus: 'upcoming'
         });
-        if (r.lastTaskDate && (!comp.maxLastTaskDate || r.lastTaskDate > comp.maxLastTaskDate)) {
-            comp.maxLastTaskDate = r.lastTaskDate;
+        if (r.lastTaskDate) {
+            const d = r.lastTaskDate instanceof Date ? r.lastTaskDate.toISOString().substring(0, 10) : String(r.lastTaskDate).substring(0, 10);
+            if (!comp.maxLastTaskDate || d > comp.maxLastTaskDate) {
+                comp.maxLastTaskDate = d;
+            }
         }
     }
 
-    const competitions = Array.from(byCompid.values())
+    console.log(JSON.stringify([...byCompid.values()]));
+
+    const competitions1 = Array.from(byCompid.values())
         // Apply the "still interesting enough to show" filter here rather
         // than in HAVING, so the per-class query can stay simple.
         .filter((comp) => {
@@ -139,63 +150,68 @@ export default async function competitionsHandler(_req, res) {
             if (comp.maxLastTaskDate && comp.maxLastTaskDate >= yesterdayIso) return true;
             if (comp.end && comp.end >= yesterdayIso) return true;
             return false;
-        })
-        .map((comp) => {
-            const inWindow = comp.start && comp.end && comp.start <= todayIso && todayIso <= comp.end;
-            const endPast = !!(comp.end && comp.end < todayIso);
-
-            // Annotate each class with its own displayStatus.
-            for (const cls of comp.classes as ClassRow[]) {
-                cls.displayStatus = classDisplayStatus(cls.status, inWindow, endPast);
-            }
-            const classDisplayStatuses = (comp.classes as ClassRow[]).map((c) => c.displayStatus);
-            const statuses: string[] = (comp.classes as ClassRow[]).map((c) => c.status).filter(Boolean);
-
-            let displayStatus: ClassDisplayStatus;
-            const anyFlying = statuses.some((s) => s === 'L' || s === 'S');
-            const allOver = statuses.length > 0 && statuses.every((s) => s === 'O');
-            const allLanded = statuses.length > 0 && statuses.every((s) => s === 'R' || s === 'H');
-            const anyTaskReady = statuses.some((s) => s === 'B' || s === 'P');
-
-            if (anyFlying) {
-                displayStatus = 'flying';
-            } else if (allOver) {
-                displayStatus = 'over';
-            } else if (allLanded) {
-                displayStatus = 'landed';
-            } else if (inWindow && anyTaskReady) {
-                displayStatus = 'today';
-            } else if (inWindow) {
-                displayStatus = 'notask';
-            } else if (endPast) {
-                displayStatus = 'over';
-            } else {
-                displayStatus = 'upcoming';
-            }
-
-            // Do the classes all agree? If so the list panel can collapse
-            // the per-class dots into a single one. Cheap to compute here
-            // and saves the client having to do the same comparison.
-            const classStatusesDiffer = new Set(classDisplayStatuses).size > 1;
-
-            return {
-                compid: comp.compid,
-                name: comp.name,
-                sitename: comp.sitename,
-                lat: comp.lt,
-                lng: comp.lg,
-                start: comp.start,
-                end: comp.end,
-                countrycode: comp.countrycode,
-                tz: comp.tz,
-                tzoffset: comp.tzoffset,
-                mainwebsite: comp.mainwebsite,
-                classCount: comp.classes.length,
-                classes: comp.classes,
-                classStatusesDiffer,
-                displayStatus
-            };
         });
+
+    //    console.table(competitions1);
+
+    const competitions = competitions1.map((comp) => {
+        const inWindow = comp.start && comp.end && comp.start <= todayIso && todayIso <= comp.end;
+        const endPast = !!(comp.end && comp.end < todayIso);
+
+        // Annotate each class with its own displayStatus.
+        for (const cls of comp.classes as ClassRow[]) {
+            cls.displayStatus = classDisplayStatus(cls.status, inWindow, endPast);
+        }
+        const classDisplayStatuses = (comp.classes as ClassRow[]).map((c) => c.displayStatus);
+        const statuses: string[] = (comp.classes as ClassRow[]).map((c) => c.status).filter(Boolean);
+
+        let displayStatus: ClassDisplayStatus;
+        const anyFlying = statuses.some((s) => s === 'L' || s === 'S');
+        const allOver = statuses.length > 0 && statuses.every((s) => s === 'O');
+        const allLanded = statuses.length > 0 && statuses.every((s) => s === 'R' || s === 'H');
+        const anyTaskReady = statuses.some((s) => s === 'B' || s === 'P');
+
+        if (anyFlying) {
+            displayStatus = 'flying';
+        } else if (allOver) {
+            displayStatus = 'over';
+        } else if (allLanded) {
+            displayStatus = 'landed';
+        } else if (inWindow && anyTaskReady) {
+            displayStatus = 'today';
+        } else if (inWindow) {
+            displayStatus = 'notask';
+        } else if (endPast) {
+            displayStatus = 'over';
+        } else {
+            displayStatus = 'upcoming';
+        }
+
+        // Do the classes all agree? If so the list panel can collapse
+        // the per-class dots into a single one. Cheap to compute here
+        // and saves the client having to do the same comparison.
+        const classStatusesDiffer = new Set(classDisplayStatuses).size > 1;
+
+        return {
+            compid: comp.compid,
+            name: comp.name,
+            sitename: comp.sitename,
+            lat: comp.lt,
+            lng: comp.lg,
+            start: comp.start,
+            end: comp.end,
+            countrycode: comp.countrycode,
+            tz: comp.tz,
+            tzoffset: comp.tzoffset,
+            mainwebsite: comp.mainwebsite,
+            classCount: comp.classes.length,
+            classes: comp.classes,
+            classStatusesDiffer,
+            displayStatus
+        };
+    });
+
+    //    console.log(JSON.stringify(competitions));
 
     // Refresh every minute so the globe picks up status changes during a flying day
     res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=60');

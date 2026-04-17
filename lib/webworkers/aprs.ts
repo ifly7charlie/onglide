@@ -50,6 +50,10 @@ const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'gl
 // and logged in. Drained in the connect handler after sendLogin().
 let pendingFilter: string | null = null;
 
+// Last successfully applied filter — re-sent after reconnects so we don't
+// fall back to the login-time r/0/0/1 placeholder.
+let currentFilter: string | null = null;
+
 // True from the moment the connect handler has fired and sendLogin() has
 // been called. This gates #filter — aprsc only accepts in-band filter
 // updates after login. Note: connection.valid is set in the packet
@@ -517,6 +521,7 @@ function applyFilter(filter: string) {
     if (filter.length > 900) {
         console.log(`aprs filter length warning: ${filter.length} bytes (aprsc practical cap ~1KB)`);
     }
+    currentFilter = filter;
     if (loggedIn && connection) {
         connection.send(`#filter ${filter}\r\n`);
         console.log(`aprs filter updated: ${filter.length} bytes: ${filter}`);
@@ -563,12 +568,12 @@ function startAprsListener(config: AprsListenerConfig) {
         connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
         loggedIn = true;
         console.log(`aprs connected and logged in to ${APRSSERVER}`);
-        // If main thread handed us a narrower filter while we were still
-        // connecting, apply it now that we're logged in.
-        if (pendingFilter !== null) {
-            const f = pendingFilter;
-            pendingFilter = null;
-            applyFilter(f);
+        // Re-apply the active filter: either a pending one (set while
+        // disconnected) or the last applied filter (on reconnect).
+        const filterToApply = pendingFilter ?? currentFilter;
+        pendingFilter = null;
+        if (filterToApply) {
+            applyFilter(filterToApply);
         }
     });
 

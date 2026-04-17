@@ -86,7 +86,7 @@ import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlandin
 
 import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocessing/timehelper';
 
-import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
+import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation, PositionStatus} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
 let userLogStream: WriteStream | null = null;
@@ -1494,6 +1494,35 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     if (removedGliders.length || updatedGliderCount || newGlidersCount != initialGliderCount) {
         console.log(`updatedTrackers: ${removedGliders.length} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
         console.log(`${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
+    }
+
+    if (!readOnly) {
+        const tracked = cTrackers.filter((t) => t.dbTrackerId);
+        const byClass = new Map<ClassName, CTrackerRow[]>();
+        for (const t of tracked) {
+            const list = byClass.get(t.className) || [];
+            list.push(t);
+            byClass.set(t.className, list);
+        }
+        for (const [className, pilots] of byClass) {
+            const channel = channels[channelName(className, datecode)];
+            const allLanded =
+                pilots.length > 0 &&
+                pilots.every((p) => {
+                    const liveScore = channel?.allScores[p.compno];
+                    const fs = liveScore?.flightStatus;
+                    return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished || p.scoredStatus !== 'S';
+                });
+            if (allLanded) {
+                db.query('UPDATE compstatus SET status = ? WHERE class = ? AND status IN (?, ?)', ['H', className, 'L', 'S'])
+                    .then((r: any) => {
+                        if (r?.affectedRows) {
+                            console.log(`compstatus -> H for ${className}: all ${pilots.length} tracked gliders landed`);
+                        }
+                    })
+                    .catch((e) => console.log('compstatus H update failed:', e));
+            }
+        }
     }
 
     // identify any competition numbers that may be duplicates and mark them.  This

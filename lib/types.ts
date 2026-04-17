@@ -326,6 +326,7 @@ export type SortKey =
     | 'speed'
     | 'aspeed'
     | 'fspeed'
+    | 'faspeed'
     | 'climb'
     | 'remaining'
     | 'aremaining'
