@@ -71,7 +71,6 @@ export default function MApp(props: {
     const mapRef = useRef<MapRef | null>(null);
     const measure = useMeasure();
 
-
     // So we get some type info
     const {options, setOptions, follow, setFollow, vc, selectedCompno, tz, viewport} = props;
 
@@ -360,7 +359,34 @@ export default function MApp(props: {
                 map.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
                 map.setLayoutProperty('contour-line', 'visibility', mapStreet ? 'none' : 'visible');
             }
-        } catch (e) {}
+            // Build an arrow PNG at runtime via canvas, so no external asset is needed.
+            // The arrow MUST point right (east, 0 degrees); Mapbox rotates it per segment
+            // to match the line's bearing.
+            function makeArrowImageData(color: string) {
+                const size = 32;
+                const c = document.createElement('canvas');
+                c.width = size;
+                c.height = size;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = color;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(size * 0.15, size * 0.2);
+                ctx.lineTo(size * 0.85, size * 0.5);
+                ctx.lineTo(size * 0.15, size * 0.8);
+                ctx.lineTo(size * 0.38, size * 0.5);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                return ctx.getImageData(0, 0, size, size);
+            }
+
+            map.addImage('arrowlight', makeArrowImageData('white'), {pixelRatio: 2});
+            map.addImage('arrowdark', makeArrowImageData('grey'), {pixelRatio: 2});
+        } catch (e) {
+            console.error(e);
+        }
     }, [mapStreet, mapRef?.current]);
     useEffect(fixupMap, [mapStreet, mapRef?.current]);
 
@@ -636,12 +662,15 @@ function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean, s
         {
             // Track line
             id: 'track',
-            type: 'line',
-            paint: {
-                'line-color': mapLight ? 'darkgrey' : 'white',
-                'line-width': ['case', ['==', !selectedPilot, true], 15, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 15, 6],
-                'line-opacity': 1,
-                'line-pattern': !mapLight ? 'oneway-large' : 'oneway-white-large' //the white one is actually orange
+            type: 'symbol',
+            layout: {
+                'symbol-placement': 'line',
+                'symbol-spacing': 1, // px between arrows
+                'icon-image': mapLight ? 'arrowdark' : 'arrowlight',
+                'icon-size': 1,
+                'icon-allow-overlap': true,
+                'icon-ignore-placement': true,
+                'icon-rotation-alignment': 'map' // rotate with bearing, not viewport
             }
         },
         {
@@ -716,12 +745,15 @@ function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean, s
         {
             // Track line
             id: 'track',
-            type: 'line',
-            paint: {
-                'line-color': mapLight ? 'black' : 'pink',
-                'line-width': ['case', ['==', !selectedPilot, true], 20, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 20, 10],
-                'line-opacity': 1,
-                'line-pattern': !mapLight ? 'oneway-large' : 'oneway-white-large' //the white one is actually orange
+            type: 'symbol',
+            layout: {
+                'symbol-placement': 'line',
+                'symbol-spacing': 4, // px between arrows
+                'icon-image': mapLight ? 'arrowdark' : 'arrowlight',
+                'icon-size': 1,
+                'icon-allow-overlap': true,
+                'icon-ignore-placement': true,
+                'icon-rotation-alignment': 'map' // rotate with bearing, not viewport
             }
         },
         {
