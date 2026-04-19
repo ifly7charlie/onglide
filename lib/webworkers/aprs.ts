@@ -63,6 +63,13 @@ let currentFilter: string | null = null;
 // itself forever.
 let loggedIn = false;
 
+// Guard against concurrent restarts. The error handler and kaInterval
+// can both trip the "too unstable" threshold in the same tick; without
+// this guard they'd each spin up a fresh listener (with its own
+// interval/socket), leaking the previous one's kaInterval since each
+// closure clears only the interval it captured.
+let restarting = false;
+
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
 import {trackMetric, initialiseInsights} from '../insights';
@@ -538,6 +545,10 @@ function startAprsListener(config: AprsListenerConfig) {
         return;
     }
 
+    // Clear the restart guard so this fresh listener can itself trigger
+    // a restart later if it becomes unstable.
+    restarting = false;
+
     // Settings for connecting to the APRS server
     const PASSCODE = -1;
     const APRSSERVER = (statistics.server = process.env.APRS_SERVER || possibleServers[Math.trunc(possibleServers.length * Math.random())]);
@@ -564,8 +575,18 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // Handle a connect
     connection.on('connect', () => {
-        connection.sendLogin();
-        connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+        // sendLogin can throw "Socket not connected" if the socket was
+        // disconnected between net's afterConnect and this handler firing
+        // (e.g. an error handler already called disconnect()). Letting it
+        // throw crashes the worker via EventEmitter's uncaught path, so
+        // swallow it and let the normal retry loop reconnect.
+        try {
+            connection.sendLogin();
+            connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+        } catch (e) {
+            console.log(`aprs sendLogin failed on ${APRSSERVER}, will retry: ${e}`);
+            return;
+        }
         loggedIn = true;
         console.log(`aprs connected and logged in to ${APRSSERVER}`);
         // Re-apply the active filter: either a pending one (set while
@@ -606,13 +627,18 @@ function startAprsListener(config: AprsListenerConfig) {
     // Failed to connect
     connection.on('error', (err) => {
         console.log('Error: ' + err);
+        if (restarting) {
+            return;
+        }
         connection.disconnect();
         statistics.server += '!';
         unstableCount += 2;
         if (unstableCount > 5) {
             console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+            restarting = true;
             clearInterval(kaInterval);
             startAprsListener(config);
+            return;
         }
         setTimeout(() => connection.connect(), unstableCount * 2000);
     });
@@ -684,15 +710,20 @@ function startAprsListener(config: AprsListenerConfig) {
             }
 
             // Re-establish the APRS connection if we haven't had anything in
-            if (!connection.valid) {
+            if (!connection.valid && !restarting) {
                 console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
                 connection.disconnect(() => {
+                    if (restarting) {
+                        return;
+                    }
                     unstableCount += 2;
                     if (unstableCount > 5) {
                         console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+                        restarting = true;
                         clearInterval(kaInterval);
                         startAprsListener(config);
                         trackMetric('aprs.restart', 1);
+                        return;
                     }
                     connection.connect();
                 });

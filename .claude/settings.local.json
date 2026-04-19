@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -lat ~/Downloads/Trace-*.json)",
+      "Bash(node bin/trace.js ~/Downloads/Trace-20260412T191321.json stats)",
+      "Bash(node bin/trace.js ~/Downloads/Trace-20260412T191321.json long 100)",
+      "Bash(node bin/trace.js ~/Downloads/Trace-20260412T191321.json hot 10)",
+      "Bash(node bin/trace.js ~/Downloads/Trace-20260412T191321.json children)",
+      "Bash(node bin/trace.js ~/Downloads/Trace-20260412T191321.json hot 30)",
+      "Bash(npx tsc:*)",
+      "Bash(echo \"EXIT $?\")",
+      "Bash(echo \"TSC=$?\")"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": false
+  }
+}
