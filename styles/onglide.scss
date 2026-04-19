@@ -222,6 +222,8 @@ button {
 
     .sidepanel-footer {
         flex-shrink: 0;
+        max-height: 40%;
+        overflow-y: auto;
         padding: 6px 16px;
         border-top: 1px solid var(--panel-border);
     }
