@@ -278,6 +278,40 @@ export default function MApp(props: {
         }
     }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving]);
 
+    // Add our track arrows
+    useEffect(() => {
+        try {
+            const map = mapRef?.current?.getMap();
+            if (map) {
+                // Build an arrow PNG at runtime via canvas, so no external asset is needed.
+                // The arrow MUST point right (east, 0 degrees); Mapbox rotates it per segment
+                // to match the line's bearing.
+                function makeArrowImageData(color: string) {
+                    const size = 32;
+                    const c = document.createElement('canvas');
+                    c.width = size;
+                    c.height = size;
+                    const ctx = c.getContext('2d');
+                    ctx.fillStyle = color;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(size * 0.15, size * 0.2);
+                    ctx.lineTo(size * 0.85, size * 0.5);
+                    ctx.lineTo(size * 0.15, size * 0.8);
+                    ctx.lineTo(size * 0.38, size * 0.5);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                    return ctx.getImageData(0, 0, size, size);
+                }
+
+                map.addImage('arrowlight', makeArrowImageData('white'), {pixelRatio: 2});
+                map.addImage('arrowdark', makeArrowImageData('grey'), {pixelRatio: 2});
+            }
+        } catch (e) {}
+    }, []);
+
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
@@ -359,34 +393,7 @@ export default function MApp(props: {
                 map.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
                 map.setLayoutProperty('contour-line', 'visibility', mapStreet ? 'none' : 'visible');
             }
-            // Build an arrow PNG at runtime via canvas, so no external asset is needed.
-            // The arrow MUST point right (east, 0 degrees); Mapbox rotates it per segment
-            // to match the line's bearing.
-            function makeArrowImageData(color: string) {
-                const size = 32;
-                const c = document.createElement('canvas');
-                c.width = size;
-                c.height = size;
-                const ctx = c.getContext('2d');
-                ctx.fillStyle = color;
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(size * 0.15, size * 0.2);
-                ctx.lineTo(size * 0.85, size * 0.5);
-                ctx.lineTo(size * 0.15, size * 0.8);
-                ctx.lineTo(size * 0.38, size * 0.5);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-                return ctx.getImageData(0, 0, size, size);
-            }
-
-            map.addImage('arrowlight', makeArrowImageData('white'), {pixelRatio: 2});
-            map.addImage('arrowdark', makeArrowImageData('grey'), {pixelRatio: 2});
-        } catch (e) {
-            console.error(e);
-        }
+        } catch (e) {}
     }, [mapStreet, mapRef?.current]);
     useEffect(fixupMap, [mapStreet, mapRef?.current]);
 
