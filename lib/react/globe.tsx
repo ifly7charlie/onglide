@@ -329,7 +329,7 @@ function CompetitionListPanel({
     };
 
     return (
-        <aside className="sidepanel">
+        <aside className="sidepanel sidepanel-globe">
             <div className="sidepanel-body">
                 {renderSection('Live', live, true)}
                 {renderSection('Upcoming', upcoming, false)}
@@ -388,7 +388,9 @@ function CompetitionListEntry({
                               Router.push('/' + comp.compid + '?className=' + cls.class);
                           }}
                       >
-                          <span className="status-dot" style={{background: statusCss(cls.displayStatus)}} />
+                          <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
+                              {STATUS_LABELS[cls.displayStatus]}
+                          </span>
                           <span className="name">{cls.classname}</span>
                           <span className="count">
                               {cls.pilotCount} {cls.pilotCount === 1 ? 'pilot' : 'pilots'}
@@ -397,9 +399,9 @@ function CompetitionListEntry({
                   ))
                 : (
                     <div className="entry-rollup">
-                        <span className="status-dot" style={{background: statusCss(comp.displayStatus)}} />
-                        {STATUS_LABELS[comp.displayStatus]}
-                        {' · '}
+                        <span className="status-pill" style={{background: statusCss(comp.displayStatus)}}>
+                            {STATUS_LABELS[comp.displayStatus]}
+                        </span>
                         {comp.classCount} {comp.classCount === 1 ? 'class' : 'classes'}
                         {totalPilots > 0 ? (
                             <>
