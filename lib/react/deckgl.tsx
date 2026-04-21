@@ -310,7 +310,7 @@ export default function MApp(props: {
                 map.addImage('arrowdark', makeArrowImageData('grey'), {pixelRatio: 2});
             }
         } catch (e) {}
-    }, []);
+    }, [mapRef.current]);
 
     //
     // Colour and style the task based on the selected pilot and their destination
