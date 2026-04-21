@@ -47,7 +47,6 @@ import {Optional, OptionalTime, OptionalDuration, OptionalDurationMM} from './op
 import {useState, useCallback} from 'react';
 
 import {FlightLegs} from './flightLegs';
-import {Sorting} from './sorting';
 
 // Helpers for loading contest information etc
 import {delayToText} from './timehelper.js';
@@ -682,10 +681,10 @@ export const PilotList = memo(function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
-    setOptions,
-    handicapped,
+    sortOrder,
     now,
-    tz
+    tz,
+    horizontal
 }: //
 {
     pilots: API_ClassName_Pilots;
@@ -693,19 +692,17 @@ export const PilotList = memo(function PilotList({
     setSelectedCompno: Function;
     options: Options;
     live: boolean;
-    setOptions: Function;
-    handicapped: boolean;
+    sortOrder: string;
     now: Epoch | undefined;
     tz: TZ;
+    horizontal?: boolean;
 }) {
-    const order = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
-
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
     // this can be done with a clone and reoder
     const pilotList: AllNormalDisplayKeys = useSelector(
         (state) =>
-            (sortOrders[order] ?? sortOrders['auto'])(state, now)
+            (sortOrders[sortOrder] ?? sortOrders['auto'])(state, now)
                 .map((r) => (r.converter ? r.converter(r, options.units, tz) : r))
                 .sort((a, b) => b.sortKey - a.sortKey),
         sortKeyEqualityCheck
@@ -718,13 +715,6 @@ export const PilotList = memo(function PilotList({
             selectedPilot === compno ? setSelectedCompno(null) : setSelectedCompno(compno);
         },
         [selectedPilot]
-    );
-
-    const setSort = useCallback(
-        (key: SortKey) => {
-            setOptions(_cloneDeep({...options, sortKey: key}));
-        },
-        [options]
     );
 
     // Generate the pilot list, sorted by the correct key
@@ -749,10 +739,5 @@ export const PilotList = memo(function PilotList({
         return null;
     }
 
-    return (
-        <>
-            <Sorting setSort={setSort} sortOrder={order} handicapped={handicapped || false} />
-            <ul className="pilots">{pilotComponents}</ul>
-        </>
-    );
+    return <ul className={horizontal ? 'pilots pilots-horizontal' : 'pilots'}>{pilotComponents}</ul>;
 });

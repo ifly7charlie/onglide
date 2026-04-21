@@ -19,11 +19,11 @@ import {fromDateCode} from '../datecode';
 import {getNow} from '../now';
 
 //
-export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz, replayTime}: {compid: string; vc: ClassName; fitBounds: Function; tz: TZ; replayTime: Epoch}) {
+export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz, replayTime, defaultOpen}: {compid: string; vc: ClassName; fitBounds: Function; tz: TZ; replayTime: Epoch; defaultOpen?: boolean}) {
     const task = useSelector((state) => selectTask(state, vc));
     const hasTask = useSelector((state) => selectHasTask(state, vc));
     const {comp, isLoading} = useContest(compid);
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(!!defaultOpen);
 
     const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
     // And then produce a string to display it locally. `comp` is undefined

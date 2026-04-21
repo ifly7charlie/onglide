@@ -18,58 +18,71 @@ interface SidePanelProps {
     footer?: ReactNode;
 }
 
-export function SidePanel({comp, vc, onClassChange, options, setOptions, head, children, footer}: SidePanelProps) {
-    const multipleClasses = (comp?.classes?.length ?? 0) > 1;
-
-    const shortNameBase = (
+export function compShortName(comp: any) {
+    return (
         comp?.competition?.name
             ?.replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
             .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
             .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
             .replace(/.*Sailplane Grandprix]*/gi, 'SGP')
             ?.trim() || comp?.competition?.name || ''
-    ).substring(0, 28);
-    const shortName = shortNameBase + (shortNameBase.length === 28 ? '…' : '');
+    );
+}
+
+export function SidePanelHeader({comp}: {comp: any}) {
+    const shortName = compShortName(comp);
+    return (
+        <div className="sidepanel-header">
+            <a href="/" className="sidepanel-back" title="Back to globe" aria-label="Back to globe">
+                <FontAwesomeIcon icon={faGlobe} />
+            </a>
+            <div className="sidepanel-title">
+                <div className="sidepanel-comp-name">
+                    {comp?.competition?.mainwebsite ? (
+                        <a href={comp.competition.mainwebsite} style={{color: 'inherit'}}>
+                            {shortName}
+                        </a>
+                    ) : (
+                        shortName
+                    )}
+                </div>
+                {comp?.competition?.start && comp?.competition?.end ? (
+                    <div className="sidepanel-comp-dates">
+                        {comp.competition.start} → {comp.competition.end}
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    );
+}
+
+export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: ClassName; onClassChange: (className: string) => void}) {
+    const multipleClasses = (comp?.classes?.length ?? 0) > 1;
+    if (!multipleClasses) return null;
+    return (
+        <div className="sidepanel-classes" role="tablist">
+            {comp.classes.map((c: any) => (
+                <button
+                    key={c.class}
+                    role="tab"
+                    aria-selected={c.class === vc}
+                    className={c.class === vc ? 'active' : ''}
+                    onClick={() => onClassChange(c.class)}
+                >
+                    {c.classname.replace(/\s+(meter|metre)/, 'm')}
+                </button>
+            ))}
+        </div>
+    );
+}
+
+export function SidePanel({comp, vc, onClassChange, options, setOptions, head, children, footer}: SidePanelProps) {
+    const multipleClasses = (comp?.classes?.length ?? 0) > 1;
 
     return (
         <aside className="sidepanel">
-            <div className="sidepanel-header">
-                <a href="/" className="sidepanel-back" title="Back to globe" aria-label="Back to globe">
-                    <FontAwesomeIcon icon={faGlobe} />
-                </a>
-                <div className="sidepanel-title">
-                    <div className="sidepanel-comp-name">
-                        {comp?.competition?.mainwebsite ? (
-                            <a href={comp.competition.mainwebsite} style={{color: 'inherit'}}>
-                                {shortName}
-                            </a>
-                        ) : (
-                            shortName
-                        )}
-                    </div>
-                    {comp?.competition?.start && comp?.competition?.end ? (
-                        <div className="sidepanel-comp-dates">
-                            {comp.competition.start} → {comp.competition.end}
-                        </div>
-                    ) : null}
-                </div>
-            </div>
-
-            {multipleClasses ? (
-                <div className="sidepanel-classes" role="tablist">
-                    {comp.classes.map((c: any) => (
-                        <button
-                            key={c.class}
-                            role="tab"
-                            aria-selected={c.class === vc}
-                            className={c.class === vc ? 'active' : ''}
-                            onClick={() => onClassChange(c.class)}
-                        >
-                            {c.classname.replace(/\s+(meter|metre)/, 'm')}
-                        </button>
-                    ))}
-                </div>
-            ) : null}
+            <SidePanelHeader comp={comp} />
+            <SidePanelClassTabs comp={comp} vc={vc} onClassChange={onClassChange} />
 
             <div className="sidepanel-tools">
                 <Options options={options} setOptions={setOptions} multipleClasses={multipleClasses} />

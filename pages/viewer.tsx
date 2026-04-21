@@ -33,6 +33,7 @@ import {dispatchClass, dispatchTask, dispatchTrack, dispatchScores, dispatchTime
 import {setReferenceDate} from '../lib/flightprocessing/referenceDate';
 
 import {PilotList, Details} from '../lib/react/pilotlist';
+import {getValidSortOrder} from '../lib/react/pilot-sorting';
 
 import * as React from 'react';
 import {styled} from '@mui/material/styles';
@@ -578,8 +579,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                         live={false}
                                         tz={TZ_DEFAULT}
                                         options={viewOptions}
-                                        setOptions={setOptions}
-                                        handicapped={Object.keys(handicaps).length > 0}
+                                        sortOrder={getValidSortOrder(viewOptions.sortKey ?? 'auto', Object.keys(handicaps).length > 0)}
                                     />
                                 </div>
                             )}

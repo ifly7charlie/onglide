@@ -20,15 +20,32 @@ import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as
 import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
+import {faLinkSlash, faSpinner, faCaretDown, faCaretUp} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
 import {OptionalDurationMM} from './optional';
+import {Sorting} from './sorting';
+import {Options as OptionsPanel} from './options';
+import {getValidSortOrder} from './pilot-sorting';
 
 import Sponsors from './sponsors';
 
-import {SidePanel} from './sidepanel';
+import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {faGlobe} from '@fortawesome/free-solid-svg-icons';
+
+function useIsMobile() {
+    const [m, setM] = useState(false);
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const mq = window.matchMedia('(max-width: 991.98px)');
+        const u = () => setM(mq.matches);
+        u();
+        mq.addEventListener('change', u);
+        return () => mq.removeEventListener('change', u);
+    }, []);
+    return m;
+}
 
 import {proposedUrl} from './fixupUrls';
 
@@ -227,27 +244,134 @@ export const OgnFeed = memo(
             [compid, options, router, setOptions, setSelectedCompno]
         );
 
-        return (
-            <>
-                <div className={'resizingMap'}>
-                    <MApp //
-                        key="map"
-                        vc={vc}
-                        follow={follow}
-                        setFollow={setFollow}
-                        setSelectedCompno={setCompno}
-                        options={options}
-                        setOptions={setOptions}
-                        tz={tz}
+        const isMobile = useIsMobile();
+        const [drawerOpen, setDrawerOpen] = useState(false);
+
+        const sortOrder = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
+        const setSort = useCallback(
+            (key: any) => {
+                setOptions(_cloneDeep({...options, sortKey: key}));
+            },
+            [options, setOptions]
+        );
+
+        const map = (
+            <div className={'resizingMap'}>
+                <MApp //
+                    key="map"
+                    vc={vc}
+                    follow={follow}
+                    setFollow={setFollow}
+                    setSelectedCompno={setCompno}
+                    options={options}
+                    setOptions={setOptions}
+                    tz={tz}
+                    replayTime={replayTime}
+                    setReplayTime={setReplayTime}
+                    viewport={viewport}
+                    setViewport={setViewport}
+                    selectedCompno={effectiveSelectedCompno}
+                    selectedHandicap={effectiveSelectedCompno ? pilots?.[effectiveSelectedCompno]?.handicap : undefined}
+                    status={status}
+                />
+            </div>
+        );
+
+        const playback = (
+            <div className="playbackbar">
+                {valid && connected ? (
+                    <PlaybackControls //
+                        {...availableScores}
                         replayTime={replayTime}
                         setReplayTime={setReplayTime}
-                        viewport={viewport}
-                        setViewport={setViewport}
-                        selectedCompno={effectiveSelectedCompno}
-                        selectedHandicap={effectiveSelectedCompno ? pilots?.[effectiveSelectedCompno]?.handicap : undefined}
-                        status={status}
+                        tz={tz}
                     />
-                </div>
+                ) : null}
+            </div>
+        );
+
+        if (isMobile) {
+            return (
+                <>
+                    {map}
+                    <div className="mobile-top-strip">
+                        <div className="mobile-strip-header">
+                            <a href="/" className="mobile-back" title="Back to globe" aria-label="Back to globe">
+                                <FontAwesomeIcon icon={faGlobe} />
+                            </a>
+                            <div className="mobile-comp-name">{compShortName(comp)}</div>
+                            <button
+                                className="drawer-toggle"
+                                onClick={() => setDrawerOpen((o) => !o)}
+                                aria-expanded={drawerOpen}
+                                title={drawerOpen ? 'Hide menu' : 'Show menu'}
+                            >
+                                <FontAwesomeIcon icon={drawerOpen ? faCaretUp : faCaretDown} />
+                            </button>
+                        </div>
+                        {valid && connected ? (
+                            <PilotList //
+                                key="pilotList"
+                                pilots={pilots}
+                                selectedPilot={effectiveSelectedCompno}
+                                setSelectedCompno={setCompno}
+                                now={replayTime}
+                                live={availableScores.live}
+                                tz={tz}
+                                options={options}
+                                sortOrder={sortOrder}
+                                horizontal
+                            />
+                        ) : (
+                            <div className="mobile-strip-placeholder">{connectionStatus}</div>
+                        )}
+                    </div>
+                    {drawerOpen ? (
+                        <div className="mobile-drawer">
+                            {(comp?.classes?.length ?? 0) > 1 ? (
+                                <div className="drawer-group">
+                                    <div className="drawer-label">Class</div>
+                                    <SidePanelClassTabs comp={comp} vc={vc} onClassChange={onClassChange} />
+                                </div>
+                            ) : null}
+                            <div className="drawer-group">
+                                <div className="drawer-label">Display</div>
+                                <div className="sidepanel-tools">
+                                    <OptionsPanel options={options} setOptions={setOptions} multipleClasses={(comp?.classes?.length ?? 0) > 1} />
+                                </div>
+                            </div>
+                            <div className="drawer-group">
+                                <div className="drawer-label">Sort by</div>
+                                <div className="sidepanel-section">
+                                    <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
+                                </div>
+                            </div>
+                            {notes && notes != '' && (
+                                <div className="sidepanel-section" style={{color: 'red'}}>
+                                    {notes}
+                                </div>
+                            )}
+                            <div className="drawer-group">
+                                <div className="sidepanel-section">
+                                    <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} defaultOpen />
+                                    {connectionStatus}
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
+                    {effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? (
+                        <div className="mobile-pilot-details">
+                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
+                        </div>
+                    ) : null}
+                    {playback}
+                </>
+            );
+        }
+
+        return (
+            <>
+                {map}
                 <SidePanel //
                     comp={comp}
                     vc={vc}
@@ -277,7 +401,8 @@ export const OgnFeed = memo(
                 >
                     {valid && connected ? (
                         <div className="sidepanel-section">
-                            <PilotList
+                            <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
+                            <PilotList //
                                 key="pilotList"
                                 pilots={pilots}
                                 selectedPilot={effectiveSelectedCompno}
@@ -286,22 +411,12 @@ export const OgnFeed = memo(
                                 live={availableScores.live}
                                 tz={tz}
                                 options={options}
-                                setOptions={setOptions}
-                                handicapped={handicapped}
+                                sortOrder={sortOrder}
                             />
                         </div>
                     ) : null}
                 </SidePanel>
-                <div className="playbackbar">
-                    {valid && connected ? (
-                        <PlaybackControls //
-                            {...availableScores}
-                            replayTime={replayTime}
-                            setReplayTime={setReplayTime}
-                            tz={tz}
-                        />
-                    ) : null}
-                </div>
+                {playback}
             </>
         );
     },

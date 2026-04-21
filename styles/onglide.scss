@@ -153,35 +153,6 @@ button {
         }
     }
 
-    .sidepanel-classes {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        padding: 6px 16px;
-        border-bottom: 1px solid var(--panel-border);
-
-        button {
-            background: transparent;
-            border: 1px solid var(--panel-border);
-            color: inherit;
-            padding: 4px 14px;
-            border-radius: 4px;
-            font: inherit;
-            font-size: 16px;
-            cursor: pointer;
-
-            &:hover {
-                background: var(--panel-hover);
-            }
-
-            &.active {
-                background: var(--panel-accent);
-                color: #fff;
-                border-color: var(--panel-accent);
-            }
-        }
-    }
-
     .sidepanel-tools {
         padding: 4px 14px;
         border-bottom: 1px solid var(--panel-border);
@@ -320,6 +291,40 @@ button {
     }
 }
 
+// Shared visual styling for the class-tab row (used by both the desktop
+// sidepanel and the mobile drawer).
+.sidepanel-classes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 16px;
+
+    button {
+        background: transparent;
+        border: 1px solid var(--panel-border);
+        color: inherit;
+        padding: 4px 14px;
+        border-radius: 4px;
+        font: inherit;
+        font-size: 16px;
+        cursor: pointer;
+
+        &:hover {
+            background: var(--panel-hover);
+        }
+
+        &.active {
+            background: var(--panel-accent);
+            color: #fff;
+            border-color: var(--panel-accent);
+        }
+    }
+}
+
+.sidepanel > .sidepanel-classes {
+    border-bottom: 1px solid var(--panel-border);
+}
+
 // Chrome overlays floating over a full-viewport map or globe.
 .map-legend {
     position: fixed;
@@ -372,18 +377,6 @@ button {
     }
 }
 
-@media (max-width: 991.98px) {
-    .sidepanel {
-        left: 0;
-        right: 0;
-        top: auto;
-        bottom: 0;
-        width: auto;
-        height: 50vh;
-        box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
-    }
-}
-
 .playbackbar {
     position: fixed;
     left: 0;
@@ -401,10 +394,164 @@ button {
     }
 }
 
+.mobile-top-strip,
+.mobile-drawer,
+.mobile-pilot-details {
+    display: none;
+}
+
 @media (max-width: 991.98px) {
+    .sidepanel {
+        display: none;
+    }
+
+    .resizingMap {
+        right: 0;
+    }
+
     .playbackbar {
         right: 0;
-        bottom: calc(50vh + 8px);
+        bottom: 8px;
+    }
+
+    .mobile-top-strip {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        min-height: 128px;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel-bg);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+
+        .mobile-strip-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 8px;
+            border-bottom: 1px solid var(--panel-border);
+
+            .mobile-back {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 32px;
+                height: 32px;
+                border-radius: 50%;
+                background: var(--panel-hover);
+                color: inherit;
+                text-decoration: none;
+                font-size: 16px;
+                flex: 0 0 auto;
+            }
+
+            .mobile-comp-name {
+                flex: 1;
+                min-width: 0;
+                font-weight: 800;
+                font-size: 17px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .drawer-toggle {
+                flex: 0 0 auto;
+                width: 40px;
+                height: 32px;
+                background: transparent;
+                border: none;
+                color: inherit;
+                font-size: 22px;
+                cursor: pointer;
+            }
+        }
+
+        .pilots-horizontal {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+            padding: 0;
+            margin: 0;
+        }
+
+        .pilots-horizontal > li {
+            flex: 0 0 auto;
+            margin-top: 0 !important;
+            margin-bottom: 0 !important;
+        }
+
+        .mobile-strip-placeholder {
+            display: flex;
+            align-items: center;
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+    }
+
+    .mobile-drawer {
+        position: fixed;
+        top: 128px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--panel-bg);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        color: var(--panel-fg);
+        overflow-y: auto;
+        z-index: 18;
+        display: block;
+
+        .drawer-group {
+            border-bottom: 1px solid var(--panel-border);
+
+            &:last-child {
+                border-bottom: none;
+            }
+
+            > .sidepanel-tools,
+            > .sidepanel-section,
+            > .sidepanel-classes {
+                border-bottom: none;
+            }
+
+            > *:not(.drawer-label) {
+                padding: 4px 16px 10px 28px;
+            }
+        }
+
+        .drawer-label {
+            padding: 10px 16px 2px 16px;
+            font-size: 11px;
+            opacity: 0.7;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 800;
+        }
+    }
+
+    .mobile-pilot-details {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 56px;
+        max-height: 40vh;
+        overflow-y: auto;
+        background: var(--panel-bg);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        color: var(--panel-fg);
+        z-index: 17;
+        box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+        padding: 6px 16px;
+        display: block;
     }
 }
 
