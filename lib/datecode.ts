@@ -27,3 +27,16 @@ export function toDateCode(date?: string | Date): Datecode {
 export function getCurrentDateCode(): Datecode {
     return toDateCode(new Date(getNow() * 1000));
 }
+
+// UTC epoch seconds of the most recent 10:00 local-time (in the given timezone)
+// that has already elapsed by `referenceTs` (default: now). This is the start
+// of the "competition day" — anything before this belongs to the previous day.
+// tzoffsetSeconds is seconds east of UTC (e.g. +3600 for UTC+1, -18000 for EST).
+export function competitionStartTs(tzoffsetSeconds: number, referenceTs?: number): number {
+    const nowMs = referenceTs != null ? referenceTs * 1000 : Date.now();
+    const localMs = nowMs + tzoffsetSeconds * 1000;
+    const localNow = new Date(localMs);
+    let local10amMs = Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate(), 10, 0, 0, 0);
+    if (localMs < local10amMs) local10amMs -= 86400 * 1000;
+    return Math.floor((local10amMs - tzoffsetSeconds * 1000) / 1000);
+}

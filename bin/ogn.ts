@@ -844,7 +844,6 @@ async function tickCompetition(competition: CompetitionContext) {
     const datecode = await getDCode(competition);
     getSunset(competition, datecode);
     getProposedScoreId(competition);
-    aprsController?.datecode(datecode);
     await updateClasses(competition, datecode);
     await updateTrackers(competition, datecode);
     await updateTasks(competition);
@@ -1454,7 +1453,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 // If we have a tracker for it then we need to link that as well
                 if (!hadTracker) {
                     // && t.dbTrackerId && t.dbTrackerId != 'unknown') {
-                    aprsController?.trackGlider(t.compno, t.className, datecode, glider.channelName, t.dbTrackerId, listening);
+                    aprsController?.trackGlider(t.compno, t.className, datecode, location.tzoffset, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
                             .split(',')
@@ -2079,7 +2078,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         match.dbTrackerId = flarmId;
 
         // And we should ask the flarm handler to listen for them properly
-        aprsController?.trackGlider(match.compno, match.className, datecode, channelName(match.className, datecode), flarmId, true);
+        aprsController?.trackGlider(match.compno, match.className, datecode, competition.location.tzoffset, channelName(match.className, datecode), flarmId, true);
 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {

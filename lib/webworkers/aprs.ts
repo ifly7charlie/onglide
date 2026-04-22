@@ -83,12 +83,11 @@ export enum AprsCommandEnum {
     track,
     finish,
     untrack,
-    datecode,
     setFilter,
     setAirfields
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandDatecode | AprsCommandSetFilter | AprsCommandSetAirfields;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandSetFilter | AprsCommandSetAirfields;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
@@ -98,6 +97,7 @@ export interface AprsCommandTrack {
     channelName: string;
     compno: string | Compno;
     datecode: Datecode;
+    tzoffset: number; // seconds east of UTC — used to derive competition start time for point backfill
     receiveNewPoints: boolean;
     trackerId: string | string[];
 }
@@ -122,11 +122,6 @@ export interface AprsCommandFinish {
 // Exit
 export interface AprsCommandShutdown {
     action: AprsCommandEnum.shutdown;
-}
-
-export interface AprsCommandDatecode {
-    action: AprsCommandEnum.datecode;
-    datecode: Datecode;
 }
 
 export interface AprsCommandSetFilter {
@@ -176,6 +171,9 @@ export interface Aircraft {
     className: string;
     trackers: FlarmID[];
 
+    datecode: Datecode; // competition day this aircraft belongs to (internal signal for reset-on-change)
+    tzoffset: number; // competition timezone offset; drives backfill start time
+
     receiveNewPoints: boolean;
 
     lastTime?: number;
@@ -203,7 +201,6 @@ export interface Tracker {
     index: number;
     aircraftList: Aircraft[];
     receiveNewPoints: boolean;
-    db: AbstractSublevel<DB, string | Uint8Array | Buffer, string, string> | undefined;
 }
 
 // All active airfields with their elevation. Populated from the initial
@@ -278,13 +275,9 @@ const receivers: Record<string, number> = {};
 const channels: Record<ChannelName, BroadcastChannel> = {};
 
 // Our persistence
-import {ClassicLevel} from 'classic-level';
-import type {AbstractSublevel} from 'abstract-level';
+import {appendPoint, closeLog, loadPoints, openLog} from './pointlog';
+import {competitionStartTs} from '../datecode';
 import {inorderAdditionalDelay} from '../constants';
-
-class DB extends ClassicLevel<string, string> {}
-let db: DB | undefined;
-let dbDatecode: Datecode = '000' as Datecode;
 
 //
 // Start a listener
@@ -311,7 +304,7 @@ export class AprsController {
         return flarmIDs && flarmIDs.length > 0;
     }
 
-    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
+    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
@@ -325,6 +318,7 @@ export class AprsController {
             className: className,
             channelName,
             datecode,
+            tzoffset,
             receiveNewPoints,
             trackerId: flarmIDs
         };
@@ -356,13 +350,6 @@ export class AprsController {
             compno: compno, //
             className: className,
             channelName: channelName
-        };
-        this.worker.postMessage?.(command);
-    }
-    datecode(datecode: Datecode) {
-        const command: AprsCommandDatecode = {
-            action: AprsCommandEnum.datecode,
-            datecode
         };
         this.worker.postMessage?.(command);
     }
@@ -411,14 +398,11 @@ if (!isMainThread && parentPort) {
     //
     // action: shutdown
     // action: track
-    parentPort.on('message', (task: AprsCommand) => {
+    parentPort.on('message', async (task: AprsCommand) => {
         // If we have been asked to exit then do so
         if (task.action == AprsCommandEnum.shutdown) {
             console.log('closing worker');
-            if (db) {
-                db.close();
-                db = undefined;
-            }
+            await closeLog();
             process.exit();
         }
 
@@ -434,9 +418,6 @@ if (!isMainThread && parentPort) {
             case AprsCommandEnum.finish:
                 finishGlider(task);
                 break;
-            case AprsCommandEnum.datecode:
-                setupDatecode(task);
-                break;
             case AprsCommandEnum.setFilter:
                 applyFilter(task.filter);
                 break;
@@ -446,75 +427,9 @@ if (!isMainThread && parentPort) {
         }
     });
 
-    startAprsListener(<AprsListenerConfig>workerData);
+    openLog().then(() => startAprsListener(<AprsListenerConfig>workerData));
 }
 
-export async function initDB(datecode: Datecode) {
-    if (db && dbDatecode == datecode) {
-        return db;
-    }
-
-    const old = db;
-
-    const basePath = `${process.env.DB_PATH ?? './db/'}`;
-    let path = `${basePath}/aprs-${datecode}.db`;
-
-    // If the shared points db doesn't exist yet, look for a legacy
-    // aprs-<datecode>-<competition>.db directory. This keeps replay
-    // working against historical data collected before the multi-comp
-    // refactor renamed the file. In single-comp replay there's only
-    // going to be one match; if there are several, pick the first and
-    // log the choice.
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const fs = require('fs');
-        if (!fs.existsSync(path)) {
-            const entries: string[] = fs.readdirSync(basePath);
-            const legacy = entries.find((e) => e.startsWith(`aprs-${datecode}-`) && e.endsWith('.db'));
-            if (legacy) {
-                path = `${basePath}/${legacy}`;
-                console.log(`initDB: falling back to legacy points db ${path}`);
-            }
-        }
-    } catch (e) {
-        /* best effort — if the scan fails we just open the primary path */
-    }
-    const openedDb = (db = new DB(path));
-    console.log('opening points database', path);
-    dbDatecode = datecode;
-    await openedDb.open().catch((e: any) => {
-        console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
-        return undefined;
-    });
-
-    if (!(openedDb?.status == 'open' || openedDb?.status == 'opening')) {
-        console.log(path, openedDb?.status, new Error('db status invalid'));
-        db = undefined;
-        return undefined;
-    }
-
-    console.log(`changing database for ${Object.keys(trackers).length} trackers`);
-    for (const t of Object.values(trackers)) {
-        t.db = db.sublevel(t.id, {});
-    }
-
-    // Reset aircraft to new day as well
-    for (const a of Object.values(allAircraft)) {
-        a.messages = [];
-        delete a.lastTime;
-        delete a.lastSent;
-        delete a.lastMoved;
-        a.lastTick = 0 as Epoch;
-        a.stationary = 0;
-        a.ground = true;
-    }
-
-    if (old) {
-        old.close();
-    }
-
-    return openedDb;
-}
 
 //
 // Apply a new aprsc filter string in-band. aprsc supports `#filter <string>`
@@ -734,11 +649,6 @@ function startAprsListener(config: AprsListenerConfig) {
     );
 }
 
-async function setupDatecode(config: AprsCommandDatecode) {
-    // Make sure we have the latest datecode for the database
-    db = await initDB(config.datecode);
-}
-
 async function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
 
@@ -751,7 +661,6 @@ async function trackGlider(task: AprsCommandTrack) {
             const tracker = trackers[t];
             tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != existingTracker.channel || a.compno != existingTracker.compno);
             if (!tracker.aircraftList.length) {
-                tracker.db?.close();
                 delete trackers[t];
             }
         });
@@ -762,6 +671,9 @@ async function trackGlider(task: AprsCommandTrack) {
         compno: task.compno,
         className: task.className,
         trackers: task.trackerId as FlarmID[],
+
+        datecode: task.datecode,
+        tzoffset: task.tzoffset,
 
         // Not had a message
         stationary: 0,
@@ -783,12 +695,8 @@ async function trackGlider(task: AprsCommandTrack) {
     // Link the glider in
     allAircraft[makeClassname_Compno(task)] = glider;
 
-    // Make sure we have the latest datecode for the database
-    if (!db) {
-        db = await initDB(task.datecode);
-    }
-
-    const interimQueue = [];
+    const interimQueue: InterimPositionMessage[] = [];
+    const since = competitionStartTs(task.tzoffset);
 
     // Link the tracker(s) in
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
@@ -803,11 +711,10 @@ async function trackGlider(task: AprsCommandTrack) {
                 id: id as FlarmID,
                 index: index++,
                 aircraftList: [glider],
-                receiveNewPoints: task.receiveNewPoints,
-                db: db?.sublevel(id, {})
+                receiveNewPoints: task.receiveNewPoints
             };
         }
-        await loadPointsForTracker(glider, trackers[id], interimQueue);
+        await loadPointsForGlider(glider, id as FlarmID, since, interimQueue);
     }
 
     // And make sure we have a channel for it
@@ -861,7 +768,6 @@ function untrackGlider(task: AprsCommandUntrack) {
         const tracker = trackers[t];
         tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != toRemove.channel || a.compno != toRemove.compno);
         if (!tracker.aircraftList.length) {
-            tracker.db?.close();
             delete trackers[t];
         }
     });
@@ -938,8 +844,7 @@ export async function processPacket(packet: aprsPacket) {
             id: flarmId,
             index: -1,
             aircraftList: [],
-            receiveNewPoints: true,
-            db: db ? db.sublevel(flarmId, {}) : undefined
+            receiveNewPoints: true
         });
     const aircraftList = tracker?.aircraftList;
     const nearest = nearestAirfield(jPoint);
@@ -970,9 +875,10 @@ export async function processPacket(packet: aprsPacket) {
         ad: airfieldDistance
     };
 
-    if (tracker.db) {
-        tracker.db.put([message.t, sender].join('/'), JSON.stringify(message));
-    }
+    // Persist every packet, known or unknown. Downstream trackers for any
+    // competition can later backfill from the log regardless of whether
+    // someone was tracking this flarmid at the time it arrived.
+    appendPoint(message);
 
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough. Dispatch goes to the
@@ -1009,30 +915,24 @@ export async function processPacket(packet: aprsPacket) {
 }
 
 //
-// Read the database for all points for a specific aircraft tracker
+// Backfill an aircraft's in-memory message queue from the point log, for a
+// single tracker flarmid, starting at the competition day anchor (10am local).
 //
-export async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messageQueue: InterimPositionMessage[]) {
-    if (!tracker.db) {
-        console.log('no database available for loading trackpoints');
-        return;
-    }
+async function loadPointsForGlider(aircraft: Aircraft, flarmId: FlarmID, since: number, messageQueue: InterimPositionMessage[]) {
     try {
         let loaded = 0;
-        for await (const [key, messageJson] of tracker.db.iterator()) {
-            const message = JSON.parse(messageJson);
+        for await (const raw of loadPoints({flarmId, since})) {
+            const message = raw as InterimPositionMessage & {d?: number};
             loaded++;
-            // Ignore if the delay is too big
-            if (message.d > 1200) {
-                continue;
-            }
-            message.c = aircraft.compno; // correct competition number as it may be wrong in the db
-            const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
+            if (typeof message.d === 'number' && message.d > 1200) continue;
+            message.c = aircraft.compno as Compno;
+            const insertIndex = _sortedLastIndexBy(messageQueue, message as InterimPositionMessage, messageSortKey);
             message.j = point([message.lat, message.lng]);
-            messageQueue.splice(insertIndex, 0, message);
+            messageQueue.splice(insertIndex, 0, message as InterimPositionMessage);
         }
-        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${messageQueue.length}/${loaded} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
+        console.log(`${aircraft.className}/${flarmId}/${aircraft.compno}: ${messageQueue.length}/${loaded} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
     } catch (err) {
-        console.error(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${err}...`);
+        console.error(`${aircraft.className}/${aircraft.compno}/${flarmId}: ${err}...`);
     }
 }
 

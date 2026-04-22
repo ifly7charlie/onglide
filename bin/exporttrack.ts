@@ -1,11 +1,12 @@
-import {Compno, ClassName, Datecode, Epoch, Task} from '../lib/types';
+import {Compno, ClassName, Datecode, Epoch, Task, FlarmID} from '../lib/types';
 
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 
-import type {Aircraft, Tracker} from '../lib/webworkers/aprs';
-import {loadPointsForTracker, initDB, processMessageQueue} from '../lib/webworkers/aprs';
+import type {Aircraft} from '../lib/webworkers/aprs';
+import {processMessageQueue} from '../lib/webworkers/aprs';
+import {loadPoints} from '../lib/webworkers/pointlog';
 
-import {fromDateCode} from '../lib/datecode';
+import {fromDateCode, competitionStartTs} from '../lib/datecode';
 
 import escape from 'sql-template-strings';
 import Mysql from 'serverless-mysql';
@@ -55,16 +56,13 @@ async function main() {
     const className = argv.className as ClassName;
     const compno = argv.compno as Compno;
 
-    // Since the refactor the track points leveldb is shared across all
-    // competitions and keyed only by datecode (aprs-<datecode>.db), so
-    // we don't need any competition lookup here — className is already
-    // a globally-unique hash of compid + raw name, so the SELECT for
-    // pilots.class below is sufficient to identify the pilot.
-
-    // Get tracker for this pilot
-    const pilots = await mysql.query<{compno: Compno; trackerid: string}[]>(escape`
-        SELECT pilots.compno, trackerid
-        FROM pilots LEFT JOIN tracker ON pilots.class = tracker.class AND pilots.compno = tracker.compno
+    // Get tracker + timezone for this pilot's competition
+    const pilots = await mysql.query<{compno: Compno; trackerid: string; tzoffset: number}[]>(escape`
+        SELECT pilots.compno, trackerid, c.tzoffset
+        FROM pilots
+        LEFT JOIN tracker ON pilots.class = tracker.class AND pilots.compno = tracker.compno
+        JOIN classes cl ON pilots.class = cl.class
+        JOIN competition c ON cl.compid = c.compid
         WHERE pilots.class = ${className} AND pilots.compno = ${compno}
     `);
 
@@ -80,14 +78,21 @@ async function main() {
         process.exit(1);
     }
 
-    // Load track points from LevelDB
-    const db = await initDB(datecode);
+    const tzoffset = Number(pilots[0].tzoffset) || 0;
+    // Anchor on the datecode's 10am-local-time (via fromDateCode → reference
+    // timestamp that falls inside the desired day). competitionStartTs then
+    // returns the UTC epoch for that 10am boundary.
+    const dayMidday = new Date(fromDateCode(datecode)).getTime() / 1000 + 12 * 3600;
+    const since = competitionStartTs(tzoffset, dayMidday);
+    const until = since + 24 * 3600;
     const messageQueue: any[] = [];
 
     const glider: Aircraft = {
         compno,
         className,
         trackers: pilots[0].trackerid.split(',') as any[],
+        datecode,
+        tzoffset,
         stationary: 0,
         ground: false,
         lastTick: 0 as Epoch,
@@ -96,22 +101,14 @@ async function main() {
         messages: []
     };
 
-    const trackerList = glider.trackers;
-    const trackers: Tracker[] = [];
-    let index = 0;
-    for (const id of [...new Set(trackerList)]) {
-        if (trackers[id]) {
-            trackers[id].aircraftList.push(glider);
-        } else {
-            trackers[id] = {
-                id: id as any,
-                index: index++,
-                aircraftList: [glider],
-                receiveNewPoints: true,
-                db: db?.sublevel(id, {})
-            };
+    const trackerList = [...new Set(glider.trackers)];
+    for (const id of trackerList) {
+        for await (const msg of loadPoints({flarmId: id as FlarmID, since, until})) {
+            const m = msg as any;
+            if (typeof m.d === 'number' && m.d > 1200) continue;
+            m.c = compno;
+            messageQueue.push(m);
         }
-        await loadPointsForTracker(glider, trackers[id], messageQueue);
     }
 
     console.error(`Loaded ${messageQueue.length} track points for ${compno}`);
