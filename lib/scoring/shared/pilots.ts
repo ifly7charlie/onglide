@@ -204,9 +204,9 @@ export async function upsertPilot(
             VALUES
                 (
                     ${pilot.classid},
-                    ${pilot.fullName},
+                    ${pilot.fullName.substring(0, 30)},
                     ${''},
-                    ${pilot.club},
+                    ${pilot.club?.substring(0, 80) ?? ''},
                     NULL,
                     ${fainumber},
                     ${newSig},
