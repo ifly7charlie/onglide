@@ -439,9 +439,9 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                 return;
             }
             const children = contestInfo.children ?? [];
-            const name = cleanText(textContent(findOne((x) => x.name == 'h1', children)));
-            const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children)));
-            const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children)));
+            const name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
+            const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
+            const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
             await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
         } catch (e) {
             ctx.log(`ensureMetadata failed for ${ctx.compid}:`, e);
@@ -460,9 +460,9 @@ export class SoaringSpotScrapeSource implements ScoringSource {
             const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
             if (contestInfo) {
                 const children = contestInfo.children ?? [];
-                const name = cleanText(textContent(findOne((x) => x.name == 'h1', children)));
-                const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children)));
-                const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children)));
+                const name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
+                const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
+                const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
                 await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
             }
 
@@ -529,7 +529,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
             const allresults = findAll((x) => x.name == 'table' && x.attribs?.class == 'result-overview', dom.children);
 
             for (const result of allresults) {
-                const nameRaw = textContent(findOne((x) => x.name == 'th', result.children)).trim();
+                const nameRaw = textContent(findOne((x) => x.name == 'th', result.children) ?? []).trim();
                 const normalizedName = normalizeClassName(nameRaw);
                 const classid = makeClassId(ctx.compid, normalizedName) as ClassId;
                 observedClasses.add(classid);

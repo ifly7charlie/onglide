@@ -214,8 +214,8 @@ export async function upsertPilot(
                     ${gravatar(pilot.fullName)},
                     ${pilot.compno},
                     'Y',
-                    ${pilot.glider},
-                    ${pilot.greg ?? ''},
+                    ${pilot.glider?.substring(0, 30) ?? ''},
+                    ${pilot.greg?.substring(0, 8) ?? ''},
                     ${pilot.handicap},
                     'Y',
                     NOW()
