@@ -510,7 +510,9 @@ export async function dropDeadCompetition(
     if (!comp.end) return false;
     const endDate = new Date(comp.end);
     if (isNaN(endDate.getTime())) return false;
-    if (endDate.getTime() >= Date.now()) return false; // not yet over
+    // `end` is inclusive — the comp still runs on the end day — so only
+    // treat it as over once that full day has passed.
+    if (endDate.getTime() + 24 * 60 * 60 * 1000 >= Date.now()) return false;
 
     // Are there any per-day rows left across all classes? If so, the
     // competition is "in past" but still has results we want to keep.
