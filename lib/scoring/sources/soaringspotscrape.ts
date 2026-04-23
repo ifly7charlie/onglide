@@ -427,12 +427,21 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         // consume the contest-info header (name, site, dates) so we can
         // populate the `competition` row before anything else fires.
         try {
-            const body = await fetch(ctx.url + '/pilots').then((res) => res.text());
-            const dom = htmlparser.parseDocument(body);
-            const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class != 'contest-title', dom?.children);
-            const name = cleanText(textContent(findOne((x) => x.name == 'h1', contestInfo?.children)));
-            const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', contestInfo?.children)));
-            const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', contestInfo?.children)));
+            const res = await fetch(ctx.url + '/pilots');
+            if (!res.ok) {
+                ctx.log(`ensureMetadata: ${ctx.url}/pilots returned ${res.status}`);
+                return;
+            }
+            const dom = htmlparser.parseDocument(await res.text());
+            const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
+            if (!contestInfo) {
+                ctx.log(`ensureMetadata: no contest-title div for ${ctx.compid}`);
+                return;
+            }
+            const children = contestInfo.children ?? [];
+            const name = cleanText(textContent(findOne((x) => x.name == 'h1', children)));
+            const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children)));
+            const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children)));
             await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
         } catch (e) {
             ctx.log(`ensureMetadata failed for ${ctx.compid}:`, e);
@@ -448,11 +457,12 @@ export class SoaringSpotScrapeSource implements ScoringSource {
             const dom = htmlparser.parseDocument(body);
 
             // Refresh competition metadata while we have the page in hand.
-            const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class != 'contest-title', dom?.children);
+            const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
             if (contestInfo) {
-                const name = cleanText(textContent(findOne((x) => x.name == 'h1', contestInfo.children)));
-                const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', contestInfo.children)));
-                const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', contestInfo.children)));
+                const children = contestInfo.children ?? [];
+                const name = cleanText(textContent(findOne((x) => x.name == 'h1', children)));
+                const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children)));
+                const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children)));
                 await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
             }
 
