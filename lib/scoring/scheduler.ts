@@ -34,6 +34,7 @@ const HEARTBEAT_MS = 60 * 1000;
 const INTERVAL_RESULTS_FAST_MS = 10 * 60 * 1000; // pre-task / briefed / first hour after launch
 const INTERVAL_RESULTS_SLOW_MS = 30 * 60 * 1000; // after launch+1h until end-of-day
 const INTERVAL_PILOTS_HOURLY_MS = 60 * 60 * 1000; // task day, before launch
+const INTERVAL_PILOTS_URGENT_MS = 30 * 60 * 1000; // active comp, DB still empty
 
 const STOP_RESULTS_LOCAL_MINUTE = 20 * 60; // 20:00 local — stop results checks
 const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
@@ -76,6 +77,16 @@ interface CompState {
     lastResultsFetch: number;
     // local-day bookkeeping
     lastPilotsLocalDate: string | null;
+
+    // Competition date window (YYYY-MM-DD strings in the comp's local tz,
+    // inclusive). Refreshed from the `competition` row every heartbeat
+    // so late-arriving start/end corrections are picked up.
+    competitionStart: string | null;
+    competitionEnd: string | null;
+    // Number of pilot rows currently in DB for this compid, refreshed
+    // each heartbeat. Used to decide when an "empty active comp" warrants
+    // an urgent pilots fetch instead of waiting for the 10am gate.
+    pilotsInDb: number | null;
     // Classes the pilots page reported on the last successful fetchPilots
     // in this process. Authoritative for "which classes are registered"
     // and used to veto the results-page class-diff so a staggered task
@@ -143,11 +154,34 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
 
     let fetchPilots = false;
 
+    // Rule 2-urgent: if the comp is inside its date window (inclusive)
+    // AND we either haven't fetched pilots in this process or the DB is
+    // still empty for this comp, bypass the 10am gate and the
+    // nextPilotsAt cooldown. Handles newly-added or restart-after-crash
+    // comps whose scraper would otherwise sleep until 10:00 local while
+    // the comp is already flying.
+    const isActiveToday = //
+        state.competitionStart != null && //
+        state.competitionEnd != null && //
+        state.competitionStart <= localNow.iso && //
+        localNow.iso <= state.competitionEnd;
+    const isEmpty = state.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
+    const urgentPilotsFetch = isActiveToday && isEmpty;
+
     // Rule 2: pre-task daily fetch — only if no class has a task today,
-    // we're past 10:00 local, and we haven't already fetched today.
-    if (!anyTaskToday && localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE && state.lastPilotsLocalDate !== localNow.iso && nowMs >= state.nextPilotsAt) {
+    // we're past 10:00 local (or urgent), and we haven't already fetched
+    // today. Urgent overrides the 10am gate; nextPilotsAt still gates
+    // frequency — scheduleNextPilots picks a 30-minute retry interval
+    // while urgent conditions persist, so a flaky scrape doesn't hammer
+    // upstream every 60s.
+    if (
+        !anyTaskToday && //
+        (urgentPilotsFetch || localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE) && //
+        state.lastPilotsLocalDate !== localNow.iso && //
+        nowMs >= state.nextPilotsAt
+    ) {
         fetchPilots = true;
-        reasons.push('pilots:daily-10am');
+        reasons.push(urgentPilotsFetch ? 'pilots:urgent-empty-active' : 'pilots:daily-10am');
     }
 
     // Rule 4: hourly pilots fetch on a task day until first launch.
@@ -274,6 +308,20 @@ function scheduleNextPilots(state: CompState, localNow: LocalTime, nowMs: number
         // Hourly until launch.
         return nowMs + applyJitter(INTERVAL_PILOTS_HOURLY_MS);
     }
+    // If the comp is inside its date window and the DB is still empty,
+    // retry every ~30 minutes rather than sleeping until the 10am gate.
+    // The urgent condition in computeDecisions re-validates before each
+    // fire, so once pilots land (or the comp falls out of its window)
+    // the normal 10am cadence takes over.
+    const isActiveToday = //
+        state.competitionStart != null && //
+        state.competitionEnd != null && //
+        state.competitionStart <= localNow.iso && //
+        localNow.iso <= state.competitionEnd;
+    const isEmpty = state.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
+    if (isActiveToday && isEmpty) {
+        return nowMs + applyJitter(INTERVAL_PILOTS_URGENT_MS);
+    }
     // Pre-task. If we're already past 10:00 today, the next chance is
     // 10:00 tomorrow. Otherwise wake at 10:00 today.
     if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
@@ -321,6 +369,32 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
     } catch (e) {
         ctx.log(`refreshObservations: query failed for ${ctx.compid}:`, e);
         return;
+    }
+
+    // Pull the comp's date window + pilot count in one trip so the
+    // urgent-fetch rule can see an up-to-date picture every heartbeat.
+    // Cheap: a single row scan on competition + an indexed COUNT over
+    // pilots for this compid. Failures degrade silently — the urgent
+    // rule falls back to the normal 10am/hourly cadence.
+    try {
+        const meta = (await ctx.db.query(escape`
+            SELECT
+                DATE_FORMAT(c.start, '%Y-%m-%d') AS compStart,
+                DATE_FORMAT(c.end, '%Y-%m-%d') AS compEnd,
+                (
+                    SELECT COUNT(*) FROM pilots p
+                    JOIN classes cl ON cl.class = p.class
+                    WHERE cl.compid = ${ctx.compid}
+                ) AS pilotCount
+            FROM competition c
+            WHERE c.compid = ${ctx.compid}
+        `)) as any[];
+        const row = meta?.[0];
+        state.competitionStart = row?.compStart ?? null;
+        state.competitionEnd = row?.compEnd ?? null;
+        state.pilotsInDb = row ? Number(row.pilotCount ?? 0) : null;
+    } catch (e) {
+        ctx.log(`refreshObservations: meta query failed for ${ctx.compid}:`, e);
     }
 
     const todayDc = localDatecode(state.tz, localNow.epoch);
@@ -644,6 +718,9 @@ async function initState(
         lastResultsFetch: 0,
         lastPilotsLocalDate: null,
         lastPilotObservedClasses: null,
+        competitionStart: null,
+        competitionEnd: null,
+        pilotsInDb: null,
         firstLaunch: new Map(),
         firstLaunchDate: null,
         nextPilotsAt: 0,

@@ -112,10 +112,11 @@ interface CompetitionContext {
 
 const contexts: Record<string, CompetitionContext> = {};
 
-// Compids we've already logged as "skipped — invalid site coords", so the
-// 60s reconcile tick doesn't spam the same line for a stale competition
-// row. Cleared when the comp becomes valid again.
-const invalidCompsLogged = new Set<string>();
+// Compids whose context couldn't be built on a previous reconcile tick —
+// either the coords were missing/bogus, or createCompetitionContext threw.
+// Tracked here so the 60s tick doesn't spam the same failure line over
+// and over; cleared the moment the comp successfully gets a context.
+const failedCompsLogged = new Set<string>();
 
 interface Statistics {
     periodStart: Epoch;
@@ -700,19 +701,24 @@ async function reconcileContexts() {
         // isn't torn down just because the coords went transiently bad.
         if (row.lat == null || row.lng == null || (row.lat === 0 && row.lng === 0)) {
             seen.add(compid);
-            if (!invalidCompsLogged.has(compid)) {
+            if (!failedCompsLogged.has(compid)) {
                 console.log(`${compid}: skipping — no valid site coordinates (lt=${row.lat} lg=${row.lng})`);
-                invalidCompsLogged.add(compid);
+                failedCompsLogged.add(compid);
             }
             continue;
         }
-        invalidCompsLogged.delete(compid);
         seen.add(compid);
-        if (!contexts[compid]) {
-            try {
-                await createCompetitionContext(row);
-            } catch (e) {
+        if (contexts[compid]) {
+            failedCompsLogged.delete(compid);
+            continue;
+        }
+        try {
+            await createCompetitionContext(row);
+            failedCompsLogged.delete(compid);
+        } catch (e) {
+            if (!failedCompsLogged.has(compid)) {
                 console.error(`createCompetitionContext(${compid}) failed:`, e);
+                failedCompsLogged.add(compid);
             }
         }
     }
