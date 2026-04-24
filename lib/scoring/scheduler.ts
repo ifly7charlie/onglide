@@ -76,6 +76,12 @@ interface CompState {
     lastResultsFetch: number;
     // local-day bookkeeping
     lastPilotsLocalDate: string | null;
+    // Classes the pilots page reported on the last successful fetchPilots
+    // in this process. Authoritative for "which classes are registered"
+    // and used to veto the results-page class-diff so a staggered task
+    // publish doesn't cascade-delete classes that just haven't flown yet.
+    // `null` until the first pilots fetch succeeds.
+    lastPilotObservedClasses: Set<ClassId> | null;
 
     // per-class first-seen 'L' for today (epoch ms). Cleared when the
     // local date rolls over.
@@ -538,7 +544,10 @@ async function processCompetition(
 
     if (decisions.fetchPilots) {
         try {
-            await adapter.fetchPilots(ctx);
+            const pilotsResult = await adapter.fetchPilots(ctx);
+            if (pilotsResult?.observed && pilotsResult.observed.size > 0) {
+                st.lastPilotObservedClasses = new Set(pilotsResult.observed.keys());
+            }
             st.lastPilotsFetch = Date.now();
             st.lastPilotsLocalDate = localDateISO(st.tz);
         } catch (e) {
@@ -552,7 +561,18 @@ async function processCompetition(
         const skipDay = makeSkipDayPredicate(st.tz, localNow, anyTaskToday);
         try {
             const result = await adapter.fetchResultsAndTasks(ctx, skipDay);
-            await diffAndRemoveClasses(db, ctx.log, src.compid, result.observedClasses);
+            // Only prune classes when fetchPilots has given us a trustworthy
+            // "these classes are registered" set this process — otherwise a
+            // staggered task publish (one class has a task, others don't
+            // yet) looks identical to a class being deleted and we'd wipe
+            // pilots for classes that just haven't flown yet.
+            if (st.lastPilotObservedClasses === null) {
+                ctx.log('diffAndRemoveClasses: no pilots fetch yet this process; skipping prune');
+            } else {
+                const merged = new Set<ClassId>(result.observedClasses);
+                for (const c of st.lastPilotObservedClasses) merged.add(c);
+                await diffAndRemoveClasses(db, ctx.log, src.compid, merged);
+            }
             // Refresh observations after the fetch — compstatus may have
             // been promoted to 'B' by the task install, which changes
             // the next-due interval.
@@ -623,6 +643,7 @@ async function initState(
         lastPilotsFetch: 0,
         lastResultsFetch: 0,
         lastPilotsLocalDate: null,
+        lastPilotObservedClasses: null,
         firstLaunch: new Map(),
         firstLaunchDate: null,
         nextPilotsAt: 0,

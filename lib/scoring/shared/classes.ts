@@ -162,6 +162,13 @@ export async function resetStaleCompStatus(
 // delete the difference. Idempotent and safe to call after every
 // fetchResultsAndTasks() call.
 //
+// The caller is expected to pass the UNION of the classes observed on the
+// pilots page and the results page. The pilots page is the authoritative
+// registration list (every class that has pilots enrolled), while the
+// results page only surfaces classes that already have at least one task
+// — a class with no task yet is a normal state early in a competition,
+// not a deletion signal on its own.
+//
 // `observedClasses` may legitimately be empty if the upstream returned
 // nothing parseable — in that case we DO NOT delete anything, since an
 // empty observation is far more likely to be a transient HTML/parse

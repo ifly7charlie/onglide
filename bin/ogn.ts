@@ -112,6 +112,11 @@ interface CompetitionContext {
 
 const contexts: Record<string, CompetitionContext> = {};
 
+// Compids we've already logged as "skipped — invalid site coords", so the
+// 60s reconcile tick doesn't spam the same line for a stale competition
+// row. Cleared when the comp becomes valid again.
+const invalidCompsLogged = new Set<string>();
+
 interface Statistics {
     periodStart: Epoch;
 
@@ -688,6 +693,20 @@ async function reconcileContexts() {
     const seen = new Set<string>();
     for (const row of rows) {
         const compid = row.compid as string;
+        // Skip comps with no usable site coordinates — turf.point() in
+        // createCompetitionContext rejects null/undefined, and 0/0 is the
+        // geocoder's "I gave up" fallback. We still add the compid to
+        // `seen` so an existing context (if somehow already running)
+        // isn't torn down just because the coords went transiently bad.
+        if (row.lat == null || row.lng == null || (row.lat === 0 && row.lng === 0)) {
+            seen.add(compid);
+            if (!invalidCompsLogged.has(compid)) {
+                console.log(`${compid}: skipping — no valid site coordinates (lt=${row.lat} lg=${row.lng})`);
+                invalidCompsLogged.add(compid);
+            }
+            continue;
+        }
+        invalidCompsLogged.delete(compid);
         seen.add(compid);
         if (!contexts[compid]) {
             try {
@@ -1080,7 +1099,9 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // APRS worker dispatches unknowns to Unknown_<compid> based on the
     // nearest airfield, so we listen on the per-compid channel.
     if (!competition.unknownChannel) {
-        competition.unknownChannel = new BroadcastChannel('Unknown_' + competition.compid);
+        const unknownChannelName = 'Unknown_' + competition.compid;
+        console.log(`[UNKTRACE] subscribing to ${unknownChannelName} (${competition.internalName})`);
+        competition.unknownChannel = new BroadcastChannel(unknownChannelName);
         competition.unknownChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(competition, ev.data, datecode)) as any;
     }
 
@@ -2020,6 +2041,8 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     // Check if it's a possible launch
     capturePossibleLaunchLanding(flarmId, datecode, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm');
 
+    const firstSighting = !unknownTrackers[flarmId];
+
     // Store in the unknown list for status display
     unknownTrackers[flarmId] = {
         firstTime: data.t,
@@ -2027,6 +2050,12 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         lastTime: data.t,
         flarmid: flarmId
     };
+
+    if (firstSighting) {
+        const ddbf = ddb[flarmId];
+        const ddbInfo = ddbf ? `ddb: ${ddbf.cn || '-'}/${ddbf.registration || '-'} ${ddbf.aircraft_model || ''}` : 'not in ddb';
+        console.log(`[UNKTRACE] unknown glider ${flarmId} first seen in ${competition.compid} @ ${data.lat.toFixed(4)},${data.lng.toFixed(4)} (${ddbInfo})`);
+    }
 
     // Do we have it in the DDB?
     const ddbf = ddb[flarmId];

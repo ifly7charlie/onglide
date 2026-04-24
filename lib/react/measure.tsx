@@ -6,7 +6,7 @@ import {cloneDeep as _cloneDeep} from 'lodash';
 
 import {useState, createContext, useContext} from 'react';
 
-import {Source, Layer, LayerProps} from 'react-map-gl';
+import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
 
 export interface MeasureOptions {
     features: Feature[];
@@ -101,7 +101,7 @@ export const measureLineLabelStyle = (source: LayerProps): LayerProps => {
         },
         layout: {
             'symbol-placement': 'line',
-            'text-font': ['Open Sans Regular'],
+            'text-font': ['Atkinson Hyperlegible Next Regular'],
             'text-field': ['get', 'distance'],
             'text-allow-overlap': false,
             'text-size': 15

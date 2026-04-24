@@ -400,7 +400,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
     const log =
-        glider.compno == 'I'
+        process.env.NEXT_PUBLIC_COMPNO && glider.compno == process.env.NEXT_PUBLIC_COMPNO
             ? console.log
             : () => {
                   /*noop*/

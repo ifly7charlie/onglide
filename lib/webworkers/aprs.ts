@@ -230,7 +230,12 @@ function nearestAirfield(jPoint: Coord): {field: Airfield; distance: number} | n
 }
 
 function getUnknownChannel(compid: string): BroadcastChannel {
-    return (unknownChannels[compid] ??= new BroadcastChannel('Unknown_' + compid));
+    if (!unknownChannels[compid]) {
+        const name = 'Unknown_' + compid;
+        console.log(`[UNKTRACE] aprs: opening dispatch channel ${name}`);
+        unknownChannels[compid] = new BroadcastChannel(name);
+    }
+    return unknownChannels[compid];
 }
 
 function setAirfields(specs: AirfieldSpec[]) {
@@ -683,7 +688,7 @@ async function trackGlider(task: AprsCommandTrack) {
 
         // Setup logging
         log:
-            task.compno == (process.env.NEXT_PUBLIC_COMPNO || 'I')
+            process.env.NEXT_PUBLIC_COMPNO && task.compno == process.env.NEXT_PUBLIC_COMPNO
                 ? function log() {
                       console.log(task.compno, ...arguments);
                   }
@@ -955,7 +960,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     if (!log) {
         log = aircraft.log;
     }
-    if (log) {
+    if (log && messages.length > 0 && position < messages.length) {
         log(`PMQ: ${aircraft.compno}: m: ${messages.length}, s:${start}/${d(start)}, to:${to}/${d(to)}, p: ${position}`);
     }
 
@@ -1060,7 +1065,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
     }
 
-    if (log) {
+    if (log && count > 0) {
         log(`PMQ: ${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, s:${start} t:${to}`);
     }
 }

@@ -1,5 +1,5 @@
 import {useCallback, useMemo, useRef, useState} from 'react';
-import {Source, Layer, LayerProps} from 'react-map-gl';
+import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
 
 import {assembleOptimalDirection} from './optimalDirection';
 import {distHaversine} from '../flightprocessing/taskhelper';

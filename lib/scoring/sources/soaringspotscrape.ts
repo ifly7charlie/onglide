@@ -116,8 +116,8 @@ async function findApproximateContestLocation(
             const timeZone = findTimezoneFromLocation(features.center[1], features.center[0]);
 
             return {
-                lt: Math.round(features.center[1] * 100 + 50) / 100,
-                lg: Math.round(features.center[0] * 100 + 50) / 100,
+                lt: Math.round(features.center[1] * 100) / 100,
+                lg: Math.round(features.center[0] * 100) / 100,
                 countrycode: features.context?.reduce((result: string | undefined, value: any) => {
                     if (value.id?.match(/^country/)) {
                         return value.short_code?.toUpperCase();
@@ -161,14 +161,22 @@ async function updateContest(
     const count = await db.query(escape`SELECT COUNT(*) cnt FROM competition WHERE compid = ${compid}`);
     if (!count || !count[0] || !count[0].cnt) {
         log(`Empty competition for compid=${compid}, pre-populating`);
+        // Seed start/end with a sentinel date well in the past. The
+        // UPDATE below replaces both with the parsed values as soon as
+        // we actually scrape real dates. If the scrape never succeeds
+        // — URL 404, broken page shape, etc. — the past `end` lets
+        // dropDeadCompetition reap the row on its next hourly sweep,
+        // so a dead scoringsource row doesn't keep hammering the URL.
         await db.query(escape`
-            INSERT IGNORE INTO competition (compid, tz, tzoffset, mainwebsite)
+            INSERT IGNORE INTO competition (compid, tz, tzoffset, mainwebsite, start, end)
             VALUES
                 (
                     ${compid},
                     "Europe/London",
                     3600,
-                    ${url}
+                    ${url},
+                    DATE_SUB(CURDATE(), INTERVAL 30 DAY),
+                    DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                 )
         `);
     }
@@ -426,25 +434,39 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         // Pull the same /pilots page used by fetchPilots, but only
         // consume the contest-info header (name, site, dates) so we can
         // populate the `competition` row before anything else fires.
+        //
+        // We ALWAYS call updateContest at the end, even on failure paths.
+        // With empty inputs, the date regex misses and the UPDATE is
+        // skipped — but the INSERT IGNORE still plants a placeholder
+        // row with a sentinel past `end`, so dropDeadCompetition can
+        // reap URLs that never scrape successfully. A later successful
+        // call overwrites start/end with the real values.
+        let name = '';
+        let site = '';
+        let dates = '';
         try {
             const res = await fetch(ctx.url + '/pilots');
             if (!res.ok) {
                 ctx.log(`ensureMetadata: ${ctx.url}/pilots returned ${res.status}`);
-                return;
+            } else {
+                const dom = htmlparser.parseDocument(await res.text());
+                const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
+                if (!contestInfo) {
+                    ctx.log(`ensureMetadata: no contest-title div for ${ctx.compid}`);
+                } else {
+                    const children = contestInfo.children ?? [];
+                    name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
+                    site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
+                    dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
+                }
             }
-            const dom = htmlparser.parseDocument(await res.text());
-            const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
-            if (!contestInfo) {
-                ctx.log(`ensureMetadata: no contest-title div for ${ctx.compid}`);
-                return;
-            }
-            const children = contestInfo.children ?? [];
-            const name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
-            const site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
-            const dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
-            await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
         } catch (e) {
             ctx.log(`ensureMetadata failed for ${ctx.compid}:`, e);
+        }
+        try {
+            await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
+        } catch (e) {
+            ctx.log(`updateContest failed for ${ctx.compid}:`, e);
         }
     }
 
@@ -498,7 +520,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     club: raw.Club ?? null,
                     country: '',
                     glider: raw.Glider ?? null,
-                    greg: raw.Glider ? String(raw.Glider).substring(0, 8).trim() : null,
+                    greg: null,
                     handicap
                 };
 

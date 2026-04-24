@@ -1,4 +1,4 @@
-import {LayerProps} from 'react-map-gl';
+import {LayerProps} from 'react-map-gl/maplibre';
 
 import type {LineString, Point, Feature} from 'geojson';
 import {lineString, point, featureCollection} from '@turf/helpers';
@@ -38,7 +38,7 @@ export const distanceLineLabelStyle = (source: LayerProps, visible?: boolean | u
         },
         layout: {
             'symbol-placement': 'line-center',
-            'text-font': ['Open Sans Regular'],
+            'text-font': ['Atkinson Hyperlegible Next Regular'],
             'text-field': ['get', 'distance'],
             //            'text-field': 'hello!',
             //            'text-color': '#0ff',

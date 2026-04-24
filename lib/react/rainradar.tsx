@@ -4,7 +4,7 @@
 
 import {useEffect, useState} from 'react';
 //import Source from '../lib/source';
-import {Source, Layer, LayerProps} from 'react-map-gl';
+import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
 
 import {maxBy as _maxby} from 'lodash';
 import type {Options, TZ} from '../types';
