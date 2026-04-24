@@ -17,7 +17,6 @@ import escape from 'sql-template-strings';
 import type {ClassId, CompNo} from '../source';
 import {enqueueFaiLookup} from './fai';
 import {FAI_SYNTHETIC_FLOOR} from './faiApi';
-import {downloadPictureCached} from './images';
 
 //
 // PilotRecord — the canonical shape adapters hand in. Adapters convert
@@ -132,7 +131,17 @@ export async function upsertPilot(
 
     let fainumber = existing[0]?.fai ?? 0;
     const sigChanged = !existing.length || existing[0]?.idsig !== newSig;
-    const needsResolve = sigChanged || !fainumber || fainumber >= FAI_SYNTHETIC_FLOOR;
+    // FAI ids (and their portraits) are assigned well before a comp
+    // starts and effectively never change mid-event, so we only look
+    // them up on:
+    //   - a brand-new pilot (no row yet, fai column is 0/null), or
+    //   - an idsig change (organizer fixed the name / country / compno).
+    // An unresolved synthetic id is left alone — re-querying FAI every
+    // fetchPilots run just burns requests on a ranking list that isn't
+    // changing. If the first attempt misses and the name later gets
+    // corrected upstream, sigChanged catches it and queues a fresh
+    // lookup.
+    const needsResolve = sigChanged || !fainumber;
 
     if (needsResolve) {
         const country = pilot.country || existing[0]?.country || '';
@@ -158,27 +167,14 @@ export async function upsertPilot(
         }
     }
 
-    // Image refresh is now driven by the FAI background worker in
-    // shared/fai.ts — it calls downloadPictureCached with a directUrl
-    // pulled off the ranking row as soon as it resolves the pilot.
-    // Firing an extra call here with no FAI id yet just produces "image
-    // update failed" noise for every pilot on a fresh comp and poisons
-    // the 24h cache before the worker gets its chance, so we skip it.
-    //
-    // Existing pilots with a real fai (< FAI_SYNTHETIC_FLOOR) whose
-    // idsig hasn't changed go through downloadPictureCached with the
-    // `igc_id` context — the image worker looks up the authoritative
-    // URL stored on the previous successful download from the images
-    // table (`images.url`) and only falls back to the guessed
-    // `{id}.jpg` when that column is NULL.
-    if (fainumber && fainumber < FAI_SYNTHETIC_FLOOR) {
-        downloadPictureCached(db, log, pilot.classid, pilot.compno, {
-            igc_id: fainumber,
-            compno: pilot.fullName,
-            class: pilot.classid,
-            greg: pilot.greg ?? undefined
-        }).catch((e) => log(`image refresh failed for ${pilotTag(pilot)}:`, e));
-    }
+    // Portrait refresh is driven by the FAI background worker — it
+    // calls downloadPictureCached with the authoritative directUrl the
+    // moment it resolves the pilot. For already-resolved pilots whose
+    // sig hasn't changed, we deliberately skip a refresh: FAI portraits
+    // rarely change mid-comp and blanket re-downloading on every
+    // fetchPilots run burns cache slots + HTTP requests without
+    // benefit. A sig change routes through the worker path above, so
+    // the new portrait (if any) lands there.
 
     try {
         await db.query(escape`

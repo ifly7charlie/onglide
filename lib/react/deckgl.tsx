@@ -3,7 +3,7 @@
 import {useCallback, useMemo, useRef, useEffect, useState} from 'react';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 
-import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl/maplibre';
+import Map, {Source, Layer, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl/maplibre';
 import maplibregl from 'maplibre-gl';
 import {Protocol as PMTilesProtocol} from 'pmtiles';
 
@@ -19,7 +19,7 @@ const ONGLIDE_MAP_STYLE = buildMapStyle();
 
 import {deckTooltip} from './decktooltip';
 
-import type {Epoch, ClassName, Compno, Options, PilotScore, TZ} from '../types';
+import type {Epoch, ClassName, Compno, Options, TZ} from '../types';
 import {TaskUp} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
@@ -328,17 +328,12 @@ export default function MApp(props: {
     }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving]);
 
     // Runtime-generated icon images for map symbols (track arrows, peaks,
-    // airports). MapLibre clears image registry on style reloads so we also
-    // re-register on each `styledata` event.
+    // airports). Registered once per map instance; MapLibre preserves them
+    // across style mutations unless you call setStyle, which we don't.
     useEffect(() => {
         const map = mapRef?.current?.getMap();
         if (!map) return;
-        const register = () => registerMapIcons(map);
-        register();
-        map.on('styledata', register);
-        return () => {
-            map.off('styledata', register);
-        };
+        registerMapIcons(map);
     }, [mapRef.current]);
 
     //

@@ -6,6 +6,7 @@ import '@fortawesome/fontawesome-svg-core/styles.css';
 import {config} from '@fortawesome/fontawesome-svg-core';
 config.autoAddCss = false;
 
+import 'maplibre-gl/dist/maplibre-gl.css';
 import '../styles/onglide.scss';
 
 import {useState, useCallback, useEffect} from 'react';
