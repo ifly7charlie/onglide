@@ -67,7 +67,9 @@ import {
     hullLineStyle,
     hullPointStyle,
     maxLineStyle,
+    maxSignStyle,
     minLineStyle,
+    minSignStyle,
     scoredLineStyle,
     scoringPointStyle,
     suggestedLineStyle,
@@ -526,13 +528,15 @@ export default function MApp(props: {
                         {debouncedScore.minGeoJSON && !lastLeg ? (
                             <Source type="geojson" data={debouncedScore.minGeoJSON} key={'min_'} id={'min'}>
                                 <Layer {...distanceLineLabelStyle(minLineStyle)} beforeId={'scored_line'} />
-                                <Layer {...minLineStyle} beforeId={'minpossible_label'} />
+                                <Layer {...minSignStyle} beforeId={'minpossible_label'} />
+                                <Layer {...minLineStyle} beforeId={'min_sign'} />
                             </Source>
                         ) : null}
                         {debouncedScore.maxGeoJSON && !lastLeg ? (
                             <Source type="geojson" data={debouncedScore.maxGeoJSON} key={'max_'} id={'max'}>
                                 <Layer {...distanceLineLabelStyle(maxLineStyle)} beforeId={'scored_line'} />
-                                <Layer {...maxLineStyle} beforeId={'maxpossible_label'} />
+                                <Layer {...maxSignStyle} beforeId={'maxpossible_label'} />
+                                <Layer {...maxLineStyle} beforeId={'max_sign'} />
                             </Source>
                         ) : null}
                         {debouncedScore.legs && task?.rules?.aat ? (

@@ -47,6 +47,34 @@ export const maxLineStyle: LayerProps = {
     }
 };
 
+export const minSignStyle: LayerProps = {
+    id: 'min_sign',
+    type: 'symbol',
+    layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 200,
+        'icon-image': 'signpost-min',
+        'icon-size': 1,
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-rotation-alignment': 'map'
+    }
+};
+
+export const maxSignStyle: LayerProps = {
+    id: 'max_sign',
+    type: 'symbol',
+    layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 200,
+        'icon-image': 'signpost-max',
+        'icon-size': 1,
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-rotation-alignment': 'map'
+    }
+};
+
 export const suggestedLineStyle: LayerProps = {
     id: 'suggested_track',
     type: 'line',
