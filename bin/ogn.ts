@@ -330,8 +330,17 @@ async function main() {
             await setTimeoutPromise(60000);
         }
     }
+    // Phase 1: load classes + cached scores per comp. updateClasses is
+    // fast — it opens leveldb, iterates cached PilotScore records into
+    // channel.allScores, and spawns the (idle) scoring worker. Then
+    // rebuildAprsFilter() emits an airfield-only filter (no channel has a
+    // task yet) so the APRS listener starts receiving packets in the
+    // airfield radii immediately, instead of waiting for the slower
+    // tracker/task DB work in Phase 3.
+    const phase1: {ctx: CompetitionContext; datecode: Datecode}[] = [];
     for (const c of Object.values(contexts)) {
-        await tickCompetition(c);
+        const datecode = await tickCompetitionClasses(c);
+        if (datecode !== null) phase1.push({ctx: c, datecode});
     }
     rebuildAprsFilter();
 
@@ -344,6 +353,10 @@ async function main() {
         userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${first.internalName}-${datecode}.txt`, {flags: 'a'});
     }
 
+    // Phase 2: start the websocket/HTTP server. Channels exist with
+    // cached scores from Phase 1, so a client connecting now gets the
+    // restored scores via sendCurrentState() → sendAllScores() while the
+    // tracker/task work in Phase 3 is still in flight.
     if ('PM2_HOME' in process.env || existsSync('.docker')) {
         console.log('PM2/DOCKER: waiting for scoring to be completed...');
         /*        const checkScoringNotReady = () => {
@@ -389,6 +402,14 @@ async function main() {
 
     setupWebSocketServer(server);
     console.log(`listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
+
+    // Phase 3: load trackers + tasks per comp, then rebuild the APRS
+    // filter so it picks up task bboxes. The rebuild's lastAprsFilter
+    // memo no-ops if the filter string is unchanged.
+    for (const {ctx, datecode} of phase1) {
+        await tickCompetitionTrackersAndTasks(ctx, datecode);
+    }
+    rebuildAprsFilter();
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
@@ -864,11 +885,30 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
 }
 
 async function tickCompetition(competition: CompetitionContext) {
-    if (competition.state === 'stopping' || competition.state === 'stopped') return;
+    const datecode = await tickCompetitionClasses(competition);
+    if (datecode === null) return;
+    await tickCompetitionTrackersAndTasks(competition, datecode);
+}
+
+// Phase 1 of a tick: resolve datecode/sunset/proposed scoreId and run
+// updateClasses so channels exist with cached scores loaded. Returns the
+// datecode for the caller to pass into Phase 2, or null if the comp is
+// stopping/stopped (caller should skip Phase 2).
+async function tickCompetitionClasses(competition: CompetitionContext): Promise<Datecode | null> {
+    if (competition.state === 'stopping' || competition.state === 'stopped') return null;
     const datecode = await getDCode(competition);
     getSunset(competition, datecode);
     getProposedScoreId(competition);
     await updateClasses(competition, datecode);
+    return datecode;
+}
+
+// Phase 2 of a tick: load trackers, load tasks, finalise score IDs and
+// transition state. Splitting this out lets startup serve cached scores
+// over the websocket and let APRS receive (with the airfield-only filter)
+// before the slow tracker/task DB work runs.
+async function tickCompetitionTrackersAndTasks(competition: CompetitionContext, datecode: Datecode) {
+    if (competition.state === 'stopping' || competition.state === 'stopped') return;
     await updateTrackers(competition, datecode);
     await updateTasks(competition);
     await finaliseScoreId(competition);

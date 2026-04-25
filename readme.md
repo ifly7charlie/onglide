@@ -39,6 +39,16 @@ NEXT_PUBLIC_PMTILES_LABELS_URL=https://tiles.onglide.com/europe-labels.pmtiles
 
 If unset, all layers fall back to `NEXT_PUBLIC_PMTILES_URL` (single-source setup).
 
+Optional: a Mapbox access token used by the SoaringSpot scrape to geocode the
+contest's free-text location string ("Prievidza, Slovakia") into lat/lng + country
++ timezone. If unset, the scrape skips geocoding and the airfield stays at the
+origin (0, 0) until a task is published — at which point the turnpoint coordinates
+position it correctly.
+
+```
+NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.your-mapbox-token
+```
+
 ### Map tiles
 
 Onglide uses MapLibre GL with an OpenMapTiles-schema vector basemap served directly
