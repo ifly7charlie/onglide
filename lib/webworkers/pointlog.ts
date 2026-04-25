@@ -364,6 +364,87 @@ async function* scanFileAll(fullPath: string, since: number, until: number | und
     }
 }
 
+// Bulk variant: scan each candidate file once, yielding any record whose
+// flarmId is in the provided set. Caller is responsible for dispatching to
+// per-id queues and any per-id since trim (use the min(since) here, then
+// drop msg.t < target.since at dispatch time). Cuts restart cost from
+// (n_gliders × n_files × scan) down to (n_files × scan).
+export interface LoadPointsForIdsQuery {
+    flarmIds: Set<string>;
+    since: number;
+    until?: number;
+}
+
+export async function* loadPointsForIds(q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
+    const files = await listAprsFiles();
+    const candidates = files
+        .filter((f) => {
+            if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
+            return true;
+        })
+        .sort((a, b) => a.firstTs - b.firstTs);
+
+    for (const f of candidates) {
+        const fullPath = path.join(basePath(), f.file);
+        try {
+            yield* scanFileForIds(fullPath, q);
+        } catch (e: any) {
+            if (e.code === 'ENOENT') continue;
+            console.log(`pointlog: scan ${f.file}: ${e.message}`);
+        }
+    }
+}
+
+async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
+    const size = statSync(fullPath).size;
+    if (size === 0) return;
+
+    const startOffset = binarySearchForTs(fullPath, size, q.since - OUT_OF_ORDER_SLACK_SEC);
+
+    const fd = openSync(fullPath, 'r');
+    try {
+        const chunkSize = 64 * 1024;
+        const buf = Buffer.alloc(chunkSize);
+        let leftover = '';
+        let offset = startOffset;
+
+        while (offset < size) {
+            const toRead = Math.min(chunkSize, size - offset);
+            const n = readSync(fd, buf, 0, toRead, offset);
+            if (n <= 0) break;
+            offset += n;
+            const chunk = leftover + buf.subarray(0, n).toString('utf8');
+            const lines = chunk.split('\n');
+            leftover = lines.pop() ?? '';
+
+            for (const line of lines) {
+                if (!line) continue;
+                let msg: LoggedMessage;
+                try {
+                    msg = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (typeof msg.t !== 'number') continue;
+                if (msg.t < q.since) continue;
+                if (q.until != null && msg.t > q.until) return;
+                if (!q.flarmIds.has(msg.f)) continue;
+                yield msg;
+            }
+        }
+        if (leftover) {
+            try {
+                const msg: LoggedMessage = JSON.parse(leftover);
+                if (typeof msg.t === 'number' && msg.t >= q.since && (q.until == null || msg.t <= q.until) && q.flarmIds.has(msg.f)) {
+                    yield msg;
+                }
+            } catch {}
+        }
+    } finally {
+        closeSync(fd);
+    }
+}
+
 export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
     const files = await listAprsFiles();
     // Filename timestamps reflect writer wall-clock (open / close). In live
