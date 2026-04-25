@@ -431,6 +431,10 @@ async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): Asyn
                 if (!q.flarmIds.has(msg.f)) continue;
                 yield msg;
             }
+
+            // Yield to the macrotask queue so live APRS data and parentPort
+            // messages don't starve during a long bulk scan.
+            await new Promise<void>((r) => setImmediate(r));
         }
         if (leftover) {
             try {
@@ -507,6 +511,12 @@ async function* scanFile(fullPath: string, q: LoadPointsQuery): AsyncGenerator<L
                 if (q.until != null && msg.t > q.until) return;
                 yield msg;
             }
+
+            // Yield to the macrotask queue so live APRS data and parentPort
+            // messages don't starve while we're chewing through a long file.
+            // The for-await consumer otherwise drains microtasks back-to-back
+            // and never returns to the event loop.
+            await new Promise<void>((r) => setImmediate(r));
         }
         // Try the trailing leftover too (file might not end with \n).
         if (leftover) {
