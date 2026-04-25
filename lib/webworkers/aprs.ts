@@ -295,7 +295,7 @@ export class AprsController {
         }
         console.log('Starting APRS worker thread');
 
-        this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config});
+        this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config, name: 'aprs'});
     }
 
     validateGlider(trackerIds: string): boolean {
