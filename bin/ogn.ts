@@ -730,6 +730,22 @@ async function reconcileContexts() {
         seen.add(compid);
         if (contexts[compid]) {
             failedCompsLogged.delete(compid);
+            const ctx = contexts[compid];
+            if (row.lat !== ctx.location.lat || row.lng !== ctx.location.lng) {
+                console.log(`${compShort(compid)}: site moved (${ctx.location.lat},${ctx.location.lng}) -> (${row.lat},${row.lng})`);
+                ctx.location.lat = row.lat;
+                ctx.location.lng = row.lng;
+                ctx.location.point = point([row.lng, row.lat]);
+                getElevationOffset(row.lat, row.lng, (agl: any) => {
+                    ctx.location.altitude = agl;
+                });
+                // Push the new airfield into every scoring worker for this
+                // comp so sticky landing classifications (Home / Landed /
+                // Grid) recompute against the corrected coordinates.
+                for (const cname of ctx.ownedChannels) {
+                    channels[cname]?.scoring?.setAirfield(ctx.location);
+                }
+            }
             continue;
         }
         try {
@@ -756,6 +772,9 @@ async function reconcileContexts() {
     // Push the combined airfield list to the APRS worker in one shot.
     const af: AirfieldSpec[] = Object.values(contexts).map((c) => ({compid: c.compid, lt: c.location.lat, lg: c.location.lng}));
     setAirfields(af);
+    // Rebuild now so airfield-radius fallback clauses pick up any moved
+    // sites on this tick instead of waiting for the next minute boundary.
+    rebuildAprsFilter();
 }
 
 async function createCompetitionContext(row: any): Promise<CompetitionContext> {

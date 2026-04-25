@@ -144,6 +144,10 @@ export class ScoringController {
         this.worker.postMessage({action: ScoringCommandEnum.clearGlider, className: this.className, datecode: this.datecode, compno} as ScoringCommand);
     }
 
+    setAirfield(airfield: AirfieldLocation) {
+        this.worker.postMessage({action: ScoringCommandEnum.setAirfield, className: this.className, datecode: this.datecode, airfield} as ScoringCommand);
+    }
+
     // Send the shutdown command to the worker and return a promise that
     // resolves when the worker process has actually exited, or after a
     // 5-second timeout (so teardown doesn't hang if the worker is stuck).
@@ -207,10 +211,11 @@ enum ScoringCommandEnum {
     initialTrack,
     rescoreGlider,
     updateScoreId,
-    clearGlider
+    clearGlider,
+    setAirfield
 }
 
-export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | ScoringCommandClearGlider | ScoringCommandClearTask;
+export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | ScoringCommandClearGlider | ScoringCommandClearTask | ScoringCommandSetAirfield;
 
 interface ScoringCommandBase {
     className: ClassName;
@@ -268,6 +273,13 @@ interface ScoringCommandClearGlider extends ScoringCommandBase {
 
 interface ScoringCommandClearTask extends ScoringCommandBase {
     action: ScoringCommandEnum.clearTask;
+}
+
+// Site coordinates moved in the DB; mutate the worker's airfield in place
+// and rescore every glider so sticky landing classifications recompute.
+interface ScoringCommandSetAirfield extends ScoringCommandBase {
+    action: ScoringCommandEnum.setAirfield;
+    airfield: AirfieldLocation;
 }
 
 //
@@ -352,6 +364,16 @@ if (!isMainThread) {
             case ScoringCommandEnum.clearGlider:
                 console.log(`${task.className}/${task.compno}: stopping scoring for ${task.compno}`);
                 scoreUpdater?.clearGlider(task.compno);
+                break;
+
+            case ScoringCommandEnum.setAirfield:
+                // Mutate in place so any in-flight enrichedPositionGenerator
+                // closures see the new point on their next read.
+                Object.assign(workerData.airfield, task.airfield);
+                console.log(`${task.className}: airfield moved to (${workerData.airfield.lat},${workerData.airfield.lng}), rescoring ${Object.keys(gliders).length} gliders`);
+                for (const g of Object.values(gliders)) {
+                    rescoreGlider(g.compno, {className: g.className, datecode: workerData.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, g.handicap, g.utcStart, g.scoreId);
+                }
                 break;
         }
     });
