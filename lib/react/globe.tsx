@@ -351,7 +351,18 @@ function CompetitionListPanel({
     // Group competitions into Live / Upcoming so users can tell at a glance
     // which ones are clickable. Upcoming entries stay in the list (so pilots
     // can find their comp) but navigation is disabled.
-    const live = competitions.filter((c) => c.displayStatus !== 'upcoming');
+    const pilotCount = (c: Competition) => (c.classes ?? []).reduce((s, cls) => s + (cls.pilotCount || 0), 0);
+    const live = competitions
+        .filter((c) => c.displayStatus !== 'upcoming')
+        .sort((a, b) => {
+            const va = summary?.byComp.get(a.compid)?.viewers ?? 0;
+            const vb = summary?.byComp.get(b.compid)?.viewers ?? 0;
+            if (va !== vb) return vb - va;
+            const ta = a.displayStatus !== 'notask' ? 1 : 0;
+            const tb = b.displayStatus !== 'notask' ? 1 : 0;
+            if (ta !== tb) return tb - ta;
+            return pilotCount(b) - pilotCount(a);
+        });
     const upcoming = competitions.filter((c) => c.displayStatus === 'upcoming');
 
     const renderSection = (title: string, comps: Competition[], clickable: boolean, suffix?: React.ReactNode) => {
@@ -387,20 +398,18 @@ function CompetitionListPanel({
         );
     };
 
+    const liveRegistered = live.reduce((sum, c) => sum + (c.classes ?? []).reduce((s, cls) => s + (cls.pilotCount || 0), 0), 0);
+
     const liveSuffix = summary && summary.totals.pilots > 0 ? (
         <span className="sidepanel-section-stats">
-            {' · '}{summary.totals.pilots} pilots · {summary.totals.flying} flying · {summary.totals.landed} landed
+            {' · '}{summary.totals.pilots}/{liveRegistered} pilots · {summary.totals.flying} flying · {summary.totals.landed} landed
+            {' · '}<FontAwesomeIcon icon={faEye} /> {summary.totals.viewers}
         </span>
     ) : null;
 
     return (
         <aside className="sidepanel sidepanel-globe">
             <div className="sidepanel-brand">Onglide</div>
-            {summary ? (
-                <div className="sidepanel-brand-stats">
-                    <FontAwesomeIcon icon={faEye} /> {summary.totals.viewers} watching
-                </div>
-            ) : null}
             <div className="sidepanel-body">
                 {renderSection('Live', live, true, liveSuffix)}
                 {renderSection('Upcoming', upcoming, false)}

@@ -22,7 +22,7 @@ export type StatusSummary = {
     // history (multiple datecodes / channels) sums cleanly.
     byClass: Map<string, {tracked: number; flying: number; landed: number}>;
     // Aggregated per compid for the row-level rollup case.
-    byComp: Map<string, {tracked: number; flying: number; landed: number}>;
+    byComp: Map<string, {tracked: number; flying: number; landed: number; viewers: number}>;
 };
 
 export function classKey(compid: string, className: string): string {
@@ -39,30 +39,38 @@ export function useStatusSummary(): StatusSummary | null {
 
     const totals = {pilots: 0, flying: 0, landed: 0, viewers: 0};
     const byClass = new Map<string, {tracked: number; flying: number; landed: number}>();
-    const byComp = new Map<string, {tracked: number; flying: number; landed: number}>();
-
-    const bump = (m: Map<string, {tracked: number; flying: number; landed: number}>, k: string, t: number, f: number, l: number) => {
-        const prev = m.get(k);
-        if (prev) {
-            prev.tracked += t;
-            prev.flying += f;
-            prev.landed += l;
-        } else {
-            m.set(k, {tracked: t, flying: f, landed: l});
-        }
-    };
+    const byComp = new Map<string, {tracked: number; flying: number; landed: number; viewers: number}>();
 
     for (const k in data) {
         const ch = data[k];
         const tracked = ch.gliders.total;
         const flying = ch.gliders.airborne;
         const landed = ch.gliders.finished + ch.gliders.home;
+        const viewers = ch.viewers.total;
         totals.pilots += tracked;
         totals.flying += flying;
         totals.landed += landed;
-        totals.viewers += ch.viewers.total;
-        bump(byClass, classKey(ch.compid, ch.className), tracked, flying, landed);
-        bump(byComp, ch.compid, tracked, flying, landed);
+        totals.viewers += viewers;
+
+        const ck = classKey(ch.compid, ch.className);
+        const cls = byClass.get(ck);
+        if (cls) {
+            cls.tracked += tracked;
+            cls.flying += flying;
+            cls.landed += landed;
+        } else {
+            byClass.set(ck, {tracked, flying, landed});
+        }
+
+        const cmp = byComp.get(ch.compid);
+        if (cmp) {
+            cmp.tracked += tracked;
+            cmp.flying += flying;
+            cmp.landed += landed;
+            cmp.viewers += viewers;
+        } else {
+            byComp.set(ch.compid, {tracked, flying, landed, viewers});
+        }
     }
 
     return {channels: data, totals, byClass, byComp};

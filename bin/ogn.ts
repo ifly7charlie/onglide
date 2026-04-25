@@ -2423,6 +2423,7 @@ function setupOgnWebServer(req, res) {
             for (const key in gliders) {
                 const g = gliders[key as ClassName_Compno];
                 if (g.className !== channel.className || g.datecode !== channel.datecode) continue;
+                if (!g.dbTrackerId || g.dbTrackerId == 'unknown') continue;
                 gliderStates.total++;
                 const label = statusLabels[g.scoredStatus];
                 if (label) gliderStates[label as 'started' | 'finished' | 'home']++;
