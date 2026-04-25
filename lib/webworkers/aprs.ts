@@ -95,7 +95,7 @@ export interface AprsCommandTrack {
 
     className: ClassName;
     channelName: string;
-    compno: string | Compno;
+    compno: Compno;
     datecode: Datecode;
     tzoffset: number; // seconds east of UTC — used to derive competition start time for point backfill
     receiveNewPoints: boolean;
@@ -105,18 +105,18 @@ export interface AprsCommandTrack {
 export interface AprsCommandUntrack {
     action: AprsCommandEnum.untrack;
 
-    className: string | ClassName;
+    className: ClassName;
     channelName: string;
-    compno: string | Compno;
+    compno: Compno;
     trackerId: string | string[];
 }
 
 export interface AprsCommandFinish {
     action: AprsCommandEnum.finish;
 
-    className: string | ClassName;
+    className: ClassName;
     channelName: string;
-    compno: string | Compno;
+    compno: Compno;
 }
 
 // Exit
@@ -167,8 +167,8 @@ const statistics = {
 
 // Keep track of the aircraft requested
 export interface Aircraft {
-    compno: string;
-    className: string;
+    compno: Compno;
+    className: ClassName;
     trackers: FlarmID[];
 
     datecode: Datecode; // competition day this aircraft belongs to (internal signal for reset-on-change)
