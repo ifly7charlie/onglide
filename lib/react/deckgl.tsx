@@ -58,6 +58,7 @@ import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} 
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
 import {pilotsTrackLayer} from './pilotstracklayer';
+import {homeLocationLayer} from './homeLocationLayer';
 //import {turnpointLayer} from './turnpointlayer';
 
 import {registerMapIcons} from './mapIcons';
@@ -89,6 +90,7 @@ export default function MApp(props: {
     status: string; // status line
     replayTime: Epoch;
     setReplayTime: (t: Epoch | undefined) => void;
+    comp?: any;
 }) {
     // For remote updating of the map
     const mapRef = useRef<MapRef | null>(null);
@@ -465,6 +467,10 @@ export default function MApp(props: {
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
+    // Pin at the competition's site (competition.lt/lg). Returns null when
+    // the comp prop is missing or the coords aren't finite numbers.
+    const homeMarker = homeLocationLayer(props.comp?.competition?.lt, props.comp?.competition?.lg);
+
     return (
         <ErrorBoundary fallback={<p style={{marginTop: 100}}>Please reload me!</p>}>
             <Map //
@@ -508,7 +514,7 @@ export default function MApp(props: {
                         getTooltip={toolTip}
                         onClick={onClick}
                         onDragStart={onDragStart}
-                        layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
+                        layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]} //
                         interleaved={true}
                     />
                 ) : null}

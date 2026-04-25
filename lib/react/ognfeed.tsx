@@ -259,6 +259,7 @@ export const OgnFeed = memo(
             <div className={'resizingMap'}>
                 <MApp //
                     key="map"
+                    comp={comp}
                     vc={vc}
                     follow={follow}
                     setFollow={setFollow}
