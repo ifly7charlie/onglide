@@ -143,6 +143,7 @@ export default async function competitionsHandler(_req, res) {
         const anyStarted = statuses.some((s) => s === 'S');
         const anyBeforeStart = statuses.some((s) => s === 'L');
         const anyLaunching = statuses.some((s) => s === 'G');
+        const allHome = statuses.length > 0 && statuses.every((s) => s === 'H');
         const allDone = statuses.length > 0 && statuses.every((s) => s === 'R' || s === 'H' || s === 'O');
         const anyTaskReady = statuses.some((s) => s === 'B' || s === 'P');
 
@@ -152,6 +153,8 @@ export default async function competitionsHandler(_req, res) {
             displayStatus = 'before_start';
         } else if (anyLaunching) {
             displayStatus = 'launching';
+        } else if (allHome) {
+            displayStatus = 'home';
         } else if (allDone) {
             displayStatus = 'landed';
         } else if (inWindow && anyTaskReady) {

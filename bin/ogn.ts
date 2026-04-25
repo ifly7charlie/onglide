@@ -1559,17 +1559,19 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             let reason = '';
             // Only promote to H when we can see most of the field — otherwise a class
             // with 5% tracker coverage would land as soon as those 5% touched down.
+            // L and S can overwrite H so a class that all-landed and then relaunches
+            // (weather hold, regrid, fresh launch) climbs back through the states.
             if (allLanded && trackerCoverage >= 0.1) {
                 nextStatus = 'H';
                 allowFrom = ['L', 'S'];
                 reason = `all ${scored.length}/${totalScored} tracked gliders landed`;
             } else if (startedCount / scored.length > 0.1) {
                 nextStatus = 'S';
-                allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'L'];
+                allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'L', 'H'];
                 reason = `${startedCount}/${scored.length} tracked gliders started`;
             } else if (airborneCount > 0) {
                 nextStatus = 'L';
-                allowFrom = [':', '?', 'P', 'B', 'X', 'G'];
+                allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'H'];
                 reason = `${airborneCount}/${scored.length} tracked gliders airborne`;
             } else if (griddedCount > 0) {
                 nextStatus = 'G';
