@@ -524,7 +524,9 @@ async function main() {
                 notValid.forEach((client: OgnWebSocket) => {
                     client.terminate();
                 });
-                console.log(`${channel.displayName}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`);
+                console.log(
+                    `${channel.displayName}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`
+                );
             }
 
             // Send keep alive and reset the stats/status
@@ -612,9 +614,7 @@ async function handleExit(signal: string) {
     // the global maps. destroyCompetitionContext internally awaits
     // the scoring workers with a 5s timeout so a stuck one can't
     // hang the whole shutdown.
-    const teardowns = Object.values(contexts).map((c) =>
-        destroyCompetitionContext(c).catch((e) => console.error(`destroy(${c.compid}) during exit:`, e))
-    );
+    const teardowns = Object.values(contexts).map((c) => destroyCompetitionContext(c).catch((e) => console.error(`destroy(${c.compid}) during exit:`, e)));
     await Promise.allSettled(teardowns);
 
     // Close the shared resources once no context is holding them open.
@@ -939,7 +939,9 @@ function getSunset(competition: CompetitionContext, datecode: Datecode) {
     const localMidday = new Date(fromDateCode(datecode)).getTime() - (loc.tzoffset - 12 * 3600) * 1000;
     const sunset = Math.round(SunCalc.getTimes(new Date(localMidday), loc.lat, loc.lng).night.getTime() / 1000) as Epoch;
     if (sunset != loc.sunset) {
-        console.log(`${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch)})`);
+        console.log(
+            `${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch)})`
+        );
         loc.sunset = sunset;
     }
 }
@@ -1402,7 +1404,12 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                         ppr.start
                     )
                 ) - (
-                    SELECT tzoffset FROM competition WHERE compid = ${compid}
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                    WHERE
+                        compid = ${compid}
                 )
             END utcStart,
             CASE
@@ -1414,7 +1421,12 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                         ppr.finish
                     )
                 ) - (
-                    SELECT tzoffset FROM competition WHERE compid = ${compid}
+                    SELECT
+                        tzoffset
+                    FROM
+                        competition
+                    WHERE
+                        compid = ${compid}
                 )
             END utcFinish,
             COALESCE(ppr.scoredStatus, 'S') scoredStatus
@@ -1436,7 +1448,8 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                     pr.datecode = ${datecode}
             ) AS ppr ON ppr.class = p.class
             AND ppr.compno = p.compno
-        WHERE cl.compid = ${compid}
+        WHERE
+            cl.compid = ${compid}
     `);
 
     const initialGliderCount = Object.keys(gliders).length;
@@ -2339,6 +2352,8 @@ function setupOgnWebServer(req, res) {
                 case 'deck':
                 case 'flarmIdRegex':
                 case 'geoTask':
+                case 'optimalGrid':
+                case 'optimalGridBaselinePath':
                 case 'coordinates':
                 case 'pointGeoJSON':
                 case 'geoJSON':
