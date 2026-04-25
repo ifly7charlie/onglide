@@ -370,7 +370,7 @@ function CompetitionListPanel({
         return (
             <>
                 <div className="sidepanel-section-header">
-                    {title} · {comps.length}
+                    {comps.length} {title}
                     {suffix}
                 </div>
                 {comps.map((c) => (
