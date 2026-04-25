@@ -281,12 +281,16 @@ button {
         }
 
         .status-dot {
-            display: inline-block;
-            width: 11px;
-            height: 11px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
             border-radius: 50%;
             margin-right: 8px;
             flex-shrink: 0;
+            color: #fff;
+            font-size: 9px;
         }
     }
 }
@@ -294,8 +298,10 @@ button {
 // Coloured pill carrying a status label. Background colour is set inline per
 // status (see globe.tsx `statusCss`), so only layout/typography here.
 .status-pill {
-    display: inline-block;
-    padding: 1px 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
     border-radius: 10px;
     font-size: 11px;
     font-weight: 800;
@@ -309,7 +315,9 @@ button {
 }
 
 // Shared visual styling for the class-tab row (used by both the desktop
-// sidepanel and the mobile drawer).
+// sidepanel and the mobile drawer). Border colour is set inline per class
+// (see SidePanelClassTabs) using the front-page status palette so the
+// status remains visible regardless of active/inactive state.
 .sidepanel-classes {
     display: flex;
     flex-wrap: wrap;
@@ -317,14 +325,22 @@ button {
     padding: 6px 16px;
 
     button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         background: transparent;
-        border: 1px solid var(--panel-border);
+        border: 2px solid var(--panel-border);
         color: inherit;
-        padding: 4px 14px;
+        padding: 3px 13px;
         border-radius: 4px;
         font: inherit;
         font-size: 16px;
         cursor: pointer;
+
+        .status-icon {
+            font-size: 13px;
+            opacity: 0.85;
+        }
 
         &:hover {
             background: var(--panel-hover);
@@ -333,13 +349,20 @@ button {
         &.active {
             background: var(--panel-accent);
             color: #fff;
-            border-color: var(--panel-accent);
         }
     }
 }
 
 .sidepanel > .sidepanel-classes {
     border-bottom: 1px solid var(--panel-border);
+}
+
+// Wrapper for the deck.gl globe canvas. Inset on the right so the side
+// panel doesn't sit over the projected centre of the globe — without this
+// the canvas fills the viewport and the visible map appears shifted.
+.globe-canvas-wrap {
+    position: absolute;
+    inset: 0 390px 0 0;
 }
 
 // Chrome overlays floating over a full-viewport map or globe.
@@ -363,12 +386,16 @@ button {
         margin-top: 2px;
 
         .status-dot {
-            display: inline-block;
-            width: 11px;
-            height: 11px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
             border-radius: 50%;
             margin-right: 8px;
             flex-shrink: 0;
+            color: #fff;
+            font-size: 9px;
         }
     }
 }

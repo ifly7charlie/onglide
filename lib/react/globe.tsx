@@ -3,16 +3,29 @@ import Router from 'next/router';
 
 import {DeckGL} from '@deck.gl/react';
 import {_GlobeView as GlobeView, COORDINATE_SYSTEM, LightingEffect, AmbientLight, _SunLight as SunLight, FlyToInterpolator} from '@deck.gl/core';
-import {GeoJsonLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
+import {GeoJsonLayer, IconLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {SimpleMeshLayer} from '@deck.gl/mesh-layers';
 import {SphereGeometry} from '@luma.gl/engine';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+
+import {STATUS_COLOURS, STATUS_LABELS, STATUS_ICONS, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
 
 // Earth radius in metres — matches the radius deck.gl's GlobeView uses
 // internally for its projection math, so a sphere mesh of this size lines
 // up exactly with marker/label positions placed via lat/lng.
 const EARTH_RADIUS_METERS = 6.3e6;
 
-export type CompetitionDisplayStatus = 'task_set' | 'before_start' | 'started' | 'landed' | 'notask' | 'upcoming';
+// Pre-built white-on-transparent SVG data URLs for each status icon, used by
+// the deck.gl IconLayer that overlays icons on the marker dots. Built once
+// at module load — the URLs are stable strings so deck.gl's image cache hits
+// on every frame.
+const STATUS_ICON_URLS: Record<CompetitionDisplayStatus, string> = (Object.keys(STATUS_COLOURS) as CompetitionDisplayStatus[]).reduce(
+    (acc, s) => {
+        acc[s] = statusIconDataUrl(s, 'white');
+        return acc;
+    },
+    {} as Record<CompetitionDisplayStatus, string>
+);
 
 export interface CompetitionClass {
     class: string;
@@ -38,32 +51,6 @@ export interface Competition {
     classes?: CompetitionClass[];
     classStatusesDiffer?: boolean;
     displayStatus: CompetitionDisplayStatus;
-}
-
-// Marker colours per status. Kept here so the legend and markers stay in sync.
-const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, number, number]> = {
-    task_set: [100, 200, 240, 255], // light blue — task briefed, waiting to launch
-    before_start: [30, 90, 220, 255], // dark blue — in air, no class has started yet
-    started: [40, 220, 90, 255], // green — at least one class is on task
-    landed: [150, 150, 150, 255], // grey — done for the day
-    notask: [200, 170, 100, 255], // dusty tan — in window but no task yet
-    upcoming: [200, 140, 200, 255] // lilac — starts tomorrow or later
-};
-
-const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
-    task_set: 'Task set',
-    before_start: 'Flying, before start',
-    started: 'Started',
-    landed: 'Landed',
-    notask: 'No task yet',
-    upcoming: 'Upcoming'
-};
-
-// Inline style helper: returns the `rgb(r,g,b)` string for a status so the
-// same palette is used in the marker layer AND the DOM list dots.
-function statusCss(status: CompetitionDisplayStatus): string {
-    const [r, g, b] = STATUS_COLOURS[status];
-    return `rgb(${r},${g},${b})`;
 }
 
 //
@@ -236,6 +223,30 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             }
         });
 
+        // White-on-coloured-dot status icon centered on each marker. Drawn
+        // separately from the ScatterplotLayer so the dot keeps its solid
+        // colour fill and the icon sits cleanly on top.
+        const markerIcons = new IconLayer<Competition>({
+            id: 'competition-marker-icons',
+            data: visibleCompetitions,
+            pickable: false,
+            getPosition: (c) => [c.lng, c.lat, 0],
+            getIcon: (c) => ({
+                url: STATUS_ICON_URLS[c.displayStatus],
+                width: 64,
+                height: 64,
+                anchorX: 32,
+                anchorY: 32,
+                mask: false
+            }),
+            getSize: (c) => (c.compid === highlightedCompid ? 18 : 11),
+            sizeUnits: 'pixels',
+            updateTriggers: {
+                getIcon: [visibleCompetitions],
+                getSize: [highlightedCompid]
+            }
+        });
+
         // SDF font is required whenever outlineWidth > 0; characterSet: 'auto'
         // handles non-ASCII glyphs in competition names.
         const labels = new TextLayer<Competition>({
@@ -255,7 +266,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             getAlignmentBaseline: 'top'
         });
 
-        return [earthSphere, countries, markers, labels].filter(Boolean) as any[];
+        return [earthSphere, countries, markers, markerIcons, labels].filter(Boolean) as any[];
     }, [visibleCompetitions, countriesGeoJson, highlightedCompid]);
 
     // Lighting with SunLight at current time. Recomputed once on mount.
@@ -271,6 +282,11 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 
     return (
         <div style={{position: 'fixed', inset: 0, background: '#0b1a33'}}>
+            {/* Globe canvas is wrapped so it occupies only the visible map
+                area — the side panel sits over the right side of the viewport
+                (or bottom on mobile) and would otherwise pull the projected
+                centre of the globe off-screen. */}
+            <div className="globe-canvas-wrap">
             {hasData ? (
                 <DeckGL
                     views={new GlobeView({id: 'globe', resolution: 10}) as any}
@@ -282,6 +298,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
                     layers={layers}
                 />
             ) : null}
+            </div>
 
             {/* Right-side competition list panel */}
             <CompetitionListPanel
@@ -295,7 +312,9 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             <div className="map-legend">
                 {(['upcoming', 'notask', 'task_set', 'before_start', 'started', 'landed'] as const).map((s) => (
                     <div key={s} className="legend-row">
-                        <span className="status-dot" style={{background: statusCss(s)}} />
+                        <span className="status-dot" style={{background: statusCss(s)}}>
+                            <FontAwesomeIcon icon={STATUS_ICONS[s]} />
+                        </span>
                         {STATUS_LABELS[s]}
                     </div>
                 ))}
@@ -430,6 +449,7 @@ function CompetitionListEntry({
                           }}
                       >
                           <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
+                              <FontAwesomeIcon icon={STATUS_ICONS[cls.displayStatus]} />
                               {STATUS_LABELS[cls.displayStatus]}
                           </span>
                           <span className="name">{cls.classname}</span>
@@ -441,6 +461,7 @@ function CompetitionListEntry({
                 : (
                     <div className="entry-rollup">
                         <span className="status-pill" style={{background: statusCss(comp.displayStatus)}}>
+                            <FontAwesomeIcon icon={STATUS_ICONS[comp.displayStatus]} />
                             {STATUS_LABELS[comp.displayStatus]}
                         </span>
                         {comp.classCount} {comp.classCount === 1 ? 'class' : 'classes'}

@@ -1,5 +1,6 @@
 import {query, mysqlEnd} from '../../lib/react/db';
 import escape from 'sql-template-strings';
+import {classDisplayStatus, type CompetitionDisplayStatus} from '../../lib/react/competition-status';
 
 //
 // Returns every competition that should be shown on the globe landing page.
@@ -7,22 +8,10 @@ import escape from 'sql-template-strings';
 // the competition's end date is in the future (upcoming/in-progress).
 //
 // For each competition we aggregate its per-class compstatus and derive a
-// single `displayStatus` that the globe uses for marker styling:
+// single `displayStatus` for the globe markers and the side panel pills.
+// Status meanings live in lib/react/competition-status.ts.
 //
-//   started      — at least one class has crossed the start line (status S)
-//   before_start — at least one class is launched but none have started (L)
-//   landed       — all classes have landed (R/H/O); recently-finished comps
-//                  also fall here for the rest of the 24h display window
-//   task_set     — window is open today, at least one class has a task set
-//                  (status B/P), pre-launch
-//   notask       — window is open today, but no class has a task configured
-//                  yet (all classes in ':'/'?' or all scrubbed 'Z')
-//   upcoming     — competition starts tomorrow or later
-//
-// We also return per-class info so the list panel can show a dot per class
-// when classes have diverged (e.g. Open flying, 15m still briefing).
-//
-export type ClassDisplayStatus = 'task_set' | 'before_start' | 'started' | 'landed' | 'notask' | 'upcoming';
+export type ClassDisplayStatus = CompetitionDisplayStatus;
 
 type ClassRow = {
     class: string;
@@ -31,22 +20,6 @@ type ClassRow = {
     pilotCount: number;
     displayStatus: ClassDisplayStatus;
 };
-
-// Derive a per-class displayStatus from its compstatus.status + the
-// competition window. Same semantics as the competition-wide rollup, but
-// applied to a single class row. `endPast` short-circuits the "upcoming"
-// fallback when the competition's end date has already passed — without
-// it, a finished comp with a blank class status would keep showing as
-// "upcoming" until the scheduler's dead-comp cleanup removes it.
-function classDisplayStatus(status: string, inWindow: boolean, endPast: boolean): ClassDisplayStatus {
-    if (status === 'S') return 'started';
-    if (status === 'L') return 'before_start';
-    if (status === 'R' || status === 'H' || status === 'O') return 'landed';
-    if (inWindow && (status === 'B' || status === 'P')) return 'task_set';
-    if (inWindow) return 'notask';
-    if (endPast) return 'landed';
-    return 'upcoming';
-}
 
 export default async function competitionsHandler(_req, res) {
     // Query returns one row per class so we can build the per-class list.

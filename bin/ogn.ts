@@ -145,7 +145,6 @@ interface Channel {
     className: ClassName;
     compid: string;
     displayName: string; // "<compShort>/<classname>" — for log lines
-    launching: boolean;
     datecode: Datecode;
 
     toSend: PositionMessage[]; // messages waiting to be sent
@@ -190,8 +189,8 @@ interface Channel {
 }
 
 let channels: Record<ChannelName, Channel> = {};
-/*EG: { 'PMSRMAM202007I': { className: 'blue', clients: [], launching: false, datecode: '070' },
-                    'PMSRMAM202007H': { className: 'red', clients: [], launching: false, datecode: '070' },
+/*EG: { 'PMSRMAM202007I': { className: 'blue', clients: [], datecode: '070' },
+                    'PMSRMAM202007H': { className: 'red', clients: [], datecode: '070' },
                     }; */
 
 interface Glider {
@@ -993,7 +992,6 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
 
             channel = {
                 clients: [],
-                launching: false,
                 activeGliders: new Set(),
                 toSend: [],
                 lastSentPositions: 0 as Epoch,
@@ -1530,23 +1528,52 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             list.push(t);
             byClass.set(t.className, list);
         }
+        // Derive the highest applicable compstatus state for each class from the live
+        // scoring state. Forward-only: each target only overwrites earlier states, so
+        // a single pilot returning to L doesn't drag a class back from S/H. All three
+        // counts use the "scored" subset (scoredStatus === 'S') so DNS/DNF pilots
+        // don't dilute denominators or block H.
         for (const [className, pilots] of byClass) {
             const channel = channels[channelName(className, datecode)];
-            const allLanded =
-                pilots.length > 0 &&
-                pilots.every((p) => {
-                    const liveScore = channel?.allScores[p.compno];
-                    const fs = liveScore?.flightStatus;
-                    return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished || p.scoredStatus !== 'S';
-                });
+            const scored = pilots.filter((p) => p.scoredStatus === 'S');
+            if (scored.length === 0) continue;
+
+            const allLanded = scored.every((p) => {
+                const fs = channel?.allScores[p.compno]?.flightStatus;
+                return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
+            });
+            const startedCount = scored.filter((p) => (channel?.allScores[p.compno]?.utcStart ?? 0) > 0).length;
+            const airborneCount = scored.filter((p) => {
+                const fs = channel?.allScores[p.compno]?.flightStatus;
+                return fs !== undefined && fs >= PositionStatus.Airborne;
+            }).length;
+
+            let nextStatus: string | null = null;
+            let allowFrom: string[] = [];
+            let reason = '';
             if (allLanded) {
-                db.query('UPDATE compstatus SET status = ? WHERE class = ? AND status IN (?, ?)', ['H', className, 'L', 'S'])
+                nextStatus = 'H';
+                allowFrom = ['L', 'S'];
+                reason = `all ${scored.length} scored gliders landed`;
+            } else if (startedCount / scored.length > 0.1) {
+                nextStatus = 'S';
+                allowFrom = [':', '?', 'P', 'B', 'X', 'L'];
+                reason = `${startedCount}/${scored.length} scored gliders started`;
+            } else if (airborneCount > 0) {
+                nextStatus = 'L';
+                allowFrom = [':', '?', 'P', 'B', 'X'];
+                reason = `${airborneCount}/${scored.length} scored gliders airborne`;
+            }
+
+            if (nextStatus) {
+                const placeholders = allowFrom.map(() => '?').join(', ');
+                db.query(`UPDATE compstatus SET status = ? WHERE class = ? AND status IN (${placeholders})`, [nextStatus, className, ...allowFrom])
                     .then((r: any) => {
                         if (r?.affectedRows) {
-                            console.log(`compstatus -> H for ${className}: all ${pilots.length} tracked gliders landed`);
+                            console.log(`compstatus -> ${nextStatus} for ${className}: ${reason}`);
                         }
                     })
-                    .catch((e) => console.log('compstatus H update failed:', e));
+                    .catch((e: any) => console.log(`compstatus ${nextStatus} update failed:`, e));
             }
         }
     }
@@ -2001,24 +2028,6 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     // We ignore ticks
     if ('tick' in message) {
         return;
-    }
-
-    // Check if they are a launch
-    if (message.g > 100 && !channel.launching) {
-        console.log(`Launch detected: ${glider.compno}, class: ${glider.className}`);
-        channel.launching = true;
-
-        // Promote compstatus to L (launched) — only if still in a pre-launch
-        // state so we don't clobber a later state set by scoring. ':' is the
-        // initial state set by update_class in the scraper, so it must be in
-        // the allow-list alongside the briefing/pre-flight states.
-        if (!readOnly) {
-            db.query('UPDATE compstatus SET status = ? WHERE class = ? AND status IN (?, ?, ?, ?, ?)', ['L', glider.className, ':', '?', 'P', 'B', 'X'])
-                .then((r: any) => {
-                    console.log(`compstatus -> L for ${glider.className}: ${r?.affectedRows ?? 0} row(s) updated`);
-                })
-                .catch((e) => console.log('compstatus L update failed:', e));
-        }
     }
 
     // Merge into the display data structure

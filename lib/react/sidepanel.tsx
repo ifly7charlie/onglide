@@ -4,6 +4,7 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 import {Options} from './options';
+import {classDisplayStatus, statusCss, STATUS_ICONS, STATUS_LABELS} from './competition-status';
 
 import type {Options as OptionsType, ClassName} from '../types';
 
@@ -59,19 +60,28 @@ export function SidePanelHeader({comp}: {comp: any}) {
 export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: ClassName; onClassChange: (className: string) => void}) {
     const multipleClasses = (comp?.classes?.length ?? 0) > 1;
     if (!multipleClasses) return null;
+    // The user is viewing this competition, so it's effectively current —
+    // pass inWindow=true so a class with status B/P maps to 'task_set'
+    // rather than falling through to 'upcoming'.
     return (
         <div className="sidepanel-classes" role="tablist">
-            {comp.classes.map((c: any) => (
-                <button
-                    key={c.class}
-                    role="tab"
-                    aria-selected={c.class === vc}
-                    className={c.class === vc ? 'active' : ''}
-                    onClick={() => onClassChange(c.class)}
-                >
-                    {c.classname.replace(/\s+(meter|metre)/, 'm')}
-                </button>
-            ))}
+            {comp.classes.map((c: any) => {
+                const ds = classDisplayStatus(c.status ?? '', true, false);
+                return (
+                    <button
+                        key={c.class}
+                        role="tab"
+                        aria-selected={c.class === vc}
+                        className={c.class === vc ? 'active' : ''}
+                        style={{borderColor: statusCss(ds)}}
+                        title={STATUS_LABELS[ds]}
+                        onClick={() => onClassChange(c.class)}
+                    >
+                        <FontAwesomeIcon icon={STATUS_ICONS[ds]} className="status-icon" />
+                        {c.classname.replace(/\s+(meter|metre)/, 'm')}
+                    </button>
+                );
+            })}
         </div>
     );
 }
