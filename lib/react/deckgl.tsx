@@ -467,9 +467,12 @@ export default function MApp(props: {
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
 
-    // Pin at the competition's site (competition.lt/lg). Returns null when
-    // the comp prop is missing or the coords aren't finite numbers.
-    const homeMarker = homeLocationLayer(props.comp?.competition?.lt, props.comp?.competition?.lg);
+    // X-marker at the competition's site (competition.lt/lg). Hidden when
+    // zoomed out so it doesn't clutter the regional view — by zoom 8 the
+    // airfield itself is visible on the basemap, so the marker only adds
+    // value when the user has zoomed in to look at the site.
+    const HOME_MARKER_MIN_ZOOM = 8;
+    const homeMarker = (props.viewport?.zoom ?? 0) >= HOME_MARKER_MIN_ZOOM ? homeLocationLayer(props.comp?.competition?.lt, props.comp?.competition?.lg) : null;
 
     return (
         <ErrorBoundary fallback={<p style={{marginTop: 100}}>Please reload me!</p>}>
