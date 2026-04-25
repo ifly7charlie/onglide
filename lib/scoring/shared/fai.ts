@@ -65,6 +65,12 @@ interface FaiRequest {
     classid: ClassId;
     className?: string; // human-readable class name, log-only
     compno: CompNo;
+    // When set, skip the findPilotByName search entirely and just pull
+    // this pilot's current portrait filename via the FAI detail
+    // endpoint. Used by enqueuePortraitRefresh for already-resolved
+    // pilots so the daily refresh doesn't run a name search it doesn't
+    // need.
+    directRefreshFai?: number;
 }
 
 function faiTag(req: FaiRequest): string {
@@ -79,6 +85,18 @@ const faiQueue = new ThrottledQueue<FaiRequest>({
     keyOf: (req) => `${req.classid}:${req.compno}`,
     handle: async (req) => {
         try {
+            // Portrait refresh path: pilot is already resolved, we know
+            // their FAI id, so skip the name search and just pull the
+            // current detail row for the authoritative photo filename.
+            if (req.directRefreshFai) {
+                const detail = await fetchFaiPilotDetail(req.log, req.directRefreshFai);
+                const url = faiPilotImageUrl(detail?.photo);
+                if (url) {
+                    req.log(`fai worker: portrait refresh ${faiTag(req)} (fai ${req.directRefreshFai}) photo=${detail?.photo}`);
+                    downloadPictureCached(req.db, req.log, req.classid, req.compno, {directUrl: url}).catch(() => undefined);
+                }
+                return;
+            }
             const resolved = await findPilotByName(
                 req.db, //
                 req.log,
@@ -110,6 +128,45 @@ const faiQueue = new ThrottledQueue<FaiRequest>({
         }
     }
 });
+
+// Per-pilot timestamp of the last portrait-refresh enqueue this
+// process, used to keep the daily refresh from re-queueing every
+// heartbeat. Restart clears it; downloadPictureCached's own 24h
+// memCache still gates the actual HTTP, so a cold start doesn't mean
+// every pilot re-downloads their portrait.
+const portraitRefreshedAt = new Map<string, number>();
+const PORTRAIT_REFRESH_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+//
+// enqueuePortraitRefresh — schedule a daily "just re-pull the current
+// portrait" request for an already-resolved pilot. Skips the name
+// search, fetches the FAI detail row directly to get the authoritative
+// photo filename, and hands that to downloadPictureCached. No-op if
+// this process already queued a refresh for the same pilot within the
+// 24h cooldown.
+//
+export function enqueuePortraitRefresh(
+    db: any, //
+    log: (msg: string, ...args: unknown[]) => void,
+    classid: ClassId,
+    compno: CompNo,
+    fai: number
+): void {
+    if (!fai || fai >= FAI_SYNTHETIC_FLOOR) return;
+    const key = `${classid}:${compno}`;
+    const last = portraitRefreshedAt.get(key);
+    if (last && Date.now() - last < PORTRAIT_REFRESH_COOLDOWN_MS) return;
+    portraitRefreshedAt.set(key, Date.now());
+    faiQueue.enqueue({
+        db,
+        log,
+        fullName: '',
+        country: '',
+        classid,
+        compno,
+        directRefreshFai: fai
+    });
+}
 
 //
 // enqueueFaiLookup — schedule a FAI ranking-list resolution for a

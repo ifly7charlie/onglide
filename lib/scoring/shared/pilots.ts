@@ -15,7 +15,7 @@ import {createHash} from 'crypto';
 import escape from 'sql-template-strings';
 
 import type {ClassId, CompNo} from '../source';
-import {enqueueFaiLookup} from './fai';
+import {enqueueFaiLookup, enqueuePortraitRefresh} from './fai';
 import {FAI_SYNTHETIC_FLOOR} from './faiApi';
 
 //
@@ -167,14 +167,19 @@ export async function upsertPilot(
         }
     }
 
-    // Portrait refresh is driven by the FAI background worker — it
-    // calls downloadPictureCached with the authoritative directUrl the
-    // moment it resolves the pilot. For already-resolved pilots whose
-    // sig hasn't changed, we deliberately skip a refresh: FAI portraits
-    // rarely change mid-comp and blanket re-downloading on every
-    // fetchPilots run burns cache slots + HTTP requests without
-    // benefit. A sig change routes through the worker path above, so
-    // the new portrait (if any) lands there.
+    // Portrait refresh:
+    //   - sigChanged (name/country/compno edit): the worker path above
+    //     does a full findPilotByName + downloadPictureCached, so a
+    //     changed portrait filename is picked up there.
+    //   - resolved, sig unchanged: kick off a daily detail-only refresh.
+    //     enqueuePortraitRefresh dedups to 24h per pilot per process and
+    //     goes direct to the FAI detail endpoint (no name search), so
+    //     the common case costs one lightweight request per pilot per
+    //     day and picks up portrait changes without hammering the
+    //     ranking list.
+    if (!sigChanged && fainumber && fainumber < FAI_SYNTHETIC_FLOOR) {
+        enqueuePortraitRefresh(db, log, pilot.classid, pilot.compno, fainumber);
+    }
 
     try {
         await db.query(escape`
