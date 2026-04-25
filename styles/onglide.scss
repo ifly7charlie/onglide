@@ -205,11 +205,24 @@ button {
 
     // Brand header at the top of the globe home-page side panel.
     .sidepanel-brand {
-        padding: 14px 18px 12px;
+        padding: 14px 18px 4px;
         font-size: 22px;
         font-weight: 800;
         letter-spacing: 0.5px;
+    }
+
+    // Live-viewer count beneath the brand. Subdued so it doesn't compete
+    // with the section headers further down.
+    .sidepanel-brand-stats {
+        padding: 0 18px 10px;
+        font-size: 12px;
+        opacity: 0.7;
         border-bottom: 1px solid var(--panel-border);
+
+        svg {
+            margin-right: 4px;
+            opacity: 0.85;
+        }
     }
 
     // Grouped list sections (used by globe home page)

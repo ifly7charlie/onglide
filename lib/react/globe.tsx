@@ -417,6 +417,7 @@ function CompetitionListPanel({
 //
 function CompetitionListEntry({
     comp,
+    summary,
     highlighted,
     clickable,
     registerRef,
@@ -425,6 +426,7 @@ function CompetitionListEntry({
     onClick
 }: {
     comp: Competition;
+    summary: StatusSummary | null;
     highlighted: boolean;
     clickable: boolean;
     registerRef: (el: HTMLDivElement | null) => void;
@@ -440,8 +442,16 @@ function CompetitionListEntry({
     // isn't interesting yet.
     const inActiveWindow = comp.displayStatus !== 'upcoming';
     const totalPilots = classes.reduce((sum, cls) => sum + (cls.pilotCount || 0), 0);
+    const compTracked = summary?.byComp.get(comp.compid)?.tracked;
 
     const entryClass = ['sidepanel-entry', highlighted ? 'highlighted' : '', !clickable ? 'non-clickable' : ''].filter(Boolean).join(' ');
+
+    // "tracked/total pilots" when we have a live count for this comp/class;
+    // otherwise just "total pilots".
+    const formatPilotCount = (total: number, tracked: number | undefined) => {
+        if (typeof tracked === 'number') return `${tracked}/${total} pilots`;
+        return `${total} ${total === 1 ? 'pilot' : 'pilots'}`;
+    };
 
     return (
         <div ref={registerRef} onMouseEnter={onHover} onMouseLeave={onLeave} onClick={onClick} className={entryClass}>
@@ -451,25 +461,26 @@ function CompetitionListEntry({
                 {comp.start} – {comp.end}
             </div>
             {inActiveWindow && classes.length > 0
-                ? classes.map((cls) => (
-                      <div
-                          key={cls.class}
-                          className="entry-classrow"
-                          onClick={(e) => {
-                              e.stopPropagation();
-                              Router.push('/' + comp.compid + '?className=' + cls.class);
-                          }}
-                      >
-                          <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
-                              <StatusIcon status={cls.displayStatus} />
-                              {STATUS_LABELS[cls.displayStatus]}
-                          </span>
-                          <span className="name">{cls.classname}</span>
-                          <span className="count">
-                              {cls.pilotCount} {cls.pilotCount === 1 ? 'pilot' : 'pilots'}
-                          </span>
-                      </div>
-                  ))
+                ? classes.map((cls) => {
+                      const classTracked = summary?.byClass.get(classKey(comp.compid, cls.class))?.tracked;
+                      return (
+                          <div
+                              key={cls.class}
+                              className="entry-classrow"
+                              onClick={(e) => {
+                                  e.stopPropagation();
+                                  Router.push('/' + comp.compid + '?className=' + cls.class);
+                              }}
+                          >
+                              <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
+                                  <StatusIcon status={cls.displayStatus} />
+                                  {STATUS_LABELS[cls.displayStatus]}
+                              </span>
+                              <span className="name">{cls.classname}</span>
+                              <span className="count">{formatPilotCount(cls.pilotCount, classTracked)}</span>
+                          </div>
+                      );
+                  })
                 : (
                     <div className="entry-rollup">
                         <span className="status-pill" style={{background: statusCss(comp.displayStatus)}}>
@@ -480,7 +491,7 @@ function CompetitionListEntry({
                         {totalPilots > 0 ? (
                             <>
                                 {' · '}
-                                {totalPilots} {totalPilots === 1 ? 'pilot' : 'pilots'}
+                                {formatPilotCount(totalPilots, compTracked)}
                             </>
                         ) : null}
                     </div>
