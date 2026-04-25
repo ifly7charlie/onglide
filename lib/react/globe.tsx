@@ -101,12 +101,36 @@ function computeInitialViewState(comps: Competition[]) {
 export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions: Competition[]; countriesGeoJson: any}) {
     const [highlightedCompid, setHighlightedCompid] = useState<string | null>(null);
 
-    // Refs to each list entry, keyed by compid, so clicking a marker on the
-    // globe can scroll the corresponding row into view in the side panel.
+    // Refs to each list entry, keyed by compid, so hovering/clicking a marker
+    // on the globe can scroll the corresponding row into view in the side panel.
     const entryRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
-    const revealCompid = useCallback((compid: string) => {
-        setHighlightedCompid(compid);
+    const scrollEntryIntoView = useCallback((compid: string) => {
         entryRefs.current.get(compid)?.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }, []);
+
+    // Click on a marker reveals the row immediately.
+    const revealCompid = useCallback(
+        (compid: string) => {
+            setHighlightedCompid(compid);
+            scrollEntryIntoView(compid);
+        },
+        [scrollEntryIntoView]
+    );
+
+    // Hover scroll is debounced so brushing the cursor across markers doesn't
+    // chase the side panel through the whole list. The latest hover wins; a
+    // hover-out cancels the pending scroll.
+    const hoverScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const scheduleHoverScroll = useCallback(
+        (compid: string | null) => {
+            if (hoverScrollTimer.current) clearTimeout(hoverScrollTimer.current);
+            if (!compid) return;
+            hoverScrollTimer.current = setTimeout(() => scrollEntryIntoView(compid), 250);
+        },
+        [scrollEntryIntoView]
+    );
+    useEffect(() => () => {
+        if (hoverScrollTimer.current) clearTimeout(hoverScrollTimer.current);
     }, []);
 
     // Drop competitions with missing coordinates before feeding them to any
@@ -199,7 +223,11 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
                 const comp = info.object as Competition | undefined;
                 if (comp) revealCompid(comp.compid);
             },
-            onHover: (info) => setHighlightedCompid(((info.object as Competition) ?? null)?.compid ?? null),
+            onHover: (info) => {
+                const compid = ((info.object as Competition) ?? null)?.compid ?? null;
+                setHighlightedCompid(compid);
+                scheduleHoverScroll(compid);
+            },
             updateTriggers: {
                 getFillColor: [visibleCompetitions],
                 getLineColor: [highlightedCompid],
