@@ -141,16 +141,13 @@ export default async function competitionsHandler(_req, res) {
 
         let displayStatus: ClassDisplayStatus;
         const anyStarted = statuses.some((s) => s === 'S');
-        const anyBeforeStart = statuses.some((s) => s === 'L');
-        const anyLaunching = statuses.some((s) => s === 'G');
+        const anyLaunching = statuses.some((s) => s === 'L');
         const allHome = statuses.length > 0 && statuses.every((s) => s === 'H');
         const allDone = statuses.length > 0 && statuses.every((s) => s === 'R' || s === 'H' || s === 'O');
-        const anyTaskReady = statuses.some((s) => s === 'B' || s === 'P');
+        const anyTaskReady = statuses.some((s) => s === 'B' || s === 'P' || s === 'G');
 
         if (anyStarted) {
             displayStatus = 'started';
-        } else if (anyBeforeStart) {
-            displayStatus = 'before_start';
         } else if (anyLaunching) {
             displayStatus = 'launching';
         } else if (allHome) {

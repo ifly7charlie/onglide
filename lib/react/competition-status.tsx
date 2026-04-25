@@ -5,25 +5,23 @@ import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 
 // Lifecycle of a soaring competition's display state through the day:
 //
-//   upcoming     — starts tomorrow or later
-//   notask       — window is open today, but no class has a task configured
-//   task_set     — task briefed, waiting to launch (status B/P)
-//   launching    — pilots on the grid, about to launch (status G)
-//   before_start — at least one class is launched but none have started (L)
-//   started      — at least one class has crossed the start line (S)
-//   landed       — all classes finished for the day (R/O, or mixed with H)
-//   home         — all classes back at home base (H)
+//   upcoming  — starts tomorrow or later
+//   notask    — window is open today, but no class has a task configured
+//   task_set  — task briefed, pilots prepping or gridded (status B/P/G)
+//   launching — at least one class is being launched (status L)
+//   started   — at least one class has crossed the start line (S)
+//   landed    — all classes finished for the day (R/O, or mixed with H)
+//   home      — all classes back at home base (H)
 //
 // Used by the front-page globe markers and legend AND by the per-competition
 // page's class tab buttons, so a class shown as "started" on the globe stays
 // "started" once the user clicks through.
 //
-export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'before_start' | 'started' | 'landed' | 'home' | 'notask' | 'upcoming';
+export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'landed' | 'home' | 'notask' | 'upcoming';
 
 export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, number, number]> = {
     task_set: [100, 200, 240, 255],
     launching: [30, 90, 220, 255],
-    before_start: [30, 90, 220, 255],
     started: [40, 220, 90, 255],
     landed: [150, 150, 150, 255],
     home: [150, 150, 150, 255],
@@ -34,7 +32,6 @@ export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, n
 export const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
     task_set: 'Task set',
     launching: 'Launching',
-    before_start: 'Flying, before start',
     started: 'Started',
     landed: 'Landed',
     home: 'Home',
@@ -45,7 +42,6 @@ export const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
 export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
     task_set: faRoute,
     launching: faPlaneDeparture,
-    before_start: faPlane,
     started: faPlane,
     landed: faFlagCheckered,
     home: faHouse,
@@ -70,11 +66,10 @@ export function statusCss(status: CompetitionDisplayStatus): string {
 // when the comp's end date has already passed.
 export function classDisplayStatus(status: string, inWindow: boolean, endPast: boolean): CompetitionDisplayStatus {
     if (status === 'S') return 'started';
-    if (status === 'L') return 'before_start';
-    if (status === 'G') return 'launching';
+    if (status === 'L') return 'launching';
     if (status === 'H') return 'home';
     if (status === 'R' || status === 'O') return 'landed';
-    if (inWindow && (status === 'B' || status === 'P')) return 'task_set';
+    if (inWindow && (status === 'B' || status === 'P' || status === 'G')) return 'task_set';
     if (inWindow) return 'notask';
     if (endPast) return 'landed';
     return 'upcoming';
