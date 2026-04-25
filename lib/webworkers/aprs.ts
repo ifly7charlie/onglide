@@ -450,8 +450,17 @@ function applyFilter(filter: string) {
     }
     currentFilter = filter;
     if (loggedIn && connection) {
-        connection.send(`#filter ${filter}\r\n`);
-        console.log(`aprs filter updated: ${filter.length} bytes: ${filter}`);
+        try {
+            connection.send(`#filter ${filter}\r\n`);
+            console.log(`aprs filter updated: ${filter.length} bytes: ${filter}`);
+        } catch (e) {
+            // Socket can drop between the loggedIn check and send (e.g.
+            // after an error that hasn't yet flipped loggedIn). Stash
+            // the filter so the next connect handler re-applies it.
+            loggedIn = false;
+            pendingFilter = filter;
+            console.log(`aprs filter send failed, deferring until reconnect: ${filter.length} bytes: ${filter}: ${e}`);
+        }
     } else {
         pendingFilter = filter;
         console.log(`aprs filter deferred until login: ${filter}`);
@@ -550,6 +559,7 @@ function startAprsListener(config: AprsListenerConfig) {
         if (restarting) {
             return;
         }
+        loggedIn = false;
         connection.disconnect();
         statistics.server += '!';
         unstableCount += 2;
@@ -627,11 +637,13 @@ function startAprsListener(config: AprsListenerConfig) {
             } catch (x) {
                 console.log('unable to send keepalive', x);
                 connection.valid = false;
+                loggedIn = false;
             }
 
             // Re-establish the APRS connection if we haven't had anything in
             if (!connection.valid && !restarting) {
                 console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
+                loggedIn = false;
                 connection.disconnect(() => {
                     if (restarting) {
                         return;
