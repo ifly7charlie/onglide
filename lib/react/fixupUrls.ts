@@ -20,6 +20,14 @@ export function oldScoresUrl(vc: ClassName, datecode: Datecode, baseTime: string
     );
 }
 
+export function statusSummaryUrl() {
+    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || window.location.host;
+    return (
+        (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST ?? '') || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX ?? '') ? 'https://' : 'http://') +
+        `${hn}/status/summary`
+    );
+}
+
 export function proposedUrl(vc: ClassName, datecode: Datecode) {
     const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
     if (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) {

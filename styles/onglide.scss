@@ -203,6 +203,15 @@ button {
         border-top: 1px solid var(--panel-border);
     }
 
+    // Brand header at the top of the globe home-page side panel.
+    .sidepanel-brand {
+        padding: 14px 18px 12px;
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: 0.5px;
+        border-bottom: 1px solid var(--panel-border);
+    }
+
     // Grouped list sections (used by globe home page)
     .sidepanel-section-header {
         padding: 16px 18px 6px 18px;
@@ -213,6 +222,15 @@ button {
         font-weight: 800;
         border-top: 1px solid var(--panel-border);
         margin-top: 4px;
+
+        // Inline pilot stats next to the section count (Live · 3 · 47 pilots …).
+        // Lighter weight so the section title stays the primary anchor.
+        .sidepanel-section-stats {
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: 0;
+            opacity: 0.85;
+        }
     }
 
     .sidepanel-entry {

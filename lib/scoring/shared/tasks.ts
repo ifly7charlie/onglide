@@ -197,7 +197,7 @@ export async function upsertTaskAndLegs(
                 const bearingDeg = previousPoint ? (bearing(previousPoint, currentPoint) + 360) % 360 : 0;
                 const hi = 0;
 
-                query += "( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?,? ),";
+                query += '( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,? ),';
 
                 values = values.concat([
                     classid,
@@ -211,6 +211,7 @@ export async function upsertTaskAndLegs(
                     hi,
                     trigraph,
                     tpname,
+                    tp.oz_line ? 'line' : 'sector',
                     oz_types[tp.oz_type],
                     tp.oz_radius1 / 1000,
                     tp.oz_line ? 90 : toDeg(tp.oz_angle1),

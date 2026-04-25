@@ -6,7 +6,11 @@ import {_GlobeView as GlobeView, COORDINATE_SYSTEM, LightingEffect, AmbientLight
 import {GeoJsonLayer, IconLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {SimpleMeshLayer} from '@deck.gl/mesh-layers';
 import {SphereGeometry} from '@luma.gl/engine';
+import {faEye} from '@fortawesome/free-solid-svg-icons';
+import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
+
 import {STATUS_COLOURS, STATUS_LABELS, StatusIcon, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
+import {classKey, useStatusSummary, type StatusSummary} from './statusSummary';
 
 // Earth radius in metres — matches the radius deck.gl's GlobeView uses
 // internally for its projection math, so a sphere mesh of this size lines
@@ -342,23 +346,27 @@ function CompetitionListPanel({
 }) {
     if (!competitions.length) return null;
 
+    const summary = useStatusSummary();
+
     // Group competitions into Live / Upcoming so users can tell at a glance
     // which ones are clickable. Upcoming entries stay in the list (so pilots
     // can find their comp) but navigation is disabled.
     const live = competitions.filter((c) => c.displayStatus !== 'upcoming');
     const upcoming = competitions.filter((c) => c.displayStatus === 'upcoming');
 
-    const renderSection = (title: string, comps: Competition[], clickable: boolean) => {
+    const renderSection = (title: string, comps: Competition[], clickable: boolean, suffix?: React.ReactNode) => {
         if (!comps.length) return null;
         return (
             <>
                 <div className="sidepanel-section-header">
                     {title} · {comps.length}
+                    {suffix}
                 </div>
                 {comps.map((c) => (
                     <CompetitionListEntry
                         key={c.compid}
                         comp={c}
+                        summary={summary}
                         highlighted={c.compid === highlightedCompid}
                         clickable={clickable}
                         registerRef={(el) => {
@@ -379,10 +387,22 @@ function CompetitionListPanel({
         );
     };
 
+    const liveSuffix = summary && summary.totals.pilots > 0 ? (
+        <span className="sidepanel-section-stats">
+            {' · '}{summary.totals.pilots} pilots · {summary.totals.flying} flying · {summary.totals.landed} landed
+        </span>
+    ) : null;
+
     return (
         <aside className="sidepanel sidepanel-globe">
+            <div className="sidepanel-brand">Onglide</div>
+            {summary ? (
+                <div className="sidepanel-brand-stats">
+                    <FontAwesomeIcon icon={faEye} /> {summary.totals.viewers} watching
+                </div>
+            ) : null}
             <div className="sidepanel-body">
-                {renderSection('Live', live, true)}
+                {renderSection('Live', live, true, liveSuffix)}
                 {renderSection('Upcoming', upcoming, false)}
             </div>
         </aside>
