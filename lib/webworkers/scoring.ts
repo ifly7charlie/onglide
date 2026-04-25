@@ -318,6 +318,13 @@ if (!isMainThread) {
                 console.log(`${task.className}/${task.compno}: ${itTask.handicap} hcap, ${itTask.utcStart} utcStart [${itTask.scoreId}]`);
                 const alreadyScoring = !!scoreCollector;
 
+                // Structured cloning across the worker boundary strips class
+                // prototypes, so any preparedLegs in the incoming task are
+                // plain objects. Rebuild them as PreparedTurnpoint instances.
+                if (task.task?.legs) {
+                    task.task.preparedLegs = task.task.legs.map((_leg, i) => new PreparedTurnpoint(task.task.legs, i));
+                }
+
                 gliders[makeClassname_Compno(task)] = {
                     className: task.className,
                     compno: task.compno,
