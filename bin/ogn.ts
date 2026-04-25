@@ -9,7 +9,7 @@ import {initialiseInsights, trackMetric, trackAggregatedMetric} from '../lib/ins
 import http from 'node:http';
 import https from 'node:https';
 
-import {readFileSync, existsSync, createWriteStream} from 'fs';
+import {readFileSync, existsSync, createWriteStream, writeFileSync, mkdirSync} from 'fs';
 
 import SunCalc from 'suncalc';
 
@@ -1697,6 +1697,30 @@ function getProposedScoreId(competition: CompetitionContext) {
 
 //
 // Update the DDB cache
+const ddbCachePath = `${process.env.DB_PATH ?? './db/'}/ddb-cache.json`;
+
+function applyDDBDevices(devices: DDBEntry[]) {
+    ddb = keyBy(devices, 'device_id');
+    forEach(ddb, function (entry) {
+        entry.registration = entry?.registration?.replace(/[^A-Z0-9]/i, '');
+    });
+    console.log('ddb entries:', Object.keys(ddb).length);
+}
+
+function loadDDBFromDisk(): boolean {
+    try {
+        if (!existsSync(ddbCachePath)) return false;
+        const raw = JSON.parse(readFileSync(ddbCachePath, 'utf8'));
+        if (!raw?.devices?.length) return false;
+        applyDDBDevices(raw.devices);
+        console.log(`ddb loaded from local cache ${ddbCachePath}`);
+        return true;
+    } catch (e) {
+        console.error('unable to load ddb cache', e);
+        return false;
+    }
+}
+
 async function updateDDB() {
     console.log('updating ddb');
 
@@ -1709,17 +1733,22 @@ async function updateDDB() {
                 return;
             }
 
-            // Update the cache with the ids by device_id
-            ddb = keyBy(ddbraw.devices, 'device_id');
+            applyDDBDevices(ddbraw.devices);
 
-            // remove the unknown characters from the registration
-            forEach(ddb, function (entry) {
-                entry.registration = entry?.registration?.replace(/[^A-Z0-9]/i, '');
-            });
-            console.log('ddb entries:', Object.keys(ddb).length);
+            try {
+                mkdirSync(process.env.DB_PATH ?? './db/', {recursive: true});
+                writeFileSync(ddbCachePath, JSON.stringify(ddbraw));
+            } catch (e) {
+                console.error('unable to persist ddb cache', e);
+            }
         })
         .catch((e) => {
             console.error('unable to fetch ddb', e);
+            // Fall back to the local cache so the process can keep matching
+            // gliders even when the DDB server is unreachable at startup.
+            if (Object.keys(ddb).length === 0) {
+                loadDDBFromDisk();
+            }
             setTimeout(updateDDB, 120_000 * Math.random() + 120_000);
         });
 }
