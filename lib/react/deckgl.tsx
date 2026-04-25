@@ -374,15 +374,7 @@ export default function MApp(props: {
         () => (
             <AttributionControl //
                 key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')}
-                customAttribution={[
-                    '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-                    'Imagery © Esri',
-                    'Elevation: AWS Open Data',
-                    radarOverlay.attribution,
-                    props.status
-                ]
-                    .filter(Boolean)
-                    .join(' | ')}
+                customAttribution={[radarOverlay.attribution, props.status].filter(Boolean).join(' | ')}
                 style={attributionStyle}
             />
         ),

@@ -376,15 +376,16 @@ button {
     flex-wrap: wrap;
     gap: 6px;
     padding: 6px 16px;
+    container-type: inline-size;
 
     button {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: clamp(2px, 1.2cqi, 6px);
         background: transparent;
         border: 2px solid var(--panel-border);
         color: inherit;
-        padding: 3px 13px;
+        padding: 3px clamp(2px, 3cqi, 13px);
         border-radius: 4px;
         font: inherit;
         font-size: 16px;
@@ -470,7 +471,7 @@ button {
     position: fixed;
     left: 0;
     right: 390px;
-    bottom: 12px;
+    bottom: 20px;
     display: flex;
     justify-content: center;
     pointer-events: none;

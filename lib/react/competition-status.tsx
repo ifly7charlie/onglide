@@ -32,7 +32,7 @@ export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, n
 export const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
     task_set: 'Task set',
     launching: 'Launching',
-    started: 'Started',
+    started: 'Racing',
     landed: 'Landed',
     home: 'Home',
     notask: 'No task yet',

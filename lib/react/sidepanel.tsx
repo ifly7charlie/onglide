@@ -4,7 +4,7 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 import {Options} from './options';
-import {classDisplayStatus, statusCss, StatusIcon, STATUS_LABELS} from './competition-status';
+import {classDisplayStatus, StatusIcon, STATUS_LABELS} from './competition-status';
 
 import type {Options as OptionsType, ClassName} from '../types';
 
@@ -73,7 +73,6 @@ export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: Cl
                         role="tab"
                         aria-selected={c.class === vc}
                         className={c.class === vc ? 'active' : ''}
-                        style={{borderColor: statusCss(ds)}}
                         title={STATUS_LABELS[ds]}
                         onClick={() => onClassChange(c.class)}
                     >
