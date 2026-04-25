@@ -380,8 +380,7 @@ export async function upsertTaskAndLegs(
                         1
                 )
             WHERE
-                (lt IS NULL OR lt = 0)
-                AND compid = (SELECT compid FROM classes WHERE class = ${classid})
+                compid = (SELECT compid FROM classes WHERE class = ${classid})
         `)
         .rollback((_e: any) => {
             log(`task transaction rolled back for ${classid} - ${date}`);
