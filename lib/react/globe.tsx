@@ -1,4 +1,4 @@
-import {useMemo, useState, useCallback, useEffect} from 'react';
+import {useMemo, useState, useCallback, useEffect, useRef} from 'react';
 import Router from 'next/router';
 
 import {DeckGL} from '@deck.gl/react';
@@ -12,7 +12,7 @@ import {SphereGeometry} from '@luma.gl/engine';
 // up exactly with marker/label positions placed via lat/lng.
 const EARTH_RADIUS_METERS = 6.3e6;
 
-export type CompetitionDisplayStatus = 'flying' | 'landed' | 'today' | 'notask' | 'upcoming' | 'over';
+export type CompetitionDisplayStatus = 'task_set' | 'before_start' | 'started' | 'landed' | 'notask' | 'upcoming';
 
 export interface CompetitionClass {
     class: string;
@@ -42,21 +42,21 @@ export interface Competition {
 
 // Marker colours per status. Kept here so the legend and markers stay in sync.
 const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, number, number]> = {
-    flying: [40, 220, 90, 255], // bright green — active
-    landed: [80, 160, 240, 255], // calm blue — done for the day
-    today: [240, 180, 40, 255], // amber — task briefed, waiting to launch
+    task_set: [100, 200, 240, 255], // light blue — task briefed, waiting to launch
+    before_start: [30, 90, 220, 255], // dark blue — in air, no class has started yet
+    started: [40, 220, 90, 255], // green — at least one class is on task
+    landed: [150, 150, 150, 255], // grey — done for the day
     notask: [200, 170, 100, 255], // dusty tan — in window but no task yet
-    upcoming: [200, 140, 200, 255], // lilac — starts tomorrow or later
-    over: [150, 150, 150, 220] // grey — finished
+    upcoming: [200, 140, 200, 255] // lilac — starts tomorrow or later
 };
 
 const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
-    flying: 'Flying now',
+    task_set: 'Task set',
+    before_start: 'Flying, before start',
+    started: 'Started',
     landed: 'Landed',
-    today: 'Later today',
     notask: 'No task yet',
-    upcoming: 'Upcoming',
-    over: 'Finished'
+    upcoming: 'Upcoming'
 };
 
 // Inline style helper: returns the `rgb(r,g,b)` string for a status so the
@@ -100,6 +100,14 @@ function computeInitialViewState(comps: Competition[]) {
 //
 export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions: Competition[]; countriesGeoJson: any}) {
     const [highlightedCompid, setHighlightedCompid] = useState<string | null>(null);
+
+    // Refs to each list entry, keyed by compid, so clicking a marker on the
+    // globe can scroll the corresponding row into view in the side panel.
+    const entryRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+    const revealCompid = useCallback((compid: string) => {
+        setHighlightedCompid(compid);
+        entryRefs.current.get(compid)?.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }, []);
 
     // Drop competitions with missing coordinates before feeding them to any
     // layer — a null lat/lng will silently cause TextLayer to drop the whole
@@ -189,9 +197,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             getLineWidth: (c) => (c.compid === highlightedCompid ? 3 : 1),
             onClick: (info) => {
                 const comp = info.object as Competition | undefined;
-                if (comp && comp.displayStatus !== 'upcoming') {
-                    Router.push('/' + comp.compid + '/');
-                }
+                if (comp) revealCompid(comp.compid);
             },
             onHover: (info) => setHighlightedCompid(((info.object as Competition) ?? null)?.compid ?? null),
             updateTriggers: {
@@ -255,10 +261,11 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
                 highlightedCompid={highlightedCompid}
                 setHighlightedCompid={setHighlightedCompid}
                 flyTo={flyTo}
+                entryRefs={entryRefs}
             />
 
             <div className="map-legend">
-                {(['flying', 'landed', 'today', 'notask', 'upcoming', 'over'] as const).map((s) => (
+                {(['upcoming', 'notask', 'task_set', 'before_start', 'started', 'landed'] as const).map((s) => (
                     <div key={s} className="legend-row">
                         <span className="status-dot" style={{background: statusCss(s)}} />
                         {STATUS_LABELS[s]}
@@ -285,21 +292,22 @@ function CompetitionListPanel({
     competitions,
     highlightedCompid,
     setHighlightedCompid,
-    flyTo
+    flyTo,
+    entryRefs
 }: {
     competitions: Competition[];
     highlightedCompid: string | null;
     setHighlightedCompid: (id: string | null) => void;
     flyTo: (c: Competition) => void;
+    entryRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
 }) {
     if (!competitions.length) return null;
 
-    // Group competitions into Live / Upcoming / Finished so users can tell
-    // at a glance which ones are clickable. Upcoming entries stay in the
-    // list (so pilots can find their comp) but navigation is disabled.
-    const live = competitions.filter((c) => c.displayStatus !== 'upcoming' && c.displayStatus !== 'over');
+    // Group competitions into Live / Upcoming so users can tell at a glance
+    // which ones are clickable. Upcoming entries stay in the list (so pilots
+    // can find their comp) but navigation is disabled.
+    const live = competitions.filter((c) => c.displayStatus !== 'upcoming');
     const upcoming = competitions.filter((c) => c.displayStatus === 'upcoming');
-    const finished = competitions.filter((c) => c.displayStatus === 'over');
 
     const renderSection = (title: string, comps: Competition[], clickable: boolean) => {
         if (!comps.length) return null;
@@ -314,6 +322,10 @@ function CompetitionListPanel({
                         comp={c}
                         highlighted={c.compid === highlightedCompid}
                         clickable={clickable}
+                        registerRef={(el) => {
+                            if (el) entryRefs.current.set(c.compid, el);
+                            else entryRefs.current.delete(c.compid);
+                        }}
                         onHover={() => {
                             setHighlightedCompid(c.compid);
                             flyTo(c);
@@ -333,7 +345,6 @@ function CompetitionListPanel({
             <div className="sidepanel-body">
                 {renderSection('Live', live, true)}
                 {renderSection('Upcoming', upcoming, false)}
-                {renderSection('Finished', finished, true)}
             </div>
         </aside>
     );
@@ -349,6 +360,7 @@ function CompetitionListEntry({
     comp,
     highlighted,
     clickable,
+    registerRef,
     onHover,
     onLeave,
     onClick
@@ -356,23 +368,24 @@ function CompetitionListEntry({
     comp: Competition;
     highlighted: boolean;
     clickable: boolean;
+    registerRef: (el: HTMLDivElement | null) => void;
     onHover: () => void;
     onLeave: () => void;
     onClick: () => void;
 }) {
     const classes = comp.classes ?? [];
 
-    // Competitions in their active window (flying, today, notask, landed)
-    // get a per-class breakdown with status dot + class name + pilot count
-    // on each line. Upcoming and over show a compact rollup — "N classes ·
-    // M pilots" — because the per-class detail isn't interesting yet.
-    const inActiveWindow = comp.displayStatus === 'flying' || comp.displayStatus === 'landed' || comp.displayStatus === 'today' || comp.displayStatus === 'notask';
+    // Competitions in their active window get a per-class breakdown with
+    // status dot + class name + pilot count on each line. Upcoming shows a
+    // compact rollup — "N classes · M pilots" — because the per-class detail
+    // isn't interesting yet.
+    const inActiveWindow = comp.displayStatus !== 'upcoming';
     const totalPilots = classes.reduce((sum, cls) => sum + (cls.pilotCount || 0), 0);
 
     const entryClass = ['sidepanel-entry', highlighted ? 'highlighted' : '', !clickable ? 'non-clickable' : ''].filter(Boolean).join(' ');
 
     return (
-        <div onMouseEnter={onHover} onMouseLeave={onLeave} onClick={onClick} className={entryClass}>
+        <div ref={registerRef} onMouseEnter={onHover} onMouseLeave={onLeave} onClick={onClick} className={entryClass}>
             <div className="entry-title">{comp.name}</div>
             {comp.sitename ? <div className="entry-sitename">{comp.sitename}</div> : null}
             <div className="entry-dates">

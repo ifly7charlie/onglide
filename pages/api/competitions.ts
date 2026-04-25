@@ -9,19 +9,20 @@ import escape from 'sql-template-strings';
 // For each competition we aggregate its per-class compstatus and derive a
 // single `displayStatus` that the globe uses for marker styling:
 //
-//   flying     — at least one class is launched/flying (status L or S)
-//   landed     — all classes are landed but competition is still running (R/H)
-//   today      — window is open today, at least one class has a task set
-//                (status B/P), pre-launch
-//   notask     — window is open today, but no class has a task configured
-//                yet (all classes in ':'/'?' or all scrubbed 'Z')
-//   upcoming   — competition starts tomorrow or later
-//   over       — all classes status 'O' but last task still within 24h window
+//   started      — at least one class has crossed the start line (status S)
+//   before_start — at least one class is launched but none have started (L)
+//   landed       — all classes have landed (R/H/O); recently-finished comps
+//                  also fall here for the rest of the 24h display window
+//   task_set     — window is open today, at least one class has a task set
+//                  (status B/P), pre-launch
+//   notask       — window is open today, but no class has a task configured
+//                  yet (all classes in ':'/'?' or all scrubbed 'Z')
+//   upcoming     — competition starts tomorrow or later
 //
 // We also return per-class info so the list panel can show a dot per class
 // when classes have diverged (e.g. Open flying, 15m still briefing).
 //
-export type ClassDisplayStatus = 'flying' | 'landed' | 'today' | 'notask' | 'upcoming' | 'over';
+export type ClassDisplayStatus = 'task_set' | 'before_start' | 'started' | 'landed' | 'notask' | 'upcoming';
 
 type ClassRow = {
     class: string;
@@ -38,12 +39,12 @@ type ClassRow = {
 // it, a finished comp with a blank class status would keep showing as
 // "upcoming" until the scheduler's dead-comp cleanup removes it.
 function classDisplayStatus(status: string, inWindow: boolean, endPast: boolean): ClassDisplayStatus {
-    if (status === 'L' || status === 'S') return 'flying';
-    if (status === 'O') return 'over';
-    if (status === 'R' || status === 'H') return 'landed';
-    if (inWindow && (status === 'B' || status === 'P')) return 'today';
+    if (status === 'S') return 'started';
+    if (status === 'L') return 'before_start';
+    if (status === 'R' || status === 'H' || status === 'O') return 'landed';
+    if (inWindow && (status === 'B' || status === 'P')) return 'task_set';
     if (inWindow) return 'notask';
-    if (endPast) return 'over';
+    if (endPast) return 'landed';
     return 'upcoming';
 }
 
@@ -166,23 +167,23 @@ export default async function competitionsHandler(_req, res) {
         const statuses: string[] = (comp.classes as ClassRow[]).map((c) => c.status).filter(Boolean);
 
         let displayStatus: ClassDisplayStatus;
-        const anyFlying = statuses.some((s) => s === 'L' || s === 'S');
-        const allOver = statuses.length > 0 && statuses.every((s) => s === 'O');
-        const allLanded = statuses.length > 0 && statuses.every((s) => s === 'R' || s === 'H');
+        const anyStarted = statuses.some((s) => s === 'S');
+        const anyBeforeStart = statuses.some((s) => s === 'L');
+        const allDone = statuses.length > 0 && statuses.every((s) => s === 'R' || s === 'H' || s === 'O');
         const anyTaskReady = statuses.some((s) => s === 'B' || s === 'P');
 
-        if (anyFlying) {
-            displayStatus = 'flying';
-        } else if (allOver) {
-            displayStatus = 'over';
-        } else if (allLanded) {
+        if (anyStarted) {
+            displayStatus = 'started';
+        } else if (anyBeforeStart) {
+            displayStatus = 'before_start';
+        } else if (allDone) {
             displayStatus = 'landed';
         } else if (inWindow && anyTaskReady) {
-            displayStatus = 'today';
+            displayStatus = 'task_set';
         } else if (inWindow) {
             displayStatus = 'notask';
         } else if (endPast) {
-            displayStatus = 'over';
+            displayStatus = 'landed';
         } else {
             displayStatus = 'upcoming';
         }
