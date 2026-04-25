@@ -50,11 +50,8 @@ export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
 };
 
 // Optional secondary icon, drawn small in the bottom-right corner of the
-// primary. Used for `launching` (plane-departure + hourglass) so it reads as
-// "about to launch" rather than just "departing".
-const STATUS_ICON_OVERLAYS: Partial<Record<CompetitionDisplayStatus, IconDefinition>> = {
-    launching: faHourglass
-};
+// primary. Currently no statuses use an overlay — kept as an extension point.
+const STATUS_ICON_OVERLAYS: Partial<Record<CompetitionDisplayStatus, IconDefinition>> = {};
 
 export function statusCss(status: CompetitionDisplayStatus): string {
     const [r, g, b] = STATUS_COLOURS[status];
