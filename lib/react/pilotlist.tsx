@@ -649,6 +649,18 @@ function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
 
 //
 // Render the pilot
+// Pair / team names ("John & Jack", "Anna and Beth") get collapsed to
+// initials ("J & J") so they fit in the narrow horizontal strip caption.
+function shortenPairName(name?: string): string {
+    if (!name) return '';
+    const parts = name.split(/\s*(?:&|\sand\s)\s*/i);
+    if (parts.length < 2) return name;
+    return parts
+        .map((p) => p.trim()[0])
+        .filter(Boolean)
+        .join(' & ');
+}
+
 const Pilot = memo(function Pilot({
     pilot,
     compno,
@@ -656,6 +668,8 @@ const Pilot = memo(function Pilot({
     suffix,
     icon,
     selected,
+    vertical,
+    position,
     onClick
 }: //
 {
@@ -665,18 +679,45 @@ const Pilot = memo(function Pilot({
     suffix?: string;
     icon: any;
     selected: boolean;
+    vertical?: boolean;
+    position?: number;
     onClick: any;
 }) {
-    const className = selected ? 'small-pic pilot pilothovercapture selected' : 'small-pic pilot pilothovercapture';
+    if (vertical) {
+        const className = selected ? 'pilot-row pilothovercapture selected' : 'pilot-row pilothovercapture';
+        return (
+            <li className={className} key={compno}>
+                <a href="#" title={compno + ': ' + pilot?.name} onClick={() => onClick(compno)}>
+                    <span className="pilot-row-left">
+                        <span className="pilot-row-position">{position != null ? `${position}.` : ''}</span>
+                        <span className="pilot-row-flag">{pilot?.country ? isoCountryCodeToFlagEmoji(pilot.country) : ''}</span>
+                        <span className="pilot-row-compno">{compno}</span>
+                        <span className="pilot-row-sep">:</span>
+                        <span className="pilot-row-name">{pilot?.name}</span>
+                    </span>
+                    <span className="pilot-row-right">
+                        <span className="data">{(value || '-').toString()}</span>
+                        {suffix ? <span className="units">{suffix}</span> : null}
+                        <PilotStatusIcon displayIcon={icon} />
+                    </span>
+                </a>
+            </li>
+        );
+    }
 
-    // Render the normal pilot icon
+    const className = selected ? 'small-pic pilot pilot-strip pilothovercapture selected' : 'small-pic pilot pilot-strip pilothovercapture';
+    const displayName = shortenPairName(pilot?.name);
+
     return (
         <li className={className} key={compno}>
             <a href="#" title={compno + ': ' + pilot?.name} onClick={() => onClick(compno)}>
-                <PilotImage image={pilot?.image} country={pilot?.country} compno={compno} class={pilot?.class} />
+                <div className="pilot-strip-compno">
+                    {pilot?.country ? <span className="pilot-strip-flag">{isoCountryCodeToFlagEmoji(pilot.country)}</span> : null}
+                    <span className="pilot-strip-compno-text">{compno}</span>
+                </div>
                 <div>
                     <div className="caption">
-                        {compno}
+                        <span className="pilot-strip-name">{displayName}</span>
                         <PilotStatusIcon displayIcon={icon} />
                     </div>
                     <div>
@@ -698,7 +739,8 @@ export const PilotList = memo(function PilotList({
     sortOrder,
     now,
     tz,
-    horizontal
+    horizontal,
+    vertical
 }: //
 {
     pilots: API_ClassName_Pilots;
@@ -710,6 +752,7 @@ export const PilotList = memo(function PilotList({
     now: Epoch | undefined;
     tz: TZ;
     horizontal?: boolean;
+    vertical?: boolean;
 }) {
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
@@ -732,7 +775,7 @@ export const PilotList = memo(function PilotList({
     );
 
     // Generate the pilot list, sorted by the correct key
-    const pilotComponents = pilotList.map((pilot) => {
+    const pilotComponents = pilotList.map((pilot, idx) => {
         return (
             <Pilot //
                 key={pilot.compno}
@@ -740,6 +783,8 @@ export const PilotList = memo(function PilotList({
                 pilot={pilots[pilot.compno]}
                 icon={icons[pilotStatus?.[pilot.compno]?.status ?? 0]}
                 selected={selectedPilot === pilot.compno}
+                vertical={vertical}
+                position={idx + 1}
                 onClick={onClick}
             />
         );
@@ -753,5 +798,6 @@ export const PilotList = memo(function PilotList({
         return null;
     }
 
-    return <ul className={horizontal ? 'pilots pilots-horizontal' : 'pilots'}>{pilotComponents}</ul>;
+    const listClass = horizontal ? 'pilots pilots-horizontal' : vertical ? 'pilots pilots-vertical' : 'pilots';
+    return <ul className={listClass}>{pilotComponents}</ul>;
 });

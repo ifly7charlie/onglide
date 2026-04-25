@@ -413,6 +413,7 @@ export const OgnFeed = memo(
                                 tz={tz}
                                 options={options}
                                 sortOrder={sortOrder}
+                                vertical
                             />
                         </div>
                     ) : null}
