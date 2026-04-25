@@ -1521,22 +1521,27 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     }
 
     if (!readOnly) {
-        const tracked = cTrackers.filter((t) => t.dbTrackerId);
-        const byClass = new Map<ClassName, CTrackerRow[]>();
-        for (const t of tracked) {
-            const list = byClass.get(t.className) || [];
-            list.push(t);
-            byClass.set(t.className, list);
+        // Group all scored pilots by class and note how many of those have trackers —
+        // sparse tracker coverage can't justify a "landed" verdict for the whole class.
+        const trackedByClass = new Map<ClassName, CTrackerRow[]>();
+        const totalScoredByClass = new Map<ClassName, number>();
+        for (const t of cTrackers) {
+            if (t.scoredStatus !== 'S') continue;
+            totalScoredByClass.set(t.className, (totalScoredByClass.get(t.className) || 0) + 1);
+            if (t.dbTrackerId) {
+                const list = trackedByClass.get(t.className) || [];
+                list.push(t);
+                trackedByClass.set(t.className, list);
+            }
         }
         // Derive the highest applicable compstatus state for each class from the live
         // scoring state. Forward-only: each target only overwrites earlier states, so
-        // a single pilot returning to L doesn't drag a class back from S/H. All three
-        // counts use the "scored" subset (scoredStatus === 'S') so DNS/DNF pilots
-        // don't dilute denominators or block H.
-        for (const [className, pilots] of byClass) {
-            const channel = channels[channelName(className, datecode)];
-            const scored = pilots.filter((p) => p.scoredStatus === 'S');
+        // a single pilot returning to L doesn't drag a class back from S/H.
+        for (const [className, scored] of trackedByClass) {
             if (scored.length === 0) continue;
+            const channel = channels[channelName(className, datecode)];
+            const totalScored = totalScoredByClass.get(className) || 0;
+            const trackerCoverage = totalScored > 0 ? scored.length / totalScored : 0;
 
             const allLanded = scored.every((p) => {
                 const fs = channel?.allScores[p.compno]?.flightStatus;
@@ -1547,22 +1552,29 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 const fs = channel?.allScores[p.compno]?.flightStatus;
                 return fs !== undefined && fs >= PositionStatus.Airborne;
             }).length;
+            const griddedCount = scored.filter((p) => channel?.allScores[p.compno]?.flightStatus === PositionStatus.Grid).length;
 
             let nextStatus: string | null = null;
             let allowFrom: string[] = [];
             let reason = '';
-            if (allLanded) {
+            // Only promote to H when we can see most of the field — otherwise a class
+            // with 5% tracker coverage would land as soon as those 5% touched down.
+            if (allLanded && trackerCoverage >= 0.1) {
                 nextStatus = 'H';
                 allowFrom = ['L', 'S'];
-                reason = `all ${scored.length} scored gliders landed`;
+                reason = `all ${scored.length}/${totalScored} tracked gliders landed`;
             } else if (startedCount / scored.length > 0.1) {
                 nextStatus = 'S';
-                allowFrom = [':', '?', 'P', 'B', 'X', 'L'];
-                reason = `${startedCount}/${scored.length} scored gliders started`;
+                allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'L'];
+                reason = `${startedCount}/${scored.length} tracked gliders started`;
             } else if (airborneCount > 0) {
                 nextStatus = 'L';
+                allowFrom = [':', '?', 'P', 'B', 'X', 'G'];
+                reason = `${airborneCount}/${scored.length} tracked gliders airborne`;
+            } else if (griddedCount > 0) {
+                nextStatus = 'G';
                 allowFrom = [':', '?', 'P', 'B', 'X'];
-                reason = `${airborneCount}/${scored.length} scored gliders airborne`;
+                reason = `${griddedCount}/${scored.length} tracked gliders on grid`;
             }
 
             if (nextStatus) {

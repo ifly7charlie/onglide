@@ -314,6 +314,28 @@ button {
     vertical-align: middle;
 }
 
+// Stacked status icon (primary FA icon with a smaller overlay icon in the
+// bottom-right). Used for `launching` (plane-departure + hourglass). The
+// dark text-shadow gives the overlay enough contrast to read against an
+// identically-coloured primary.
+.status-icon-stack {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+
+    .status-icon-overlay {
+        position: absolute;
+        right: -0.25em;
+        bottom: -0.2em;
+        font-size: 0.6em;
+        text-shadow:
+            0 0 1px rgba(0, 0, 0, 0.9),
+            0 0 1px rgba(0, 0, 0, 0.9);
+    }
+}
+
 // Shared visual styling for the class-tab row (used by both the desktop
 // sidepanel and the mobile drawer). Border colour is set inline per class
 // (see SidePanelClassTabs) using the front-page status palette so the
@@ -355,14 +377,6 @@ button {
 
 .sidepanel > .sidepanel-classes {
     border-bottom: 1px solid var(--panel-border);
-}
-
-// Wrapper for the deck.gl globe canvas. Inset on the right so the side
-// panel doesn't sit over the projected centre of the globe — without this
-// the canvas fills the viewport and the visible map appears shifted.
-.globe-canvas-wrap {
-    position: absolute;
-    inset: 0 390px 0 0;
 }
 
 // Chrome overlays floating over a full-viewport map or globe.

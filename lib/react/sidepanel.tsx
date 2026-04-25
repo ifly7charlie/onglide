@@ -4,7 +4,7 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 import {Options} from './options';
-import {classDisplayStatus, statusCss, STATUS_ICONS, STATUS_LABELS} from './competition-status';
+import {classDisplayStatus, statusCss, StatusIcon, STATUS_LABELS} from './competition-status';
 
 import type {Options as OptionsType, ClassName} from '../types';
 
@@ -77,7 +77,7 @@ export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: Cl
                         title={STATUS_LABELS[ds]}
                         onClick={() => onClassChange(c.class)}
                     >
-                        <FontAwesomeIcon icon={STATUS_ICONS[ds]} className="status-icon" />
+                        <StatusIcon status={ds} className="status-icon" />
                         {c.classname.replace(/\s+(meter|metre)/, 'm')}
                     </button>
                 );

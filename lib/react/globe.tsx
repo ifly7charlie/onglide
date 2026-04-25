@@ -6,9 +6,7 @@ import {_GlobeView as GlobeView, COORDINATE_SYSTEM, LightingEffect, AmbientLight
 import {GeoJsonLayer, IconLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {SimpleMeshLayer} from '@deck.gl/mesh-layers';
 import {SphereGeometry} from '@luma.gl/engine';
-import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-
-import {STATUS_COLOURS, STATUS_LABELS, STATUS_ICONS, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
+import {STATUS_COLOURS, STATUS_LABELS, StatusIcon, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
 
 // Earth radius in metres — matches the radius deck.gl's GlobeView uses
 // internally for its projection math, so a sphere mesh of this size lines
@@ -282,11 +280,6 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 
     return (
         <div style={{position: 'fixed', inset: 0, background: '#0b1a33'}}>
-            {/* Globe canvas is wrapped so it occupies only the visible map
-                area — the side panel sits over the right side of the viewport
-                (or bottom on mobile) and would otherwise pull the projected
-                centre of the globe off-screen. */}
-            <div className="globe-canvas-wrap">
             {hasData ? (
                 <DeckGL
                     views={new GlobeView({id: 'globe', resolution: 10}) as any}
@@ -298,7 +291,6 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
                     layers={layers}
                 />
             ) : null}
-            </div>
 
             {/* Right-side competition list panel */}
             <CompetitionListPanel
@@ -310,10 +302,10 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             />
 
             <div className="map-legend">
-                {(['upcoming', 'notask', 'task_set', 'before_start', 'started', 'landed'] as const).map((s) => (
+                {(['upcoming', 'notask', 'task_set', 'launching', 'before_start', 'started', 'landed'] as const).map((s) => (
                     <div key={s} className="legend-row">
                         <span className="status-dot" style={{background: statusCss(s)}}>
-                            <FontAwesomeIcon icon={STATUS_ICONS[s]} />
+                            <StatusIcon status={s} />
                         </span>
                         {STATUS_LABELS[s]}
                     </div>
@@ -449,7 +441,7 @@ function CompetitionListEntry({
                           }}
                       >
                           <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
-                              <FontAwesomeIcon icon={STATUS_ICONS[cls.displayStatus]} />
+                              <StatusIcon status={cls.displayStatus} />
                               {STATUS_LABELS[cls.displayStatus]}
                           </span>
                           <span className="name">{cls.classname}</span>
@@ -461,7 +453,7 @@ function CompetitionListEntry({
                 : (
                     <div className="entry-rollup">
                         <span className="status-pill" style={{background: statusCss(comp.displayStatus)}}>
-                            <FontAwesomeIcon icon={STATUS_ICONS[comp.displayStatus]} />
+                            <StatusIcon status={comp.displayStatus} />
                             {STATUS_LABELS[comp.displayStatus]}
                         </span>
                         {comp.classCount} {comp.classCount === 1 ? 'class' : 'classes'}
