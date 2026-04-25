@@ -2409,6 +2409,45 @@ function setupOgnWebServer(req, res) {
         return;
     }
 
+    if (req?.url == '/status/summary') {
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(200, headers);
+
+        const statusLabels: Record<Glider['scoredStatus'], string> = {S: 'started', F: 'finished', H: 'home'};
+        const summary: Record<ChannelName, any> = {};
+
+        for (const cname in channels) {
+            const channel = channels[cname as ChannelName];
+            const gliderStates = {started: 0, finished: 0, home: 0, airborne: channel.activeGliders.size, total: 0};
+
+            for (const key in gliders) {
+                const g = gliders[key as ClassName_Compno];
+                if (g.className !== channel.className || g.datecode !== channel.datecode) continue;
+                gliderStates.total++;
+                const label = statusLabels[g.scoredStatus];
+                if (label) gliderStates[label as 'started' | 'finished' | 'home']++;
+            }
+
+            let visible = 0;
+            let interacting = 0;
+            for (const c of channel.clients) {
+                if (c.isVisible) visible++;
+                if (c.isInteracting) interacting++;
+            }
+
+            summary[cname as ChannelName] = {
+                className: channel.className,
+                datecode: channel.datecode,
+                compid: channel.compid,
+                gliders: gliderStates,
+                viewers: {total: channel.clients.length, visible, interacting}
+            };
+        }
+
+        res.end(JSON.stringify(summary));
+        return;
+    }
+
     // explict score request
     const [valid, command, channelName, timestampString, pScoreId]: string[] = req?.url?.match(/^\/([a-z]+)\/([a-z0-9_-]+)\.(json|[0-9]+)(\/[0-9.]+|)(\.bin|)$/i) || [false, '', '', '', ''];
     const timestamp = parseInt(timestampString);
