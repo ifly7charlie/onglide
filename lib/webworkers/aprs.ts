@@ -734,6 +734,15 @@ async function trackGlider(task: AprsCommandTrack) {
         await loadPointsForGlider(glider, id as FlarmID, since, interimQueue);
     }
 
+    // Sort the bulk-loaded points once. loadPointsForGlider pushes in
+    // arrival order (jittered up to OUT_OF_ORDER_SLACK_SEC), and across
+    // multiple trackers the per-tracker runs are concatenated. V8's
+    // TimSort handles near-sorted/concatenated-runs data in ~O(N).
+    interimQueue.sort(messageSortKeyCompare);
+    if (interimQueue.length) {
+        console.log(`${task.className}/${task.compno}: ${interimQueue.length} points sorted ${d(interimQueue[0].t)}-${d(interimQueue[interimQueue.length - 1].t)}`);
+    }
+
     // And make sure we have a channel for it
     if (!channels[task.channelName]) {
         channels[task.channelName] = new BroadcastChannel(task.channelName);
@@ -803,6 +812,10 @@ function sortKey(sender: string, tracker: Tracker | undefined): number {
 
 function messageSortKey(m: InterimPositionMessage): number {
     return m.t; //sortKey(m.o, trackers[m.f]);
+}
+
+function messageSortKeyCompare(a: InterimPositionMessage, b: InterimPositionMessage): number {
+    return a.t - b.t;
 }
 
 //
@@ -935,6 +948,11 @@ export async function processPacket(packet: aprsPacket) {
 // Backfill an aircraft's in-memory message queue from the point log, for a
 // single tracker flarmid, starting at the competition day anchor (10am local).
 //
+// Backfill is bulk-load-only: pointlog files are append-in-arrival-order
+// (with up to OUT_OF_ORDER_SLACK_SEC of jitter), so we just push everything
+// and the caller sorts once at the end. The previous per-point binary
+// insert + splice was O(N²) per glider and saturated the APRS worker thread
+// at restart while scoring workers sat idle waiting for broadcast packets.
 async function loadPointsForGlider(aircraft: Aircraft, flarmId: FlarmID, since: number, messageQueue: InterimPositionMessage[]) {
     try {
         let loaded = 0;
@@ -943,11 +961,10 @@ async function loadPointsForGlider(aircraft: Aircraft, flarmId: FlarmID, since: 
             loaded++;
             if (typeof message.d === 'number' && message.d > 1200) continue;
             message.c = aircraft.compno as Compno;
-            const insertIndex = _sortedLastIndexBy(messageQueue, message as InterimPositionMessage, messageSortKey);
             message.j = point([message.lat, message.lng]);
-            messageQueue.splice(insertIndex, 0, message as InterimPositionMessage);
+            messageQueue.push(message as InterimPositionMessage);
         }
-        console.log(`${aircraft.className}/${flarmId}/${aircraft.compno}: ${messageQueue.length}/${loaded} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
+        console.log(`${aircraft.className}/${flarmId}/${aircraft.compno}: ${messageQueue.length}/${loaded} points loaded`);
     } catch (err) {
         console.error(`${aircraft.className}/${aircraft.compno}/${flarmId}: ${err}...`);
     }

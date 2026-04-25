@@ -1,24 +1,23 @@
 import {IconLayer} from '@deck.gl/layers';
-import {faLocationDot} from '@fortawesome/free-solid-svg-icons';
 
-// Build the SVG once at module load — the URL is stable so deck.gl's image
-// cache treats it as a single asset across re-renders.
-function buildPinDataUrl(fill: string, stroke: string): string {
-    const [width, height, , , pathRaw] = faLocationDot.icon;
-    const path = Array.isArray(pathRaw) ? pathRaw.join(' ') : (pathRaw as string);
-    const svg =
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">` +
-        `<path fill="${fill}" stroke="${stroke}" stroke-width="40" stroke-linejoin="round" paint-order="stroke" d="${path}"/>` +
-        `</svg>`;
-    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
+// Hand-rolled X glyph rather than a FontAwesome icon — gives us full control
+// over stroke weight (which is what determines "subtlety" at marker sizes).
+// Centred in a 32×32 viewBox so anchor maths is trivial.
+const X_SIZE = 32;
+const X_URL =
+    `data:image/svg+xml;utf8,` +
+    encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${X_SIZE} ${X_SIZE}">` +
+            `<g stroke="rgba(40,40,40,0.85)" stroke-width="3" stroke-linecap="round" fill="none">` +
+            `<line x1="9" y1="9" x2="23" y2="23"/>` +
+            `<line x1="23" y1="9" x2="9" y2="23"/>` +
+            `</g>` +
+            `</svg>`
+    );
 
-const PIN_URL = buildPinDataUrl('rgb(220, 60, 60)', 'rgba(255,255,255,0.9)');
-const PIN_W = faLocationDot.icon[0];
-const PIN_H = faLocationDot.icon[1];
-
-// Marker for the competition's site location (lt/lg from the competition row).
-// Anchored at the bottom-centre so the pin's tip sits exactly on the lat/lng.
+// Subtle X marker for the competition's site location (lt/lg from the
+// competition row). Centred on the lat/lng so both arms of the X cross at
+// the exact site coordinate.
 export function homeLocationLayer(lat: number | null | undefined, lng: number | null | undefined) {
     if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) {
         return null;
@@ -29,14 +28,14 @@ export function homeLocationLayer(lat: number | null | undefined, lng: number | 
         pickable: false,
         getPosition: (d) => [d.lng, d.lat, 0],
         getIcon: () => ({
-            url: PIN_URL,
-            width: PIN_W,
-            height: PIN_H,
-            anchorX: PIN_W / 2,
-            anchorY: PIN_H,
+            url: X_URL,
+            width: X_SIZE,
+            height: X_SIZE,
+            anchorX: X_SIZE / 2,
+            anchorY: X_SIZE / 2,
             mask: false
         }),
-        getSize: 36,
+        getSize: 18,
         sizeUnits: 'pixels'
     });
 }
