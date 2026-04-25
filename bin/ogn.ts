@@ -1374,6 +1374,17 @@ interface CTrackerRow {
     scoredStatus: 'H' | 'F' | 'S';
 }
 
+// Drop a pilot from every score store on a channel: in-memory current and
+// historical scores, plus the leveldb-backed cache so they don't reappear
+// after a restart.
+function forgetCompno(channel: Channel, compno: Compno) {
+    delete channel.allScores[compno];
+    for (const shid of channel.scoreHistory.values()) {
+        shid.delete(compno);
+    }
+    channel.scoreDb?.del(compno).catch((e) => console.log(`scoreDb del ${compno}:`, e));
+}
+
 async function updateTrackers(competition: CompetitionContext, datecode: Datecode) {
     const {compid} = competition;
     const location = competition.location;
@@ -1486,7 +1497,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         if (channel) {
             channel.scoring?.clearGlider(g.compno);
             channel.scoreIdUpdateRequired = true; // ensure we change id even if nothing else changes - this should remove the glider from history
-            delete channel.allScores[g.compno]; // remove from old scores as it's not valid any more
+            forgetCompno(channel, g.compno);
         }
     });
 
@@ -1494,6 +1505,28 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     removedGliders.forEach((g) => {
         delete gliders[makeClassname_Compno(g)];
     });
+
+    // Catch scores left over from pilots removed while ogn.ts wasn't running:
+    // they load from leveldb into allScores at startup but were never in `gliders`,
+    // so the removedGliders filter above doesn't see them.
+    for (const channel of Object.values(channels)) {
+        if (channel.compid !== compid || channel.datecode !== datecode) continue;
+        for (const compno of Object.keys(channel.allScores) as Compno[]) {
+            if (!keyedDb[makeClassname_Compno(channel.className, compno)]) {
+                console.log(`${channel.displayName}:${compno} clearing orphan score (not in current pilot list)`);
+                channel.scoring?.clearGlider(compno);
+                channel.scoreIdUpdateRequired = true;
+                forgetCompno(channel, compno);
+            }
+        }
+        for (const shid of channel.scoreHistory.values()) {
+            for (const compno of shid.keys()) {
+                if (!keyedDb[makeClassname_Compno(channel.className, compno)]) {
+                    shid.delete(compno);
+                }
+            }
+        }
+    }
 
     // Now go through all the desired gliders and make sure we have linked them
     const results = await Promise.allSettled(
