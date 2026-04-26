@@ -174,6 +174,28 @@ async function updateContest(
         `);
     }
 
+    // Grand-prix detection from the competition name. Catches "Grand
+    // Prix", "GrandPrix" and "SGP" (case-insensitive, word-bounded so
+    // "SGPS" or similar substrings don't false-match). One-way flip,
+    // same as the per-day regatta-start detector — `grandprixstart <>
+    // 'Y'` makes the UPDATE a no-op once any class has been promoted.
+    // On a brand-new comp this UPDATE matches zero rows because classes
+    // are upserted later in fetchResultsAndTasks; the next fetchPilots
+    // call (which re-invokes updateContest) catches them.
+    if (/\bgrand\s*prix\b|\bsgp\b/i.test(contestName)) {
+        const r = await db.query(escape`
+            UPDATE classes
+            SET
+                grandprixstart = 'Y'
+            WHERE
+                compid = ${compid}
+                AND grandprixstart <> 'Y'
+        `);
+        if (r?.affectedRows) {
+            log(`competition name "${contestName}" matched grand-prix pattern; set grandprixstart=Y on ${r.affectedRows} class(es)`);
+        }
+    }
+
     let location: any = (
         await db.query(escape`
             SELECT
@@ -245,6 +267,16 @@ async function processDayResults(
     // let doCheckForOGNMatches = false; // disabled — IGC download check is gated off below
     const dateCode = toDateCode(date);
 
+    // Grand-prix detection: in a regatta-start (Sailplane Grand Prix)
+    // class every starter shares one start time, whereas a normal racing
+    // class has starts spread across many seconds/minutes. We tally
+    // distinct non-empty start strings during this row loop and, if the
+    // whole field collapsed to a single value, set classes.grandprixstart
+    // = 'Y' once at the end. One-way flip — a single odd day shouldn't
+    // unset a confirmed GP class, so no auto-revert.
+    const distinctStarts = new Set<string>();
+    let startersWithTime = 0;
+
     if (!results || !results[0]) {
         log(`${className}: ${date} - no results`);
         return;
@@ -298,8 +330,13 @@ async function processDayResults(
             return parseInt(p[1]) + parseInt(p[2]) / 60 + parseInt(p[3]) / 3600;
         }
 
-        const rStart = row.Start != '' ? row.Start : null;
+        const rStart = row.Start?.trim() || null;
         const rFinish = row.Finish != '' ? row.Finish : null;
+
+        if (rStart) {
+            distinctStarts.add(rStart);
+            startersWithTime++;
+        }
         const start = row.Start ? (cDate(row.Start)?.getTime() ?? 0) / 1000 : 0;
         const finish = row.Time != '' ? (cDate(row.Finish)?.getTime() ?? 0) / 1000 : 0;
         const duration = finish && start ? cHour(row.Time) ?? 0 : 0;
@@ -400,6 +437,21 @@ async function processDayResults(
                 AND datecode = ${dateCode}
                 AND STATUS != "Z"
         `);
+    }
+
+    if (startersWithTime >= 2 && distinctStarts.size === 1) {
+        const r = await db.query(escape`
+            UPDATE classes
+            SET
+                grandprixstart = 'Y'
+            WHERE
+                class = ${classid}
+                AND grandprixstart <> 'Y'
+        `);
+        if (r?.affectedRows) {
+            const startTime = distinctStarts.values().next().value;
+            log(`${className}: regatta start detected (${startersWithTime} pilots @ ${startTime}); set grandprixstart=Y`);
+        }
     }
 }
 
