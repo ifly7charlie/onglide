@@ -25,6 +25,7 @@ import * as dotenv from 'dotenv';
 import {findAirfieldsByName, type RankedAirfield} from '../lib/scoring/shared/airfield';
 import {nowInTz} from '../lib/scoring/shared/timezone';
 import {toDateCode} from '../lib/datecode';
+import {loadMergedDDB, isBlocked, type DDBEntry} from '../lib/ddb';
 
 dotenv.config({path: '.env.local'});
 
@@ -76,6 +77,7 @@ interface CompetitionRow {
     tz: string | null;
     start: Date | null;
     end: Date | null;
+    trackingconsent: string | null;
 }
 
 interface PilotRow {
@@ -93,6 +95,12 @@ interface Match {
     flarmChange: boolean;
     gregChange: boolean;
     gliderDiffers: boolean;
+    // Set when the device's flarm ID is in the merged DDB with
+    // tracked!=Y AND the comp has not opted into trackingconsent.
+    // Such matches write the 'blocked' sentinel into tracker.trackerid
+    // instead of the real flarm id, and never apply gregChange.
+    blocked?: boolean;
+    blockedSources?: string;
 }
 
 function onCancel() {
@@ -114,7 +122,12 @@ function gliderEquivalent(a: string | null | undefined, b: string | null | undef
 function isAutoApply(m: Match): boolean {
     if (!m.flarmChange) return false;
     const dbTid = norm(m.pilot.trackerid);
-    if (dbTid !== '' && dbTid !== 'UNKNOWN') return false;
+    if (dbTid !== '' && dbTid !== 'UNKNOWN' && dbTid !== 'BLOCKED') return false;
+    // Blocked matches auto-apply (writing the 'blocked' sentinel) so
+    // the comp organiser sees the privacy decision reflected in the
+    // pilot list without needing to confirm each one. The glider-type
+    // equivalence check is skipped because we never write the real id.
+    if (m.blocked) return true;
     return gliderEquivalent(m.pilot.glidertype, m.device.aircraft);
 }
 
@@ -251,7 +264,7 @@ async function pickCompetition(): Promise<CompetitionRow> {
     // kept in the list so a comp without full metadata doesn't silently
     // disappear.
     const rows = await mysql.query<CompetitionRow[]>(escape`
-        SELECT compid, name, sitename, tz, start, end
+        SELECT compid, name, sitename, tz, start, end, trackingconsent
         FROM competition
         WHERE (start IS NULL OR start <= CURDATE())
           AND (end   IS NULL OR end   >= CURDATE())
@@ -376,7 +389,12 @@ async function loadPilots(compid: string): Promise<PilotRow[]> {
     `);
 }
 
-function buildMatches(devices: LogbookDevice[], pilots: PilotRow[]): Match[] {
+function buildMatches(
+    devices: LogbookDevice[],
+    pilots: PilotRow[],
+    ddb: Record<string, DDBEntry> | null,
+    trackingconsent: string | null
+): Match[] {
     const byCompno = new Map<string, PilotRow>();
     for (const p of pilots) byCompno.set(norm(p.compno), p);
 
@@ -391,11 +409,19 @@ function buildMatches(devices: LogbookDevice[], pilots: PilotRow[]): Match[] {
         const apiGreg = d.registration || '';
         const apiGlider = d.aircraft || '';
 
-        const flarmChange = !!apiFlarm && norm(apiFlarm) !== norm(pilot.trackerid);
+        const flarmChange = !!apiFlarm && norm(apiFlarm) !== norm(pilot.trackerid) && norm(pilot.trackerid) !== 'BLOCKED';
         const gregChange = !!apiGreg && norm(apiGreg) !== norm(pilot.greg);
         const gliderDiffers = !!apiGlider && !!pilot.glidertype && norm(apiGlider) !== norm(pilot.glidertype);
 
-        matches.push({pilot, device: d, flarmChange, gregChange, gliderDiffers});
+        // DDB Permit-Livetracking gate. Look the device up in the
+        // merged DDB; if either upstream marks tracked!=Y and the comp
+        // hasn't opted in, write the 'blocked' sentinel instead of
+        // the real flarm id.
+        const ddbf = ddb && apiFlarm ? ddb[apiFlarm.toLowerCase()] || ddb[apiFlarm.toUpperCase()] || ddb[apiFlarm] : undefined;
+        const blocked = isBlocked(ddbf, trackingconsent);
+        const blockedSources = blocked ? ddbf?.sources?.join('+') : undefined;
+
+        matches.push({pilot, device: d, flarmChange, gregChange, gliderDiffers, blocked, blockedSources});
     }
     // Stable sort: actionable first, then compno
     matches.sort((a, b) => {
@@ -415,9 +441,13 @@ function summarise(m: Match): string {
     const {pilot, device} = m;
     const parts: string[] = [];
     parts.push(pilotLabel(pilot));
-    if (m.flarmChange) parts.push(`flarmid: ${pilot.trackerid || '(none)'} → ${device.address}`);
+    if (m.blocked) {
+        parts.push(`flarmid: ${pilot.trackerid || '(none)'} → blocked (Permit-Livetracking declined: ${m.blockedSources || 'ddb'})`);
+    } else if (m.flarmChange) {
+        parts.push(`flarmid: ${pilot.trackerid || '(none)'} → ${device.address}`);
+    }
     if (m.gliderDiffers) parts.push(`glider differs: db="${pilot.glidertype}" api="${device.aircraft}"`);
-    if (!m.flarmChange && !m.gliderDiffers) parts.push('(in sync)');
+    if (!m.flarmChange && !m.gliderDiffers && !m.blocked) parts.push('(in sync)');
     return parts.join('  |  ');
 }
 
@@ -426,12 +456,18 @@ function printAll(matches: Match[]) {
         console.log('\nNo devices at airfield matched a pilot in this competition.\n');
         return;
     }
+    const blockedCount = matches.filter((m) => m.blocked).length;
+    if (blockedCount) {
+        console.log(`\n${blockedCount} match${blockedCount === 1 ? '' : 'es'} blocked by DDB Permit-Livetracking — will be written as 'blocked'.`);
+    }
     console.log(`\n${matches.length} match${matches.length === 1 ? '' : 'es'}:\n`);
     for (const m of matches) {
         const {pilot, device} = m;
         const auto = isAutoApply(m) ? '   [auto-apply]' : '';
-        console.log(`  ${pilotLabel(pilot)}${auto}`);
-        console.log(`    flarmid:    db=${pilot.trackerid || '(none)'}  api=${device.address}${m.flarmChange ? '   *update*' : ''}`);
+        const blocked = m.blocked ? '   [blocked: Permit-Livetracking declined]' : '';
+        console.log(`  ${pilotLabel(pilot)}${auto}${blocked}`);
+        const apiAddrLabel = m.blocked ? "'blocked'" : device.address;
+        console.log(`    flarmid:    db=${pilot.trackerid || '(none)'}  api=${apiAddrLabel}${m.flarmChange || m.blocked ? '   *update*' : ''}`);
         console.log(`    glidertype: db=${pilot.glidertype || '(none)'}  api=${device.aircraft || '(none)'}${m.gliderDiffers ? '   *differs*' : ''}`);
     }
     console.log('');
@@ -444,15 +480,21 @@ interface Decision {
 
 async function reviewMatches(matches: Match[]): Promise<Map<Match, Decision>> {
     const decisions = new Map<Match, Decision>();
-    const actionable = matches.filter((m) => m.flarmChange || m.gregChange);
+    // Blocked matches are actionable too — the auto-apply path below
+    // writes the 'blocked' sentinel for them so the front end knows.
+    const actionable = matches.filter((m) => m.flarmChange || m.gregChange || m.blocked);
     if (!actionable.length) return decisions;
 
     // Auto-apply: safe tracker fills (flarmid was unknown/empty and the glider
-    // type agrees modulo whitespace/dashes) — don't bother asking.
+    // type agrees modulo whitespace/dashes) — don't bother asking. Blocked
+    // matches always auto-apply (writing the 'blocked' sentinel) regardless
+    // of the current tracker value, so a privacy-declined pilot whose row
+    // already holds a real flarm id still gets corrected.
     const auto = actionable.filter(isAutoApply);
     const manual = actionable.filter((m) => !isAutoApply(m));
     for (const m of auto) {
-        decisions.set(m, {applyFlarm: m.flarmChange, applyGreg: m.gregChange});
+        const applyFlarm = m.blocked ? norm(m.pilot.trackerid) !== 'BLOCKED' : m.flarmChange;
+        decisions.set(m, {applyFlarm, applyGreg: m.gregChange});
         console.log(`[auto] ${summarise(m)}`);
     }
     if (auto.length) console.log('');
@@ -513,22 +555,30 @@ async function applyDecisions(decisions: Map<Match, Decision>) {
     for (const [m, d] of decisions) {
         const {pilot, device} = m;
         if (d.applyFlarm) {
+            // Permit-Livetracking gate: write the 'blocked' sentinel
+            // rather than the real flarm id, and skip the trackerhistory
+            // line that would otherwise leak the address.
+            const writeId = m.blocked ? 'blocked' : device.address;
+            const method = m.blocked ? 'ddb-blocked' : 'ognddb';
+            const histFlarm = m.blocked ? 'blocked' : device.address;
             t.query(escape`
                 INSERT IGNORE INTO tracker (class, compno, type, trackerid)
                 VALUES (${pilot.class}, ${pilot.compno}, 'flarm', 'unknown')
             `);
             t.query(escape`
                 UPDATE tracker
-                SET trackerid = ${device.address}
+                SET trackerid = ${writeId}
                 WHERE class = ${pilot.class} AND compno = ${pilot.compno}
             `);
             t.query(escape`
                 INSERT INTO trackerhistory (compno, changed, flarmid, greg, method)
-                VALUES (${pilot.compno}, now(), ${device.address}, ${device.registration || null}, 'ognddb')
+                VALUES (${pilot.compno}, now(), ${histFlarm}, ${device.registration || null}, ${method})
             `);
             flarmCount++;
         }
-        if (d.applyGreg) {
+        // Don't write the registration for a blocked pilot — same
+        // reason: we shouldn't be cross-linking their device records.
+        if (d.applyGreg && !m.blocked) {
             t.query(escape`
                 UPDATE pilots
                 SET greg = ${device.registration}
@@ -558,7 +608,17 @@ async function main() {
     const pilots = await loadPilots(comp.compid);
     console.log(`${pilots.length} pilots in competition ${comp.compid}.`);
 
-    const matches = buildMatches(devices, pilots);
+    // Load the merged OGN+FlarmNet DDB so we can honour the
+    // Permit-Livetracking flag. A null result (both upstreams down,
+    // no cache) just means we can't gate — proceed without blocking.
+    console.log('Loading device database (OGN + FlarmNet)...');
+    const ddb = await loadMergedDDB();
+    if (!ddb) console.log('  (no DDB available — Permit-Livetracking gate disabled this run)');
+    if (comp.trackingconsent === 'Y') {
+        console.log(`  comp ${comp.compid} has trackingconsent=Y — Permit-Livetracking gate bypassed.`);
+    }
+
+    const matches = buildMatches(devices, pilots, ddb, comp.trackingconsent);
     printAll(matches);
 
     const decisions = await reviewMatches(matches);

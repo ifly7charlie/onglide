@@ -27,6 +27,7 @@ import {
     faPaperPlane,
     faPenToSquare,
     faQuestion, //
+    faEyeSlash,
     faRightFromBracket,
     faRightToBracket,
     faSignal,
@@ -78,7 +79,8 @@ const icons: IconDefinition[] = [
     faPaperPlane, // Airborne
     faHouse, // Home
     faCow, // Landed
-    faTrophy // Finished
+    faTrophy, // Finished
+    faEyeSlash // Blocked = 8 (DDB Permit-Livetracking declined)
 ];
 
 // Figure out what image to display for the pilot. If they have an image then display the thumbnail for it,
@@ -425,7 +427,7 @@ export const Details = ({
     // gets updated regularily
     const delay = (replayTime ?? latestUpdate ?? Infinity) - (vario?.t || 0);
     const uptodate = delay < 45;
-    const old = delay > offlineTime && score && score.flightStatus != PositionStatus.Home && score.flightStatus != PositionStatus.Finished && score.flightStatus != PositionStatus.Landed;
+    const old = delay > offlineTime && score && score.flightStatus != PositionStatus.Home && score.flightStatus != PositionStatus.Finished && score.flightStatus != PositionStatus.Landed && score.flightStatus != PositionStatus.Blocked;
 
     // Figure out what to show based on the db status
     let flightDetails = null;
@@ -443,7 +445,12 @@ export const Details = ({
         </span>
     ) : null;
 
-    if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
+    if (score?.flightStatus == PositionStatus.Blocked) {
+        // Pilot is identified but Permit-Livetracking is declined in
+        // the DDB. Show a static "tracking declined" message — no
+        // positions ever arrive for them.
+        flightDetails = <div>{t('pilot.tracking_declined', {defaultValue: 'Tracking declined'})}</div>;
+    } else if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
         flightDetails = <></>;
     } else if (!score?.utcStart) {
         if (score?.flightStatus == PositionStatus.Grid) {

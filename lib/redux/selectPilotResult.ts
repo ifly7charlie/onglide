@@ -89,6 +89,11 @@ export const selectAuto = createSelector(
                 if (!score || score.flightStatus == PositionStatus.Unknown) {
                     sortKey = -2;
                     value = '-';
+                } else if (score.flightStatus == PositionStatus.Blocked) {
+                    // Pilot is identified but DDB Permit-Livetracking is N
+                    // (and no comp-level consent) — sort to the very end.
+                    sortKey = -3;
+                    value = '-';
                 } else if (score.flightStatus == PositionStatus.Grid || (!score.utcStart && score.flightStatus == PositionStatus.Home)) {
                     sortKey = -1;
                     value = '-';

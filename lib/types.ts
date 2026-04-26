@@ -111,7 +111,11 @@ export enum PositionStatus {
     Airborne = 4,
     Home = 5,
     Landed = 6,
-    Finished = 7
+    Finished = 7,
+    // Pilot is identified, but the device's DDB Permit-Livetracking
+    // flag is N (and the comp has not opted into explicit consent).
+    // No APRS subscription is created for them.
+    Blocked = 8
 }
 
 export const PositionStatusText = {
@@ -122,7 +126,8 @@ export const PositionStatusText = {
     [PositionStatus.Airborne]: 'airborne',
     [PositionStatus.Home]: 'home',
     [PositionStatus.Landed]: 'landed',
-    [PositionStatus.Finished]: 'finished'
+    [PositionStatus.Finished]: 'finished',
+    [PositionStatus.Blocked]: 'tracking declined'
 };
 
 export interface EnrichedPosition extends PositionMessage {

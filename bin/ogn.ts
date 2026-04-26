@@ -9,7 +9,7 @@ import {initialiseInsights, trackMetric, trackAggregatedMetric} from '../lib/ins
 import http from 'node:http';
 import https from 'node:https';
 
-import {readFileSync, existsSync, createWriteStream, writeFileSync, mkdirSync} from 'fs';
+import {readFileSync, existsSync, createWriteStream} from 'fs';
 
 import SunCalc from 'suncalc';
 
@@ -39,6 +39,9 @@ import {taskBbox, unionBboxes, expandBbox, bboxToAprsArea, bboxContainsCircle, B
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
 
+// Shared device-database loader (OGN + FlarmNet)
+import {loadMergedDDB, isBlocked, DDBEntry as SharedDDBEntry} from '../lib/ddb';
+
 // Message passed from the AprsContest Listener
 import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
@@ -47,7 +50,7 @@ console.log('dev mode', dev);
 let db: ReturnType<typeof mysql>;
 
 // lodash
-import {forEach, reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex, sortedIndexBy as _sortedIndexBy} from 'lodash';
+import {reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex, sortedIndexBy as _sortedIndexBy} from 'lodash';
 
 //import _remove from 'lodash.remove';
 //import _groupby from 'lodash.groupby';
@@ -108,6 +111,9 @@ interface CompetitionContext {
     unknownChannel?: BroadcastChannel;
     lastDatecode?: Datecode;
     state: 'starting' | 'running' | 'stopping' | 'stopped';
+    // 'Y' if the comp has obtained explicit livetracking consent from
+    // pilots; bypasses the DDB Permit-Livetracking block.
+    trackingconsent?: string;
 }
 
 const contexts: Record<string, CompetitionContext> = {};
@@ -233,16 +239,8 @@ interface UnknownTracker {
 
 let unknownTrackers: Record<FlarmID, UnknownTracker> = {}; // All the ones we have seen in launch area but matched or not matched
 
-// {"devices":[{"device_type":"F","device_id":"000000","aircraft_model":"HPH 304CZ-17","registration":"OK-7777","cn":"KN","tracked":"Y","identified":"Y"},
-interface DDBEntry {
-    device_type: string;
-    device_id: string;
-    aircraft_model: string;
-    registration: string;
-    cn: string;
-    tracked: string;
-    identified: string;
-}
+// DDB entry shape — see lib/ddb for the merged (OGN + FlarmNet) loader.
+type DDBEntry = SharedDDBEntry;
 let ddb: Record<string, DDBEntry> = {};
 
 interface OgnWebSocket extends WebSocket {
@@ -653,7 +651,7 @@ async function discoverCompetitions(): Promise<any[]> {
     // current scoring datecode (the "pre-comp practice day" escape hatch
     // on the start side). Date window filtering is done in TypeScript
     // below so replay mode can bypass it.
-    const base = `SELECT c.compid, c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats,
+    const base = `SELECT c.compid, c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats, c.trackingconsent,
                          (SELECT COUNT(*)
                           FROM tasks t
                           JOIN compstatus cs ON cs.class = t.class AND cs.datecode = t.datecode
@@ -789,7 +787,8 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
         internalName: location.name.replace(/[^a-z]/gi, '').substring(0, 10),
         location,
         ownedChannels: new Set(),
-        state: 'starting'
+        state: 'starting',
+        trackingconsent: row.trackingconsent || 'N'
     };
 
     console.log(`${compShort(competition.compid)}: creating competition context (internalName=${competition.internalName})`);
@@ -1490,7 +1489,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     // Now unsubsribe from each of them
     removedGliders.forEach((g) => {
         console.log(`${g.displayName}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
-        if (g.dbTrackerId && g.dbTrackerId != 'unknown') {
+        if (g.dbTrackerId && g.dbTrackerId != 'unknown' && g.dbTrackerId != 'blocked') {
             aprsController?.untrackGlider(g.compno, g.className, g.channelName, g.dbTrackerId);
         }
         const channel = channels[g.channelName];
@@ -1592,6 +1591,22 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                             .join('|')})`,
                         'i'
                     );
+                }
+
+                // Surface blocked pilots to the front end. They never receive
+                // points (aprs.ts validateGlider rejects 'blocked'), so the
+                // scoring pipeline won't emit a status for them — synthesize
+                // a PilotScore with flightStatus=Blocked. Overwrite any prior
+                // score (could be a stale leveldb load from before the block
+                // was applied) but only when the status isn't already Blocked
+                // so we don't churn scoreIdUpdateRequired on every cycle.
+                if (t.dbTrackerId === 'blocked' && channel.allScores[t.compno]?.flightStatus !== PositionStatus.Blocked) {
+                    channel.allScores[t.compno] = PilotScore.fromPartial({
+                        compno: t.compno,
+                        flightStatus: PositionStatus.Blocked,
+                        t: getNow()
+                    });
+                    channel.scoreIdUpdateRequired = true;
                 }
 
                 return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: glider.scoringConfigured, listening};
@@ -1753,61 +1768,22 @@ function getProposedScoreId(competition: CompetitionContext) {
 }
 
 //
-// Update the DDB cache
-const ddbCachePath = `${process.env.DB_PATH ?? './db/'}/ddb-cache.json`;
-
-function applyDDBDevices(devices: DDBEntry[]) {
-    ddb = keyBy(devices, 'device_id');
-    forEach(ddb, function (entry) {
-        entry.registration = entry?.registration?.replace(/[^A-Z0-9]/i, '');
-    });
-    console.log('ddb entries:', Object.keys(ddb).length);
-}
-
-function loadDDBFromDisk(): boolean {
-    try {
-        if (!existsSync(ddbCachePath)) return false;
-        const raw = JSON.parse(readFileSync(ddbCachePath, 'utf8'));
-        if (!raw?.devices?.length) return false;
-        applyDDBDevices(raw.devices);
-        console.log(`ddb loaded from local cache ${ddbCachePath}`);
-        return true;
-    } catch (e) {
-        console.error('unable to load ddb cache', e);
-        return false;
-    }
-}
-
+// Refresh the in-memory DDB by fetching both upstream sources and
+// merging. lib/ddb handles disk-cache fallbacks per-source so a single
+// upstream outage doesn't take matching down. We retry on a randomised
+// 2-4min interval only if the merge produced nothing usable AND the
+// in-memory map is still empty.
 async function updateDDB() {
     console.log('updating ddb');
-
-    return fetch('http://ddb.glidernet.org/download/?j=1')
-        .then((res) => res.json())
-        .then((ddbraw) => {
-            // {"devices":[{"device_type":"F","device_id":"000000","aircraft_model":"HPH 304CZ-17","registration":"OK-7777","cn":"KN","tracked":"Y","identified":"Y"},
-            if (!ddbraw.devices) {
-                console.log('no devices in ddb');
-                return;
-            }
-
-            applyDDBDevices(ddbraw.devices);
-
-            try {
-                mkdirSync(process.env.DB_PATH ?? './db/', {recursive: true});
-                writeFileSync(ddbCachePath, JSON.stringify(ddbraw));
-            } catch (e) {
-                console.error('unable to persist ddb cache', e);
-            }
-        })
-        .catch((e) => {
-            console.error('unable to fetch ddb', e);
-            // Fall back to the local cache so the process can keep matching
-            // gliders even when the DDB server is unreachable at startup.
-            if (Object.keys(ddb).length === 0) {
-                loadDDBFromDisk();
-            }
-            setTimeout(updateDDB, 120_000 * Math.random() + 120_000);
-        });
+    const merged = await loadMergedDDB();
+    if (merged) {
+        ddb = merged;
+        return;
+    }
+    console.error('ddb update produced no entries from any source');
+    if (Object.keys(ddb).length === 0) {
+        setTimeout(updateDDB, 120_000 * Math.random() + 120_000);
+    }
 }
 
 //
@@ -2091,7 +2067,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         channel.webPathBaseTime = 0 as Epoch;
         glider.scoredStart = score.utcStart as Epoch;
 
-        const channelGliders = Object.values(gliders).filter((glider) => glider.className == channel.className && glider.dbTrackerId && glider.dbTrackerId != 'unknown');
+        const channelGliders = Object.values(gliders).filter((glider) => glider.className == channel.className && glider.dbTrackerId && glider.dbTrackerId != 'unknown' && glider.dbTrackerId != 'blocked');
 
         channel.earliestStart = channelGliders.reduce((min, glider) => Math.min(min, glider.scoredStart ?? Infinity) as Epoch, Infinity as Epoch);
 
@@ -2269,6 +2245,39 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
             return;
         }
 
+        // DDB Permit-Livetracking gate. If either upstream (OGN or
+        // FlarmNet) marks this device tracked!=Y and the comp hasn't
+        // opted into explicit consent, mark the pilot's tracker as
+        // 'blocked' and stop — never subscribe APRS for them.
+        if (isBlocked(ddbf, competition.trackingconsent)) {
+            const sources = ddbf.sources?.join('+') ?? '?';
+            for (const match of matches) {
+                match.dbTrackerId = 'blocked';
+                unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
+                unknownTrackers[flarmId].message = `${flarmId}: ${match.compno} declined livetracking via DDB (sources: ${sources})`;
+                console.log(unknownTrackers[flarmId].message);
+                if (!readOnly) {
+                    db.transaction()
+                        .query(escape`
+                            UPDATE tracker
+                            SET trackerid = 'blocked'
+                            WHERE compno = ${match.compno}
+                              AND class = ${match.className}
+                              AND trackerid IN ('unknown','')
+                            LIMIT 1
+                        `)
+                        .query(escape`
+                            INSERT INTO trackerhistory
+                                (compno, changed, flarmid, greg, method)
+                            VALUES
+                                (${match.compno}, now(), 'blocked', ${ddbf.registration || null}, 'ddb-blocked')
+                        `)
+                        .commit();
+                }
+            }
+            return;
+        }
+
         if (matches.length > 1) {
             console.log(flarmId + ': warning more than one candidate matched from ddb (' + matches.toString() + ')');
             unknownTrackers[flarmId].message = 'Multiple DDB matches ' + matches.toString();
@@ -2280,7 +2289,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
 
         // If it's another match for somebody we have matched then ignore it
-        if (match.dbTrackerId != flarmId && match.dbTrackerId != 'unknown') {
+        if (match.dbTrackerId != flarmId && match.dbTrackerId != 'unknown' && match.dbTrackerId != 'blocked') {
             unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
             console.log(unknownTrackers[flarmId].message);
             match.duplicate = 1;
@@ -2306,7 +2315,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                     WHERE
                         compno = ${match.compno}
                         AND class = ${match.className}
-                        AND trackerid = "unknown"
+                        AND trackerid IN ('unknown','blocked','')
                     LIMIT
                         1
                 `)
@@ -2480,7 +2489,7 @@ function setupOgnWebServer(req, res) {
             for (const key in gliders) {
                 const g = gliders[key as ClassName_Compno];
                 if (g.className !== channel.className || g.datecode !== channel.datecode) continue;
-                if (!g.dbTrackerId || g.dbTrackerId == 'unknown') continue;
+                if (!g.dbTrackerId || g.dbTrackerId == 'unknown' || g.dbTrackerId == 'blocked') continue;
                 gliderStates.total++;
                 const label = statusLabels[g.scoredStatus];
                 if (label) gliderStates[label as 'started' | 'finished' | 'home']++;

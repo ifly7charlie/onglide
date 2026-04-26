@@ -50,6 +50,7 @@ CREATE TABLE `competition` (
   `lt` float DEFAULT NULL COMMENT 'launch/landing location',
   `lg` float DEFAULT NULL COMMENT 'launch/landing location',
   `flightstats` char(1) DEFAULT 'N' COMMENT 'Compute per-flight statistics (thermals, wind, etc.) - Y/N',
+  `trackingconsent` char(1) DEFAULT 'N' COMMENT 'Y = comp has obtained explicit livetracking consent from pilots; bypass DDB tracked=N block',
   PRIMARY KEY (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 

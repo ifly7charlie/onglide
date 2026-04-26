@@ -299,7 +299,7 @@ export class AprsController {
     }
 
     validateGlider(trackerIds: string): boolean {
-        if (!trackerIds || trackerIds == 'unknown') {
+        if (!trackerIds || trackerIds == 'unknown' || trackerIds == 'blocked') {
             return false;
         }
         const flarmIDs = trackerIds
