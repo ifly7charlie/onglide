@@ -28,6 +28,7 @@ import {processIGC, checkForOGNMatches} from '../../flightprocessing/launchlandi
 
 import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
+import {findAirfieldsByName} from '../shared/airfield';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctHandicap, type PilotRecord} from '../shared/pilots';
 import {upsertClass} from '../shared/classes';
 import {upsertTaskAndLegs} from '../shared/tasks';
@@ -69,9 +70,11 @@ export function deriveSoaringspotCompId(urlString: string): string | null {
     }
 }
 
-// Approximate site location returned by Mapbox geocoding. Used to seed
-// competition.lt/lg before any tasks have been scraped (taskleg coords
-// later refine the timezone).
+// Approximate site location used to seed competition.lt/lg before any
+// tasks have been scraped. Filled by Nominatim + Overpass: geocode the
+// free-text sitename, then look for nearby OSM aerodromes; if one's name
+// overlaps with the sitename we snap lt/lg to its centroid (more accurate
+// than the geocoded town point), otherwise keep the geocoded point.
 interface ApproximateContestLocation {
     lt: number;
     lg: number;
@@ -82,58 +85,36 @@ interface ApproximateContestLocation {
     };
 }
 
-// Geocode a free-text location string (e.g. "Prievidza, Slovakia") via
-// the Mapbox Places API and derive coords + country code + IANA tz.
-// Returns a safe fallback on any failure so the scrape can still proceed.
 async function findApproximateContestLocation(
     log: (msg: string, ...args: unknown[]) => void, //
     location: string
 ): Promise<ApproximateContestLocation> {
-    const referrer = 'https://' + (process.env.NEXT_PUBLIC_SITEURL || '') + '/';
-    const accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+    const fallback: ApproximateContestLocation = {lt: 0, lg: 0, countrycode: '', timezone: {name: 'Europe/London', offset: 0}};
 
-    if (!accessToken) {
-        log('NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN not set, skipping geocode');
-        return {lt: 0, lg: 0, countrycode: '', timezone: {name: 'Europe/London', offset: 0}};
+    const result = await findAirfieldsByName(location).catch((e) => {
+        log('findAirfieldsByName failed:', e);
+        return null;
+    });
+    if (!result?.geocode) return fallback;
+
+    let lt = result.geocode.lat;
+    let lg = result.geocode.lon;
+    const top = result.ranked[0];
+    if (top && top.nameOverlap >= 1) {
+        log(`refined site to OSM "${top.name}" (${top.distanceKm.toFixed(1)} km, match: ${top.matchedTokens.join(',')})`);
+        lt = top.lat;
+        lg = top.lon;
+    } else if (top) {
+        log(`no name-matching airfield within range; using geocoded point (closest OSM: ${top.name} at ${top.distanceKm.toFixed(1)} km)`);
     }
 
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(location)}.json?limit=1&access_token=${accessToken}`;
-
-    return fetch(url, {headers: {Referer: referrer}})
-        .then((res) => {
-            if (res.status != 200) {
-                log(` ${url}: ${res.status}`);
-                throw new Error('mapbox error:' + res.status);
-            }
-            return res.json();
-        })
-        .then((r: any) => {
-            const features = r.features?.[0];
-            if (!features || !features.center) {
-                throw new Error('no features found');
-            }
-
-            const timeZone = findTimezoneFromLocation(features.center[1], features.center[0]);
-
-            return {
-                lt: Math.round(features.center[1] * 100) / 100,
-                lg: Math.round(features.center[0] * 100) / 100,
-                countrycode: features.context?.reduce((result: string | undefined, value: any) => {
-                    if (value.id?.match(/^country/)) {
-                        return value.short_code?.toUpperCase();
-                    }
-                    return result;
-                }, undefined),
-                timezone: {
-                    name: timeZone,
-                    offset: getTzOffset(timeZone)
-                }
-            };
-        })
-        .catch((e) => {
-            log('findApproximateContestLocation failed:', e);
-            return {lt: 0, lg: 0, countrycode: '', timezone: {name: 'Europe/London', offset: 0}};
-        });
+    const tz = findTimezoneFromLocation(lt, lg);
+    return {
+        lt: Math.round(lt * 100) / 100,
+        lg: Math.round(lg * 100) / 100,
+        countrycode: result.geocode.countryCode || '',
+        timezone: {name: tz, offset: getTzOffset(tz)}
+    };
 }
 
 // Tidy up free-text strings extracted from SoaringSpot HTML — collapse

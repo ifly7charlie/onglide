@@ -4,11 +4,15 @@
 // Flow:
 //   1. List competitions in this DB and pick one.
 //   2. Search for an airfield via https://flightbook.glidernet.org/api/autocomp/<name>
-//      and pick one (or confirm if unique).
-//   3. Fetch https://flightbook.glidernet.org/api/logbook/<code>/ and, for every
-//      identified device whose `competition` field matches a pilot's compno in
-//      the selected competition, show db-vs-api (flarmid / greg / glidertype).
-//   4. Accept/reject each proposed change individually, then write accepted
+//      (seeded from the comp's sitename via Nominatim + Overpass) and pick one.
+//   3. Decide which date's logbook to fetch: yesterday wins if yesterday was
+//      a flown contest day AND today either has no task or the comp's local
+//      time is still before noon; otherwise today.
+//   4. Fetch https://flightbook.glidernet.org/api/logbook/<code>/<date>/ and,
+//      for every identified device whose `competition` field matches a pilot's
+//      compno in the selected competition, show db-vs-api (flarmid / greg /
+//      glidertype).
+//   5. Accept/reject each proposed change individually, then write accepted
 //      ones in a single transaction: tracker.trackerid + trackerhistory, and
 //      pilots.greg. glidertype is reported only, never written.
 //
@@ -17,6 +21,10 @@ import prompts from 'prompts';
 import escape from 'sql-template-strings';
 import Mysql from 'serverless-mysql';
 import * as dotenv from 'dotenv';
+
+import {findAirfieldsByName, type RankedAirfield} from '../lib/scoring/shared/airfield';
+import {nowInTz} from '../lib/scoring/shared/timezone';
+import {toDateCode} from '../lib/datecode';
 
 dotenv.config({path: '.env.local'});
 
@@ -29,9 +37,6 @@ const mysql = Mysql({
     }
 });
 
-const HTTP_UA = 'onglide-matchtrackers/1.0 (https://github.com/ifly7charlie/onglide)';
-const NEARBY_RADIUS_KM = 30;
-
 interface AutocompEntry {
     code: string;
     elevation: number;
@@ -40,34 +45,9 @@ interface AutocompEntry {
     tz: string;
 }
 
-interface NominatimResult {
-    lat: string;
-    lon: string;
-    display_name: string;
-}
-
-interface OverpassElement {
-    type: 'node' | 'way' | 'relation';
-    id: number;
-    lat?: number;
-    lon?: number;
-    center?: {lat: number; lon: number};
-    tags?: Record<string, string>;
-}
-
-interface OsmAerodrome {
-    name: string;
-    icao?: string;
-    iata?: string;
-    lat: number;
-    lon: number;
-    distanceKm: number;
-    aerowayType: string;
-}
-
 interface ResolvedAirfield {
     autocomp: AutocompEntry;
-    osm: OsmAerodrome;
+    osm: RankedAirfield;
     matchedVia: 'icao' | 'iata' | 'name';
 }
 
@@ -93,6 +73,7 @@ interface CompetitionRow {
     compid: string;
     name: string | null;
     sitename: string | null;
+    tz: string | null;
     start: Date | null;
     end: Date | null;
 }
@@ -143,75 +124,65 @@ async function autocomp(name: string): Promise<AutocompEntry[]> {
     return (await r.json()) as AutocompEntry[];
 }
 
-async function logbook(code: string): Promise<Logbook> {
-    const r = await fetch(`https://flightbook.glidernet.org/api/logbook/${encodeURIComponent(code)}/`);
-    if (!r.ok) throw new Error(`logbook ${code}: HTTP ${r.status}`);
+async function logbook(code: string, date?: string): Promise<Logbook> {
+    const url = date //
+        ? `https://flightbook.glidernet.org/api/logbook/${encodeURIComponent(code)}/${date}/`
+        : `https://flightbook.glidernet.org/api/logbook/${encodeURIComponent(code)}/`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`logbook ${code} ${date || 'today'}: HTTP ${r.status}`);
     return (await r.json()) as Logbook;
 }
 
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371;
-    const toRad = (d: number) => (d * Math.PI) / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
+interface LogbookDateDecision {
+    date: string; // YYYY-MM-DD
+    isYesterday: boolean;
+    reason: string;
 }
 
-async function geocode(name: string): Promise<{lat: number; lon: number; displayName: string} | null> {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1`;
-    const r = await fetch(url, {headers: {'User-Agent': HTTP_UA}});
-    if (!r.ok) {
-        console.log(`  Nominatim HTTP ${r.status}`);
-        return null;
+// Decide whether to fetch today's or yesterday's logbook. Yesterday wins
+// when yesterday was a flown contest day AND either today has no task
+// scheduled OR the comp's local time is still before noon (pilots haven't
+// yet generated useful data for today). Otherwise fall through to today.
+async function chooseLogbookDate(comp: CompetitionRow): Promise<LogbookDateDecision> {
+    const tz = comp.tz || 'UTC';
+    const local = nowInTz(tz);
+    const today = new Date(Date.UTC(local.year, local.month - 1, local.day));
+    const yesterday = new Date(today);
+    yesterday.setUTCDate(today.getUTCDate() - 1);
+    const todayStr = today.toISOString().slice(0, 10);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    const todayDc = toDateCode(today);
+    const yesterdayDc = toDateCode(yesterday);
+
+    const todayTask = await mysql.query<{n: number}[]>(escape`
+        SELECT COUNT(*) AS n
+        FROM tasks t JOIN classes c ON c.class = t.class
+        WHERE c.compid = ${comp.compid} AND t.datecode = ${todayDc}
+    `);
+    const yesterdayContest = await mysql.query<{n: number}[]>(escape`
+        SELECT COUNT(*) AS n
+        FROM tasks t JOIN classes c ON c.class = t.class
+        WHERE c.compid = ${comp.compid} AND t.datecode = ${yesterdayDc} AND t.flown = 'Y'
+    `);
+
+    const todayHasTask = (todayTask[0]?.n ?? 0) > 0;
+    const yesterdayWasContest = (yesterdayContest[0]?.n ?? 0) > 0;
+
+    console.log(
+        `Comp local time: ${local.iso} ${String(local.hour).padStart(2, '0')}:${String(local.minute).padStart(2, '0')} (${tz}).` +
+            ` Today task: ${todayHasTask ? 'yes' : 'no'}. Yesterday contest day: ${yesterdayWasContest ? 'yes' : 'no'}.`
+    );
+
+    if (yesterdayWasContest && (!todayHasTask || local.hour < 12)) {
+        const reason = !todayHasTask //
+            ? 'no task today; yesterday was flown'
+            : `before noon (${local.hour}h) and yesterday was flown`;
+        return {date: yesterdayStr, isYesterday: true, reason};
     }
-    const json = (await r.json()) as NominatimResult[];
-    if (!json?.length) return null;
-    return {lat: parseFloat(json[0].lat), lon: parseFloat(json[0].lon), displayName: json[0].display_name};
+    return {date: todayStr, isYesterday: false, reason: 'today is the active contest day'};
 }
 
-async function nearbyAerodromes(lat: number, lon: number, radiusKm: number): Promise<OsmAerodrome[]> {
-    const r = Math.round(radiusKm * 1000);
-    const q = `[out:json][timeout:25];
-(
-  node["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
-  way["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
-  relation["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
-);
-out center tags;`;
-    const resp = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': HTTP_UA},
-        body: 'data=' + encodeURIComponent(q)
-    });
-    if (!resp.ok) {
-        console.log(`  Overpass HTTP ${resp.status}`);
-        return [];
-    }
-    const json = (await resp.json()) as {elements: OverpassElement[]};
-    const out: OsmAerodrome[] = [];
-    for (const el of json.elements || []) {
-        const tags = el.tags || {};
-        const name = tags.name || tags['name:en'] || tags.icao || tags.iata;
-        if (!name) continue;
-        const elat = el.lat ?? el.center?.lat;
-        const elon = el.lon ?? el.center?.lon;
-        if (elat == null || elon == null) continue;
-        out.push({
-            name,
-            icao: tags.icao,
-            iata: tags.iata,
-            lat: elat,
-            lon: elon,
-            distanceKm: haversineKm(lat, lon, elat, elon),
-            aerowayType: tags.aeroway || ''
-        });
-    }
-    out.sort((a, b) => a.distanceKm - b.distanceKm);
-    return out;
-}
-
-async function resolveOgnCandidates(osms: OsmAerodrome[]): Promise<ResolvedAirfield[]> {
+async function resolveOgnCandidates(osms: RankedAirfield[]): Promise<ResolvedAirfield[]> {
     const byCode = new Map<string, ResolvedAirfield>();
     for (const osm of osms) {
         const tries: Array<{key: string; via: ResolvedAirfield['matchedVia']}> = [];
@@ -233,13 +204,19 @@ async function resolveOgnCandidates(osms: OsmAerodrome[]): Promise<ResolvedAirfi
             const pick = exact || list[0];
             const entry: ResolvedAirfield = {autocomp: pick, osm, matchedVia: t.via};
             const existing = byCode.get(pick.code);
-            if (!existing || osm.distanceKm < existing.osm.distanceKm) {
-                byCode.set(pick.code, entry);
-            }
+            // Prefer the OSM source with stronger name overlap; fall back to closer distance.
+            const better =
+                !existing ||
+                osm.nameOverlap > existing.osm.nameOverlap ||
+                (osm.nameOverlap === existing.osm.nameOverlap && osm.distanceKm < existing.osm.distanceKm);
+            if (better) byCode.set(pick.code, entry);
             break;
         }
     }
-    return Array.from(byCode.values()).sort((a, b) => a.osm.distanceKm - b.osm.distanceKm);
+    return Array.from(byCode.values()).sort((a, b) => {
+        if (a.osm.nameOverlap !== b.osm.nameOverlap) return b.osm.nameOverlap - a.osm.nameOverlap;
+        return a.osm.distanceKm - b.osm.distanceKm;
+    });
 }
 
 async function resolveBySitename(sitename: string): Promise<ResolvedAirfield[]> {
@@ -247,33 +224,26 @@ async function resolveBySitename(sitename: string): Promise<ResolvedAirfield[]> 
     if (!search) return [];
 
     console.log(`\nGeocoding "${search}" via Nominatim...`);
-    const geo = await geocode(search).catch((e) => {
-        console.log(`  Nominatim error: ${(e as Error).message}`);
-        return null;
-    });
-    if (!geo) {
+    const {geocode, ranked} = await findAirfieldsByName(search);
+    if (!geocode) {
         console.log('  no result — falling back to text search');
         return [];
     }
-    console.log(`  → ${geo.lat.toFixed(4)}, ${geo.lon.toFixed(4)}  (${geo.displayName})`);
+    console.log(`  → ${geocode.lat.toFixed(4)}, ${geocode.lon.toFixed(4)}  (${geocode.displayName})`);
 
-    console.log(`Querying Overpass for aeroway=aerodrome|airstrip within ${NEARBY_RADIUS_KM} km...`);
-    const osms = await nearbyAerodromes(geo.lat, geo.lon, NEARBY_RADIUS_KM).catch((e) => {
-        console.log(`  Overpass error: ${(e as Error).message}`);
-        return [] as OsmAerodrome[];
-    });
-    if (!osms.length) {
+    if (!ranked.length) {
         console.log('  no aerodromes found — falling back to text search');
         return [];
     }
-    console.log(`  → ${osms.length} OSM aerodrome${osms.length === 1 ? '' : 's'}:`);
-    for (const o of osms) {
+    console.log(`  ${ranked.length} OSM aerodrome${ranked.length === 1 ? '' : 's'} (sorted by name match, then distance):`);
+    for (const o of ranked) {
         const codes = [o.icao, o.iata].filter(Boolean).join('/') || '-';
-        console.log(`     ${o.distanceKm.toFixed(1).padStart(5)} km  ${o.name}  [${codes}]  (aeroway=${o.aerowayType})`);
+        const match = o.matchedTokens.length ? `  name-match: ${o.matchedTokens.join(',')}` : '';
+        console.log(`     ${o.distanceKm.toFixed(1).padStart(5)} km  ${o.name}  [${codes}]  (aeroway=${o.aerowayType})${match}`);
     }
 
     console.log('Resolving OGN codes...');
-    return await resolveOgnCandidates(osms);
+    return await resolveOgnCandidates(ranked);
 }
 
 async function pickCompetition(): Promise<CompetitionRow> {
@@ -281,7 +251,7 @@ async function pickCompetition(): Promise<CompetitionRow> {
     // kept in the list so a comp without full metadata doesn't silently
     // disappear.
     const rows = await mysql.query<CompetitionRow[]>(escape`
-        SELECT compid, name, sitename, start, end
+        SELECT compid, name, sitename, tz, start, end
         FROM competition
         WHERE (start IS NULL OR start <= CURDATE())
           AND (end   IS NULL OR end   >= CURDATE())
@@ -577,8 +547,10 @@ async function main() {
 
     const comp = await pickCompetition();
     const airfield = await pickAirfield(comp);
-    console.log(`\nFetching logbook for ${airfield.code} (${airfield.name})...`);
-    const lb = await logbook(airfield.code);
+    const decision = await chooseLogbookDate(comp);
+    console.log(`Logbook date: ${decision.date} (${decision.reason}).`);
+    console.log(`\nFetching logbook for ${airfield.code} (${airfield.name}) on ${decision.date}...`);
+    const lb = await logbook(airfield.code, decision.date);
     const devices = lb?.devices || [];
     const identifiedWithCompno = devices.filter((d) => d.identified && d.competition).length;
     console.log(`${devices.length} devices at airfield (${identifiedWithCompno} identified w/ compno).`);

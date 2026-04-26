@@ -1,0 +1,199 @@
+// Copyright 2026- (c) Melissa Jenkins
+// Part of Onglide.com competition tracking service
+// BSD licence
+
+//
+// Airfield locator: geocode a competition sitename via OpenStreetMap
+// Nominatim, then ask Overpass for nearby `aeroway=aerodrome|airstrip`
+// features and rank them by name overlap with the sitename, breaking
+// ties by distance. Used by:
+//   - lib/scoring/sources/soaringspotscrape.ts (automatic resolution
+//     replacing the previous Mapbox geocode)
+//   - bin/matchtrackers.ts (interactive CLI; OGN logbook lookup runs
+//     against the OGN-resolved subset of these candidates)
+//
+// All network calls fail open — Nominatim/Overpass errors return
+// null/[] and the caller decides what to do.
+//
+
+import distance from '@turf/distance';
+import {point} from '@turf/helpers';
+
+const HTTP_UA = 'onglide-airfield-locator/1.0 (https://github.com/ifly7charlie/onglide)';
+const DEFAULT_RADIUS_KM = 30;
+
+// Type-words that say nothing about *which* airfield we're looking at —
+// drop them so a sitename of "Lasham" matches "Lasham Airfield" cleanly.
+// NFD normalisation strips diacritics, so the German "ä" forms collapse
+// to "gelande" / "segelfluggelande" rather than the "ae" transliteration.
+const STOPWORDS = new Set([
+    'airfield',
+    'airport',
+    'aerodrome',
+    'airstrip',
+    'flugplatz',
+    'flughafen',
+    'segelfluggelande',
+    'fliegerhorst',
+    'heeresflugplatz',
+    'sonderlandeplatz',
+    'sonderflugplatz',
+    'gelande',
+    'aerodrom',
+    'aeropuerto',
+    'aeroport',
+    'aeroporto'
+]);
+
+export interface OsmAerodrome {
+    name: string;
+    icao?: string;
+    iata?: string;
+    lat: number;
+    lon: number;
+    distanceKm: number;
+    aerowayType: string; // 'aerodrome' | 'airstrip'
+}
+
+export interface RankedAirfield extends OsmAerodrome {
+    nameOverlap: number;
+    matchedTokens: string[];
+}
+
+export interface NominatimGeocode {
+    lat: number;
+    lon: number;
+    displayName: string;
+    countryCode?: string; // ISO-3166-1 alpha-2, uppercased
+}
+
+interface NominatimResult {
+    lat: string;
+    lon: string;
+    display_name: string;
+    address?: {
+        country_code?: string;
+    };
+}
+
+interface OverpassElement {
+    type: 'node' | 'way' | 'relation';
+    id: number;
+    lat?: number;
+    lon?: number;
+    center?: {lat: number; lon: number};
+    tags?: Record<string, string>;
+}
+
+function tokenize(s: string): string[] {
+    if (!s) return [];
+    const normalized = s
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .toLowerCase();
+    const out: string[] = [];
+    for (const t of normalized.split(/[\s\-,.()'"\/]+/)) {
+        if (t.length < 3) continue;
+        if (STOPWORDS.has(t)) continue;
+        out.push(t);
+    }
+    return out;
+}
+
+export async function geocodeNominatim(name: string): Promise<NominatimGeocode | null> {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1&addressdetails=1`;
+    let resp: Response;
+    try {
+        resp = await fetch(url, {headers: {'User-Agent': HTTP_UA}});
+    } catch {
+        return null;
+    }
+    if (!resp.ok) return null;
+    const json = (await resp.json().catch(() => null)) as NominatimResult[] | null;
+    if (!json?.length) return null;
+    const r = json[0];
+    return {
+        lat: parseFloat(r.lat),
+        lon: parseFloat(r.lon),
+        displayName: r.display_name,
+        countryCode: r.address?.country_code ? r.address.country_code.toUpperCase() : undefined
+    };
+}
+
+export async function nearbyAerodromes(lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM): Promise<OsmAerodrome[]> {
+    const r = Math.round(radiusKm * 1000);
+    const q = `[out:json][timeout:25];
+(
+  node["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
+  way["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
+  relation["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
+);
+out center tags;`;
+
+    let resp: Response;
+    try {
+        resp = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': HTTP_UA},
+            body: 'data=' + encodeURIComponent(q)
+        });
+    } catch {
+        return [];
+    }
+    if (!resp.ok) return [];
+    const json = (await resp.json().catch(() => null)) as {elements: OverpassElement[]} | null;
+    if (!json?.elements) return [];
+
+    const origin = point([lon, lat]);
+    const out: OsmAerodrome[] = [];
+    for (const el of json.elements) {
+        const tags = el.tags || {};
+        const aname = tags.name || tags['name:en'] || tags.icao || tags.iata;
+        if (!aname) continue;
+        const elat = el.lat ?? el.center?.lat;
+        const elon = el.lon ?? el.center?.lon;
+        if (elat == null || elon == null) continue;
+        out.push({
+            name: aname,
+            icao: tags.icao,
+            iata: tags.iata,
+            lat: elat,
+            lon: elon,
+            distanceKm: distance(origin, point([elon, elat])),
+            aerowayType: tags.aeroway || ''
+        });
+    }
+    out.sort((a, b) => a.distanceKm - b.distanceKm);
+    return out;
+}
+
+export function rankAirfieldsBySite(sitename: string, aerodromes: OsmAerodrome[]): RankedAirfield[] {
+    const siteTokens = new Set(tokenize(sitename));
+    const ranked: RankedAirfield[] = aerodromes.map((a) => {
+        const matched: string[] = [];
+        for (const t of tokenize(a.name)) {
+            if (siteTokens.has(t)) matched.push(t);
+        }
+        return {...a, nameOverlap: matched.length, matchedTokens: matched};
+    });
+    ranked.sort((a, b) => {
+        if (a.nameOverlap !== b.nameOverlap) return b.nameOverlap - a.nameOverlap;
+        return a.distanceKm - b.distanceKm;
+    });
+    return ranked;
+}
+
+export async function findAirfieldsByPoint(sitename: string, lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM): Promise<RankedAirfield[]> {
+    const aerodromes = await nearbyAerodromes(lat, lon, radiusKm);
+    return rankAirfieldsBySite(sitename, aerodromes);
+}
+
+export async function findAirfieldsByName(
+    sitename: string,
+    radiusKm: number = DEFAULT_RADIUS_KM
+): Promise<{geocode: NominatimGeocode | null; ranked: RankedAirfield[]}> {
+    const geocode = await geocodeNominatim(sitename);
+    if (!geocode) return {geocode: null, ranked: []};
+    const ranked = await findAirfieldsByPoint(sitename, geocode.lat, geocode.lon, radiusKm);
+    return {geocode, ranked};
+}
