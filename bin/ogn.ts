@@ -1652,7 +1652,10 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             // Only consider tracked pilots that have actually reported a flight
             // status — a tracker that's never produced a score shouldn't block
             // the class from going H, and shouldn't trigger H either.
-            const withStatus = scored.filter((p) => channel?.allScores[p.compno]?.flightStatus !== undefined);
+            const withStatus = scored.filter((p) => {
+                const fs = channel?.allScores[p.compno]?.flightStatus;
+                return fs !== undefined && fs !== PositionStatus.Unknown;
+            });
             const allLanded = withStatus.length > 0 && withStatus.every((p) => {
                 const fs = channel!.allScores[p.compno]!.flightStatus;
                 return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
