@@ -1646,13 +1646,38 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         // sparse tracker coverage can't justify a "landed" verdict for the whole class.
         const trackedByClass = new Map<ClassName, CTrackerRow[]>();
         const totalScoredByClass = new Map<ClassName, number>();
+        // Per-class counts across *all* pilots (any scoredStatus) so we can
+        // detect classes where the official scorer has already finalised
+        // every pilot (scoredStatus F/H). Those classes never enter the
+        // per-class loop below because trackedByClass requires 'S', so we
+        // promote them to compstatus 'H' separately.
+        const totalByClass = new Map<ClassName, number>();
+        const terminalByClass = new Map<ClassName, number>();
         for (const t of cTrackers) {
+            totalByClass.set(t.className, (totalByClass.get(t.className) || 0) + 1);
+            if (t.scoredStatus === 'F' || t.scoredStatus === 'H') {
+                terminalByClass.set(t.className, (terminalByClass.get(t.className) || 0) + 1);
+            }
             if (t.scoredStatus !== 'S') continue;
             totalScoredByClass.set(t.className, (totalScoredByClass.get(t.className) || 0) + 1);
             if (t.dbTrackerId) {
                 const list = trackedByClass.get(t.className) || [];
                 list.push(t);
                 trackedByClass.set(t.className, list);
+            }
+        }
+        // Classes where every pilot has a terminal scoredStatus (F/H from
+        // the official scorer) should be 'H' regardless of whether the
+        // per-class loop fires for them.
+        for (const [className, total] of totalByClass) {
+            if (total > 0 && terminalByClass.get(className) === total) {
+                db.query(`UPDATE compstatus SET status = 'H' WHERE class = ? AND status IN ('L', 'S', 'F')`, [className])
+                    .then((r: any) => {
+                        if (r?.affectedRows) {
+                            console.log(`compstatus -> H for ${className}: all ${total} pilots have terminal scoredStatus`);
+                        }
+                    })
+                    .catch((e: any) => console.log(`compstatus H update failed:`, e));
             }
         }
         // Derive the highest applicable compstatus state for each class from the live
