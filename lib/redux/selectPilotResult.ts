@@ -37,12 +37,11 @@ function convertTime(i: ConvertedDisplayKeys, _units: Units, tz: TZ): NormalDisp
     if (!i.value) {
         return i;
     }
-    // Figure out what the local language is for international date strings
-    const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
-
-    // And then produce a string to display it locally
+    // hour12: false forces 24-hour even for locales that default to 12-hour.
+    // Previously this used 'uk' (Ukrainian) as a side-effect; the new form
+    // lets the user's actual locale dictate digit shape and ordering.
     const dt = new Date(i.value * 1000);
-    return {...i, value: dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'}), suffix: (i.value % 60 < 10 ? '0' : '') + dt.toLocaleTimeString(lang, {timeZone: tz, second: '2-digit'})};
+    return {...i, value: dt.toLocaleTimeString(undefined, {timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false}), suffix: (i.value % 60 < 10 ? '0' : '') + dt.toLocaleTimeString(undefined, {timeZone: tz, second: '2-digit'})};
 }
 
 import type {RootState} from './store';

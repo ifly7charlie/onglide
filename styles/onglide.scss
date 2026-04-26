@@ -211,6 +211,119 @@ button {
         letter-spacing: 0.5px;
     }
 
+    // Brand row variant: brand text on the left, language picker on the right.
+    .sidepanel-brand-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+
+        .sidepanel-brand-text {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+
+    // Language picker — trigger shows just the active locale's flag, menu
+    // mirrors the Sort dropdown style (absolute popover with row buttons).
+    .language-switcher {
+        position: relative;
+        flex-shrink: 0;
+
+        .lang-trigger {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+            line-height: 1;
+
+            &:hover {
+                background: var(--panel-hover);
+            }
+
+            .lang-trigger-flag {
+                font-size: 18px;
+            }
+
+            .lang-caret {
+                opacity: 0.6;
+                font-size: 12px;
+                transition: transform 150ms;
+
+                &.open {
+                    transform: rotate(180deg);
+                }
+            }
+        }
+
+        .lang-menu {
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            min-width: 180px;
+            background: var(--dropdown-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+            z-index: 30;
+            padding: 6px 0;
+            max-height: 70vh;
+            overflow-y: auto;
+
+            .lang-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                width: 100%;
+                background: transparent;
+                border: none;
+                padding: 6px 14px;
+                font: inherit;
+                font-size: 13px;
+                color: inherit;
+                cursor: pointer;
+                text-align: left;
+
+                &:hover {
+                    background: var(--panel-hover);
+                }
+
+                &.active {
+                    background: var(--panel-accent);
+                    color: #fff;
+                }
+
+                .lang-row-flag {
+                    font-size: 16px;
+                    flex-shrink: 0;
+                }
+
+                .lang-row-label {
+                    flex: 1;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+            }
+        }
+    }
+
+    // The header variant sits at the right edge of the comp-name title bar.
+    .sidepanel-header-lang {
+        margin-left: auto;
+    }
+
     // Live-viewer count beneath the brand. Subdued so it doesn't compete
     // with the section headers further down.
     .sidepanel-brand-stats {

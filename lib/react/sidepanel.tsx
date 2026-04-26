@@ -1,10 +1,12 @@
 import {ReactNode} from 'react';
+import {useTranslation} from 'next-i18next/pages';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 import {Options} from './options';
-import {classDisplayStatus, StatusIcon, STATUS_LABELS} from './competition-status';
+import {LanguageSwitcher} from './language-switcher';
+import {classDisplayStatus, StatusIcon, STATUS_LABEL_KEYS} from './competition-status';
 
 import type {Options as OptionsType, ClassName} from '../types';
 
@@ -31,10 +33,11 @@ export function compShortName(comp: any) {
 }
 
 export function SidePanelHeader({comp}: {comp: any}) {
+    const {t} = useTranslation('common');
     const shortName = compShortName(comp);
     return (
         <div className="sidepanel-header">
-            <a href="/" className="sidepanel-back" title="Back to globe" aria-label="Back to globe">
+            <a href="/" className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                 <FontAwesomeIcon icon={faGlobe} />
             </a>
             <div className="sidepanel-title">
@@ -53,11 +56,13 @@ export function SidePanelHeader({comp}: {comp: any}) {
                     </div>
                 ) : null}
             </div>
+            <LanguageSwitcher className="sidepanel-header-lang" />
         </div>
     );
 }
 
 export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: ClassName; onClassChange: (className: string) => void}) {
+    const {t} = useTranslation('common');
     const multipleClasses = (comp?.classes?.length ?? 0) > 1;
     if (!multipleClasses) return null;
     // The user is viewing this competition, so it's effectively current —
@@ -73,7 +78,7 @@ export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: Cl
                         role="tab"
                         aria-selected={c.class === vc}
                         className={c.class === vc ? 'active' : ''}
-                        title={STATUS_LABELS[ds]}
+                        title={t(STATUS_LABEL_KEYS[ds])}
                         onClick={() => onClassChange(c.class)}
                     >
                         <StatusIcon status={ds} className="status-icon" />

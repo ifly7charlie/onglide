@@ -1,4 +1,5 @@
 import {memo} from 'react';
+import {useTranslation} from 'next-i18next/pages';
 import {TooltipIcon} from './htmlhelper';
 
 import {PilotScore, PilotScoreLeg, Epoch, PositionStatus, TZ} from '../types';
@@ -27,6 +28,7 @@ import {
 import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
 export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: any; units: boolean; tz: TZ}) {
+    const {t} = useTranslation('common');
     const [viewOptions, setViewOptions] = useState({task: 1, hcapped: 0});
 
     if (!score?.legs) {
@@ -36,22 +38,23 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
     const legIcon = (leg) => {
         if (leg.legno == score.currentLeg) {
             if (score.utcFinish) {
-                return <TooltipIcon icon={faTrophy} tooltip="Finished!" />;
+                return <TooltipIcon icon={faTrophy} tooltip={t('flight_legs.finished')} />;
             } else if (score.flightStatus == PositionStatus.Landed) {
-                return <TooltipIcon icon={faCow} tooltip="Landout on leg" />;
+                return <TooltipIcon icon={faCow} tooltip={t('flight_legs.landout_on_leg')} />;
             } else if (score.flightStatus == PositionStatus.Home) {
-                return <TooltipIcon icon={faHouse} tooltip="Returned home" />;
+                return <TooltipIcon icon={faHouse} tooltip={t('flight_legs.returned_home')} />;
             } else if (score.inSector || score.inPenalty) {
-                return <TooltipIcon icon={faLocationCrosshairs} tooltip="plane in sector" fade style={{animationDuration: '10s'}} />;
+                return <TooltipIcon icon={faLocationCrosshairs} tooltip={t('flight_legs.in_sector')} fade style={{animationDuration: '10s'}} />;
             }
-            return <TooltipIcon icon={faPaperPlane} tooltip="plane still heading to sector" fade style={{animationDuration: '10s'}} />;
+            return <TooltipIcon icon={faPaperPlane} tooltip={t('flight_legs.heading_to_sector')} fade style={{animationDuration: '10s'}} />;
         }
         if (leg.legno > score.currentLeg) {
-            return <TooltipIcon icon={faHourglassStart} tooltip="leg not started yet" size="xs" />;
+            return <TooltipIcon icon={faHourglassStart} tooltip={t('flight_legs.leg_not_started')} size="xs" />;
         } else if (leg.estimatedStart || leg.estimatedEnd) {
-            return <TooltipIcon icon={faSignal} tooltip={`warning: estimated ${leg.estimatedStart ? 'leg start ' : ''}${leg.estimatedEnd ? 'leg end' : ''} due to coverage issue`} />;
+            const which = `${leg.estimatedStart ? t('flight_legs.estimated_start') : ''}${leg.estimatedEnd ? t('flight_legs.estimated_end') : ''}`;
+            return <TooltipIcon icon={faSignal} tooltip={t('flight_legs.estimated_warning', {which})} />;
         }
-        return <TooltipIcon icon={faSquareCheck} tooltip="leg completed" />;
+        return <TooltipIcon icon={faSquareCheck} tooltip={t('flight_legs.leg_completed')} />;
     };
 
     const accessor = viewOptions.hcapped ? (l: PilotScoreLeg | PilotScore) => l?.handicapped : (l: PilotScoreLeg | PilotScore) => l?.actual;
@@ -89,14 +92,14 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
         if (l && l.maxPossible) {
             return (
                 <td style={{fontSize: 'small'}} key="legend">
-                    Possible
+                    {t('flight_legs.possible')}
                     <br />
-                    Shortest
+                    {t('flight_legs.shortest')}
                 </td>
             );
         }
         if (l.distanceRemaining > 0) {
-            return <td key="legend">Shortest</td>;
+            return <td key="legend">{t('flight_legs.shortest')}</td>;
         }
         return null;
     };
@@ -104,28 +107,37 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
     const actualLegs = _filter(score.legs, (f) => f.legno != 0);
     const hasHandicappedResults = score?.handicapped;
 
+    const taskRadios: {key: string; label: string}[] = [
+        {key: 'leg', label: t('flight_legs.view_leg')},
+        {key: 'task', label: t('flight_legs.view_task')}
+    ];
+    const hcapRadios: {key: string; label: string}[] = [
+        {key: 'actuals', label: t('flight_legs.view_actuals')},
+        {key: 'handicapped', label: t('flight_legs.view_handicapped')}
+    ];
+
     return (
         <>
             <br style={{clear: 'both'}} />
-            <div className="btn-group-mini" role="group" aria-label="task or leg" style={{float: 'left'}}>
-                {['leg', 'task'].map((radio, idx) => (
-                    <button key={idx} className={idx == viewOptions.task ? 'active' : ''} onClick={() => setViewOptions({...viewOptions, task: idx})}>
-                        {radio}
+            <div className="btn-group-mini" role="group" aria-label={t('flight_legs.view_task_or_leg')} style={{float: 'left'}}>
+                {taskRadios.map((radio, idx) => (
+                    <button key={radio.key} className={idx == viewOptions.task ? 'active' : ''} onClick={() => setViewOptions({...viewOptions, task: idx})}>
+                        {radio.label}
                     </button>
                 ))}
             </div>
 
             {hasHandicappedResults ? (
-                <div className="btn-group-mini" role="group" aria-label="actual or handicapped" style={{float: 'right'}}>
-                    {['actuals', 'handicapped'].map((radio, idx) => (
+                <div className="btn-group-mini" role="group" aria-label={t('flight_legs.view_actual_or_handicapped')} style={{float: 'right'}}>
+                    {hcapRadios.map((radio, idx) => (
                         <button
-                            key={radio}
+                            key={radio.key}
                             className={idx == viewOptions.hcapped ? 'active' : ''}
                             onClick={() => {
                                 setViewOptions({...viewOptions, hcapped: idx});
                             }}
                         >
-                            {radio}
+                            {radio.label}
                         </button>
                     ))}
                 </div>
@@ -138,34 +150,34 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                             <td>&nbsp;</td>
                             {_map(actualLegs, (x) => (
                                 <td key={x.legno.toString()}>
-                                    Leg {x.legno} {legIcon(x)}
+                                    {t('task.leg', {n: x.legno})} {legIcon(x)}
                                 </td>
                             ))}
                         </tr>
                     </thead>
                     <tbody>
                         <tr style={{fontSize: 'small'}}>
-                            <td>Leg Start Altitude</td>
+                            <td>{t('flight_legs.leg_start_altitude')}</td>
                             {_map(actualLegs, (x) => (x?.alt > 0 ? <td key={x.legno.toString()}>{displayHeight(x?.alt, units)}</td> : null))}
                         </tr>
                         <tr>
-                            <td>Leg Start</td>
+                            <td>{t('flight_legs.leg_start')}</td>
                             {_map(actualLegs, (x) => (x.time ? <td key={x.legno.toString()}>{OptionalTimeHHMM('', x.time as Epoch, tz)}</td> : null))}
                         </tr>
                         <tr style={{fontSize: 'small'}}>
-                            <td>Leg Duration</td>
+                            <td>{t('flight_legs.leg_duration')}</td>
                             {_map(actualLegs, (x) => (x.duration ? <td key={x.legno.toString()}>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
                         </tr>
                         {!viewOptions.task ? (
                             <>
                                 <tr>
-                                    <td>Leg Distance</td>
+                                    <td>{t('flight_legs.leg_distance')}</td>
                                     {_map(actualLegs, (x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.distance || ''}</td>
                                     ))}
                                 </tr>
                                 <tr>
-                                    <td>Leg Speed</td>
+                                    <td>{t('flight_legs.leg_speed')}</td>
                                     {_map(actualLegs, (x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.legSpeed}</td>
                                     ))}
@@ -181,13 +193,13 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                         {viewOptions.task ? (
                             <>
                                 <tr>
-                                    <td>Task Speed</td>
+                                    <td>{t('flight_legs.task_speed')}</td>
                                     {_map(actualLegs, (x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.taskSpeed || ''}</td>
                                     ))}
                                 </tr>
                                 <tr>
-                                    <td>Task Distance</td>
+                                    <td>{t('flight_legs.task_distance')}</td>
                                     {_map(actualLegs, (x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.taskDistance || ''}</td>
                                     ))}
@@ -206,7 +218,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
             {score.wind?.speed ? (
                 <>
                     <br style={{clear: 'both'}} />
-                    Recent Wind {score.wind.speed} kph @ {score.wind.direction}°
+                    {t('flight_legs.recent_wind')} {score.wind.speed} {t('units.kph')} @ {score.wind.direction}°
                     <br />
                 </>
             ) : null}

@@ -1,5 +1,7 @@
 import Head from 'next/head';
 import useSWR from 'swr';
+import {useTranslation} from 'next-i18next/pages';
+import {serverSideTranslations} from 'next-i18next/pages/serverSideTranslations';
 
 import {CompetitionGlobe, Competition} from '../lib/react/globe';
 
@@ -14,11 +16,12 @@ const fetcher = (url: string) => fetch(url).then((res) => (res.status === 200 ? 
 export default function GlobeLandingPage({countriesGeoJson}: {countriesGeoJson: any}) {
     const {data} = useSWR('/api/competitions', fetcher, {refreshInterval: 60 * 1000});
     const competitions: Competition[] = data?.competitions ?? [];
+    const {t} = useTranslation('common');
 
     return (
         <>
             <Head>
-                <title>Onglide — live competitions</title>
+                <title>{t('app.title_landing')}</title>
                 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
             </Head>
             <CompetitionGlobe competitions={competitions} countriesGeoJson={countriesGeoJson} />
@@ -32,7 +35,7 @@ export default function GlobeLandingPage({countriesGeoJson}: {countriesGeoJson: 
 // GeoJSON hosted via unpkg; if the fetch fails we simply render without
 // the land layer.
 //
-export async function getServerSideProps() {
+export async function getServerSideProps({locale}: {locale?: string}) {
     let countriesGeoJson: any = null;
     try {
         // World-110m-simplified GeoJSON (~110KB) — lightweight enough to
@@ -52,7 +55,8 @@ export async function getServerSideProps() {
 
     return {
         props: {
-            countriesGeoJson
+            countriesGeoJson,
+            ...(await serverSideTranslations(locale ?? 'en', ['common']))
         }
     };
 }

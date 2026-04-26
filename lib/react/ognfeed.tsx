@@ -8,6 +8,7 @@
 
 import {useState, useMemo, useCallback, useEffect, memo} from 'react';
 import {useRouter} from 'next/router';
+import {useTranslation} from 'next-i18next/pages';
 
 import {usePilots} from './loaders';
 
@@ -111,6 +112,7 @@ export const OgnFeed = memo(
         notes: string;
     }) {
         const {pilots, isPLoading} = usePilots(vc);
+        const {t} = useTranslation('common');
         //        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
@@ -189,9 +191,9 @@ export const OgnFeed = memo(
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
-                connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={faSpinner} spin />],
-                retry: (wsStatus.retry ?? 0) < 16 ? null : ['Connecting to live feed...', <FontAwesomeIcon icon={faSpinner} spin />],
-                closed: ['Connection to tracking is closed, please change the selected class to retry', <FontAwesomeIcon icon={faLinkSlash} />]
+                connecting: [t('connection.connecting'), <FontAwesomeIcon icon={faSpinner} spin />],
+                retry: (wsStatus.retry ?? 0) < 16 ? null : [t('connection.connecting'), <FontAwesomeIcon icon={faSpinner} spin />],
+                closed: [t('connection.closed'), <FontAwesomeIcon icon={faLinkSlash} />]
             }[wsStatus.state ?? 'open'];
 
             if (connectionStatusO) {
@@ -204,7 +206,7 @@ export const OgnFeed = memo(
                 );
             }
             return null;
-        }, [wsStatus.state, wsStatus.retry]);
+        }, [wsStatus.state, wsStatus.retry, t]);
 
         const setCompno = useCallback(
             (cn) => {
@@ -218,11 +220,12 @@ export const OgnFeed = memo(
 
         // Cache the calculated times and only refresh every 60 seconds
         const status = useMemo(() => {
+            const lang = router.locale ?? 'en';
             return (
-                (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
-                ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
+                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, lang)}) + ' | ' : '') + //
+                ` <a href='#' title='${t('connection.viewers')}'>${wsStatus.listeners} 👥</a> | <a href='#' title='${t('connection.tracked_planes')}'>${wsStatus.airborne} ✈️  </a>`
             );
-        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
+        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, router.locale]);
 
         // Scale map to fit the bounds
         const fitBounds = useCallback(() => {
@@ -297,7 +300,7 @@ export const OgnFeed = memo(
                     {map}
                     <div className="mobile-top-strip">
                         <div className="mobile-strip-header">
-                            <a href="/" className="mobile-back" title="Back to globe" aria-label="Back to globe">
+                            <a href="/" className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                                 <FontAwesomeIcon icon={faGlobe} />
                             </a>
                             <div className="mobile-comp-name">{compShortName(comp)}</div>
@@ -305,7 +308,7 @@ export const OgnFeed = memo(
                                 className="drawer-toggle"
                                 onClick={() => setDrawerOpen((o) => !o)}
                                 aria-expanded={drawerOpen}
-                                title={drawerOpen ? 'Hide menu' : 'Show menu'}
+                                title={drawerOpen ? t('drawer.hide_menu') : t('drawer.show_menu')}
                             >
                                 <FontAwesomeIcon icon={drawerOpen ? faCaretUp : faCaretDown} />
                             </button>
@@ -331,18 +334,18 @@ export const OgnFeed = memo(
                         <div className="mobile-drawer">
                             {(comp?.classes?.length ?? 0) > 1 ? (
                                 <div className="drawer-group">
-                                    <div className="drawer-label">Class</div>
+                                    <div className="drawer-label">{t('drawer.class')}</div>
                                     <SidePanelClassTabs comp={comp} vc={vc} onClassChange={onClassChange} />
                                 </div>
                             ) : null}
                             <div className="drawer-group">
-                                <div className="drawer-label">Display</div>
+                                <div className="drawer-label">{t('drawer.display')}</div>
                                 <div className="sidepanel-tools">
                                     <OptionsPanel options={options} setOptions={setOptions} multipleClasses={(comp?.classes?.length ?? 0) > 1} />
                                 </div>
                             </div>
                             <div className="drawer-group">
-                                <div className="drawer-label">Sort by</div>
+                                <div className="drawer-label">{t('drawer.sort_by')}</div>
                                 <div className="sidepanel-section">
                                     <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
                                 </div>
@@ -434,10 +437,7 @@ export const OgnFeed = memo(
     //    function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
 );
 
-function formatTimes(t, tz: TZ) {
-    // Figure out what the local language is for international date strings
-    const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
-
+function formatTimes(time: number, tz: TZ, lang: string) {
     const competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
         ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                 <span style={{color: 'grey'}}>
@@ -446,11 +446,10 @@ function formatTimes(t, tz: TZ) {
           </a>`
         : '';
 
-    // And then produce a string to display it locally
-    const dt = new Date(t * 1000);
-    const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((t + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
+    const dt = new Date(time * 1000);
+    const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((time + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
     return (
-        `<a href='#' title='competition time'>${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
+        `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
         `<a href='#' title='your time'>${dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`
     );
 }

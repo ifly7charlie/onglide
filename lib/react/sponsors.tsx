@@ -1,5 +1,7 @@
 import {useMemo} from 'react';
 
+import {TranslationHelpFooter} from './translation-help-footer';
+
 const OGN_LOGO = (
     <a href="http://www.glidernet.org/" title="OGN Network" target="_blank" rel="noreferrer">
         <img width="120" height="120" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" />
@@ -32,5 +34,10 @@ export default function Sponsor(props: {at: number}) {
 
     const currentSponsor = useMemo(() => sponsorList[Math.trunc(props.at / 60) % sponsorList.length], [Math.trunc(props.at / 60)]);
 
-    return <div className="sponsor">{currentSponsor}</div>;
+    return (
+        <div className="sponsor">
+            {currentSponsor}
+            <TranslationHelpFooter />
+        </div>
+    );
 }

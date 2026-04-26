@@ -1,6 +1,8 @@
 'use client';
 
 import {useCallback, useMemo, useRef, useEffect, useState} from 'react';
+import {useRouter} from 'next/router';
+import {useTranslation} from 'next-i18next/pages';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 
 import Map, {Source, Layer, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl/maplibre';
@@ -125,7 +127,9 @@ export default function MApp(props: {
     const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
-    const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
+    const router = useRouter();
+    const {t} = useTranslation('common');
+    const lang = router.locale ?? (typeof navigator !== 'undefined' ? (navigator.languages?.[0] ?? navigator.language) : 'en');
     const radarOverlay = RadarOverlay({options, tz});
 
     // What task are we using on display
@@ -366,8 +370,8 @@ export default function MApp(props: {
 
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current}), //
-        [vc, props.options.units, props.tz, mapRef?.current, pilotScores]
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, t}), //
+        [vc, props.options.units, props.tz, mapRef?.current, pilotScores, t, lang]
     );
 
     const attribution = useMemo(

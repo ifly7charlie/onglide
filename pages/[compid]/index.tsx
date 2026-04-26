@@ -1,5 +1,7 @@
 import {useRouter} from 'next/router';
 import Head from 'next/head';
+import {useTranslation} from 'next-i18next/pages';
+import {serverSideTranslations} from 'next-i18next/pages/serverSideTranslations';
 
 import {useState} from 'react';
 
@@ -27,6 +29,7 @@ export default function CombinePage(props) {
     // query because that stops page reload when switching between the
     // classes. If no class is set then assume the first one
     const router = useRouter();
+    const {t} = useTranslation('common');
     const compid = props.compid;
     let {className} = router.query;
     if (!className) {
@@ -76,7 +79,7 @@ export default function CombinePage(props) {
                 <Head>
                     <title>{comp.competition.name}</title>
                 </Head>
-                <h1>Please choose a class from the menu bar</h1>
+                <h1>{t('competition.no_class_selected')}</h1>
             </>
         );
     }
@@ -121,7 +124,7 @@ export default function CombinePage(props) {
                             height: '100vh' // or fixed height
                         }}
                     >
-                        No tasks yet
+                        {t('competition.no_tasks_yet')}
                     </div>
                 )}
             </MeasureContext>
@@ -133,6 +136,7 @@ export default function CombinePage(props) {
 // Determine the default class for this competition
 export async function getServerSideProps(context) {
     const compid = context.params.compid as string;
+    const locale: string = context.locale ?? 'en';
     try {
         const location = (
             await query(escape`
@@ -170,7 +174,8 @@ export async function getServerSideProps(context) {
                 lng: location?.lg || 0,
                 tzoffset: location?.tzoffset || 0,
                 tz: location?.tz || 'Etc/UTC',
-                defaultClass: classes && classes.length > 0 ? classes[0].class : ''
+                defaultClass: classes && classes.length > 0 ? classes[0].class : '',
+                ...(await serverSideTranslations(locale, ['common']))
             }
         };
     } catch (e) {
@@ -182,7 +187,8 @@ export async function getServerSideProps(context) {
                 lng: 0,
                 tzoffset: 0,
                 tz: 'Etc/UTC',
-                defaultClass: ''
+                defaultClass: '',
+                ...(await serverSideTranslations(locale, ['common']))
             }
         };
     }

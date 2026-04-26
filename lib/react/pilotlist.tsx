@@ -1,4 +1,5 @@
 import {memo, useMemo} from 'react';
+import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {
     faBackward,
@@ -160,6 +161,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
 }
 
 function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
+    const {t} = useTranslation('common');
     const howMuchClimb = vario //
         ? vario.average > 0.2
             ? faCircleArrowUp
@@ -173,33 +175,34 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
     return vario?.valid ? (
         <SummaryComponent
             id="climb"
-            title="vario" //
+            title={t('pilot_metric.vario')} //
             main={{value: !isNaN(convertedClimb[0]) ? convertedClimb[0] : null, icon: howMuchClimb, units: convertedClimb[1]}}
-            data1={{value: convertHeight(vario.total, units)[0], units: units ? 'ft' : 'm', icon: vario?.average >= 0 ? faCloudUpload : faCloudArrowDown}}
-            data2={{value: vario.Xperiod, units: 'sec', icon: faHourglassHalf}}
+            data1={{value: convertHeight(vario.total, units)[0], units: units ? t('units.ft') : t('units.m'), icon: vario?.average >= 0 ? faCloudUpload : faCloudArrowDown}}
+            data2={{value: vario.Xperiod, units: t('units.sec'), icon: faHourglassHalf}}
         />
     ) : (
         <SummaryComponent
             id="climb"
-            title="vario" //
+            title={t('pilot_metric.vario')} //
             main={{value: null, icon: faSignal, units: ''}}
         />
     );
 }
 
 function WindComponent({wind}: {wind: {speed: number; direction: number} | undefined}) {
+    const {t} = useTranslation('common');
     if (!wind?.speed) return null;
     return (
         <SummaryComponent
             id="wind"
-            title="wind" //
-            main={{value: wind.speed, units: 'kph', icon: faWind, description: 'recent wind speed'}}
-            data1={{value: wind.direction, units: '°', icon: faLocationArrow, description: 'wind bearing', iconStyle: {transform: `rotate(${wind.direction + 135}deg)`}}}
+            title={t('pilot_metric.wind')} //
+            main={{value: wind.speed, units: t('units.kph'), icon: faWind, description: t('pilot_metric.recent_wind_speed')}}
+            data1={{value: wind.direction, units: '°', icon: faLocationArrow, description: t('pilot_metric.wind_bearing'), iconStyle: {transform: `rotate(${wind.direction + 135}deg)`}}}
         />
     );
 }
 
-const StartComponent = memo(function StartComponent({
+function StartComponent({
     utcStart,
     utcFinish,
     taskTimeRemaining,
@@ -213,27 +216,28 @@ const StartComponent = memo(function StartComponent({
     taskDuration: Epoch;
     tz: TZ;
 }) {
+    const {t} = useTranslation('common');
     const [endTime, description, icon] = utcFinish
-        ? [OptionalTime(' ', utcFinish, tz), 'finish time', faHourglassEnd] //
+        ? [OptionalTime(' ', utcFinish, tz), t('pilot_metric.finish_time'), faHourglassEnd] //
         : taskTimeRemaining
-          ? [OptionalDuration('', taskTimeRemaining), 'remaining time', faHistory]
-          : ['', 'finish time', null];
+          ? [OptionalDuration('', taskTimeRemaining), t('pilot_metric.remaining_time'), faHistory]
+          : ['', t('pilot_metric.finish_time'), null];
 
     const duration = OptionalDuration('+', taskDuration as Epoch).split(':');
 
     return (
         <SummaryComponent
             id="times"
-            title="times" //
+            title={t('pilot_metric.times')} //
             width="120px"
-            main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: faStopwatch, description: 'elapsed time'}}
-            data1={{value: OptionalTime('', utcStart, tz), icon: faHourglassStart, description: 'start time'}}
+            main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: faStopwatch, description: t('pilot_metric.elapsed_time')}}
+            data1={{value: OptionalTime('', utcStart, tz), icon: faHourglassStart, description: t('pilot_metric.start_time')}}
             data2={{value: endTime, icon, description: description}}
         />
     );
-});
+}
 
-const HandicappedSpeedComponent = memo(function HandicappedSpeedComponent({
+function HandicappedSpeedComponent({
     utcFinish,
     handicappedTaskSpeed,
     actualTaskSpeed
@@ -243,16 +247,18 @@ const HandicappedSpeedComponent = memo(function HandicappedSpeedComponent({
     handicappedTaskSpeed: number;
     actualTaskSpeed: number;
 }) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             id="speed"
-            title="speed" //
-            main={{value: handicappedTaskSpeed, units: 'kph', icon: utcFinish ? faTrophy : faPaperPlane, description: 'handicapped speed'}}
-            data1={{value: actualTaskSpeed, units: 'kph', icon: faTachometerAlt, description: 'actual speed'}}
+            title={t('pilot_metric.speed')} //
+            main={{value: handicappedTaskSpeed, units: t('units.kph'), icon: utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.handicapped_speed')}}
+            data1={{value: actualTaskSpeed, units: t('units.kph'), icon: faTachometerAlt, description: t('pilot_metric.actual_speed')}}
         />
     );
-});
-const ActualSpeedComponent = memo(function ActualSpeedComponent({
+}
+
+function ActualSpeedComponent({
     utcFinish,
     actualTaskSpeed
 }: //
@@ -260,42 +266,45 @@ const ActualSpeedComponent = memo(function ActualSpeedComponent({
     utcFinish: Epoch;
     actualTaskSpeed: number;
 }) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="100px"
             id="speed"
-            title="speed" //
-            main={{value: actualTaskSpeed, units: 'kph', icon: utcFinish ? faTrophy : faPaperPlane, description: 'actual speed'}}
+            title={t('pilot_metric.speed')} //
+            main={{value: actualTaskSpeed, units: t('units.kph'), icon: utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.actual_speed')}}
         />
     );
-});
+}
 
 function HandicappedDistanceComponent({score}: {score: PilotScore}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="90px"
             id="hdistance"
-            title="distance" //
-            main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'handicapped distance done'}}
-            data1={{value: score.actual.taskDistance, units: 'km', icon: faRightFromBracket, description: 'actual distance done'}}
+            title={t('pilot_metric.distance')} //
+            main={{value: score.handicapped.taskDistance, units: t('units.km'), icon: score.utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.handicapped_distance')}}
+            data1={{value: score.actual.taskDistance, units: t('units.km'), icon: faRightFromBracket, description: t('pilot_metric.actual_distance')}}
             data2={{
                 value: !score.utcFinish ? (score.handicapped.distanceRemaining ?? score.handicapped.minPossible) : undefined,
-                units: 'km',
+                units: t('units.km'),
                 icon: faRightToBracket,
-                description: 'handicapped minimum distance remaining'
+                description: t('pilot_metric.handicapped_distance_remaining')
             }}
         />
     );
 }
 
 function ActualDistanceComponent({score}: {score: PilotScore}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="90px"
             id="distance"
-            title="distance" //
-            main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'actual distance done'}}
-            data1={{value: !score.utcFinish ? (score.actual.distanceRemaining ?? score.actual.minPossible) : undefined, units: 'km', icon: faRightToBracket, description: 'actual minimum distance remaining'}}
+            title={t('pilot_metric.distance')} //
+            main={{value: score.actual.taskDistance, units: t('units.km'), icon: score.utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.actual_distance')}}
+            data1={{value: !score.utcFinish ? (score.actual.distanceRemaining ?? score.actual.minPossible) : undefined, units: t('units.km'), icon: faRightToBracket, description: t('pilot_metric.actual_distance_remaining')}}
         />
     );
 }
@@ -313,29 +322,31 @@ function grBattery(gr: number): any {
     return faBatteryEmpty;
 }
 
-const HandicappedGRComponent = memo(function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
+function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="100px"
             id="hgr"
-            title="L/D" //
-            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : '∞', units: ' :1', icon: grBattery(handicappedGrRemaining), description: 'handicapped L/D remaining'}}
-            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
+            title={t('pilot_metric.ld')} //
+            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : '∞', units: ' ' + t('units.ratio'), icon: grBattery(handicappedGrRemaining), description: t('pilot_metric.handicapped_ld_remaining')}}
+            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: t('units.ratio'), icon: grBattery(actualGrRemaining), description: t('pilot_metric.actual_ld_remaining')}}
         />
     );
-});
+}
 
-const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining, homeGr}: {actualGrRemaining: number; homeGr: number}) {
+function ActualGRComponent({actualGrRemaining, homeGr}: {actualGrRemaining: number; homeGr: number}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="100px"
             id="gr"
-            title="L/D" //
-            main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
-            data1={{value: homeGr < 999 ? homeGr : '∞', units: ':1', icon: faHome, description: 'L/D to home'}}
+            title={t('pilot_metric.ld')} //
+            main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: t('units.ratio'), icon: grBattery(actualGrRemaining), description: t('pilot_metric.actual_ld_remaining')}}
+            data1={{value: homeGr < 999 ? homeGr : '∞', units: t('units.ratio'), icon: faHome, description: t('pilot_metric.ld_to_home')}}
         />
     );
-});
+}
 
 export const Details = ({
     compno,
@@ -352,10 +363,11 @@ export const Details = ({
     replayTime: Epoch | undefined;
     onEditHandicap?: (compno: Compno, handicap: number) => void;
 }) => {
+    const {t} = useTranslation('common');
     let competitionDelay = useMemo(() => {
         if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
             return (
-                <a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
+                <a href="#" title={t('pilot.view_delayed_official')} className="tooltipicon">
                     <span style={{color: 'grey'}}>
                         &nbsp;+&nbsp;
                         <FontAwesomeIcon icon={faClockRotateLeft} size="sm" />
@@ -365,7 +377,7 @@ export const Details = ({
             );
         }
         return null;
-    }, []);
+    }, [t]);
 
     // Get vario for specific time
     const vario = useSelector((state) => selectPilotVario(state, compno, replayTime));
@@ -427,7 +439,7 @@ export const Details = ({
                     <FontAwesomeIcon icon={faSignal} />{' '}
                 </>
             ) : null}
-            Altitude {displayHeight(vario.altitude, units)} (AGL {displayHeight(vario.agl, units)})
+            {t('pilot.altitude_with_agl', {altitude: displayHeight(vario.altitude, units), agl: displayHeight(vario.agl, units)})}
         </span>
     ) : null;
 
@@ -435,11 +447,11 @@ export const Details = ({
         flightDetails = <></>;
     } else if (!score?.utcStart) {
         if (score?.flightStatus == PositionStatus.Grid) {
-            flightDetails = <div>Gridded, waiting to fly</div>;
+            flightDetails = <div>{t('pilot.gridded_waiting')}</div>;
         } else {
             flightDetails = (
                 <div>
-                    No start reported yet
+                    {t('pilot.no_start')}
                     <ul className={statusClassName}>
                         <ClimbComponent vario={vario} units={!!units} />
                     </ul>
@@ -461,7 +473,7 @@ export const Details = ({
         if (score?.flightStatus == PositionStatus.Landed) {
             flightDetails = (
                 <div>
-                    Landed out
+                    {t('pilot.landed_out')}
                     <ul className={statusClassName}>{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
@@ -469,7 +481,7 @@ export const Details = ({
         } else if (score?.flightStatus == PositionStatus.Home) {
             flightDetails = (
                 <div>
-                    Landed back
+                    {t('pilot.landed_back')}
                     <ul className={statusClassName}>{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
@@ -493,7 +505,7 @@ export const Details = ({
 
     // Are we in coverage or not, keyed off uptodate
     const ognCoverage = score?.utcFinish ? (
-        'Finished' //
+        t('pilot.finished') //
     ) : replayTime ? (
         <span>
             &nbsp;
@@ -510,8 +522,8 @@ export const Details = ({
     ) : uptodate ? (
         <span>
             &nbsp;
-            <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
-                <FontAwesomeIcon icon={faSquareCheck} /> {Math.round(delay)}s delay
+            <a href="#" style={{color: 'black'}} title={t('pilot.view_in_coverage')} className="tooltipicon">
+                <FontAwesomeIcon icon={faSquareCheck} /> {t('pilot.view_delay', {seconds: Math.round(delay)})}
                 {process.env.NODE_ENV == 'development' && score ? ', ' + Math.round(latestUpdate - score?.t) + 's delay' + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
                 {process.env.NODE_ENV == 'development' ? (
                     <p>
@@ -523,17 +535,17 @@ export const Details = ({
     ) : (
         <span>
             &nbsp;
-            <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage" className="tooltipicon">
+            <a href="#" style={{color: 'grey'}} title={t('pilot.view_no_recent')} className="tooltipicon">
                 {(delay || Infinity) < 3600 ? (
                     <>
                         <FontAwesomeIcon icon={faSpinner} spin />
-                        &nbsp; Last point {delayToText(delay)} ago
+                        &nbsp; {t('pilot.view_last_point', {delay: delayToText(delay)})}
                     </>
                 ) : (
                     <>
                         <FontAwesomeIcon icon={faTriangleExclamation} />
                         &nbsp;
-                        {vario ? <>&gt;1 hour ago</> : <>No tracking yet</>}
+                        {vario ? <>{t('pilot.view_old')}</> : <>{t('pilot.view_no_signal')}</>}
                     </>
                 )}
                 {process.env.NODE_ENV == 'development' && score ? ', ' + delayToText(latestUpdate - score?.t) + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
@@ -549,7 +561,7 @@ export const Details = ({
     const flag =
         (pilot.country || '') !== '' ? (
             <div className="details-flag">
-                <a href="#" title={new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) || 'Country Code: ' + pilot.country} className="tooltipicon">
+                <a href="#" title={new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) || t('pilot.country_fallback', {country: pilot.country})} className="tooltipicon">
                     {isoCountryCodeToFlagEmoji(pilot.country)}
                 </a>
             </div>
@@ -571,7 +583,7 @@ export const Details = ({
                             size="xs"
                             style={{cursor: 'pointer', marginLeft: 4, opacity: 0.6}}
                             onClick={() => {
-                                const value = window.prompt('Enter handicap value (leave empty to clear):', pilot.handicap !== 100 ? String(pilot.handicap) : '');
+                                const value = window.prompt(t('pilot.edit_handicap_prompt'), pilot.handicap !== 100 ? String(pilot.handicap) : '');
                                 if (value === null) return;
                                 if (value.trim() === '') {
                                     onEditHandicap(compno, 100);
@@ -582,7 +594,7 @@ export const Details = ({
                                     }
                                 }
                             }}
-                            title="Edit handicap"
+                            title={t('pilot.edit_handicap')}
                         />
                     ) : null}
                 </span>

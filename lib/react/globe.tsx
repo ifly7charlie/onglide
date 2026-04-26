@@ -9,8 +9,12 @@ import {SphereGeometry} from '@luma.gl/engine';
 import {faEye} from '@fortawesome/free-solid-svg-icons';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
-import {STATUS_COLOURS, STATUS_LABELS, StatusIcon, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
+import {useTranslation} from 'next-i18next/pages';
+
+import {STATUS_COLOURS, STATUS_LABEL_KEYS, StatusIcon, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
 import {classKey, useStatusSummary, type StatusSummary} from './statusSummary';
+import {LanguageSwitcher} from './language-switcher';
+import {TranslationHelpFooter} from './translation-help-footer';
 
 // Earth radius in metres — matches the radius deck.gl's GlobeView uses
 // internally for its projection math, so a sphere mesh of this size lines
@@ -88,6 +92,7 @@ function computeInitialViewState(comps: Competition[]) {
 // Because the state is shared, marker and list are always visually in sync.
 //
 export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions: Competition[]; countriesGeoJson: any}) {
+    const {t} = useTranslation('common');
     const [highlightedCompid, setHighlightedCompid] = useState<string | null>(null);
 
     // Refs to each list entry, keyed by compid, so hovering/clicking a marker
@@ -311,15 +316,15 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
                         <span className="status-dot" style={{background: statusCss(s)}}>
                             <StatusIcon status={s} />
                         </span>
-                        {STATUS_LABELS[s]}
+                        {t(STATUS_LABEL_KEYS[s])}
                     </div>
                 ))}
             </div>
 
             <div className="map-attribution">
-                Land data:{' '}
+                {t('competition.land_data')}{' '}
                 <a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener noreferrer">
-                    Natural Earth
+                    {t('competition.natural_earth')}
                 </a>
             </div>
         </div>
@@ -344,9 +349,11 @@ function CompetitionListPanel({
     flyTo: (c: Competition) => void;
     entryRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
 }) {
-    if (!competitions.length) return null;
-
+    // All hooks must run on every render — call them before any early return,
+    // otherwise the hook order changes between renders and React errors out.
+    const {t} = useTranslation('common');
     const summary = useStatusSummary();
+    if (!competitions.length) return null;
 
     // Group competitions into Live / Upcoming so users can tell at a glance
     // which ones are clickable. Upcoming entries stay in the list (so pilots
@@ -365,12 +372,13 @@ function CompetitionListPanel({
         });
     const upcoming = competitions.filter((c) => c.displayStatus === 'upcoming');
 
-    const renderSection = (title: string, comps: Competition[], clickable: boolean, suffix?: React.ReactNode) => {
+    const renderSection = (titleKey: 'live' | 'upcoming', comps: Competition[], clickable: boolean, suffix?: React.ReactNode) => {
         if (!comps.length) return null;
+        const headerKey = titleKey === 'live' ? 'competition.live_count' : 'competition.upcoming_count';
         return (
             <>
                 <div className="sidepanel-section-header">
-                    {comps.length} {title}
+                    {t(headerKey, {count: comps.length})}
                     {suffix}
                 </div>
                 {comps.map((c) => (
@@ -402,17 +410,23 @@ function CompetitionListPanel({
 
     const liveSuffix = summary && summary.totals.pilots > 0 ? (
         <span className="sidepanel-section-stats">
-            {' · '}{summary.totals.pilots}/{liveRegistered} pilots · {summary.totals.flying} flying · {summary.totals.landed} landed
+            {t('competition.live_stats', {tracked: summary.totals.pilots, registered: liveRegistered, flying: summary.totals.flying, landed: summary.totals.landed})}
             {' · '}<FontAwesomeIcon icon={faEye} /> {summary.totals.viewers}
         </span>
     ) : null;
 
     return (
         <aside className="sidepanel sidepanel-globe">
-            <div className="sidepanel-brand">Onglide</div>
+            <div className="sidepanel-brand sidepanel-brand-row">
+                <span className="sidepanel-brand-text">{t('app.title')}</span>
+                <LanguageSwitcher className="sidepanel-brand-lang" />
+            </div>
             <div className="sidepanel-body">
-                {renderSection('Live', live, true, liveSuffix)}
-                {renderSection('Upcoming', upcoming, false)}
+                {renderSection('live', live, true, liveSuffix)}
+                {renderSection('upcoming', upcoming, false)}
+            </div>
+            <div className="sidepanel-footer">
+                <TranslationHelpFooter />
             </div>
         </aside>
     );
@@ -443,6 +457,7 @@ function CompetitionListEntry({
     onLeave: () => void;
     onClick: () => void;
 }) {
+    const {t} = useTranslation('common');
     const classes = comp.classes ?? [];
 
     // Competitions in their active window get a per-class breakdown with
@@ -458,8 +473,8 @@ function CompetitionListEntry({
     // "tracked/total pilots" when we have a live count for this comp/class;
     // otherwise just "total pilots".
     const formatPilotCount = (total: number, tracked: number | undefined) => {
-        if (typeof tracked === 'number') return `${tracked}/${total} pilots`;
-        return `${total} ${total === 1 ? 'pilot' : 'pilots'}`;
+        if (typeof tracked === 'number') return t('competition.tracked_pilots', {tracked, total});
+        return t('competition.pilot', {count: total});
     };
 
     return (
@@ -483,7 +498,7 @@ function CompetitionListEntry({
                           >
                               <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
                                   <StatusIcon status={cls.displayStatus} />
-                                  {STATUS_LABELS[cls.displayStatus]}
+                                  {t(STATUS_LABEL_KEYS[cls.displayStatus])}
                               </span>
                               <span className="name">{cls.classname}</span>
                               <span className="count">{formatPilotCount(cls.pilotCount, classTracked)}</span>
@@ -494,9 +509,9 @@ function CompetitionListEntry({
                     <div className="entry-rollup">
                         <span className="status-pill" style={{background: statusCss(comp.displayStatus)}}>
                             <StatusIcon status={comp.displayStatus} />
-                            {STATUS_LABELS[comp.displayStatus]}
+                            {t(STATUS_LABEL_KEYS[comp.displayStatus])}
                         </span>
-                        {comp.classCount} {comp.classCount === 1 ? 'class' : 'classes'}
+                        {t('competition.class', {count: comp.classCount})}
                         {totalPilots > 0 ? (
                             <>
                                 {' · '}

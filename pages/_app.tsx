@@ -1,6 +1,7 @@
 'use client';
 
 import Head from 'next/head';
+import {appWithTranslation} from 'next-i18next/pages';
 
 import '@fortawesome/fontawesome-svg-core/styles.css';
 import {config} from '@fortawesome/fontawesome-svg-core';
@@ -62,7 +63,7 @@ export function useOptions() {
 }
 
 // This default export is required in a new `pages/_app.js` file.
-export default function MyApp({Component, pageProps}) {
+function MyApp({Component, pageProps}) {
     const [options, setOptions] = useOptions();
     return (
         <>
@@ -73,3 +74,5 @@ export default function MyApp({Component, pageProps}) {
         </>
     );
 }
+
+export default appWithTranslation(MyApp);

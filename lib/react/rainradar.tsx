@@ -3,6 +3,8 @@
 //
 
 import {useEffect, useState} from 'react';
+import {useRouter} from 'next/router';
+import {useTranslation} from 'next-i18next/pages';
 //import Source from '../lib/source';
 import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
 
@@ -10,6 +12,9 @@ import {maxBy as _maxby} from 'lodash';
 import type {Options, TZ} from '../types';
 
 export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
+    const {t} = useTranslation('common');
+    const router = useRouter();
+    const lang = router.locale ?? 'en';
     const [radarTileURL, setURL] = useState<string>();
     const [radarTime, setTime] = useState<string>();
 

@@ -1,4 +1,5 @@
 import {useMeasure} from './measure';
+import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {cloneDeep as _cloneDeep} from 'lodash';
 
@@ -23,6 +24,7 @@ import type {Options as OptionsType} from '../types';
 
 export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean}) {
     const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
+    const {t} = useTranslation('common', {keyPrefix: 'options'});
 
     const radarFunction = () => {
         let nextRadar = props.options.rainRadarAdvance + 1;
@@ -74,11 +76,11 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
     return (
         <div className="options">
             {measureEnabled ? (
-                <button title="Click to measure" onClick={toggleMeasure}>
+                <button title={t('click_to_measure')} onClick={toggleMeasure}>
                     <FontAwesomeIcon icon={faRuler} />
                 </button>
             ) : (
-                <button title="Click to stop measuring" onClick={toggleMeasure}>
+                <button title={t('click_to_stop_measuring')} onClick={toggleMeasure}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={faSlash} />
                         <FontAwesomeIcon icon={faRuler} />
@@ -105,11 +107,11 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             &nbsp;
             */}
             {props.options.constructionLines ? (
-                <button title="Click to hide Construction Lines" onClick={constructionLines}>
+                <button title={t('construction_lines_hide')} onClick={constructionLines}>
                     <FontAwesomeIcon icon={faCompassDrafting} />
                 </button>
             ) : (
-                <button title="Click to show Construction Lines" onClick={constructionLines}>
+                <button title={t('construction_lines_show')} onClick={constructionLines}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={faSlash} />
                         <FontAwesomeIcon icon={faCompassDrafting} />
@@ -118,44 +120,44 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             )}
             &nbsp;
             {props.options.map2d ? (
-                <button title="Displaying 2D, Click to switch to 3D" onClick={toggle2d}>
+                <button title={t('switch_to_3d')} onClick={toggle2d}>
                     <FontAwesomeIcon icon={faMap} />{' '}
                 </button>
             ) : (
-                <button title="Displaying 3D, Click to switch to 2D" onClick={toggle2d}>
+                <button title={t('switch_to_2d')} onClick={toggle2d}>
                     <FontAwesomeIcon icon={faGlobe} />
                 </button>
             )}
             {false ? <br className="smallScreen" /> : null}
             {props.options.mapType ? (
-                <button title="Displaying road map, Click to switch to satellite map" onClick={toggleSatellite}>
+                <button title={t('satellite_to_road')} onClick={toggleSatellite}>
                     <FontAwesomeIcon icon={faRoad} />
                 </button>
             ) : (
-                <button title="Displaying satellite map, Click to switch to road map" onClick={toggleSatellite}>
+                <button title={t('road_to_satellite')} onClick={toggleSatellite}>
                     <FontAwesomeIcon icon={faSatellite} />
                 </button>
             )}
             {
                 [
-                    <button title="Map orientation is currently locked to North Up, Change to Task Track Up when following" onClick={toggleTaskUp}>
+                    <button title={t('north_up')} onClick={toggleTaskUp}>
                         <FontAwesomeIcon icon={faCompass} transform={{rotate: -45}} />
                     </button>,
-                    <button title="Follow orientation is currently Task Track Up, Change to Manual (user controlled)" onClick={toggleTaskUp}>
+                    <button title={t('task_track_up')} onClick={toggleTaskUp}>
                         <FontAwesomeIcon icon={faPersonArrowUpFromLine} />
                     </button>,
-                    <button title="Follow orientation is currently Manual (user controlled), Change to be always North Up" onClick={toggleTaskUp}>
+                    <button title={t('manual_orientation')} onClick={toggleTaskUp}>
                         <FontAwesomeIcon icon={faHandPointer} />
                     </button>
                 ][props.options.taskUp || 0]
             }
             &nbsp;
             {props.options.follow ? (
-                <button title="Will follow selected pilot, Click to leave map alone when selecting a pilot" onClick={toggleFollow}>
+                <button title={t('follow_pilot')} onClick={toggleFollow}>
                     <FontAwesomeIcon icon={faLocationCrosshairs} />
                 </button>
             ) : (
-                <button title="Do not follow selected pilot, Click to follow" onClick={toggleFollow}>
+                <button title={t('follow_disabled')} onClick={toggleFollow}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={faSlash} />
                         <FontAwesomeIcon icon={faLocationCrosshairs} />
@@ -165,32 +167,32 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             &nbsp;
             {
                 [
-                    <button title="Show recent paths for all pilots" onClick={toggleFullPaths}>
+                    <button title={t('paths_recent')} onClick={toggleFullPaths}>
                         <span className="fa-layers">
                             <FontAwesomeIcon icon={faSlash} />
                             <FontAwesomeIcon icon={faRoute} />
                         </span>
                     </button>,
-                    <button title="Show full path for selected pilot" onClick={toggleFullPaths}>
+                    <button title={t('paths_selected_full')} onClick={toggleFullPaths}>
                         <span className="fa-layers">
                             <FontAwesomeIcon icon={faRoute} />
                             <FontAwesomeIcon icon={fa1} transform="shrink-8 left-4 up-4" />
                         </span>
                     </button>,
-                    <button title="Show full paths for all pilots" onClick={toggleFullPaths}>
+                    <button title={t('paths_all_full')} onClick={toggleFullPaths}>
                         <FontAwesomeIcon icon={faRoute} />
                     </button>
                 ][props.options.fullPaths || 0]
             }
             &nbsp;
             {!props.multipleClasses ? null : props.options.showOthers ? (
-                <button title="Showing gliders from other classes, click to only show current class" onClick={toggleShowOthers}>
+                <button title={t('show_other_classes')} onClick={toggleShowOthers}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={faUsers} />
                     </span>
                 </button>
             ) : (
-                <button title="Show selected class only, click to show other classes as well" onClick={toggleShowOthers}>
+                <button title={t('show_only_current')} onClick={toggleShowOthers}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={faSlash} />
                         <FontAwesomeIcon icon={faUsers} />
@@ -199,11 +201,11 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             )}
             &nbsp;
             {props.options.units ? (
-                <button title="Switch to metric units" onClick={toggleUnits} className="units-toggle">
+                <button title={t('switch_to_metric')} onClick={toggleUnits} className="units-toggle">
                     ft
                 </button>
             ) : (
-                <button title="Switch to imperial units" onClick={toggleUnits} className="units-toggle">
+                <button title={t('switch_to_imperial')} onClick={toggleUnits} className="units-toggle">
                     m
                 </button>
             )}

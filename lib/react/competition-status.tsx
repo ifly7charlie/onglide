@@ -31,15 +31,18 @@ export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, n
     yesterday: [100, 140, 170, 255]
 };
 
-export const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
-    task_set: 'Task set',
-    launching: 'Launching',
-    started: 'Racing',
-    landed: 'Landed',
-    home: 'Home',
-    notask: 'No task yet',
-    upcoming: 'Upcoming',
-    yesterday: 'Yesterday'
+// Maps each display status to its translation key under the `task_status`
+// namespace in common.json. Callers should pass these keys through `t()`
+// (or use the `useStatusLabel` helper) to render them.
+export const STATUS_LABEL_KEYS: Record<CompetitionDisplayStatus, string> = {
+    task_set: 'task_status.task_set',
+    launching: 'task_status.launching',
+    started: 'task_status.racing',
+    landed: 'task_status.landed',
+    home: 'task_status.home',
+    notask: 'task_status.no_task',
+    upcoming: 'task_status.upcoming',
+    yesterday: 'task_status.yesterday'
 };
 
 export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {

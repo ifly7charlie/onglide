@@ -1,5 +1,7 @@
 import {useState, useCallback, useRef, useMemo, useEffect} from 'react';
 import Head from 'next/head';
+import {useTranslation} from 'next-i18next/pages';
+import {serverSideTranslations} from 'next-i18next/pages/serverSideTranslations';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faFileArrowUp, faPlane, faMagnifyingGlassLocation, faCaretUp, faCaretDown, faCopy, faRotateLeft, faArrowsRotate} from '@fortawesome/free-solid-svg-icons';
@@ -49,6 +51,14 @@ const MApp = dynamic(() => import('../lib/react/deckgl').then((mod) => mod), {
         </div>
     )
 });
+
+export async function getStaticProps({locale}: {locale?: string}) {
+    return {
+        props: {
+            ...(await serverSideTranslations(locale ?? 'en', ['common']))
+        }
+    };
+}
 
 const VC = 'View' as ClassName;
 const TZ_DEFAULT = 'Etc/UTC' as TZ;
@@ -113,6 +123,7 @@ function ViewPlaybackControls({
     setReplayTime: (t: Epoch | undefined) => void;
     tz: TZ;
 }) {
+    const {t} = useTranslation('common');
     const latestTrackUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4);
     const replayEndTime = latestTrackUpdate || latestScore;
 
@@ -157,7 +168,7 @@ function ViewPlaybackControls({
                     onChange={(_, value) => doSetTime(value as Epoch)}
                 />
                 <BoxAfter>
-                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>End</TinyText>}
+                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>{t('connection.end')}</TinyText>}
                     <TinyText>+{formatDuration(replayEndTime - earliestScore)}</TinyText>
                 </BoxAfter>
             </Widget>
@@ -167,12 +178,13 @@ function ViewPlaybackControls({
 
 export default function ViewPage(props) {
     const [store] = useState(createViewStore);
+    const {t} = useTranslation('common');
 
     return (
         <Provider store={store}>
             <MeasureContext>
                 <Head>
-                    <title>OnGlide IGC Viewer</title>
+                    <title>{t('app.viewer_title')}</title>
                 </Head>
                 <ViewPageInner options={props.options} setOptions={props.setOptions} />
             </MeasureContext>
@@ -183,6 +195,7 @@ export default function ViewPage(props) {
 function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions: Function}) {
     const dispatch = useDispatch();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const {t} = useTranslation('common');
 
     const [flights, setFlights] = useState<LoadedFlight[]>([]);
     const [taskBuilt, setTaskBuilt] = useState(false);
@@ -264,7 +277,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     const igcData = parseIGC(text);
 
                     if (!igcData.fixes.length) {
-                        setError(`No fixes found in ${file.name}`);
+                        setError(t('viewer.no_fixes', {file: file.name}));
                         continue;
                     }
 
@@ -344,13 +357,13 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     setSelectedCompno(newFlights[0].compno);
                 }
             } catch (e) {
-                setError(e instanceof Error ? e.message : 'Error processing file');
+                setError(e instanceof Error ? e.message : t('viewer.error_processing'));
                 console.error(e);
             } finally {
                 setProcessing(false);
             }
         },
-        [dispatch, taskBuilt, selectedCompno, availableScores, options, setOptions]
+        [dispatch, taskBuilt, selectedCompno, availableScores, options, setOptions, t]
     );
 
     const handleFileInput = useCallback(
@@ -416,12 +429,12 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                 }
             }
         } catch (e) {
-            setError(e instanceof Error ? e.message : 'Error rescoring');
+            setError(e instanceof Error ? e.message : t('viewer.error_rescoring'));
             console.error(e);
         } finally {
             setProcessing(false);
         }
-    }, [dispatch, flights]);
+    }, [dispatch, flights, t]);
 
     const handleSetHandicap = useCallback((compno: Compno, handicap: number) => {
         setHandicaps((prev) => {
@@ -481,8 +494,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     onClick={() => fileInputRef.current?.click()}
                 >
                     <FontAwesomeIcon icon={faFileArrowUp} size="3x" style={{opacity: 0.3, marginBottom: 16}} />
-                    <p style={{fontSize: '1.2rem', opacity: 0.6}}>Drop IGC files here or click to browse</p>
-                    {processing && <p>Processing...</p>}
+                    <p style={{fontSize: '1.2rem', opacity: 0.6}}>{t('viewer.drop_or_browse')}</p>
+                    {processing && <p>{t('viewer.processing')}</p>}
                     {error && <p style={{color: 'red'}}>{error}</p>}
                 </div>
             ) : (
@@ -503,15 +516,15 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             setViewport={setViewport}
                             selectedCompno={selectedCompno}
                             selectedHandicap={selectedCompno ? (handicaps[selectedCompno] ?? 100) : 100}
-                            status={`${flights.length} flight${flights.length > 1 ? 's' : ''} loaded`}
+                            status={t('viewer.flights_loaded', {count: flights.length})}
                         />
                     </div>
                     <aside className="sidepanel" key="results">
                         <div className="sidepanel-header">
                             <FontAwesomeIcon icon={faPlane} />
                             <div className="sidepanel-title">
-                                <div className="sidepanel-comp-name">OnGlide IGC Viewer</div>
-                                <div className="sidepanel-comp-dates">{flights.length} flight{flights.length > 1 ? 's' : ''} loaded</div>
+                                <div className="sidepanel-comp-name">{t('app.viewer_title')}</div>
+                                <div className="sidepanel-comp-dates">{t('viewer.flights_loaded', {count: flights.length})}</div>
                             </div>
                         </div>
                         <div className="sidepanel-tools">
@@ -523,17 +536,21 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                     {error}
                                 </div>
                             )}
-                            {processing && <div className="sidepanel-section">Processing files...</div>}
+                            {processing && <div className="sidepanel-section">{t('viewer.processing_files')}</div>}
                             {task && (
                                 <div className="sidepanel-section">
                                     <h5 className="task-heading">
-                                        <button title="Zoom to task" onClick={fitBounds as any}>
+                                        <button title={t('task.zoom_to_task')} onClick={fitBounds as any}>
                                             <FontAwesomeIcon icon={faMagnifyingGlassLocation} />
                                         </button>
                                         <span className="task-title">
-                                            {task.rules.aat ? (task.details.duration?.substring(1, 5) !== '0:00' ? `${task.details.duration?.substring(1, 5)} hour Assigned Area Task` : 'Assigned Area Task') : `${task.details.distance}km Speed Task`}
+                                            {task.rules.aat
+                                                ? task.details.duration?.substring(1, 5) !== '0:00'
+                                                    ? t('task.aat_with_duration', {duration: task.details.duration?.substring(1, 5)})
+                                                    : t('task.aat')
+                                                : t('task.speed_with_distance', {distance: task.details.distance})}
                                         </span>
-                                        <button onClick={() => setTaskOpen(!taskOpen)} title={taskOpen ? 'Hide Task Details' : 'Show Task Details'} aria-controls="view-task-collapse" aria-expanded={taskOpen}>
+                                        <button onClick={() => setTaskOpen(!taskOpen)} title={taskOpen ? t('task.hide_details') : t('task.show_details')} aria-controls="view-task-collapse" aria-expanded={taskOpen}>
                                             <FontAwesomeIcon icon={taskOpen ? faCaretUp : faCaretDown} />
                                         </button>
                                     </h5>
@@ -542,10 +559,10 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                             <table className="legs-mini" style={{marginBottom: 0}}>
                                                 <thead>
                                                     <tr>
-                                                        <td colSpan={2}>Turnpoint</td>
-                                                        <td>Bearing</td>
-                                                        <td>Leg Length</td>
-                                                        <td>TP Radius</td>
+                                                        <td colSpan={2}>{t('task.turnpoint')}</td>
+                                                        <td>{t('task.bearing')}</td>
+                                                        <td>{t('task.leg_length')}</td>
+                                                        <td>{t('task.tp_radius')}</td>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -591,13 +608,13 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         </div>
                         <div className="sidepanel-footer" style={{display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap'}}>
                             <span style={{cursor: 'pointer', opacity: 0.7}} onClick={() => fileInputRef.current?.click()}>
-                                <FontAwesomeIcon icon={faFileArrowUp} /> Add more flights
+                                <FontAwesomeIcon icon={faFileArrowUp} /> {t('viewer.add_more')}
                             </span>
-                            <span style={{cursor: processing ? 'default' : 'pointer', opacity: processing ? 0.3 : 0.7}} onClick={processing ? undefined : handleRescore} title="Re-run scoring on all loaded flights">
-                                <FontAwesomeIcon icon={faArrowsRotate} /> Rescore
+                            <span style={{cursor: processing ? 'default' : 'pointer', opacity: processing ? 0.3 : 0.7}} onClick={processing ? undefined : handleRescore} title={t('viewer.rescore_title')}>
+                                <FontAwesomeIcon icon={faArrowsRotate} /> {t('viewer.rescore')}
                             </span>
-                            <span style={{cursor: 'pointer', opacity: 0.7}} onClick={handleReset} title="Clear all flights and start over">
-                                <FontAwesomeIcon icon={faRotateLeft} /> Reset
+                            <span style={{cursor: 'pointer', opacity: 0.7}} onClick={handleReset} title={t('viewer.reset_title')}>
+                                <FontAwesomeIcon icon={faRotateLeft} /> {t('viewer.reset')}
                             </span>
                             {allScores && Object.keys(allScores).length > 0 && (
                                 <span
@@ -609,9 +626,9 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                         }, {});
                                         navigator.clipboard.writeText(JSON.stringify(dump, null, 2));
                                     }}
-                                    title="Copy current scores as JSON to clipboard"
+                                    title={t('viewer.copy_scores_title')}
                                 >
-                                    <FontAwesomeIcon icon={faCopy} /> Copy Scores
+                                    <FontAwesomeIcon icon={faCopy} /> {t('viewer.copy_scores')}
                                 </span>
                             )}
                         </div>
