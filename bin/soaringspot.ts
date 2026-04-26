@@ -1057,7 +1057,7 @@ async function process_day_task(day, classid, classname, keys) {
         // if they are marked as flying etc. If the day is cancelled we want that updated here as well
         // Status not used at present but a way of keeping track of if they are flying etc.
         .query(() => {
-            if (day.result_status != 'cancelled') return ["UPDATE compstatus SET status='B' WHERE class=? AND datecode=? AND status NOT IN ( 'L', 'S', 'R', 'H', 'Z' )", [classid, toDateCode(date)]];
+            if (day.result_status != 'cancelled') return ["UPDATE compstatus SET status='B' WHERE class=? AND datecode=? AND status NOT IN ( 'L', 'S', 'R', 'F', 'H', 'Z' )", [classid, toDateCode(date)]];
             else return ["UPDATE compstatus SET status='Z' WHERE class=? AND datecode=?", [classid, toDateCode(date)]];
         })
 
