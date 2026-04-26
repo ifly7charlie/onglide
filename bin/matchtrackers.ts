@@ -29,12 +29,46 @@ const mysql = Mysql({
     }
 });
 
+const HTTP_UA = 'onglide-matchtrackers/1.0 (https://github.com/ifly7charlie/onglide)';
+const NEARBY_RADIUS_KM = 30;
+
 interface AutocompEntry {
     code: string;
     elevation: number;
     id: number;
     name: string;
     tz: string;
+}
+
+interface NominatimResult {
+    lat: string;
+    lon: string;
+    display_name: string;
+}
+
+interface OverpassElement {
+    type: 'node' | 'way' | 'relation';
+    id: number;
+    lat?: number;
+    lon?: number;
+    center?: {lat: number; lon: number};
+    tags?: Record<string, string>;
+}
+
+interface OsmAerodrome {
+    name: string;
+    icao?: string;
+    iata?: string;
+    lat: number;
+    lon: number;
+    distanceKm: number;
+    aerowayType: string;
+}
+
+interface ResolvedAirfield {
+    autocomp: AutocompEntry;
+    osm: OsmAerodrome;
+    matchedVia: 'icao' | 'iata' | 'name';
 }
 
 interface LogbookDevice {
@@ -115,6 +149,133 @@ async function logbook(code: string): Promise<Logbook> {
     return (await r.json()) as Logbook;
 }
 
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+async function geocode(name: string): Promise<{lat: number; lon: number; displayName: string} | null> {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1`;
+    const r = await fetch(url, {headers: {'User-Agent': HTTP_UA}});
+    if (!r.ok) {
+        console.log(`  Nominatim HTTP ${r.status}`);
+        return null;
+    }
+    const json = (await r.json()) as NominatimResult[];
+    if (!json?.length) return null;
+    return {lat: parseFloat(json[0].lat), lon: parseFloat(json[0].lon), displayName: json[0].display_name};
+}
+
+async function nearbyAerodromes(lat: number, lon: number, radiusKm: number): Promise<OsmAerodrome[]> {
+    const r = Math.round(radiusKm * 1000);
+    const q = `[out:json][timeout:25];
+(
+  node["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
+  way["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
+  relation["aeroway"~"^(aerodrome|airstrip)$"](around:${r},${lat},${lon});
+);
+out center tags;`;
+    const resp = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': HTTP_UA},
+        body: 'data=' + encodeURIComponent(q)
+    });
+    if (!resp.ok) {
+        console.log(`  Overpass HTTP ${resp.status}`);
+        return [];
+    }
+    const json = (await resp.json()) as {elements: OverpassElement[]};
+    const out: OsmAerodrome[] = [];
+    for (const el of json.elements || []) {
+        const tags = el.tags || {};
+        const name = tags.name || tags['name:en'] || tags.icao || tags.iata;
+        if (!name) continue;
+        const elat = el.lat ?? el.center?.lat;
+        const elon = el.lon ?? el.center?.lon;
+        if (elat == null || elon == null) continue;
+        out.push({
+            name,
+            icao: tags.icao,
+            iata: tags.iata,
+            lat: elat,
+            lon: elon,
+            distanceKm: haversineKm(lat, lon, elat, elon),
+            aerowayType: tags.aeroway || ''
+        });
+    }
+    out.sort((a, b) => a.distanceKm - b.distanceKm);
+    return out;
+}
+
+async function resolveOgnCandidates(osms: OsmAerodrome[]): Promise<ResolvedAirfield[]> {
+    const byCode = new Map<string, ResolvedAirfield>();
+    for (const osm of osms) {
+        const tries: Array<{key: string; via: ResolvedAirfield['matchedVia']}> = [];
+        if (osm.icao) tries.push({key: osm.icao, via: 'icao'});
+        if (osm.iata) tries.push({key: osm.iata, via: 'iata'});
+        tries.push({key: osm.name, via: 'name'});
+
+        for (const t of tries) {
+            let list: AutocompEntry[] = [];
+            try {
+                list = await autocomp(t.key);
+            } catch (e) {
+                console.log(`    autocomp(${t.via}="${t.key}") errored: ${(e as Error).message}`);
+                continue;
+            }
+            console.log(`    autocomp(${t.via}="${t.key}") → ${list.length}${list.length ? ' [' + list.map((l) => l.code).join(', ') + ']' : ''}`);
+            if (!list.length) continue;
+            const exact = t.via !== 'name' ? list.find((l) => norm(l.code) === norm(t.key)) : undefined;
+            const pick = exact || list[0];
+            const entry: ResolvedAirfield = {autocomp: pick, osm, matchedVia: t.via};
+            const existing = byCode.get(pick.code);
+            if (!existing || osm.distanceKm < existing.osm.distanceKm) {
+                byCode.set(pick.code, entry);
+            }
+            break;
+        }
+    }
+    return Array.from(byCode.values()).sort((a, b) => a.osm.distanceKm - b.osm.distanceKm);
+}
+
+async function resolveBySitename(sitename: string): Promise<ResolvedAirfield[]> {
+    const search = sitename.trim();
+    if (!search) return [];
+
+    console.log(`\nGeocoding "${search}" via Nominatim...`);
+    const geo = await geocode(search).catch((e) => {
+        console.log(`  Nominatim error: ${(e as Error).message}`);
+        return null;
+    });
+    if (!geo) {
+        console.log('  no result — falling back to text search');
+        return [];
+    }
+    console.log(`  → ${geo.lat.toFixed(4)}, ${geo.lon.toFixed(4)}  (${geo.displayName})`);
+
+    console.log(`Querying Overpass for aeroway=aerodrome|airstrip within ${NEARBY_RADIUS_KM} km...`);
+    const osms = await nearbyAerodromes(geo.lat, geo.lon, NEARBY_RADIUS_KM).catch((e) => {
+        console.log(`  Overpass error: ${(e as Error).message}`);
+        return [] as OsmAerodrome[];
+    });
+    if (!osms.length) {
+        console.log('  no aerodromes found — falling back to text search');
+        return [];
+    }
+    console.log(`  → ${osms.length} OSM aerodrome${osms.length === 1 ? '' : 's'}:`);
+    for (const o of osms) {
+        const codes = [o.icao, o.iata].filter(Boolean).join('/') || '-';
+        console.log(`     ${o.distanceKm.toFixed(1).padStart(5)} km  ${o.name}  [${codes}]  (aeroway=${o.aerowayType})`);
+    }
+
+    console.log('Resolving OGN codes...');
+    return await resolveOgnCandidates(osms);
+}
+
 async function pickCompetition(): Promise<CompetitionRow> {
     // Limit to competitions whose date window contains today. NULL dates are
     // kept in the list so a comp without full metadata doesn't silently
@@ -151,7 +312,7 @@ async function pickCompetition(): Promise<CompetitionRow> {
     return rows[idx];
 }
 
-async function pickAirfield(initial?: string | null): Promise<AutocompEntry> {
+async function pickAirfieldByName(initial?: string | null): Promise<AutocompEntry> {
     const {name} = await prompts(
         {
             type: 'text',
@@ -194,6 +355,38 @@ async function pickAirfield(initial?: string | null): Promise<AutocompEntry> {
         {onCancel}
     );
     return list[idx];
+}
+
+async function pickAirfield(comp: CompetitionRow): Promise<AutocompEntry> {
+    const candidates = comp.sitename ? await resolveBySitename(comp.sitename) : [];
+
+    if (candidates.length) {
+        console.log(`\n${candidates.length} OGN airfield${candidates.length === 1 ? '' : 's'} resolved near "${comp.sitename}":`);
+        for (const c of candidates) {
+            console.log(`   ${c.osm.distanceKm.toFixed(1).padStart(5)} km  ${c.autocomp.code} — ${c.autocomp.name}  (via ${c.matchedVia})`);
+        }
+        const choices = candidates.map((c, i) => ({
+            title: `${c.autocomp.code} — ${c.autocomp.name}  (${c.osm.distanceKm.toFixed(1)} km, ${c.matchedVia})`,
+            value: i
+        }));
+        choices.push({title: '— search by name instead —', value: -1});
+        const {idx} = await prompts(
+            {
+                type: 'select',
+                name: 'idx',
+                message: 'Select airfield',
+                choices,
+                initial: 0
+            },
+            {onCancel}
+        );
+        if (typeof idx === 'number' && idx >= 0) return candidates[idx].autocomp;
+    }
+
+    // Fall back to free-text search; seed with sitename minus anything after a comma
+    // (e.g. "Lasham, Hampshire" → "Lasham") so the user usually just hits enter.
+    const hint = comp.sitename ? comp.sitename.split(',')[0].trim() : null;
+    return await pickAirfieldByName(hint);
 }
 
 async function loadPilots(compid: string): Promise<PilotRow[]> {
@@ -383,10 +576,7 @@ async function main() {
     mysql.connect();
 
     const comp = await pickCompetition();
-    // Strip after the first comma: the sitename is often "Lasham, Hampshire"
-    // but the OGN autocomp wants just the airfield name.
-    const airfieldHint = comp.sitename ? comp.sitename.split(',')[0].trim() : null;
-    const airfield = await pickAirfield(airfieldHint);
+    const airfield = await pickAirfield(comp);
     console.log(`\nFetching logbook for ${airfield.code} (${airfield.name})...`);
     const lb = await logbook(airfield.code);
     const devices = lb?.devices || [];
