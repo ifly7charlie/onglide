@@ -1646,38 +1646,17 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         // sparse tracker coverage can't justify a "landed" verdict for the whole class.
         const trackedByClass = new Map<ClassName, CTrackerRow[]>();
         const totalScoredByClass = new Map<ClassName, number>();
-        // Per-class counts across *all* pilots (any scoredStatus) so we can
-        // detect classes where the official scorer has already finalised
-        // every pilot (scoredStatus F/H). Those classes never enter the
-        // per-class loop below because trackedByClass requires 'S', so we
-        // promote them to compstatus 'H' separately.
-        const totalByClass = new Map<ClassName, number>();
-        const terminalByClass = new Map<ClassName, number>();
         for (const t of cTrackers) {
-            totalByClass.set(t.className, (totalByClass.get(t.className) || 0) + 1);
-            if (t.scoredStatus === 'F' || t.scoredStatus === 'H') {
-                terminalByClass.set(t.className, (terminalByClass.get(t.className) || 0) + 1);
-            }
-            if (t.scoredStatus !== 'S') continue;
+            // Include pilots the official scorer has finalised (F/H) as well
+            // as those still being scored ('S'). Excluding F/H meant that a
+            // class where every tracked pilot was already finalised dropped
+            // out of the per-class loop entirely, leaving compstatus stuck.
+            if (t.scoredStatus !== 'S' && t.scoredStatus !== 'F' && t.scoredStatus !== 'H') continue;
             totalScoredByClass.set(t.className, (totalScoredByClass.get(t.className) || 0) + 1);
             if (t.dbTrackerId) {
                 const list = trackedByClass.get(t.className) || [];
                 list.push(t);
                 trackedByClass.set(t.className, list);
-            }
-        }
-        // Classes where every pilot has a terminal scoredStatus (F/H from
-        // the official scorer) should be 'H' regardless of whether the
-        // per-class loop fires for them.
-        for (const [className, total] of totalByClass) {
-            if (total > 0 && terminalByClass.get(className) === total) {
-                db.query(`UPDATE compstatus SET status = 'H' WHERE class = ? AND status IN ('L', 'S', 'F')`, [className])
-                    .then((r: any) => {
-                        if (r?.affectedRows) {
-                            console.log(`compstatus -> H for ${className}: all ${total} pilots have terminal scoredStatus`);
-                        }
-                    })
-                    .catch((e: any) => console.log(`compstatus H update failed:`, e));
             }
         }
         // Derive the highest applicable compstatus state for each class from the live
@@ -1689,14 +1668,19 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             const totalScored = totalScoredByClass.get(className) || 0;
             const trackerCoverage = totalScored > 0 ? scored.length / totalScored : 0;
 
-            // Only consider tracked pilots that have actually reported a flight
-            // status — a tracker that's never produced a score shouldn't block
-            // the class from going H, and shouldn't trigger H either.
+            // A pilot counts toward the H decision if either the live scorer
+            // has produced a meaningful flightStatus, or the official scorer
+            // has finalised them (scoredStatus F/H). A tracker with neither
+            // (flightStatus Unknown and scoredStatus 'S') shouldn't block H
+            // and shouldn't trigger it either.
+            const isTerminalScored = (p: CTrackerRow) => p.scoredStatus === 'F' || p.scoredStatus === 'H';
             const withStatus = scored.filter((p) => {
+                if (isTerminalScored(p)) return true;
                 const fs = channel?.allScores[p.compno]?.flightStatus;
                 return fs !== undefined && fs !== PositionStatus.Unknown;
             });
             const allLanded = withStatus.length > 0 && withStatus.every((p) => {
+                if (isTerminalScored(p)) return true;
                 const fs = channel!.allScores[p.compno]!.flightStatus;
                 return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
             });
