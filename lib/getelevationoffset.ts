@@ -120,7 +120,11 @@ async function _getElevationOffset(lat, lng, cb) {
             })
             .catch((err) => {
                 // We still call the callback on an error as we don't want to drop the packet
-                console.error('unable to read elevation: ' + err);
+                // Node's fetch wraps the real network error on err.cause (ENOTFOUND, ECONNRESET,
+                // ETIMEDOUT, UND_ERR_*, TLS errors, etc.) — surface it so the log is actionable.
+                const cause = err && err.cause;
+                const causeStr = cause ? ` (cause: ${cause.code || cause.name || ''} ${cause.message || cause})`.trimEnd() : '';
+                console.error(`unable to read elevation for ${url}: ${err}${causeStr}`);
                 pending[url].forEach((cbp) => cbp(0));
                 delete pending[url];
             });
