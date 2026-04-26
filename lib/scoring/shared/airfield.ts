@@ -65,6 +65,7 @@ export interface NominatimGeocode {
     lon: number;
     displayName: string;
     countryCode?: string; // ISO-3166-1 alpha-2, uppercased
+    source: 'nominatim' | 'wikidata';
 }
 
 interface NominatimResult {
@@ -116,7 +117,65 @@ export async function geocodeNominatim(name: string): Promise<NominatimGeocode |
         lat: parseFloat(r.lat),
         lon: parseFloat(r.lon),
         displayName: r.display_name,
-        countryCode: r.address?.country_code ? r.address.country_code.toUpperCase() : undefined
+        countryCode: r.address?.country_code ? r.address.country_code.toUpperCase() : undefined,
+        source: 'nominatim'
+    };
+}
+
+interface SparqlBinding {
+    item: {value: string};
+    itemLabel?: {value: string};
+    lat: {value: string};
+    lon: {value: string};
+    cc?: {value: string};
+}
+
+// Wikidata fallback for sitenames Nominatim doesn't know about — typical
+// of German micro-toponyms like "Garbenheimer Wiesen" which exist as
+// Wikidata items (e.g. Q126164412 "Garbenheimer Wiesen gliding site")
+// with P625 coordinate-location and P17 → P297 country ISO code, but
+// have no OSM place feature for Nominatim to anchor on. Free, no API
+// key, just a User-Agent.
+export async function geocodeWikidata(name: string): Promise<NominatimGeocode | null> {
+    const escName = name.replace(/[\\"]/g, '\\$&');
+    const query = `SELECT ?item ?itemLabel ?lat ?lon ?cc WHERE {
+  SERVICE wikibase:mwapi {
+    bd:serviceParam wikibase:api "EntitySearch".
+    bd:serviceParam wikibase:endpoint "www.wikidata.org".
+    bd:serviceParam mwapi:search "${escName}".
+    bd:serviceParam mwapi:language "en".
+    ?item wikibase:apiOutputItem mwapi:item.
+  }
+  ?item p:P625/psv:P625 ?coord.
+  ?coord wikibase:geoLatitude ?lat; wikibase:geoLongitude ?lon.
+  OPTIONAL { ?item wdt:P17/wdt:P297 ?cc. }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en,de". }
+} LIMIT 1`;
+
+    let resp: Response;
+    try {
+        resp = await fetch('https://query.wikidata.org/sparql', {
+            method: 'POST',
+            headers: {
+                'User-Agent': HTTP_UA,
+                Accept: 'application/sparql-results+json',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'query=' + encodeURIComponent(query)
+        });
+    } catch {
+        return null;
+    }
+    if (!resp.ok) return null;
+    const json = (await resp.json().catch(() => null)) as {results?: {bindings?: SparqlBinding[]}} | null;
+    const row = json?.results?.bindings?.[0];
+    if (!row) return null;
+    return {
+        lat: parseFloat(row.lat.value),
+        lon: parseFloat(row.lon.value),
+        displayName: row.itemLabel?.value || name,
+        countryCode: row.cc?.value ? row.cc.value.toUpperCase() : undefined,
+        source: 'wikidata'
     };
 }
 
@@ -192,7 +251,8 @@ export async function findAirfieldsByName(
     sitename: string,
     radiusKm: number = DEFAULT_RADIUS_KM
 ): Promise<{geocode: NominatimGeocode | null; ranked: RankedAirfield[]}> {
-    const geocode = await geocodeNominatim(sitename);
+    let geocode = await geocodeNominatim(sitename);
+    if (!geocode) geocode = await geocodeWikidata(sitename);
     if (!geocode) return {geocode: null, ranked: []};
     const ranked = await findAirfieldsByPoint(sitename, geocode.lat, geocode.lon, radiusKm);
     return {geocode, ranked};

@@ -223,13 +223,13 @@ async function resolveBySitename(sitename: string): Promise<ResolvedAirfield[]> 
     const search = sitename.trim();
     if (!search) return [];
 
-    console.log(`\nGeocoding "${search}" via Nominatim...`);
+    console.log(`\nGeocoding "${search}" via Nominatim, then Wikidata...`);
     const {geocode, ranked} = await findAirfieldsByName(search);
     if (!geocode) {
         console.log('  no result — falling back to text search');
         return [];
     }
-    console.log(`  → ${geocode.lat.toFixed(4)}, ${geocode.lon.toFixed(4)}  (${geocode.displayName})`);
+    console.log(`  → ${geocode.lat.toFixed(4)}, ${geocode.lon.toFixed(4)}  via ${geocode.source}  (${geocode.displayName})`);
 
     if (!ranked.length) {
         console.log('  no aerodromes found — falling back to text search');
