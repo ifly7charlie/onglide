@@ -358,16 +358,34 @@ function CompetitionListPanel({
     // Group competitions into Live / Upcoming so users can tell at a glance
     // which ones are clickable. Upcoming entries stay in the list (so pilots
     // can find their comp) but navigation is disabled.
+    // Within Live, rank by the most active status across the comp's classes
+    // (finishing > racing > launching > task set > home > no task), then by
+    // viewers desc, then by registered pilot count desc.
+    const STATUS_RANK: Record<CompetitionDisplayStatus, number> = {
+        finishing: 0,
+        started: 1,
+        launching: 2,
+        task_set: 3,
+        home: 4,
+        notask: 5,
+        yesterday: 6,
+        upcoming: 7
+    };
     const pilotCount = (c: Competition) => (c.classes ?? []).reduce((s, cls) => s + (cls.pilotCount || 0), 0);
+    const compRank = (c: Competition) => {
+        const classes = c.classes ?? [];
+        if (!classes.length) return STATUS_RANK[c.displayStatus] ?? 99;
+        return Math.min(...classes.map((cls) => STATUS_RANK[cls.displayStatus] ?? 99));
+    };
     const live = competitions
         .filter((c) => c.displayStatus !== 'upcoming')
         .sort((a, b) => {
+            const ra = compRank(a);
+            const rb = compRank(b);
+            if (ra !== rb) return ra - rb;
             const va = summary?.byComp.get(a.compid)?.viewers ?? 0;
             const vb = summary?.byComp.get(b.compid)?.viewers ?? 0;
             if (va !== vb) return vb - va;
-            const ta = a.displayStatus !== 'notask' ? 1 : 0;
-            const tb = b.displayStatus !== 'notask' ? 1 : 0;
-            if (ta !== tb) return tb - ta;
             return pilotCount(b) - pilotCount(a);
         });
     const upcoming = competitions.filter((c) => c.displayStatus === 'upcoming');
