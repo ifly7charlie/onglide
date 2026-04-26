@@ -30,7 +30,7 @@ import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsRes
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
 import {findAirfieldsByName} from '../shared/airfield';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctHandicap, type PilotRecord} from '../shared/pilots';
-import {upsertClass} from '../shared/classes';
+import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
 import {upsertTaskAndLegs} from '../shared/tasks';
 
 const https = require('node:https');
@@ -509,6 +509,10 @@ export class SoaringSpotScrapeSource implements ScoringSource {
             }
 
             await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
+
+            for (const classid of accumulator.observed.keys()) {
+                await syncClassHandicapFlag(ctx.db, ctx.log, classid);
+            }
         } catch (e) {
             ctx.log(`fetchPilots failed for ${ctx.compid}:`, e);
         }

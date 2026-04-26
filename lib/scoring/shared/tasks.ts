@@ -216,7 +216,10 @@ export async function upsertTaskAndLegs(
                     tp.oz_radius1 / 1000,
                     tp.oz_line ? 90 : toDeg(tp.oz_angle1),
                     tp.oz_radius2 / 1000,
-                    toDeg(tp.oz_angle2),
+                    // SoaringSpot/SeeYou encode "full inner cylinder" as
+                    // oz_angle2 = π/2 (apex 180°); the renderer treats
+                    // a2 = 180 as the full-circle marker.
+                    toDeg(tp.oz_angle2) >= 90 - 1e-6 ? 180 : toDeg(tp.oz_angle2),
                     tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0,
                     tp.altitude
                 ]);

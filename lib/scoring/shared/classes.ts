@@ -83,6 +83,53 @@ export async function upsertClass(
 }
 
 //
+// syncClassHandicapFlag — derive `classes.handicapped` from the pilots
+// table for a single class. Any participating pilot with a non-100
+// handicap flips the class to 'Y'; if every pilot is back at 100 the
+// class flips back to 'N'. The new ssscrape never sets this column at
+// upsert time (the previous SoaringSpot OAuth path inferred it from the
+// class type, which the public scrape page doesn't expose), so the
+// pilot handicaps captured by fetchPilots are the only signal we have.
+//
+// Called once per observed class after pilots have been upserted +
+// pruned, so a single UPDATE sees the final roster for the class.
+// Pilots with `participating = 'N'` (H/C) or 'W' (withdrawn) don't
+// count — H/C pilots in particular routinely carry their own off-100
+// handicap without making the class itself handicapped.
+//
+export async function syncClassHandicapFlag(
+    db: any, //
+    log: (msg: string, ...args: unknown[]) => void,
+    classid: ClassId
+): Promise<void> {
+    try {
+        await db.query(escape`
+            UPDATE classes
+            SET
+                handicapped = IF(
+                    (
+                        SELECT
+                            COUNT(*)
+                        FROM
+                            pilots
+                        WHERE
+                            pilots.class = classes.class
+                            AND pilots.participating = 'Y'
+                            AND pilots.handicap IS NOT NULL
+                            AND pilots.handicap <> 100
+                    ) > 0,
+                    'Y',
+                    'N'
+                )
+            WHERE
+                classes.class = ${classid}
+        `);
+    } catch (e) {
+        log(`syncClassHandicapFlag failed for ${classid}:`, e);
+    }
+}
+
+//
 // cascadeDeleteClass — hard delete every row that references this
 // classid. Used by both rule 5 (class disappeared from source) and the
 // dead-competition cleanup in tasks.ts. Order matters only for tables

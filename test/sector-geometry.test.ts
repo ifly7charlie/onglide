@@ -203,6 +203,50 @@ describe('Sector + full cylinder (a1=90, r1=20km, a2=180, r2=0.5km)', () => {
     });
 });
 
+// ── AAT key-hole: narrow outer wedge + full inner cylinder ─────────────
+//
+// SoaringSpot/SeeYou AAT pattern: outer 90° pie (a1=45 half-angle) plus a
+// full inner cylinder (a2=180 half-angle marker). a1=90 cases above can
+// hide bugs because the half-discs combine into a full circle by symmetry;
+// here a1≠90 means a half-disc rendering would leave the departure-side
+// inside-r2 area uncovered.
+
+describe('AAT key-hole (a1=45, r1=10km, a2=180, r2=0.5km)', () => {
+    const task = makeSectorTask({r1: 10, a1: 45, r2: 0.5, a2: 180, direction: 'symmetrical'});
+    const tp = getSectorTP(task);
+    const tpCenter = {lat: task.legs[1].nlat, lng: task.legs[1].nlng};
+
+    test('point inside r2 on the departure side is inside (full inner cylinder)', () => {
+        const p = pointAtBearingDistance(tpCenter, tp.departureMid, 0.3);
+        expect(isInSector(tp, p.lat, p.lng)).toBe(true);
+        expect(geoJSONContains(tp, p.lat, p.lng)).toBe(true);
+    });
+
+    test('point inside r2 perpendicular to bisector is inside', () => {
+        const p = pointAtBearingDistance(tpCenter, tp.departureMid + 90, 0.3);
+        expect(isInSector(tp, p.lat, p.lng)).toBe(true);
+        expect(geoJSONContains(tp, p.lat, p.lng)).toBe(true);
+    });
+
+    test('point inside r2 on the approach side is inside', () => {
+        const p = pointAtBearingDistance(tpCenter, tp.approachMid, 0.3);
+        expect(isInSector(tp, p.lat, p.lng)).toBe(true);
+        expect(geoJSONContains(tp, p.lat, p.lng)).toBe(true);
+    });
+
+    test('point in outer wedge beyond r2 is inside', () => {
+        const p = pointAtBearingDistance(tpCenter, tp.departureMid, 8);
+        expect(isInSector(tp, p.lat, p.lng)).toBe(true);
+        expect(geoJSONContains(tp, p.lat, p.lng)).toBe(true);
+    });
+
+    test('point beyond r2 outside the outer wedge is outside', () => {
+        const p = pointAtBearingDistance(tpCenter, tp.approachMid, 5);
+        expect(isInSector(tp, p.lat, p.lng)).toBe(false);
+        expect(geoJSONContains(tp, p.lat, p.lng)).toBe(false);
+    });
+});
+
 // ── Annular wedge (Bozeat pattern) ──────────────────────────────────────
 //
 // r1=80km, a1=20°, r2=10km, a12=50°, direction=fixed
