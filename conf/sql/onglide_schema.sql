@@ -62,7 +62,7 @@ CREATE TABLE `compstatus` (
   `class` char(15) NOT NULL,
   `datecode` char(3) DEFAULT NULL COMMENT 'current contest date code for this class',
   
-  `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,X=confirm reg,P=prebrief,B=afterbrief,G=gridded,L=launched,S=startopen/flying,R=all reported,H=all home,Z=scrubbed,O=comp over',
+  `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,X=confirm reg,P=prebrief,B=afterbrief,G=gridded,L=launched,S=startopen/flying,F=first finisher imminent,R=all reported,H=all home,Z=scrubbed,O=comp over',
   `resultsdatecode` char(3) DEFAULT NULL COMMENT 'what date is scoring up to with uploading, results after this date wont be displayed',
   `task` char(1) DEFAULT 'A' COMMENT 'selected task',
   

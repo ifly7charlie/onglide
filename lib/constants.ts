@@ -16,6 +16,11 @@ export const webPathBaseTimeDuration = 5 * 60;
 // How many minutes of scores are we batching together
 export const scoreChunkSize = 30 * 60;
 
+// ETA threshold (minutes) for promoting a class compstatus to 'F' (finishing):
+// when any tracked pilot's distanceRemaining / taskSpeed implies arrival within
+// this many minutes, the class is treated as imminently finishing.
+export const FINISHING_ETA_MINUTES = 5;
+
 export const inorderAdditionalDelay = 6;
 
 // How far beyond the finite extent of a start line a near-miss is accepted (metres)

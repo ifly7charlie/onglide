@@ -598,9 +598,13 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                 await upsertClass(ctx.db, ctx.log, ctx.compid, classid, className, todayDatecode);
 
                 const dates = findAll((x) => x.name == 'tr' && x.parent?.nodeType == 1 && (x.parent as any)?.name == 'tbody', result.children);
+                ctx.log(`DEBUG ${classid}: found ${dates.length} date row(s) in result-overview`);
 
                 for (const day of dates) {
                     const cells = findAll((x) => x.name == 'td', day.children);
+                    const cell0 = cells[0] ? textContent(cells[0])?.trim() : '<no-cell0>';
+                    const cell1 = cells[1] ? textContent(cells[1])?.trim() : '<no-cell1>';
+                    ctx.log(`DEBUG ${classid}: row cells=${cells?.length ?? 0} cell0="${cell0}" cell1="${cell1}"`);
                     if (!cells?.length || cells.length < 2) {
                         ctx.log('no dates yet');
                         continue;
@@ -612,13 +616,17 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     // when SoaringSpot changed wrapping whitespace.
                     const taskAnchor = findOne((x) => x.name == 'a', cells[1].children ?? []);
                     if (!taskAnchor) {
+                        ctx.log(`DEBUG ${classid}: no task anchor in cell1 — skipping row`);
                         // "No task" / "—" / any row with no task link at
                         // all. Skip; there's nothing to scrape or cancel.
                         continue;
                     }
 
                     const dateGB = textContent(cells[0])?.match(/([0-9]{2})\/([0-9]{2})\/([0-9]{4})/);
-                    if (!dateGB) continue;
+                    if (!dateGB) {
+                        ctx.log(`DEBUG ${classid}: cell0 did not match dd/mm/yyyy: "${cell0}"`);
+                        continue;
+                    }
 
                     const date = dateGB[3] + '-' + dateGB[2] + '-' + dateGB[1];
                     const dateCode = toDateCode(date);

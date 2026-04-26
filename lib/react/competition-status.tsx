@@ -10,21 +10,24 @@ import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 //   task_set  — task briefed, pilots prepping or gridded (status B/P/G)
 //   launching — at least one class is being launched (status L)
 //   started   — at least one class has crossed the start line (S)
-//   landed    — all classes finished for the day (R/O, or mixed with H)
+//   finishing — at least one class has its first finisher within ~5 min of home (F)
 //   home      — all classes back at home base (H)
 //   yesterday — last task was yesterday and nothing's happening today yet
+//
+// Comps whose end date has passed are filtered out by the caller and never
+// reach this display layer.
 //
 // Used by the front-page globe markers and legend AND by the per-competition
 // page's class tab buttons, so a class shown as "started" on the globe stays
 // "started" once the user clicks through.
 //
-export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'landed' | 'home' | 'notask' | 'upcoming' | 'yesterday';
+export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'finishing' | 'home' | 'notask' | 'upcoming' | 'yesterday';
 
 export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, number, number]> = {
     task_set: [100, 200, 240, 255],
     launching: [30, 90, 220, 255],
     started: [40, 220, 90, 255],
-    landed: [150, 150, 150, 255],
+    finishing: [240, 180, 40, 255],
     home: [150, 150, 150, 255],
     notask: [200, 170, 100, 255],
     upcoming: [200, 140, 200, 255],
@@ -38,7 +41,7 @@ export const STATUS_LABEL_KEYS: Record<CompetitionDisplayStatus, string> = {
     task_set: 'task_status.task_set',
     launching: 'task_status.launching',
     started: 'task_status.racing',
-    landed: 'task_status.landed',
+    finishing: 'task_status.finishing',
     home: 'task_status.home',
     notask: 'task_status.no_task',
     upcoming: 'task_status.upcoming',
@@ -49,7 +52,7 @@ export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
     task_set: faRoute,
     launching: faPlaneDeparture,
     started: faPlane,
-    landed: faFlagCheckered,
+    finishing: faFlagCheckered,
     home: faHouse,
     notask: faHourglass,
     upcoming: faCalendar,
@@ -66,16 +69,15 @@ export function statusCss(status: CompetitionDisplayStatus): string {
 }
 
 // Derive a displayStatus from a single class's compstatus.status code plus
-// the competition window. `endPast` short-circuits the "upcoming" fallback
-// when the comp's end date has already passed.
-export function classDisplayStatus(status: string, inWindow: boolean, endPast: boolean): CompetitionDisplayStatus {
+// the competition window. Callers must filter out comps whose end date has
+// passed before calling this — there is no post-end fallback here.
+export function classDisplayStatus(status: string, inWindow: boolean): CompetitionDisplayStatus {
+    if (status === 'F') return 'finishing';
     if (status === 'S') return 'started';
     if (status === 'L') return 'launching';
     if (status === 'H') return 'home';
-    if (status === 'R' || status === 'O') return 'landed';
     if (inWindow && (status === 'B' || status === 'P' || status === 'G')) return 'task_set';
     if (inWindow) return 'notask';
-    if (endPast) return 'landed';
     return 'upcoming';
 }
 

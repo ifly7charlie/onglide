@@ -71,7 +71,7 @@ export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: Cl
     return (
         <div className="sidepanel-classes" role="tablist">
             {comp.classes.map((c: any) => {
-                const ds = classDisplayStatus(c.status ?? '', true, false);
+                const ds = classDisplayStatus(c.status ?? '', true);
                 return (
                     <button
                         key={c.class}

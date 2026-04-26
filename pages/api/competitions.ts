@@ -5,8 +5,8 @@ import {toDateCode} from '../../lib/datecode';
 
 //
 // Returns every competition that should be shown on the globe landing page.
-// A competition appears if its last task was within the past 24 hours, OR if
-// the competition's end date is in the future (upcoming/in-progress).
+// A competition appears only while its end date is today or in the future
+// (upcoming or in-progress). Comps whose end has passed are filtered out.
 //
 // For each competition we aggregate its per-class compstatus and derive a
 // single `displayStatus` for the globe markers and the side panel pills.
@@ -111,17 +111,15 @@ export default async function competitionsHandler(_req, res) {
     }
 
     const competitions1 = Array.from(byCompid.values())
-        // Apply the "still interesting enough to show" filter here rather
-        // than in HAVING, so the per-class query can stay simple.
+        // Drop comps whose end date has already passed; they have nothing
+        // live to show. Comps with no end date are kept (open-ended).
         .filter((comp) => {
             if (!comp.end) return true;
-            if (comp.end >= yesterdayIso) return true;
-            return false;
+            return comp.end >= todayIso;
         });
 
     const competitions = competitions1.map((comp) => {
         const inWindow = comp.start && comp.end && comp.start <= todayIso && todayIso <= comp.end;
-        const endPast = !!(comp.end && comp.end < todayIso);
 
         // Annotate each class with its own displayStatus. compstatus.status
         // is sticky — if a class flew days ago and was never updated, the
@@ -133,7 +131,7 @@ export default async function competitionsHandler(_req, res) {
             if (cls.statusDatecode && cls.statusDatecode < todayDatecode) {
                 cls.displayStatus = cls.statusDatecode === yesterdayDatecode ? 'yesterday' : 'notask';
             } else {
-                cls.displayStatus = classDisplayStatus(cls.status, inWindow, endPast);
+                cls.displayStatus = classDisplayStatus(cls.status, inWindow);
             }
         }
         const classDisplayStatuses = (comp.classes as ClassRow[]).map((c) => c.displayStatus);
@@ -146,26 +144,24 @@ export default async function competitionsHandler(_req, res) {
             .filter(Boolean);
 
         let displayStatus: ClassDisplayStatus;
+        const anyFinishing = statuses.some((s) => s === 'F');
         const anyStarted = statuses.some((s) => s === 'S');
         const anyLaunching = statuses.some((s) => s === 'L');
         const allHome = statuses.length > 0 && statuses.every((s) => s === 'H');
-        const allDone = statuses.length > 0 && statuses.every((s) => s === 'R' || s === 'H' || s === 'O');
         const anyTaskReady = statuses.some((s) => s === 'B' || s === 'P' || s === 'G');
 
-        if (anyStarted) {
+        if (anyFinishing) {
+            displayStatus = 'finishing';
+        } else if (anyStarted) {
             displayStatus = 'started';
         } else if (anyLaunching) {
             displayStatus = 'launching';
         } else if (allHome) {
             displayStatus = 'home';
-        } else if (allDone) {
-            displayStatus = 'landed';
         } else if (inWindow && anyTaskReady) {
             displayStatus = 'task_set';
         } else if (inWindow) {
             displayStatus = 'notask';
-        } else if (endPast) {
-            displayStatus = 'landed';
         } else {
             displayStatus = 'upcoming';
         }

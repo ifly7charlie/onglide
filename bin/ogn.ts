@@ -56,7 +56,7 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 // Launch our listener
 import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
 
-import {webPathBaseTimeDuration, scoreChunkSize} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -1649,8 +1649,12 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             const totalScored = totalScoredByClass.get(className) || 0;
             const trackerCoverage = totalScored > 0 ? scored.length / totalScored : 0;
 
-            const allLanded = scored.every((p) => {
-                const fs = channel?.allScores[p.compno]?.flightStatus;
+            // Only consider tracked pilots that have actually reported a flight
+            // status — a tracker that's never produced a score shouldn't block
+            // the class from going H, and shouldn't trigger H either.
+            const withStatus = scored.filter((p) => channel?.allScores[p.compno]?.flightStatus !== undefined);
+            const allLanded = withStatus.length > 0 && withStatus.every((p) => {
+                const fs = channel!.allScores[p.compno]!.flightStatus;
                 return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
             });
             const startedCount = scored.filter((p) => (channel?.allScores[p.compno]?.utcStart ?? 0) > 0).length;
@@ -1659,6 +1663,19 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 return fs !== undefined && fs >= PositionStatus.Airborne;
             }).length;
             const griddedCount = scored.filter((p) => channel?.allScores[p.compno]?.flightStatus === PositionStatus.Grid).length;
+            // 'finishing' = at least one still-flying, started pilot whose
+            // distanceRemaining / taskSpeed puts them within FINISHING_ETA_MINUTES of home.
+            const finishingCount = scored.filter((p) => {
+                const score = channel?.allScores[p.compno];
+                if (!score) return false;
+                const fs = score.flightStatus;
+                if (fs === PositionStatus.Finished || fs === PositionStatus.Home || fs === PositionStatus.Landed) return false;
+                if ((score.utcStart ?? 0) === 0) return false;
+                const distRemaining = score.actual?.distanceRemaining ?? 0;
+                const speed = score.actual?.taskSpeed ?? 0;
+                if (distRemaining <= 0 || speed <= 0) return false;
+                return (distRemaining / speed) * 60 < FINISHING_ETA_MINUTES;
+            }).length;
 
             let nextStatus: string | null = null;
             let allowFrom: string[] = [];
@@ -1669,8 +1686,12 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             // (weather hold, regrid, fresh launch) climbs back through the states.
             if (allLanded && trackerCoverage >= 0.1) {
                 nextStatus = 'H';
+                allowFrom = ['L', 'S', 'F'];
+                reason = `all ${withStatus.length}/${totalScored} reporting gliders landed`;
+            } else if (finishingCount > 0) {
+                nextStatus = 'F';
                 allowFrom = ['L', 'S'];
-                reason = `all ${scored.length}/${totalScored} tracked gliders landed`;
+                reason = `${finishingCount}/${scored.length} tracked gliders finishing (< ${FINISHING_ETA_MINUTES} min to home)`;
             } else if (startedCount / scored.length > 0.1) {
                 nextStatus = 'S';
                 allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'L', 'H'];

@@ -311,7 +311,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             />
 
             <div className="map-legend">
-                {(['upcoming', 'notask', 'task_set', 'launching', 'started', 'landed', 'home', 'yesterday'] as const).map((s) => (
+                {(['upcoming', 'notask', 'task_set', 'launching', 'started', 'finishing', 'home', 'yesterday'] as const).map((s) => (
                     <div key={s} className="legend-row">
                         <span className="status-dot" style={{background: statusCss(s)}}>
                             <StatusIcon status={s} />
