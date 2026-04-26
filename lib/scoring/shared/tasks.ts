@@ -81,15 +81,17 @@ export async function upsertTaskAndLegs(
     // and the transaction below short-circuits. Done as an awaited
     // standalone query (rather than inside the chain) to side-step the
     // flaky transaction-chain commit behaviour. The status NOT IN guard
-    // protects airborne/landed classes from being demoted; 'Z' (scrubbed)
-    // is intentionally allowed so a new task on a later day overrides a
+    // protects airborne/landed classes from being demoted, but only when
+    // the locked state belongs to *this* dateCode — a stale L/S/R/H from
+    // a previous day must yield to the new task's 'B'. 'Z' (scrubbed) is
+    // intentionally allowed so a new task on a later day overrides a
     // stale scrubbed status from a previous datecode.
     if (day.result_status != 'cancelled') {
         await db.query(escape`
             UPDATE compstatus
             SET status = 'B', datecode = ${dateCode}
             WHERE class = ${classid}
-              AND status NOT IN ('L', 'S', 'R', 'H')
+              AND (status NOT IN ('L', 'S', 'R', 'H') OR datecode IS NULL OR datecode <> ${dateCode})
         `);
     } else {
         await db.query(escape`

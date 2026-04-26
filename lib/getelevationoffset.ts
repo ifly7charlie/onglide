@@ -18,9 +18,6 @@ let pending = [];
 // via NEXT_PUBLIC_DEM_TILE_URL to front it through your own CDN.
 const DEM_TILE_URL = process.env.NEXT_PUBLIC_DEM_TILE_URL || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 
-let cacheHit = 0;
-let cacheMiss = 0;
-
 import {LRUCache} from 'lru-cache';
 
 const options = {
@@ -34,9 +31,6 @@ const options = {
 };
 
 const cache = new LRUCache(options);
-setInterval(() => {
-    console.log(`tile cache hit ${cacheHit}, miss ${cacheMiss}, ${cacheMiss ? cacheHit / cacheMiss : 0}%, ${cache.size}/${cache.max} items`);
-}, 60_000);
 
 //    module.exports = function(tk) {
 //      return function(p, cb) {
@@ -112,8 +106,6 @@ async function _getElevationOffset(lat, lng, cb) {
             delete pending[url];
         }
 
-        cacheMiss++;
-
         // Go and get the URL
         fetch(url)
             .then((res) => {
@@ -133,7 +125,6 @@ async function _getElevationOffset(lat, lng, cb) {
                 delete pending[url];
             });
     } else {
-        cacheHit++;
         cb(pixelsToElevation(pixels));
     }
 }
