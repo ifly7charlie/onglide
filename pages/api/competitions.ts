@@ -1,6 +1,7 @@
 import {query, mysqlEnd} from '../../lib/react/db';
 import escape from 'sql-template-strings';
 import {classDisplayStatus, type CompetitionDisplayStatus} from '../../lib/react/competition-status';
+import {toDateCode} from '../../lib/datecode';
 
 //
 // Returns every competition that should be shown on the globe landing page.
@@ -18,6 +19,7 @@ type ClassRow = {
     classname: string;
     status: string;
     pilotCount: number;
+    statusDatecode: string | null;
     displayStatus: ClassDisplayStatus;
 };
 
@@ -43,6 +45,7 @@ export default async function competitionsHandler(_req, res) {
             cl.class AS classid,
             cl.classname,
             COALESCE(cs.status, '') AS status,
+            cs.datecode AS statusDatecode,
             (
                 SELECT
                     COUNT(*)
@@ -50,16 +53,7 @@ export default async function competitionsHandler(_req, res) {
                     pilots p
                 WHERE
                     p.class = cl.class
-            ) AS pilotCount,
-            (
-                SELECT
-                    MAX(cd2.calendardate)
-                FROM
-                    contestday cd2
-                WHERE
-                    cd2.class = cl.class
-                    AND cd2.status = 'Y'
-            ) AS lastTaskDate
+            ) AS pilotCount
         FROM
             competition c
             JOIN classes cl ON cl.compid = c.compid
@@ -76,6 +70,13 @@ export default async function competitionsHandler(_req, res) {
     // quirks won't bite us.
     const todayIso = new Date().toISOString().substring(0, 10);
     const yesterdayIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+    // compstatus stores its current-day pointer as a 3-char datecode, so
+    // we compare against the datecode forms of `todayIso`/`yesterdayIso`
+    // to decide whether the row's `status` reflects today's activity, is
+    // a one-day-stale leftover (yesterday) we can label nicely, or older
+    // than that — in which case the status field is treated as empty.
+    const todayDatecode = toDateCode(new Date(todayIso));
+    const yesterdayDatecode = toDateCode(new Date(yesterdayIso));
 
     // Bucket class rows by compid so we can do per-competition aggregation.
     const byCompid = new Map<string, any>();
@@ -93,51 +94,56 @@ export default async function competitionsHandler(_req, res) {
                 tz: r.tz,
                 tzoffset: r.tzoffset,
                 mainwebsite: r.mainwebsite,
-                classes: [] as ClassRow[],
-                maxLastTaskDate: null as string | null
+                classes: [] as ClassRow[]
             });
         }
         const comp = byCompid.get(r.compid);
+        const statusDatecode = r.statusDatecode ? String(r.statusDatecode).toUpperCase() : null;
         comp.classes.push({
             class: r.classid,
             classname: r.classname,
             status: r.status,
             pilotCount: Number(r.pilotCount) || 0,
+            statusDatecode,
             // displayStatus is filled in below once we know inWindow.
             displayStatus: 'upcoming'
         });
-        if (r.lastTaskDate) {
-            const d = r.lastTaskDate instanceof Date ? r.lastTaskDate.toISOString().substring(0, 10) : String(r.lastTaskDate).substring(0, 10);
-            if (!comp.maxLastTaskDate || d > comp.maxLastTaskDate) {
-                comp.maxLastTaskDate = d;
-            }
-        }
     }
-
-    console.log(JSON.stringify([...byCompid.values()]));
 
     const competitions1 = Array.from(byCompid.values())
         // Apply the "still interesting enough to show" filter here rather
         // than in HAVING, so the per-class query can stay simple.
         .filter((comp) => {
-            if (!comp.maxLastTaskDate && !comp.end) return true;
-            if (comp.maxLastTaskDate && comp.maxLastTaskDate >= yesterdayIso) return true;
-            if (comp.end && comp.end >= yesterdayIso) return true;
+            if (!comp.end) return true;
+            if (comp.end >= yesterdayIso) return true;
             return false;
         });
-
-    //    console.table(competitions1);
 
     const competitions = competitions1.map((comp) => {
         const inWindow = comp.start && comp.end && comp.start <= todayIso && todayIso <= comp.end;
         const endPast = !!(comp.end && comp.end < todayIso);
 
-        // Annotate each class with its own displayStatus.
+        // Annotate each class with its own displayStatus. compstatus.status
+        // is sticky — if a class flew days ago and was never updated, the
+        // row still says 'L'/'S'/'H'. So only trust the status when its
+        // datecode matches today. Anything older is 'notask' (so a missed
+        // landing report from two days ago doesn't look like 'racing'),
+        // with 'yesterday' as a one-day-stale label.
         for (const cls of comp.classes as ClassRow[]) {
-            cls.displayStatus = classDisplayStatus(cls.status, inWindow, endPast);
+            if (cls.statusDatecode && cls.statusDatecode < todayDatecode) {
+                cls.displayStatus = cls.statusDatecode === yesterdayDatecode ? 'yesterday' : 'notask';
+            } else {
+                cls.displayStatus = classDisplayStatus(cls.status, inWindow, endPast);
+            }
         }
         const classDisplayStatuses = (comp.classes as ClassRow[]).map((c) => c.displayStatus);
-        const statuses: string[] = (comp.classes as ClassRow[]).map((c) => c.status).filter(Boolean);
+        // Roll-up only counts classes whose compstatus is from today. Stale
+        // rows already became 'notask'/'yesterday' above and shouldn't drag
+        // the comp marker into 'started' just because nobody updated them.
+        const statuses: string[] = (comp.classes as ClassRow[])
+            .filter((c) => c.statusDatecode === todayDatecode)
+            .map((c) => c.status)
+            .filter(Boolean);
 
         let displayStatus: ClassDisplayStatus;
         const anyStarted = statuses.some((s) => s === 'S');
@@ -162,6 +168,14 @@ export default async function competitionsHandler(_req, res) {
             displayStatus = 'landed';
         } else {
             displayStatus = 'upcoming';
+        }
+
+        // If no class has today's data but at least one was on yesterday's,
+        // the comp is "still on yesterday". Other classes that didn't fly
+        // yesterday keep their own per-class status and don't block the
+        // comp-level label.
+        if (statuses.length === 0 && (comp.classes as ClassRow[]).some((c) => c.statusDatecode === yesterdayDatecode)) {
+            displayStatus = 'yesterday';
         }
 
         // Do the classes all agree? If so the list panel can collapse

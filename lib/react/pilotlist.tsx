@@ -692,7 +692,6 @@ const Pilot = memo(function Pilot({
                         <span className="pilot-row-position">{position != null ? `${position}.` : ''}</span>
                         <span className="pilot-row-flag">{pilot?.country ? isoCountryCodeToFlagEmoji(pilot.country) : ''}</span>
                         <span className="pilot-row-compno">{compno}</span>
-                        <span className="pilot-row-sep">:</span>
                         <span className="pilot-row-name">{pilot?.name}</span>
                     </span>
                     <span className="pilot-row-right">

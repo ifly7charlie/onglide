@@ -2474,7 +2474,8 @@ function setupOgnWebServer(req, res) {
                 datecode: channel.datecode,
                 compid: channel.compid,
                 gliders: gliderStates,
-                viewers: {total: channel.clients.length, visible, interacting}
+                viewers: {total: channel.clients.length, visible, interacting},
+                rescoring: channel.scoreId !== channel.liveScoreId
             };
         }
 

@@ -478,6 +478,10 @@ button {
     .maplibregl-ctrl-attrib-inner a {
         color: var(--panel-accent) !important;
     }
+
+    img[alt="OGN Network"] {
+        filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.75)) drop-shadow(0 0 14px rgba(255, 255, 255, 0.4));
+    }
 }
 
 .playbackbar {
@@ -894,11 +898,10 @@ ul.pilots.pilots-vertical {
     }
 
     .pilot-row-compno {
+        flex: 0 0 auto;
+        width: 32px;
+        text-align: center;
         font-weight: 700;
-    }
-
-    .pilot-row-sep {
-        opacity: 0.5;
     }
 
     .pilot-row-name {

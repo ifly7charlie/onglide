@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faPlane, faPlaneDeparture, faFlagCheckered, faHouse, faCalendar, faHourglass, faRoute} from '@fortawesome/free-solid-svg-icons';
+import {faPlane, faPlaneDeparture, faFlagCheckered, faHouse, faCalendar, faClockRotateLeft, faHourglass, faRoute} from '@fortawesome/free-solid-svg-icons';
 import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 
 // Lifecycle of a soaring competition's display state through the day:
@@ -12,12 +12,13 @@ import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 //   started   — at least one class has crossed the start line (S)
 //   landed    — all classes finished for the day (R/O, or mixed with H)
 //   home      — all classes back at home base (H)
+//   yesterday — last task was yesterday and nothing's happening today yet
 //
 // Used by the front-page globe markers and legend AND by the per-competition
 // page's class tab buttons, so a class shown as "started" on the globe stays
 // "started" once the user clicks through.
 //
-export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'landed' | 'home' | 'notask' | 'upcoming';
+export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'landed' | 'home' | 'notask' | 'upcoming' | 'yesterday';
 
 export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, number, number]> = {
     task_set: [100, 200, 240, 255],
@@ -26,7 +27,8 @@ export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, n
     landed: [150, 150, 150, 255],
     home: [150, 150, 150, 255],
     notask: [200, 170, 100, 255],
-    upcoming: [200, 140, 200, 255]
+    upcoming: [200, 140, 200, 255],
+    yesterday: [100, 140, 170, 255]
 };
 
 export const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
@@ -36,7 +38,8 @@ export const STATUS_LABELS: Record<CompetitionDisplayStatus, string> = {
     landed: 'Landed',
     home: 'Home',
     notask: 'No task yet',
-    upcoming: 'Upcoming'
+    upcoming: 'Upcoming',
+    yesterday: 'Yesterday'
 };
 
 export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
@@ -46,7 +49,8 @@ export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
     landed: faFlagCheckered,
     home: faHouse,
     notask: faHourglass,
-    upcoming: faCalendar
+    upcoming: faCalendar,
+    yesterday: faClockRotateLeft
 };
 
 // Optional secondary icon, drawn small in the bottom-right corner of the
