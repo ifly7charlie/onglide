@@ -479,7 +479,9 @@ async function main() {
         for (const compChannels of Object.values(byComp)) {
             const positions = compChannels.reduce(
                 (a, c: Channel) => {
-                    a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+                    if (c.toSend.length) {
+                        a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+                    }
                     return a;
                 },
                 {} as Record<string, Positions>
@@ -799,8 +801,8 @@ async function reconcileContexts() {
             ctx.summary.mainwebsite = row.mainwebsite ?? null;
             ctx.summary.tz = row.tz || ctx.summary.tz;
             ctx.summary.tzoffset = parseInt(row.tzoffset as unknown as string) || ctx.summary.tzoffset;
-            const newStart = row.start instanceof Date ? row.start.toISOString().slice(0, 10) : (typeof row.start === 'string' ? row.start.slice(0, 10) : ctx.summary.start);
-            const newEnd = row.end instanceof Date ? row.end.toISOString().slice(0, 10) : (typeof row.end === 'string' ? row.end.slice(0, 10) : ctx.summary.end);
+            const newStart = row.start instanceof Date ? row.start.toISOString().slice(0, 10) : typeof row.start === 'string' ? row.start.slice(0, 10) : ctx.summary.start;
+            const newEnd = row.end instanceof Date ? row.end.toISOString().slice(0, 10) : typeof row.end === 'string' ? row.end.slice(0, 10) : ctx.summary.end;
             ctx.summary.start = newStart;
             ctx.summary.end = newEnd;
             if (row.lat !== ctx.location.lat || row.lng !== ctx.location.lng) {
@@ -913,30 +915,16 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
     for (const cname of ownedCnames) {
         const channel = channels[cname];
         if (!channel) continue;
-        try {
-            const msg = OnglideWebSocketMessage.encode({
-                identifiers: {
-                    className: channel.className,
-                    datecode: channel.datecode,
-                    competition: channel.compid,
-                    earliestScore: getNow(),
-                    latestScore: getNow(),
-                    scoreId: channel.liveScoreId ?? ''
-                }
-            }).finish();
-            channel.sendBinary(msg);
-        } catch (e) {
-            /* best effort */
-        }
         console.log(`${tag}/${channel.displayName}: closing ${channel.clients.length} clients`);
-        for (const client of channel.clients) {
+        const clients = channel.clients;
+        channel.clients = [];
+        for (const client of clients) {
             try {
                 (client as any).close?.();
             } catch (e) {
                 /**/
             }
         }
-        channel.clients = [];
     }
 
     // Step 2: close each broadcast channel so no more APRS packets land
@@ -1807,11 +1795,13 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 const fs = channel?.allScores[p.compno]?.flightStatus;
                 return fs !== undefined && fs !== PositionStatus.Unknown;
             });
-            const allLanded = withStatus.length > 0 && withStatus.every((p) => {
-                if (isTerminalScored(p)) return true;
-                const fs = channel!.allScores[p.compno]!.flightStatus;
-                return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
-            });
+            const allLanded =
+                withStatus.length > 0 &&
+                withStatus.every((p) => {
+                    if (isTerminalScored(p)) return true;
+                    const fs = channel!.allScores[p.compno]!.flightStatus;
+                    return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
+                });
             const startedCount = scored.filter((p) => (channel?.allScores[p.compno]?.utcStart ?? 0) > 0).length;
             const airborneCount = scored.filter((p) => {
                 const fs = channel?.allScores[p.compno]?.flightStatus;
@@ -2279,10 +2269,7 @@ async function refreshUpcomingCompetitions(rows: any[]) {
         // count to use.
         let classnames: string[] = [];
         try {
-            const cls = await db.query<{classname: string}[]>(
-                'SELECT cl.classname FROM classes cl WHERE cl.compid = ? ORDER BY cl.classname',
-                [compid]
-            );
+            const cls = await db.query<{classname: string}[]>('SELECT cl.classname FROM classes cl WHERE cl.compid = ? ORDER BY cl.classname', [compid]);
             classnames = cls.map((c) => c.classname);
         } catch (e) {
             console.log(`refreshUpcomingCompetitions: classes query failed for ${compid}:`, e);
@@ -2683,17 +2670,26 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                     db.transaction()
                         .query(escape`
                             UPDATE tracker
-                            SET trackerid = 'blocked'
-                            WHERE compno = ${match.compno}
-                              AND class = ${match.className}
-                              AND trackerid IN ('unknown','')
-                            LIMIT 1
+                            SET
+                                trackerid = 'blocked'
+                            WHERE
+                                compno = ${match.compno}
+                                AND class = ${match.className}
+                                AND trackerid IN ('unknown', '')
+                            LIMIT
+                                1
                         `)
                         .query(escape`
-                            INSERT INTO trackerhistory
-                                (compno, changed, flarmid, greg, method)
+                            INSERT INTO
+                                trackerhistory (compno, changed, flarmid, greg, method)
                             VALUES
-                                (${match.compno}, now(), 'blocked', ${ddbf.registration || null}, ${method})
+                                (
+                                    ${match.compno},
+                                    now(),
+                                    'blocked',
+                                    ${ddbf.registration || null},
+                                    ${method}
+                                )
                         `)
                         .commit();
                 }
@@ -2738,7 +2734,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                     WHERE
                         compno = ${match.compno}
                         AND class = ${match.className}
-                        AND trackerid IN ('unknown','blocked','')
+                        AND trackerid IN ('unknown', 'blocked', '')
                     LIMIT
                         1
                 `)
