@@ -29,6 +29,7 @@ export interface DDBEntry {
     tracked: string; // 'Y' or 'N' — most-restrictive after merge
     identified: string;
     sources?: DDBSource[]; // diagnostic: which upstream(s) produced this record
+    blockedBy?: DDBSource[]; // upstream(s) that set tracked != 'Y' for this device
 }
 
 interface DDBPayload {
@@ -59,7 +60,8 @@ export function mergeDDB(ognDevices: DDBEntry[], flarmnetDevices: DDBEntry[]): R
         out[d.device_id] = {
             ...d,
             registration: cleanRegistration(d.registration),
-            sources: ['ogn']
+            sources: ['ogn'],
+            blockedBy: d.tracked === 'Y' ? [] : ['ogn']
         };
     }
 
@@ -68,10 +70,17 @@ export function mergeDDB(ognDevices: DDBEntry[], flarmnetDevices: DDBEntry[]): R
         const existing = out[d.device_id];
         const reg = cleanRegistration(d.registration);
         if (!existing) {
-            out[d.device_id] = {...d, registration: reg, sources: ['flarmnet']};
+            out[d.device_id] = {
+                ...d,
+                registration: reg,
+                sources: ['flarmnet'],
+                blockedBy: d.tracked === 'Y' ? [] : ['flarmnet']
+            };
             continue;
         }
         // Merge: prefer non-empty fields from either side; tracked is most-restrictive.
+        const blockedBy: DDBSource[] = [...(existing.blockedBy ?? [])];
+        if (d.tracked !== 'Y') blockedBy.push('flarmnet');
         out[d.device_id] = {
             device_type: existing.device_type || d.device_type,
             device_id: existing.device_id,
@@ -80,7 +89,8 @@ export function mergeDDB(ognDevices: DDBEntry[], flarmnetDevices: DDBEntry[]): R
             cn: existing.cn || d.cn,
             tracked: existing.tracked === 'Y' && d.tracked === 'Y' ? 'Y' : 'N',
             identified: existing.identified === 'Y' && d.identified === 'Y' ? 'Y' : 'N',
-            sources: ['ogn', 'flarmnet']
+            sources: ['ogn', 'flarmnet'],
+            blockedBy
         };
     }
 
@@ -156,4 +166,16 @@ export function isBlocked(entry: DDBEntry | undefined, trackingconsent: string |
     if (!entry) return false;
     if (entry.tracked === 'Y') return false;
     return (trackingconsent || 'N') !== 'Y';
+}
+
+//
+// Returns the trackerhistory.method enum value identifying which
+// source(s) blocked the device: 'ogn-blocked', 'flarmnet-blocked',
+// or 'ddb-blocked' when both sources blocked it.
+//
+export function blockedMethod(entry: DDBEntry | undefined): 'ogn-blocked' | 'flarmnet-blocked' | 'ddb-blocked' {
+    const by = entry?.blockedBy ?? [];
+    if (by.length >= 2) return 'ddb-blocked';
+    if (by[0] === 'flarmnet') return 'flarmnet-blocked';
+    return 'ogn-blocked';
 }

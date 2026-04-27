@@ -9,6 +9,47 @@ message OnglideWebSocketMessage {
     optional KeepAlive ka = 4;
     optional uint32 t = 5;
     optional Task task = 8;
+    optional CompetitionsList competitions = 9;
+}
+
+// Per-class status row shown on the globe landing page; mirrors the JSON
+// previously returned by /api/competitions.
+message CompetitionClassStatus {
+	string class = 1;            // classid
+	string classname = 2;
+	string status = 3;           // raw compstatus.status (L/S/H/F/B/P/G/'')
+	uint32 pilotCount = 4;
+	optional string statusDatecode = 5;
+	string displayStatus = 6;    // matches CompetitionDisplayStatus union in TS
+}
+
+message CompetitionSummary {
+	string compid = 1;
+	string name = 2;
+	optional string sitename = 3;
+	double lat = 4;
+	double lng = 5;
+	string start = 6;            // YYYY-MM-DD
+	string end = 7;              // YYYY-MM-DD
+	string countrycode = 8;
+	string tz = 9;
+	int32 tzoffset = 10;
+	optional string mainwebsite = 11;
+	uint32 classCount = 12;
+	bool classStatusesDiffer = 13;
+	string displayStatus = 14;
+	repeated CompetitionClassStatus classes = 15;
+}
+
+// Pushed to clients of the reserved /all channel. On initial connect the
+// server sends `full=true` with every active competition. Subsequent frames
+// are deltas: `competitions` lists only changed comps, `removed` lists comp
+// ids that have dropped off the live list (end date passed).
+message CompetitionsList {
+	repeated CompetitionSummary competitions = 1;
+	uint32 generatedAt = 2;
+	bool full = 3;
+	repeated string removed = 4;
 }
 
 message Identifiers {

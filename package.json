@@ -15,6 +15,7 @@
         "ssscrape": "node dist/bin/ssscrape.js",
         "rst": "node dist/bin/rst.js",
         "sgp": "node dist/bin/sgp.js",
+        "wsclient": "node dist/bin/wsclient.js",
         "setup": "bin/install.js",
         "ogn": "node --max-old-space-size=4096 dist/bin/ogn.js",
         "ogn:dev": "tsc-watch --project tsconfig-bin.json --onFailure \"echo Failed build\" --onSuccess \"node  --enable-source-maps --max-old-space-size=4096 --inspect --experimental-fetch dist/bin/ogn.js\"",

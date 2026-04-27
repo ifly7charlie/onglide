@@ -1,11 +1,9 @@
 import Head from 'next/head';
-import useSWR from 'swr';
 import {useTranslation} from 'next-i18next/pages';
 import {serverSideTranslations} from 'next-i18next/pages/serverSideTranslations';
 
-import {CompetitionGlobe, Competition} from '../lib/react/globe';
-
-const fetcher = (url: string) => fetch(url).then((res) => (res.status === 200 ? res.json() : {competitions: []}));
+import {CompetitionGlobe} from '../lib/react/globe';
+import {useCompetitionsWebsocket} from '../lib/react/useCompetitionsWebsocket';
 
 //
 // Landing page: 3D globe showing every competition that is live or within
@@ -13,9 +11,11 @@ const fetcher = (url: string) => fetch(url).then((res) => (res.status === 200 ? 
 // colored by status (flying / landed / upcoming / over) and a click drops
 // into the existing competition view at /<compid>/.
 //
+// Competition list comes from the OGN daemon's /all websocket — initial
+// snapshot on connect, then deltas as compstatus / pilot rosters change.
+//
 export default function GlobeLandingPage({countriesGeoJson}: {countriesGeoJson: any}) {
-    const {data} = useSWR('/api/competitions', fetcher, {refreshInterval: 60 * 1000});
-    const competitions: Competition[] = data?.competitions ?? [];
+    const {competitions} = useCompetitionsWebsocket();
     const {t} = useTranslation('common');
 
     return (

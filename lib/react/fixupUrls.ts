@@ -28,6 +28,18 @@ export function statusSummaryUrl() {
     );
 }
 
+// URL for the reserved /all channel — landing-page CompetitionsList feed.
+// Mirrors proposedUrl()'s prefix/protocol logic but uses the literal `all`
+// channel instead of `{className}{datecode}`.
+export function competitionsWebsocketUrl() {
+    if (typeof window === 'undefined') return null;
+    const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
+    if (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) {
+        return process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX + hn + '/all';
+    }
+    return (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_HOST ?? '') ? 'wss://' : 'ws://') + hn + '/all';
+}
+
 export function proposedUrl(vc: ClassName, datecode: Datecode) {
     const hn = process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
     if (process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX) {

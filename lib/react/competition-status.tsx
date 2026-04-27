@@ -21,7 +21,11 @@ import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 // page's class tab buttons, so a class shown as "started" on the globe stays
 // "started" once the user clicks through.
 //
-export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'finishing' | 'home' | 'notask' | 'upcoming' | 'yesterday';
+// Type and the pure derivation function live in a JSX-free module so the
+// OGN daemon can import them without pulling in React.
+import {classDisplayStatus, type CompetitionDisplayStatus} from '../competition-display-status';
+export {classDisplayStatus};
+export type {CompetitionDisplayStatus};
 
 export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, number, number]> = {
     task_set: [100, 200, 240, 255],
@@ -66,19 +70,6 @@ const STATUS_ICON_OVERLAYS: Partial<Record<CompetitionDisplayStatus, IconDefinit
 export function statusCss(status: CompetitionDisplayStatus): string {
     const [r, g, b] = STATUS_COLOURS[status];
     return `rgb(${r},${g},${b})`;
-}
-
-// Derive a displayStatus from a single class's compstatus.status code plus
-// the competition window. Callers must filter out comps whose end date has
-// passed before calling this — there is no post-end fallback here.
-export function classDisplayStatus(status: string, inWindow: boolean): CompetitionDisplayStatus {
-    if (status === 'F') return 'finishing';
-    if (status === 'S') return 'started';
-    if (status === 'L') return 'launching';
-    if (status === 'H') return 'home';
-    if (inWindow && (status === 'B' || status === 'P' || status === 'G')) return 'task_set';
-    if (inWindow) return 'notask';
-    return 'upcoming';
 }
 
 function iconPathString(def: IconDefinition): string {

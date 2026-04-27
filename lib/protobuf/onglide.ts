@@ -19,6 +19,58 @@ export interface OnglideWebSocketMessage {
   ka?: KeepAlive | undefined;
   t?: number | undefined;
   task?: Task | undefined;
+  competitions?: CompetitionsList | undefined;
+}
+
+/**
+ * Per-class status row shown on the globe landing page; mirrors the JSON
+ * previously returned by /api/competitions.
+ */
+export interface CompetitionClassStatus {
+  /** classid */
+  class: string;
+  classname: string;
+  /** raw compstatus.status (L/S/H/F/B/P/G/'') */
+  status: string;
+  pilotCount: number;
+  statusDatecode?:
+    | string
+    | undefined;
+  /** matches CompetitionDisplayStatus union in TS */
+  displayStatus: string;
+}
+
+export interface CompetitionSummary {
+  compid: string;
+  name: string;
+  sitename?: string | undefined;
+  lat: number;
+  lng: number;
+  /** YYYY-MM-DD */
+  start: string;
+  /** YYYY-MM-DD */
+  end: string;
+  countrycode: string;
+  tz: string;
+  tzoffset: number;
+  mainwebsite?: string | undefined;
+  classCount: number;
+  classStatusesDiffer: boolean;
+  displayStatus: string;
+  classes: CompetitionClassStatus[];
+}
+
+/**
+ * Pushed to clients of the reserved /all channel. On initial connect the
+ * server sends `full=true` with every active competition. Subsequent frames
+ * are deltas: `competitions` lists only changed comps, `removed` lists comp
+ * ids that have dropped off the live list (end date passed).
+ */
+export interface CompetitionsList {
+  competitions: CompetitionSummary[];
+  generatedAt: number;
+  full: boolean;
+  removed: string[];
 }
 
 export interface Identifiers {
@@ -310,6 +362,7 @@ function createBaseOnglideWebSocketMessage(): OnglideWebSocketMessage {
     ka: undefined,
     t: undefined,
     task: undefined,
+    competitions: undefined,
   };
 }
 
@@ -335,6 +388,9 @@ export const OnglideWebSocketMessage = {
     }
     if (message.task !== undefined) {
       Task.encode(message.task, writer.uint32(66).fork()).ldelim();
+    }
+    if (message.competitions !== undefined) {
+      CompetitionsList.encode(message.competitions, writer.uint32(74).fork()).ldelim();
     }
     return writer;
   },
@@ -395,6 +451,13 @@ export const OnglideWebSocketMessage = {
 
           message.task = Task.decode(reader, reader.uint32());
           continue;
+        case 9:
+          if (tag !== 74) {
+            break;
+          }
+
+          message.competitions = CompetitionsList.decode(reader, reader.uint32());
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -413,6 +476,7 @@ export const OnglideWebSocketMessage = {
       ka: isSet(object.ka) ? KeepAlive.fromJSON(object.ka) : undefined,
       t: isSet(object.t) ? globalThis.Number(object.t) : undefined,
       task: isSet(object.task) ? Task.fromJSON(object.task) : undefined,
+      competitions: isSet(object.competitions) ? CompetitionsList.fromJSON(object.competitions) : undefined,
     };
   },
 
@@ -439,6 +503,9 @@ export const OnglideWebSocketMessage = {
     if (message.task !== undefined) {
       obj.task = Task.toJSON(message.task);
     }
+    if (message.competitions !== undefined) {
+      obj.competitions = CompetitionsList.toJSON(message.competitions);
+    }
     return obj;
   },
 
@@ -462,6 +529,536 @@ export const OnglideWebSocketMessage = {
     message.ka = (object.ka !== undefined && object.ka !== null) ? KeepAlive.fromPartial(object.ka) : undefined;
     message.t = object.t ?? undefined;
     message.task = (object.task !== undefined && object.task !== null) ? Task.fromPartial(object.task) : undefined;
+    message.competitions = (object.competitions !== undefined && object.competitions !== null)
+      ? CompetitionsList.fromPartial(object.competitions)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCompetitionClassStatus(): CompetitionClassStatus {
+  return { class: "", classname: "", status: "", pilotCount: 0, statusDatecode: undefined, displayStatus: "" };
+}
+
+export const CompetitionClassStatus = {
+  encode(message: CompetitionClassStatus, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.class !== "") {
+      writer.uint32(10).string(message.class);
+    }
+    if (message.classname !== "") {
+      writer.uint32(18).string(message.classname);
+    }
+    if (message.status !== "") {
+      writer.uint32(26).string(message.status);
+    }
+    if (message.pilotCount !== 0) {
+      writer.uint32(32).uint32(message.pilotCount);
+    }
+    if (message.statusDatecode !== undefined) {
+      writer.uint32(42).string(message.statusDatecode);
+    }
+    if (message.displayStatus !== "") {
+      writer.uint32(50).string(message.displayStatus);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): CompetitionClassStatus {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCompetitionClassStatus();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.class = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.classname = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+        case 4:
+          if (tag !== 32) {
+            break;
+          }
+
+          message.pilotCount = reader.uint32();
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.statusDatecode = reader.string();
+          continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.displayStatus = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CompetitionClassStatus {
+    return {
+      class: isSet(object.class) ? globalThis.String(object.class) : "",
+      classname: isSet(object.classname) ? globalThis.String(object.classname) : "",
+      status: isSet(object.status) ? globalThis.String(object.status) : "",
+      pilotCount: isSet(object.pilotCount) ? globalThis.Number(object.pilotCount) : 0,
+      statusDatecode: isSet(object.statusDatecode) ? globalThis.String(object.statusDatecode) : undefined,
+      displayStatus: isSet(object.displayStatus) ? globalThis.String(object.displayStatus) : "",
+    };
+  },
+
+  toJSON(message: CompetitionClassStatus): unknown {
+    const obj: any = {};
+    if (message.class !== "") {
+      obj.class = message.class;
+    }
+    if (message.classname !== "") {
+      obj.classname = message.classname;
+    }
+    if (message.status !== "") {
+      obj.status = message.status;
+    }
+    if (message.pilotCount !== 0) {
+      obj.pilotCount = Math.round(message.pilotCount);
+    }
+    if (message.statusDatecode !== undefined) {
+      obj.statusDatecode = message.statusDatecode;
+    }
+    if (message.displayStatus !== "") {
+      obj.displayStatus = message.displayStatus;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CompetitionClassStatus>, I>>(base?: I): CompetitionClassStatus {
+    return CompetitionClassStatus.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CompetitionClassStatus>, I>>(object: I): CompetitionClassStatus {
+    const message = createBaseCompetitionClassStatus();
+    message.class = object.class ?? "";
+    message.classname = object.classname ?? "";
+    message.status = object.status ?? "";
+    message.pilotCount = object.pilotCount ?? 0;
+    message.statusDatecode = object.statusDatecode ?? undefined;
+    message.displayStatus = object.displayStatus ?? "";
+    return message;
+  },
+};
+
+function createBaseCompetitionSummary(): CompetitionSummary {
+  return {
+    compid: "",
+    name: "",
+    sitename: undefined,
+    lat: 0,
+    lng: 0,
+    start: "",
+    end: "",
+    countrycode: "",
+    tz: "",
+    tzoffset: 0,
+    mainwebsite: undefined,
+    classCount: 0,
+    classStatusesDiffer: false,
+    displayStatus: "",
+    classes: [],
+  };
+}
+
+export const CompetitionSummary = {
+  encode(message: CompetitionSummary, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.compid !== "") {
+      writer.uint32(10).string(message.compid);
+    }
+    if (message.name !== "") {
+      writer.uint32(18).string(message.name);
+    }
+    if (message.sitename !== undefined) {
+      writer.uint32(26).string(message.sitename);
+    }
+    if (message.lat !== 0) {
+      writer.uint32(33).double(message.lat);
+    }
+    if (message.lng !== 0) {
+      writer.uint32(41).double(message.lng);
+    }
+    if (message.start !== "") {
+      writer.uint32(50).string(message.start);
+    }
+    if (message.end !== "") {
+      writer.uint32(58).string(message.end);
+    }
+    if (message.countrycode !== "") {
+      writer.uint32(66).string(message.countrycode);
+    }
+    if (message.tz !== "") {
+      writer.uint32(74).string(message.tz);
+    }
+    if (message.tzoffset !== 0) {
+      writer.uint32(80).int32(message.tzoffset);
+    }
+    if (message.mainwebsite !== undefined) {
+      writer.uint32(90).string(message.mainwebsite);
+    }
+    if (message.classCount !== 0) {
+      writer.uint32(96).uint32(message.classCount);
+    }
+    if (message.classStatusesDiffer !== false) {
+      writer.uint32(104).bool(message.classStatusesDiffer);
+    }
+    if (message.displayStatus !== "") {
+      writer.uint32(114).string(message.displayStatus);
+    }
+    for (const v of message.classes) {
+      CompetitionClassStatus.encode(v!, writer.uint32(122).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): CompetitionSummary {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCompetitionSummary();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.compid = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.sitename = reader.string();
+          continue;
+        case 4:
+          if (tag !== 33) {
+            break;
+          }
+
+          message.lat = reader.double();
+          continue;
+        case 5:
+          if (tag !== 41) {
+            break;
+          }
+
+          message.lng = reader.double();
+          continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.start = reader.string();
+          continue;
+        case 7:
+          if (tag !== 58) {
+            break;
+          }
+
+          message.end = reader.string();
+          continue;
+        case 8:
+          if (tag !== 66) {
+            break;
+          }
+
+          message.countrycode = reader.string();
+          continue;
+        case 9:
+          if (tag !== 74) {
+            break;
+          }
+
+          message.tz = reader.string();
+          continue;
+        case 10:
+          if (tag !== 80) {
+            break;
+          }
+
+          message.tzoffset = reader.int32();
+          continue;
+        case 11:
+          if (tag !== 90) {
+            break;
+          }
+
+          message.mainwebsite = reader.string();
+          continue;
+        case 12:
+          if (tag !== 96) {
+            break;
+          }
+
+          message.classCount = reader.uint32();
+          continue;
+        case 13:
+          if (tag !== 104) {
+            break;
+          }
+
+          message.classStatusesDiffer = reader.bool();
+          continue;
+        case 14:
+          if (tag !== 114) {
+            break;
+          }
+
+          message.displayStatus = reader.string();
+          continue;
+        case 15:
+          if (tag !== 122) {
+            break;
+          }
+
+          message.classes.push(CompetitionClassStatus.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CompetitionSummary {
+    return {
+      compid: isSet(object.compid) ? globalThis.String(object.compid) : "",
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      sitename: isSet(object.sitename) ? globalThis.String(object.sitename) : undefined,
+      lat: isSet(object.lat) ? globalThis.Number(object.lat) : 0,
+      lng: isSet(object.lng) ? globalThis.Number(object.lng) : 0,
+      start: isSet(object.start) ? globalThis.String(object.start) : "",
+      end: isSet(object.end) ? globalThis.String(object.end) : "",
+      countrycode: isSet(object.countrycode) ? globalThis.String(object.countrycode) : "",
+      tz: isSet(object.tz) ? globalThis.String(object.tz) : "",
+      tzoffset: isSet(object.tzoffset) ? globalThis.Number(object.tzoffset) : 0,
+      mainwebsite: isSet(object.mainwebsite) ? globalThis.String(object.mainwebsite) : undefined,
+      classCount: isSet(object.classCount) ? globalThis.Number(object.classCount) : 0,
+      classStatusesDiffer: isSet(object.classStatusesDiffer) ? globalThis.Boolean(object.classStatusesDiffer) : false,
+      displayStatus: isSet(object.displayStatus) ? globalThis.String(object.displayStatus) : "",
+      classes: globalThis.Array.isArray(object?.classes)
+        ? object.classes.map((e: any) => CompetitionClassStatus.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: CompetitionSummary): unknown {
+    const obj: any = {};
+    if (message.compid !== "") {
+      obj.compid = message.compid;
+    }
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.sitename !== undefined) {
+      obj.sitename = message.sitename;
+    }
+    if (message.lat !== 0) {
+      obj.lat = message.lat;
+    }
+    if (message.lng !== 0) {
+      obj.lng = message.lng;
+    }
+    if (message.start !== "") {
+      obj.start = message.start;
+    }
+    if (message.end !== "") {
+      obj.end = message.end;
+    }
+    if (message.countrycode !== "") {
+      obj.countrycode = message.countrycode;
+    }
+    if (message.tz !== "") {
+      obj.tz = message.tz;
+    }
+    if (message.tzoffset !== 0) {
+      obj.tzoffset = Math.round(message.tzoffset);
+    }
+    if (message.mainwebsite !== undefined) {
+      obj.mainwebsite = message.mainwebsite;
+    }
+    if (message.classCount !== 0) {
+      obj.classCount = Math.round(message.classCount);
+    }
+    if (message.classStatusesDiffer !== false) {
+      obj.classStatusesDiffer = message.classStatusesDiffer;
+    }
+    if (message.displayStatus !== "") {
+      obj.displayStatus = message.displayStatus;
+    }
+    if (message.classes?.length) {
+      obj.classes = message.classes.map((e) => CompetitionClassStatus.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CompetitionSummary>, I>>(base?: I): CompetitionSummary {
+    return CompetitionSummary.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CompetitionSummary>, I>>(object: I): CompetitionSummary {
+    const message = createBaseCompetitionSummary();
+    message.compid = object.compid ?? "";
+    message.name = object.name ?? "";
+    message.sitename = object.sitename ?? undefined;
+    message.lat = object.lat ?? 0;
+    message.lng = object.lng ?? 0;
+    message.start = object.start ?? "";
+    message.end = object.end ?? "";
+    message.countrycode = object.countrycode ?? "";
+    message.tz = object.tz ?? "";
+    message.tzoffset = object.tzoffset ?? 0;
+    message.mainwebsite = object.mainwebsite ?? undefined;
+    message.classCount = object.classCount ?? 0;
+    message.classStatusesDiffer = object.classStatusesDiffer ?? false;
+    message.displayStatus = object.displayStatus ?? "";
+    message.classes = object.classes?.map((e) => CompetitionClassStatus.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCompetitionsList(): CompetitionsList {
+  return { competitions: [], generatedAt: 0, full: false, removed: [] };
+}
+
+export const CompetitionsList = {
+  encode(message: CompetitionsList, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.competitions) {
+      CompetitionSummary.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.generatedAt !== 0) {
+      writer.uint32(16).uint32(message.generatedAt);
+    }
+    if (message.full !== false) {
+      writer.uint32(24).bool(message.full);
+    }
+    for (const v of message.removed) {
+      writer.uint32(34).string(v!);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): CompetitionsList {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseCompetitionsList();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.competitions.push(CompetitionSummary.decode(reader, reader.uint32()));
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.generatedAt = reader.uint32();
+          continue;
+        case 3:
+          if (tag !== 24) {
+            break;
+          }
+
+          message.full = reader.bool();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.removed.push(reader.string());
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): CompetitionsList {
+    return {
+      competitions: globalThis.Array.isArray(object?.competitions)
+        ? object.competitions.map((e: any) => CompetitionSummary.fromJSON(e))
+        : [],
+      generatedAt: isSet(object.generatedAt) ? globalThis.Number(object.generatedAt) : 0,
+      full: isSet(object.full) ? globalThis.Boolean(object.full) : false,
+      removed: globalThis.Array.isArray(object?.removed) ? object.removed.map((e: any) => globalThis.String(e)) : [],
+    };
+  },
+
+  toJSON(message: CompetitionsList): unknown {
+    const obj: any = {};
+    if (message.competitions?.length) {
+      obj.competitions = message.competitions.map((e) => CompetitionSummary.toJSON(e));
+    }
+    if (message.generatedAt !== 0) {
+      obj.generatedAt = Math.round(message.generatedAt);
+    }
+    if (message.full !== false) {
+      obj.full = message.full;
+    }
+    if (message.removed?.length) {
+      obj.removed = message.removed;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CompetitionsList>, I>>(base?: I): CompetitionsList {
+    return CompetitionsList.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<CompetitionsList>, I>>(object: I): CompetitionsList {
+    const message = createBaseCompetitionsList();
+    message.competitions = object.competitions?.map((e) => CompetitionSummary.fromPartial(e)) || [];
+    message.generatedAt = object.generatedAt ?? 0;
+    message.full = object.full ?? false;
+    message.removed = object.removed?.map((e) => e) || [];
     return message;
   },
 };

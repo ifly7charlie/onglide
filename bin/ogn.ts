@@ -21,7 +21,7 @@ import {point} from '@turf/helpers';
 import {WebSocket, WebSocketServer} from 'ws';
 import type {IncomingMessage} from 'http';
 
-import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore, CompetitionSummary, CompetitionClassStatus} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
@@ -39,8 +39,16 @@ import {taskBbox, unionBboxes, expandBbox, bboxToAprsArea, bboxContainsCircle, B
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
 
+// Display-status derivation shared with the front-end (JSX-free entry point).
+import {classDisplayStatus, type CompetitionDisplayStatus} from '../lib/competition-display-status';
+
+// Reserved channel name for the global "all competitions" feed used by the
+// landing page. Lowercase so it cannot collide with a real `{className}{datecode}`
+// channel (those are upper-cased alphanumeric — see channelName()).
+const COMPETITIONS_CHANNEL = 'all';
+
 // Shared device-database loader (OGN + FlarmNet)
-import {loadMergedDDB, isBlocked, DDBEntry as SharedDDBEntry} from '../lib/ddb';
+import {loadMergedDDB, isBlocked, blockedMethod, DDBEntry as SharedDDBEntry} from '../lib/ddb';
 
 // Message passed from the AprsContest Listener
 import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM} from '../lib/types';
@@ -103,6 +111,19 @@ process.setMaxListeners(35);
 // timezone, internal name, the set of channel keys this comp owns — lives
 // in a CompetitionContext. PR 4 restructures but stays single-comp; PR 5
 // walks this map to support multiple concurrent comps.
+interface CompetitionMetadata {
+    name: string;
+    sitename: string | null;
+    countrycode: string;
+    mainwebsite: string | null;
+    lat: number;
+    lng: number;
+    start: string; // YYYY-MM-DD
+    end: string; // YYYY-MM-DD
+    tz: string;
+    tzoffset: number;
+}
+
 interface CompetitionContext {
     compid: string;
     internalName: string;
@@ -114,6 +135,7 @@ interface CompetitionContext {
     // 'Y' if the comp has obtained explicit livetracking consent from
     // pilots; bypasses the DDB Permit-Livetracking block.
     trackingconsent?: string;
+    summary: CompetitionMetadata;
 }
 
 const contexts: Record<string, CompetitionContext> = {};
@@ -151,7 +173,14 @@ interface Channel {
     className: ClassName;
     compid: string;
     displayName: string; // "<compShort>/<classname>" — for log lines
+    classname: string; // human-readable class name (e.g. "Open", "Standard")
     datecode: Datecode;
+
+    // Mirror of compstatus row + pilot count — fed into the /all
+    // CompetitionsList feed without re-querying the DB.
+    compStatus: string; // raw compstatus.status (L/S/H/F/B/P/G/'')
+    statusDatecode: Datecode | null; // compstatus.datecode
+    pilotCount: number;
 
     toSend: PositionMessage[]; // messages waiting to be sent
 
@@ -195,6 +224,22 @@ interface Channel {
 }
 
 let channels: Record<ChannelName, Channel> = {};
+
+// Clients connected to the reserved /all channel — landing-page globe.
+// Kept separate from the per-class channels[] so iteration over per-class
+// state (position broadcasts, keepalive, stats) stays untouched.
+let competitionsListeners: OgnWebSocket[] = [];
+
+// Last-broadcast cache, keyed by compid. Used by broadcastCompetitionsDelta
+// to suppress no-op frames: a tick that rebuilds an identical summary skips
+// the wire altogether. Stores the encoded CompetitionSummary bytes.
+const lastCompetitionSummaryBytes = new Map<string, string>();
+
+// Comps that exist in the DB but haven't started yet (and have no task wired
+// up). They get no scoring/tracker infrastructure, but the landing-page
+// globe still shows them with displayStatus='upcoming'. Refreshed on every
+// reconcile tick — see refreshUpcomingCompetitions().
+const upcomingComps: Record<string, CompetitionMetadata & {classnames: string[]}> = {};
 /*EG: { 'PMSRMAM202007I': { className: 'blue', clients: [], datecode: '070' },
                     'PMSRMAM202007H': { className: 'red', clients: [], datecode: '070' },
                     }; */
@@ -643,7 +688,7 @@ main().then(() => console.log('Started'));
 // identically. Multi-comp deployments just omit it. The date window
 // opens the day before start and closes two days after end to give
 // grace for overnight replay / scoring jobs.
-async function discoverCompetitions(): Promise<any[]> {
+async function discoverCompetitions(): Promise<{active: any[]; upcoming: any[]}> {
     const envCompId = process.env.COMP_ID;
 
     // Fetch every competition that has at least one class, plus a flag
@@ -651,7 +696,8 @@ async function discoverCompetitions(): Promise<any[]> {
     // current scoring datecode (the "pre-comp practice day" escape hatch
     // on the start side). Date window filtering is done in TypeScript
     // below so replay mode can bypass it.
-    const base = `SELECT c.compid, c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats, c.trackingconsent,
+    const base = `SELECT c.compid, c.name, c.sitename, c.countrycode, c.mainwebsite,
+                         c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats, c.trackingconsent,
                          (SELECT COUNT(*)
                           FROM tasks t
                           JOIN compstatus cs ON cs.class = t.class AND cs.datecode = t.datecode
@@ -668,7 +714,7 @@ async function discoverCompetitions(): Promise<any[]> {
     // through. Used to test FE changes and benchmark scoring when no
     // live competition is running.
     if (replayBase > 0) {
-        return rows;
+        return {active: rows, upcoming: []};
     }
 
     // Live mode: each comp's date window is evaluated in its own local
@@ -679,39 +725,51 @@ async function discoverCompetitions(): Promise<any[]> {
     //
     // End is strict: once the last local day is past, the comp is done.
     // Start is strict too, except when the currentTaskCount escape hatch
-    // fires (a task is already wired up for today's scoring datecode).
+    // fires (a task is already wired up for today's scoring datecode), in
+    // which case it counts as active. Future comps with no task are kept
+    // separately so the /all feed can advertise them as 'upcoming' on the
+    // landing page without spinning up scoring/tracker infrastructure.
     const ymd = (v: any): string => {
         if (v instanceof Date) return v.toISOString().slice(0, 10);
         if (typeof v === 'string') return v.slice(0, 10);
         return '';
     };
     const nowUtcMs = Date.now();
-    const result: any[] = [];
+    const active: any[] = [];
+    const upcoming: any[] = [];
     for (const row of rows) {
         const tzoffset = parseInt(row.tzoffset as unknown as string) || 0;
         const localToday = new Date(nowUtcMs + tzoffset * 1000).toISOString().slice(0, 10);
         const start = ymd(row.start);
         const end = ymd(row.end);
         if (end && end < localToday) continue; // past the end, done
-        if (start && start > localToday && (Number(row.currentTaskCount) || 0) === 0) continue; // future, no task yet
-        result.push(row);
+        if (start && start > localToday && (Number(row.currentTaskCount) || 0) === 0) {
+            upcoming.push(row);
+            continue;
+        }
+        active.push(row);
     }
-    return result;
+    return {active, upcoming};
 }
 
 // Walk the discovery result against the current contexts map and start
 // or stop contexts to match. Called at startup and from the 60s tick.
 async function reconcileContexts() {
-    let rows: any[];
+    let active: any[];
+    let upcoming: any[];
     try {
-        rows = await discoverCompetitions();
+        const result = await discoverCompetitions();
+        active = result.active;
+        upcoming = result.upcoming;
     } catch (e) {
         console.error('discoverCompetitions failed:', e);
         return;
     }
 
+    refreshUpcomingCompetitions(upcoming);
+
     const seen = new Set<string>();
-    for (const row of rows) {
+    for (const row of active) {
         const compid = row.compid as string;
         // Skip comps with no usable site coordinates — turf.point() in
         // createCompetitionContext rejects null/undefined, and 0/0 is the
@@ -730,10 +788,23 @@ async function reconcileContexts() {
         if (contexts[compid]) {
             failedCompsLogged.delete(compid);
             const ctx = contexts[compid];
+            // Keep summary fields in sync — these are read by buildCompetitionSummary().
+            ctx.summary.name = row.name;
+            ctx.summary.sitename = row.sitename ?? null;
+            ctx.summary.countrycode = row.countrycode || '';
+            ctx.summary.mainwebsite = row.mainwebsite ?? null;
+            ctx.summary.tz = row.tz || ctx.summary.tz;
+            ctx.summary.tzoffset = parseInt(row.tzoffset as unknown as string) || ctx.summary.tzoffset;
+            const newStart = row.start instanceof Date ? row.start.toISOString().slice(0, 10) : (typeof row.start === 'string' ? row.start.slice(0, 10) : ctx.summary.start);
+            const newEnd = row.end instanceof Date ? row.end.toISOString().slice(0, 10) : (typeof row.end === 'string' ? row.end.slice(0, 10) : ctx.summary.end);
+            ctx.summary.start = newStart;
+            ctx.summary.end = newEnd;
             if (row.lat !== ctx.location.lat || row.lng !== ctx.location.lng) {
                 console.log(`${compShort(compid)}: site moved (${ctx.location.lat},${ctx.location.lng}) -> (${row.lat},${row.lng})`);
                 ctx.location.lat = row.lat;
                 ctx.location.lng = row.lng;
+                ctx.summary.lat = Number(row.lat) || 0;
+                ctx.summary.lng = Number(row.lng) || 0;
                 ctx.location.point = point([row.lng, row.lat]);
                 getElevationOffset(row.lat, row.lng, (agl: any) => {
                     ctx.location.altitude = agl;
@@ -782,13 +853,30 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
     location.officialDelay = getDelay();
     location.tzoffset = parseInt(location.tzoffset as unknown as string);
 
+    const ymd = (v: any): string => {
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === 'string') return v.slice(0, 10);
+        return '';
+    };
     const competition: CompetitionContext = {
         compid: row.compid,
         internalName: location.name.replace(/[^a-z]/gi, '').substring(0, 10),
         location,
         ownedChannels: new Set(),
         state: 'starting',
-        trackingconsent: row.trackingconsent || 'N'
+        trackingconsent: row.trackingconsent || 'N',
+        summary: {
+            name: row.name,
+            sitename: row.sitename ?? null,
+            countrycode: row.countrycode || '',
+            mainwebsite: row.mainwebsite ?? null,
+            lat: Number(row.lat) || 0,
+            lng: Number(row.lng) || 0,
+            start: ymd(row.start),
+            end: ymd(row.end),
+            tz: row.tz || '',
+            tzoffset: parseInt(row.tzoffset as unknown as string) || 0
+        }
     };
 
     console.log(`${compShort(competition.compid)}: creating competition context (internalName=${competition.internalName})`);
@@ -901,6 +989,8 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
     competition.state = 'stopped';
     delete contexts[competition.compid];
     console.log(`${tag}: competition context stopped`);
+    // Tell /all listeners the comp is gone so the globe drops its marker.
+    broadcastCompetitionsDelta([], [competition.compid]);
 }
 
 async function tickCompetition(competition: CompetitionContext) {
@@ -932,6 +1022,10 @@ async function tickCompetitionTrackersAndTasks(competition: CompetitionContext, 
     await updateTasks(competition);
     await finaliseScoreId(competition);
     if (competition.state === 'starting') competition.state = 'running';
+    // Push any change picked up by this tick (new class, new pilot count,
+    // task wired up, etc.) to /all listeners. broadcastCompetitionsDelta
+    // suppresses the wire write if nothing changed since last broadcast.
+    broadcastCompetitionsDelta([competition.compid], []);
 }
 
 function getSunset(competition: CompetitionContext, datecode: Datecode) {
@@ -1009,8 +1103,11 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // Fetch the trackers from the database and the channel they are supposed to be in.
     // Scoped to this OGN process's compid so we don't pick up other competitions sharing
     // the same database.
-    const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string; classname: string}[]>(
-        'SELECT cs.class, cs.datecode, cl.compid, cl.classname FROM compstatus cs JOIN classes cl ON cs.class = cl.class WHERE cl.compid = ?',
+    const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string; classname: string; status: string}[]>(
+        `SELECT cs.class, cs.datecode, cl.compid, cl.classname, COALESCE(cs.status, '') AS status
+         FROM classes cl
+         LEFT JOIN compstatus cs ON cs.class = cl.class
+         WHERE cl.compid = ?`,
         [competition.compid]
     );
 
@@ -1058,8 +1155,12 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 lastSentPositions: 0 as Epoch,
                 className: c.class,
                 compid: c.compid,
+                classname: c.classname,
                 displayName: `${compShort(c.compid)}/${c.classname}`,
                 datecode: datecode,
+                compStatus: c.status || '',
+                statusDatecode: (c.datecode as Datecode | null) ?? null,
+                pilotCount: 0, // populated by updateTrackers from configured gliders
                 gliderHash: '',
                 statistics: {
                     periodStart: Math.trunc(Date.now() / 1000) as Epoch,
@@ -1125,6 +1226,14 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
             // We move it to the new list
             delete channels[cname];
         }
+
+        // Refresh status mirror fields from the latest compstatus row so the
+        // /all CompetitionsList feed reflects the DB on every tick. pilotCount
+        // is populated by updateTrackers from the configured glider set.
+        channel.compStatus = c.status || '';
+        channel.statusDatecode = (c.datecode as Datecode | null) ?? null;
+        channel.classname = c.classname;
+
         newchannels[cname] = channel;
 
         // Make sure we have a broadcast channel for the class
@@ -1641,6 +1750,21 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         console.log(`${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
     }
 
+    // Refresh per-class pilotCount from the configured glider set. This is
+    // what the /all CompetitionsList feed surfaces to the landing page —
+    // "pilots configured for tracking" rather than the raw pilots-table count.
+    for (const cname of competition.ownedChannels) {
+        const ch = channels[cname];
+        if (!ch) continue;
+        let count = 0;
+        for (const g of Object.values(gliders)) {
+            if (g.compid === competition.compid && g.className === ch.className && g.datecode === ch.datecode && g.scoringConfigured) {
+                count++;
+            }
+        }
+        ch.pilotCount = count;
+    }
+
     if (!readOnly) {
         // Group all scored pilots by class and note how many of those have trackers —
         // sparse tracker coverage can't justify a "landed" verdict for the whole class.
@@ -1744,6 +1868,14 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                     .then((r: any) => {
                         if (r?.affectedRows) {
                             console.log(`compstatus -> ${nextStatus} for ${className}: ${reason}`);
+                            // Mirror the live status onto the channel so the
+                            // /all feed reflects the change without a tick.
+                            const ch = channels[channelName(className, datecode)];
+                            if (ch) {
+                                ch.compStatus = nextStatus!;
+                                ch.statusDatecode = datecode;
+                            }
+                            broadcastCompetitionsDelta([competition.compid], []);
                         }
                     })
                     .catch((e: any) => console.log(`compstatus ${nextStatus} update failed:`, e));
@@ -2116,6 +2248,278 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
     }
 }
 
+// =====================================================================
+// Global "all competitions" feed (channel `/all`)
+// =====================================================================
+
+// Refresh the in-memory map of comps that exist but haven't started flying
+// yet. We pull the class roster for each upcoming comp so the landing page
+// can show class chips with pilot counts even before tracking begins.
+// Emits a /all delta covering anything added, changed, or removed since the
+// last refresh.
+async function refreshUpcomingCompetitions(rows: any[]) {
+    const ymd = (v: any): string => {
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === 'string') return v.slice(0, 10);
+        return '';
+    };
+
+    const seen = new Set<string>();
+    const changed: string[] = [];
+    for (const row of rows) {
+        const compid = row.compid as string;
+        seen.add(compid);
+        // Pull classnames for this comp in one query. Pilot counts go via
+        // the same pilots-table count the front-end used to do — these
+        // pilots aren't being tracked yet so there's no in-memory glider
+        // count to use.
+        let classnames: string[] = [];
+        try {
+            const cls = await db.query<{classname: string}[]>(
+                'SELECT cl.classname FROM classes cl WHERE cl.compid = ? ORDER BY cl.classname',
+                [compid]
+            );
+            classnames = cls.map((c) => c.classname);
+        } catch (e) {
+            console.log(`refreshUpcomingCompetitions: classes query failed for ${compid}:`, e);
+        }
+
+        const tzoffset = parseInt(row.tzoffset as unknown as string) || 0;
+        const next: CompetitionMetadata & {classnames: string[]} = {
+            name: row.name,
+            sitename: row.sitename ?? null,
+            countrycode: row.countrycode || '',
+            mainwebsite: row.mainwebsite ?? null,
+            lat: Number(row.lat) || 0,
+            lng: Number(row.lng) || 0,
+            start: ymd(row.start),
+            end: ymd(row.end),
+            tz: row.tz || '',
+            tzoffset,
+            classnames
+        };
+        const prev = upcomingComps[compid];
+        if (!prev || JSON.stringify(prev) !== JSON.stringify(next)) {
+            upcomingComps[compid] = next;
+            changed.push(compid);
+        }
+    }
+
+    // Drop entries that no longer appear in the upcoming list. They've
+    // either become active (handled by the contexts path) or fallen out of
+    // the date window entirely.
+    const removed: string[] = [];
+    for (const compid of Object.keys(upcomingComps)) {
+        if (!seen.has(compid)) {
+            delete upcomingComps[compid];
+            removed.push(compid);
+        }
+    }
+
+    if (changed.length || removed.length) {
+        broadcastCompetitionsDelta(changed, removed);
+    }
+}
+
+// Build a CompetitionSummary for one comp from in-memory state. Mirrors
+// the aggregation that pages/api/competitions.ts used to do in JS, but
+// reads compstatus mirrors directly off the per-class Channel objects so
+// no DB round-trip is needed on every status change.
+function buildUpcomingSummary(compid: string): CompetitionSummary | null {
+    const meta = upcomingComps[compid];
+    if (!meta) return null;
+    const classes: CompetitionClassStatus[] = meta.classnames.map((classname) => ({
+        class: classname, // class id == classname for upcoming (we don't expose the id pre-flight)
+        classname,
+        status: '',
+        pilotCount: 0,
+        statusDatecode: undefined,
+        displayStatus: 'upcoming' as CompetitionDisplayStatus
+    }));
+    return {
+        compid,
+        name: meta.name,
+        sitename: meta.sitename ?? undefined,
+        lat: meta.lat,
+        lng: meta.lng,
+        start: meta.start,
+        end: meta.end,
+        countrycode: meta.countrycode,
+        tz: meta.tz,
+        tzoffset: meta.tzoffset,
+        mainwebsite: meta.mainwebsite ?? undefined,
+        classCount: classes.length,
+        classStatusesDiffer: false,
+        displayStatus: 'upcoming',
+        classes
+    };
+}
+
+function buildCompetitionSummary(competition: CompetitionContext): CompetitionSummary | null {
+    const sum = competition.summary;
+    if (!sum) return null;
+
+    // Day-of-flying compares done as YYYY-MM-DD strings against the comp's
+    // local date so a westbound evening flight on the last day still scores
+    // as inWindow. Replay mode bypasses live wall-clock checks.
+    const todayLocalIso = (() => {
+        const tzoffset = sum.tzoffset || 0;
+        return new Date(Date.now() + tzoffset * 1000).toISOString().slice(0, 10);
+    })();
+    const todayDatecode = toDateCode(new Date(todayLocalIso));
+    const yesterdayLocalIso = new Date(new Date(todayLocalIso).getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const yesterdayDatecode = toDateCode(new Date(yesterdayLocalIso));
+
+    const inWindow = !!sum.start && !!sum.end && sum.start <= todayLocalIso && todayLocalIso <= sum.end;
+
+    const classes: CompetitionClassStatus[] = [];
+    for (const cname of competition.ownedChannels) {
+        const ch = channels[cname];
+        if (!ch) continue;
+        const sdc = ch.statusDatecode ? String(ch.statusDatecode).toUpperCase() : null;
+        // compstatus is sticky — only trust the status when its datecode
+        // matches today; older datecodes get demoted to 'yesterday' or
+        // 'notask' so a missed landing report from two days ago doesn't
+        // look like 'racing'. See the original /api/competitions logic.
+        let displayStatus: CompetitionDisplayStatus;
+        if (sdc && sdc < todayDatecode) {
+            displayStatus = sdc === yesterdayDatecode ? 'yesterday' : 'notask';
+        } else {
+            displayStatus = classDisplayStatus(ch.compStatus, inWindow);
+        }
+        classes.push({
+            class: ch.className,
+            classname: ch.classname || ch.className,
+            status: ch.compStatus,
+            pilotCount: ch.pilotCount,
+            statusDatecode: sdc ?? undefined,
+            displayStatus
+        });
+    }
+    classes.sort((a, b) => a.classname.localeCompare(b.classname));
+
+    // Comp-level rollup: only classes whose compstatus is from today count
+    // toward the live label. Stale rows already became yesterday/notask
+    // above and shouldn't drag the comp marker into 'started' just
+    // because nobody updated them.
+    const todaysStatuses: string[] = [];
+    let anyYesterday = false;
+    for (const cname of competition.ownedChannels) {
+        const ch = channels[cname];
+        if (!ch) continue;
+        const sdc = ch.statusDatecode ? String(ch.statusDatecode).toUpperCase() : null;
+        if (sdc === todayDatecode && ch.compStatus) todaysStatuses.push(ch.compStatus);
+        if (sdc === yesterdayDatecode) anyYesterday = true;
+    }
+    let displayStatus: CompetitionDisplayStatus;
+    const anyFinishing = todaysStatuses.some((s) => s === 'F');
+    const anyStarted = todaysStatuses.some((s) => s === 'S');
+    const anyLaunching = todaysStatuses.some((s) => s === 'L');
+    const allHome = todaysStatuses.length > 0 && todaysStatuses.every((s) => s === 'H');
+    const anyTaskReady = todaysStatuses.some((s) => s === 'B' || s === 'P' || s === 'G');
+    if (anyFinishing) displayStatus = 'finishing';
+    else if (anyStarted) displayStatus = 'started';
+    else if (anyLaunching) displayStatus = 'launching';
+    else if (allHome) displayStatus = 'home';
+    else if (inWindow && anyTaskReady) displayStatus = 'task_set';
+    else if (inWindow) displayStatus = 'notask';
+    else displayStatus = 'upcoming';
+    if (todaysStatuses.length === 0 && anyYesterday) displayStatus = 'yesterday';
+
+    const classStatusesDiffer = new Set(classes.map((c) => c.displayStatus)).size > 1;
+
+    return {
+        compid: competition.compid,
+        name: sum.name,
+        sitename: sum.sitename ?? undefined,
+        lat: sum.lat,
+        lng: sum.lng,
+        start: sum.start,
+        end: sum.end,
+        countrycode: sum.countrycode,
+        tz: sum.tz,
+        tzoffset: sum.tzoffset,
+        mainwebsite: sum.mainwebsite ?? undefined,
+        classCount: classes.length,
+        classStatusesDiffer,
+        displayStatus,
+        classes
+    };
+}
+
+// Send the full snapshot to a single client (used on connect). Always
+// `full=true` so the client can populate its cache from cold.
+function broadcastCompetitionsSnapshot(client: OgnWebSocket) {
+    const summaries: CompetitionSummary[] = [];
+    for (const ctx of Object.values(contexts)) {
+        const s = buildCompetitionSummary(ctx);
+        if (s) {
+            summaries.push(s);
+            // Seed the cache so the next delta correctly suppresses no-ops
+            // for compids the new client just received.
+            lastCompetitionSummaryBytes.set(ctx.compid, summaryFingerprint(s));
+        }
+    }
+    for (const compid of Object.keys(upcomingComps)) {
+        const s = buildUpcomingSummary(compid);
+        if (s) {
+            summaries.push(s);
+            lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
+        }
+    }
+    const msg = OnglideWebSocketMessage.encode({
+        competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}
+    }).finish();
+    if (client.readyState === WebSocket.OPEN) {
+        client.send(msg, {binary: true});
+    }
+}
+
+// Broadcast a delta to every /all listener. Only comps whose summary has
+// actually changed (vs lastCompetitionSummaryBytes) end up on the wire.
+// `removedCompids` is for comps that have just dropped off the active
+// list (end date passed).
+function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: string[]) {
+    if (!competitionsListeners.length) {
+        // Still update the cache so a future client sees correct deltas
+        for (const compid of changedCompids) {
+            const ctx = contexts[compid];
+            const s = ctx ? buildCompetitionSummary(ctx) : buildUpcomingSummary(compid);
+            if (s) lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
+        }
+        for (const compid of removedCompids) lastCompetitionSummaryBytes.delete(compid);
+        return;
+    }
+
+    const dirty: CompetitionSummary[] = [];
+    for (const compid of changedCompids) {
+        const ctx = contexts[compid];
+        const s = ctx ? buildCompetitionSummary(ctx) : buildUpcomingSummary(compid);
+        if (!s) continue;
+        const fp = summaryFingerprint(s);
+        if (lastCompetitionSummaryBytes.get(compid) === fp) continue;
+        lastCompetitionSummaryBytes.set(compid, fp);
+        dirty.push(s);
+    }
+    for (const compid of removedCompids) lastCompetitionSummaryBytes.delete(compid);
+
+    if (dirty.length === 0 && removedCompids.length === 0) return;
+
+    const msg = OnglideWebSocketMessage.encode({
+        competitions: {competitions: dirty, generatedAt: Math.floor(getNow()), full: false, removed: removedCompids}
+    }).finish();
+
+    competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
+    competitionsListeners.forEach((client) => client.send(msg, {binary: true}));
+}
+
+// Stable string fingerprint of a CompetitionSummary for delta suppression.
+// JSON.stringify is deterministic for our shape (no Maps, no field-order
+// surprises since ts-proto emits a fixed property order).
+function summaryFingerprint(s: CompetitionSummary): string {
+    return JSON.stringify(s);
+}
+
 async function sendKeepalive(channel: Channel) {
     const now = getNow();
 
@@ -2265,6 +2669,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         // 'blocked' and stop — never subscribe APRS for them.
         if (isBlocked(ddbf, competition.trackingconsent)) {
             const sources = ddbf.sources?.join('+') ?? '?';
+            const method = blockedMethod(ddbf);
             for (const match of matches) {
                 match.dbTrackerId = 'blocked';
                 unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
@@ -2284,7 +2689,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                             INSERT INTO trackerhistory
                                 (compno, changed, flarmid, greg, method)
                             VALUES
-                                (${match.compno}, now(), 'blocked', ${ddbf.registration || null}, 'ddb-blocked')
+                                (${match.compno}, now(), 'blocked', ${ddbf.registration || null}, ${method})
                         `)
                         .commit();
                 }
@@ -2379,6 +2784,30 @@ function setupWebSocketServer(server) {
         ws.isClosed = false;
         ws.isInteracting = false;
         ws.connectedAt = getNow();
+
+        // Reserved /all channel: landing-page listener gets a CompetitionsList
+        // snapshot and is added to the dedicated competitionsListeners array.
+        // It does not subscribe to any per-class scoring/track stream.
+        if (channelName === COMPETITIONS_CHANNEL) {
+            ws.sendBinary = (data: Uint8Array) => {
+                if (ws.readyState === WebSocket.OPEN && ws.isAlive) {
+                    return ws.send(data, {binary: true});
+                }
+                return undefined;
+            };
+            competitionsListeners.push(ws);
+            ws.on('pong', () => {
+                ws.isAlive = true;
+            });
+            ws.on('close', () => {
+                ws.isAlive = false;
+                ws.isClosed = true;
+            });
+            ws.on('error', console.error);
+            broadcastCompetitionsSnapshot(ws);
+            return;
+        }
+
         if (channelName in channels) {
             channels[channelName].clients.push(ws);
         } else {
