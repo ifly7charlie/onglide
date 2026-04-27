@@ -89,15 +89,25 @@ export async function upsertTaskAndLegs(
     if (day.result_status != 'cancelled') {
         await db.query(escape`
             UPDATE compstatus
-            SET status = 'B', datecode = ${dateCode}
-            WHERE class = ${classid}
-              AND (status NOT IN ('L', 'S', 'R', 'H') OR datecode IS NULL OR datecode <> ${dateCode})
+            SET
+                status = 'B',
+                datecode = ${dateCode}
+            WHERE
+                class = ${classid}
+                AND (
+                    status NOT IN ('L', 'S', 'R', 'H')
+                    OR datecode IS NULL
+                    OR datecode <> ${dateCode}
+                )
         `);
     } else {
         await db.query(escape`
             UPDATE compstatus
-            SET status = 'Z', datecode = ${dateCode}
-            WHERE class = ${classid}
+            SET
+                status = 'Z',
+                datecode = ${dateCode}
+            WHERE
+                class = ${classid}
         `);
     }
 
@@ -359,7 +369,7 @@ export async function upsertTaskAndLegs(
             WHERE
                 class = ${classid}
         `)
-        .query(escape`
+        /*        .query(escape`
             UPDATE competition
             SET
                 lt = (
@@ -386,7 +396,7 @@ export async function upsertTaskAndLegs(
                 )
             WHERE
                 compid = (SELECT compid FROM classes WHERE class = ${classid})
-        `)
+                `) */
         .rollback((_e: any) => {
             log(`task transaction rolled back for ${classid} - ${date}`);
         })
@@ -400,9 +410,22 @@ export async function upsertTaskAndLegs(
     try {
         const compRow = (
             await db.query(escape`
-                SELECT compid, lt, lg, tz
-                FROM competition
-                WHERE compid = (SELECT compid FROM classes WHERE class = ${classid})
+                SELECT
+                    compid,
+                    lt,
+                    lg,
+                    tz
+                FROM
+                    competition
+                WHERE
+                    compid = (
+                        SELECT
+                            compid
+                        FROM
+                            classes
+                        WHERE
+                            class = ${classid}
+                    )
             `)
         )?.[0];
         if (compRow?.lt && compRow?.lg) {
@@ -411,8 +434,12 @@ export async function upsertTaskAndLegs(
                 const tzoffset = getTzOffset(tz);
                 log(`${classname}: refining tz from ${compRow.tz} -> ${tz} (${tzoffset}s) based on taskleg (${compRow.lt}, ${compRow.lg})`);
                 await db.query(escape`
-                    UPDATE competition SET tz = ${tz}, tzoffset = ${tzoffset}
-                    WHERE compid = ${compRow.compid}
+                    UPDATE competition
+                    SET
+                        tz = ${tz},
+                        tzoffset = ${tzoffset}
+                    WHERE
+                        compid = ${compRow.compid}
                 `);
             }
         }
@@ -441,7 +468,12 @@ export async function pruneOldDays(
     let classRows: {class: ClassId}[] = [];
     try {
         classRows = (await db.query(escape`
-            SELECT class FROM classes WHERE compid = ${compid}
+            SELECT
+                class
+            FROM
+                classes
+            WHERE
+                compid = ${compid}
         `)) as {class: ClassId}[];
     } catch (e) {
         log(`pruneOldDays: class lookup failed for compid=${compid}:`, e);
@@ -455,15 +487,38 @@ export async function pruneOldDays(
             // data for this class. We'll prune anything strictly before
             // today.
             const datecodes = (await db.query(escape`
-                SELECT DISTINCT datecode FROM (
-                    SELECT datecode FROM tasks WHERE class = ${classid}
-                    UNION
-                    SELECT datecode FROM taskleg WHERE class = ${classid}
-                    UNION
-                    SELECT datecode FROM contestday WHERE class = ${classid}
-                    UNION
-                    SELECT datecode FROM pilotresult WHERE class = ${classid}
-                ) d
+                SELECT DISTINCT
+                    datecode
+                FROM
+                    (
+                        SELECT
+                            datecode
+                        FROM
+                            tasks
+                        WHERE
+                            class = ${classid}
+                        UNION
+                        SELECT
+                            datecode
+                        FROM
+                            taskleg
+                        WHERE
+                            class = ${classid}
+                        UNION
+                        SELECT
+                            datecode
+                        FROM
+                            contestday
+                        WHERE
+                            class = ${classid}
+                        UNION
+                        SELECT
+                            datecode
+                        FROM
+                            pilotresult
+                        WHERE
+                            class = ${classid}
+                    ) d
             `)) as {datecode: string}[];
 
             for (const d of datecodes ?? []) {
@@ -474,10 +529,30 @@ export async function pruneOldDays(
                 // implementation would convert via fromDateCode, but the
                 // cadence here is once-per-day so a string compare with
                 // the current dc is sufficient.
-                await db.query(escape`DELETE FROM taskleg WHERE class = ${classid} AND datecode = ${d.datecode}`);
-                await db.query(escape`DELETE FROM tasks WHERE class = ${classid} AND datecode = ${d.datecode}`);
-                await db.query(escape`DELETE FROM pilotresult WHERE class = ${classid} AND datecode = ${d.datecode}`);
-                await db.query(escape`DELETE FROM contestday WHERE class = ${classid} AND datecode = ${d.datecode}`);
+                await db.query(escape`
+                    DELETE FROM taskleg
+                    WHERE
+                        class = ${classid}
+                        AND datecode = ${d.datecode}
+                `);
+                await db.query(escape`
+                    DELETE FROM tasks
+                    WHERE
+                        class = ${classid}
+                        AND datecode = ${d.datecode}
+                `);
+                await db.query(escape`
+                    DELETE FROM pilotresult
+                    WHERE
+                        class = ${classid}
+                        AND datecode = ${d.datecode}
+                `);
+                await db.query(escape`
+                    DELETE FROM contestday
+                    WHERE
+                        class = ${classid}
+                        AND datecode = ${d.datecode}
+                `);
                 log(`pruned old day ${d.datecode} from class ${classid}`);
             }
         } catch (e) {
@@ -504,7 +579,13 @@ export async function dropDeadCompetition(
     try {
         comp = (
             await db.query(escape`
-                SELECT compid, end FROM competition WHERE compid = ${compid}
+                SELECT
+                    compid,
+                    END
+                FROM
+                    competition
+                WHERE
+                    compid = ${compid}
             `)
         )?.[0];
     } catch (e) {
@@ -527,9 +608,31 @@ export async function dropDeadCompetition(
             await db.query(escape`
                 SELECT
                     (
-                        (SELECT COUNT(*) FROM tasks t JOIN classes c ON c.class = t.class WHERE c.compid = ${compid})
-                      + (SELECT COUNT(*) FROM contestday cd JOIN classes c ON c.class = cd.class WHERE c.compid = ${compid})
-                      + (SELECT COUNT(*) FROM pilotresult pr JOIN classes c ON c.class = pr.class WHERE c.compid = ${compid})
+                        (
+                            SELECT
+                                COUNT(*)
+                            FROM
+                                tasks t
+                                JOIN classes c ON c.class = t.class
+                            WHERE
+                                c.compid = ${compid}
+                        ) + (
+                            SELECT
+                                COUNT(*)
+                            FROM
+                                contestday cd
+                                JOIN classes c ON c.class = cd.class
+                            WHERE
+                                c.compid = ${compid}
+                        ) + (
+                            SELECT
+                                COUNT(*)
+                            FROM
+                                pilotresult pr
+                                JOIN classes c ON c.class = pr.class
+                            WHERE
+                                c.compid = ${compid}
+                        )
                     ) AS leftover
             `)
         )?.[0];
@@ -544,7 +647,14 @@ export async function dropDeadCompetition(
 
     let classRows: {class: ClassId}[] = [];
     try {
-        classRows = (await db.query(escape`SELECT class FROM classes WHERE compid = ${compid}`)) as {class: ClassId}[];
+        classRows = (await db.query(escape`
+            SELECT
+                class
+            FROM
+                classes
+            WHERE
+                compid = ${compid}
+        `)) as {class: ClassId}[];
     } catch (e) {
         log(`dropDeadCompetition: class enum failed:`, e);
     }
@@ -553,8 +663,16 @@ export async function dropDeadCompetition(
     }
 
     try {
-        await db.query(escape`DELETE FROM competition WHERE compid = ${compid}`);
-        await db.query(escape`DELETE FROM scoringsource WHERE compid = ${compid}`);
+        await db.query(escape`
+            DELETE FROM competition
+            WHERE
+                compid = ${compid}
+        `);
+        await db.query(escape`
+            DELETE FROM scoringsource
+            WHERE
+                compid = ${compid}
+        `);
     } catch (e) {
         log(`dropDeadCompetition: top-level delete failed:`, e);
     }
