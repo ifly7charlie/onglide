@@ -110,7 +110,9 @@ function summarise(m: OnglideWebSocketMessage): string {
         const t = m.task;
         const sizes: string[] = [];
         if (t.geoJSON) sizes.push(`geoJSON=${t.geoJSON.length}b`);
-        if (t.taskJSON) sizes.push(`taskJSON=${t.taskJSON.length}b`);
+        if (t.legs?.length) sizes.push(`legs=${t.legs.length}`);
+        if (t.rules) sizes.push('rules');
+        if (t.details) sizes.push(`details(${t.details.type ?? '?'})`);
         parts.push(`task${t.startOpen ? ' startOpen' : ''}${sizes.length ? ' ' + sizes.join(' ') : ''}`);
     }
     if (m.scores) {

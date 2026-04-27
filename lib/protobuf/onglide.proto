@@ -61,17 +61,61 @@ message Identifiers {
 	optional string scoreId = 6;
 }
 
+message TaskRules {
+	bool grandprixstart = 1;
+	uint32 nostartutc = 2;          // Epoch
+	optional bool aat = 3;
+	optional bool dh = 4;            // distance handicap
+	optional bool handicapped = 5;
+	optional double dm = 6;          // minimum distance for non-AAT speed tasks
+	uint32 maxHandicap = 7;          // highest handicap in the class
+}
+
+message TaskDetails {
+	string type = 1;                 // 'S' | 'D' | 'E' | 'A'
+	double distance = 2;             // task distance in km
+	string duration = 3;             // 'HH:MM:SS' (AAT)
+	string status = 4;               // 'Z' = scrubbed, etc
+	string nostart = 5;              // 'HH:MM:SS' start-open string
+	optional string info = 6;
+	optional string calendardate = 7;
+	optional uint32 taskid = 8;      // diagnostic
+	optional string hash = 9;        // diagnostic
+}
+
+// Per-leg fields the frontend needs. Includes the full geometric inputs
+// (type, r1/r2, a1/a2/a12, direction, altitude) because the client re-runs
+// calculateTask() via adjustDistanceHandicapTask() for DH classes.
+// Server-computed artefacts (per-leg geoJSON / coordinates / lineString /
+// point / pointGeoJSON / maxR / quickSector / legDistanceAdjust / finish)
+// are NOT sent — they get rebuilt on the client when needed.
+message TaskLeg {
+	uint32 legno = 1;
+	string type = 2;                 // 'line' | 'sector'
+	string ntrigraph = 3;
+	string name = 4;
+	double bearing = 5;
+	double length = 6;               // km
+	double nlat = 7;
+	double nlng = 8;
+	double r1 = 9;                   // km
+	double r2 = 10;                  // km
+	double a1 = 11;                  // degrees (half-angle)
+	double a2 = 12;                  // degrees
+	double a12 = 13;                 // bearing
+	string direction = 14;           // 'symmetrical' | 'np' | 'pp' | 'fixed'
+	optional double altitude = 15;
+}
+
 message Task {
 	optional bool startOpen = 3;
-	optional string geoJSON = 1;
-	optional string taskJSON = 2;
+	optional string geoJSON = 1;     // {tp, track, Dm?} FeatureCollection bundle for deck.gl
+	reserved 2;                      // was: string taskJSON
+	reserved "taskJSON";
+	optional TaskRules rules = 4;
+	optional TaskDetails details = 5;
+	repeated TaskLeg legs = 6;
 }
-/*
-message TaskGeoJson {
-	string Dm = 1;
-	string tp = 2;
-	string track = 3;
-	}*/
 
 
 message PilotTracks {

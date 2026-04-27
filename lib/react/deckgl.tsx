@@ -140,14 +140,15 @@ export default function MApp(props: {
 
     const legAdvance = task && task.rules.aat && selectedScore?.inSector && selectedScore.legs[selectedScore.currentLeg + 1]?.actual.distance > 10;
 
-    const nextPoint =
-        !task || !selectedScore
-            ? null //
-            : !selectedScore?.utcStart
-              ? task.legs[0].point // if we are before start
-              : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
-                ? task.legs.at(-1)?.point // or at finish or only finish left
-                : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0))?.point; // mindistance is from us so this is the next point
+    const nextPoint = (() => {
+        if (!task || !selectedScore) return null;
+        const leg = !selectedScore?.utcStart
+            ? task.legs[0]
+            : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
+              ? task.legs.at(-1)
+              : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0));
+        return leg ? ([leg.nlng, leg.nlat] as [number, number]) : undefined;
+    })();
 
     const handleKeyPress = useCallback(
         (e) => {

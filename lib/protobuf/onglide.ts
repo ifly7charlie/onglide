@@ -82,10 +82,92 @@ export interface Identifiers {
   scoreId?: string | undefined;
 }
 
+export interface TaskRules {
+  grandprixstart: boolean;
+  /** Epoch */
+  nostartutc: number;
+  aat?:
+    | boolean
+    | undefined;
+  /** distance handicap */
+  dh?: boolean | undefined;
+  handicapped?:
+    | boolean
+    | undefined;
+  /** minimum distance for non-AAT speed tasks */
+  dm?:
+    | number
+    | undefined;
+  /** highest handicap in the class */
+  maxHandicap: number;
+}
+
+export interface TaskDetails {
+  /** 'S' | 'D' | 'E' | 'A' */
+  type: string;
+  /** task distance in km */
+  distance: number;
+  /** 'HH:MM:SS' (AAT) */
+  duration: string;
+  /** 'Z' = scrubbed, etc */
+  status: string;
+  /** 'HH:MM:SS' start-open string */
+  nostart: string;
+  info?: string | undefined;
+  calendardate?:
+    | string
+    | undefined;
+  /** diagnostic */
+  taskid?:
+    | number
+    | undefined;
+  /** diagnostic */
+  hash?: string | undefined;
+}
+
+/**
+ * Per-leg fields the frontend needs. Includes the full geometric inputs
+ * (type, r1/r2, a1/a2/a12, direction, altitude) because the client re-runs
+ * calculateTask() via adjustDistanceHandicapTask() for DH classes.
+ * Server-computed artefacts (per-leg geoJSON / coordinates / lineString /
+ * point / pointGeoJSON / maxR / quickSector / legDistanceAdjust / finish)
+ * are NOT sent — they get rebuilt on the client when needed.
+ */
+export interface TaskLeg {
+  legno: number;
+  /** 'line' | 'sector' */
+  type: string;
+  ntrigraph: string;
+  name: string;
+  bearing: number;
+  /** km */
+  length: number;
+  nlat: number;
+  nlng: number;
+  /** km */
+  r1: number;
+  /** km */
+  r2: number;
+  /** degrees (half-angle) */
+  a1: number;
+  /** degrees */
+  a2: number;
+  /** bearing */
+  a12: number;
+  /** 'symmetrical' | 'np' | 'pp' | 'fixed' */
+  direction: string;
+  altitude?: number | undefined;
+}
+
 export interface Task {
-  startOpen?: boolean | undefined;
+  startOpen?:
+    | boolean
+    | undefined;
+  /** {tp, track, Dm?} FeatureCollection bundle for deck.gl */
   geoJSON?: string | undefined;
-  taskJSON?: string | undefined;
+  rules?: TaskRules | undefined;
+  details?: TaskDetails | undefined;
+  legs: TaskLeg[];
 }
 
 export interface PilotTracks {
@@ -1204,8 +1286,639 @@ export const Identifiers = {
   },
 };
 
+function createBaseTaskRules(): TaskRules {
+  return {
+    grandprixstart: false,
+    nostartutc: 0,
+    aat: undefined,
+    dh: undefined,
+    handicapped: undefined,
+    dm: undefined,
+    maxHandicap: 0,
+  };
+}
+
+export const TaskRules = {
+  encode(message: TaskRules, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.grandprixstart !== false) {
+      writer.uint32(8).bool(message.grandprixstart);
+    }
+    if (message.nostartutc !== 0) {
+      writer.uint32(16).uint32(message.nostartutc);
+    }
+    if (message.aat !== undefined) {
+      writer.uint32(24).bool(message.aat);
+    }
+    if (message.dh !== undefined) {
+      writer.uint32(32).bool(message.dh);
+    }
+    if (message.handicapped !== undefined) {
+      writer.uint32(40).bool(message.handicapped);
+    }
+    if (message.dm !== undefined) {
+      writer.uint32(49).double(message.dm);
+    }
+    if (message.maxHandicap !== 0) {
+      writer.uint32(56).uint32(message.maxHandicap);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): TaskRules {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTaskRules();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 8) {
+            break;
+          }
+
+          message.grandprixstart = reader.bool();
+          continue;
+        case 2:
+          if (tag !== 16) {
+            break;
+          }
+
+          message.nostartutc = reader.uint32();
+          continue;
+        case 3:
+          if (tag !== 24) {
+            break;
+          }
+
+          message.aat = reader.bool();
+          continue;
+        case 4:
+          if (tag !== 32) {
+            break;
+          }
+
+          message.dh = reader.bool();
+          continue;
+        case 5:
+          if (tag !== 40) {
+            break;
+          }
+
+          message.handicapped = reader.bool();
+          continue;
+        case 6:
+          if (tag !== 49) {
+            break;
+          }
+
+          message.dm = reader.double();
+          continue;
+        case 7:
+          if (tag !== 56) {
+            break;
+          }
+
+          message.maxHandicap = reader.uint32();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TaskRules {
+    return {
+      grandprixstart: isSet(object.grandprixstart) ? globalThis.Boolean(object.grandprixstart) : false,
+      nostartutc: isSet(object.nostartutc) ? globalThis.Number(object.nostartutc) : 0,
+      aat: isSet(object.aat) ? globalThis.Boolean(object.aat) : undefined,
+      dh: isSet(object.dh) ? globalThis.Boolean(object.dh) : undefined,
+      handicapped: isSet(object.handicapped) ? globalThis.Boolean(object.handicapped) : undefined,
+      dm: isSet(object.dm) ? globalThis.Number(object.dm) : undefined,
+      maxHandicap: isSet(object.maxHandicap) ? globalThis.Number(object.maxHandicap) : 0,
+    };
+  },
+
+  toJSON(message: TaskRules): unknown {
+    const obj: any = {};
+    if (message.grandprixstart !== false) {
+      obj.grandprixstart = message.grandprixstart;
+    }
+    if (message.nostartutc !== 0) {
+      obj.nostartutc = Math.round(message.nostartutc);
+    }
+    if (message.aat !== undefined) {
+      obj.aat = message.aat;
+    }
+    if (message.dh !== undefined) {
+      obj.dh = message.dh;
+    }
+    if (message.handicapped !== undefined) {
+      obj.handicapped = message.handicapped;
+    }
+    if (message.dm !== undefined) {
+      obj.dm = message.dm;
+    }
+    if (message.maxHandicap !== 0) {
+      obj.maxHandicap = Math.round(message.maxHandicap);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TaskRules>, I>>(base?: I): TaskRules {
+    return TaskRules.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TaskRules>, I>>(object: I): TaskRules {
+    const message = createBaseTaskRules();
+    message.grandprixstart = object.grandprixstart ?? false;
+    message.nostartutc = object.nostartutc ?? 0;
+    message.aat = object.aat ?? undefined;
+    message.dh = object.dh ?? undefined;
+    message.handicapped = object.handicapped ?? undefined;
+    message.dm = object.dm ?? undefined;
+    message.maxHandicap = object.maxHandicap ?? 0;
+    return message;
+  },
+};
+
+function createBaseTaskDetails(): TaskDetails {
+  return {
+    type: "",
+    distance: 0,
+    duration: "",
+    status: "",
+    nostart: "",
+    info: undefined,
+    calendardate: undefined,
+    taskid: undefined,
+    hash: undefined,
+  };
+}
+
+export const TaskDetails = {
+  encode(message: TaskDetails, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.type !== "") {
+      writer.uint32(10).string(message.type);
+    }
+    if (message.distance !== 0) {
+      writer.uint32(17).double(message.distance);
+    }
+    if (message.duration !== "") {
+      writer.uint32(26).string(message.duration);
+    }
+    if (message.status !== "") {
+      writer.uint32(34).string(message.status);
+    }
+    if (message.nostart !== "") {
+      writer.uint32(42).string(message.nostart);
+    }
+    if (message.info !== undefined) {
+      writer.uint32(50).string(message.info);
+    }
+    if (message.calendardate !== undefined) {
+      writer.uint32(58).string(message.calendardate);
+    }
+    if (message.taskid !== undefined) {
+      writer.uint32(64).uint32(message.taskid);
+    }
+    if (message.hash !== undefined) {
+      writer.uint32(74).string(message.hash);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): TaskDetails {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTaskDetails();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.type = reader.string();
+          continue;
+        case 2:
+          if (tag !== 17) {
+            break;
+          }
+
+          message.distance = reader.double();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.duration = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.nostart = reader.string();
+          continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.info = reader.string();
+          continue;
+        case 7:
+          if (tag !== 58) {
+            break;
+          }
+
+          message.calendardate = reader.string();
+          continue;
+        case 8:
+          if (tag !== 64) {
+            break;
+          }
+
+          message.taskid = reader.uint32();
+          continue;
+        case 9:
+          if (tag !== 74) {
+            break;
+          }
+
+          message.hash = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TaskDetails {
+    return {
+      type: isSet(object.type) ? globalThis.String(object.type) : "",
+      distance: isSet(object.distance) ? globalThis.Number(object.distance) : 0,
+      duration: isSet(object.duration) ? globalThis.String(object.duration) : "",
+      status: isSet(object.status) ? globalThis.String(object.status) : "",
+      nostart: isSet(object.nostart) ? globalThis.String(object.nostart) : "",
+      info: isSet(object.info) ? globalThis.String(object.info) : undefined,
+      calendardate: isSet(object.calendardate) ? globalThis.String(object.calendardate) : undefined,
+      taskid: isSet(object.taskid) ? globalThis.Number(object.taskid) : undefined,
+      hash: isSet(object.hash) ? globalThis.String(object.hash) : undefined,
+    };
+  },
+
+  toJSON(message: TaskDetails): unknown {
+    const obj: any = {};
+    if (message.type !== "") {
+      obj.type = message.type;
+    }
+    if (message.distance !== 0) {
+      obj.distance = message.distance;
+    }
+    if (message.duration !== "") {
+      obj.duration = message.duration;
+    }
+    if (message.status !== "") {
+      obj.status = message.status;
+    }
+    if (message.nostart !== "") {
+      obj.nostart = message.nostart;
+    }
+    if (message.info !== undefined) {
+      obj.info = message.info;
+    }
+    if (message.calendardate !== undefined) {
+      obj.calendardate = message.calendardate;
+    }
+    if (message.taskid !== undefined) {
+      obj.taskid = Math.round(message.taskid);
+    }
+    if (message.hash !== undefined) {
+      obj.hash = message.hash;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TaskDetails>, I>>(base?: I): TaskDetails {
+    return TaskDetails.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TaskDetails>, I>>(object: I): TaskDetails {
+    const message = createBaseTaskDetails();
+    message.type = object.type ?? "";
+    message.distance = object.distance ?? 0;
+    message.duration = object.duration ?? "";
+    message.status = object.status ?? "";
+    message.nostart = object.nostart ?? "";
+    message.info = object.info ?? undefined;
+    message.calendardate = object.calendardate ?? undefined;
+    message.taskid = object.taskid ?? undefined;
+    message.hash = object.hash ?? undefined;
+    return message;
+  },
+};
+
+function createBaseTaskLeg(): TaskLeg {
+  return {
+    legno: 0,
+    type: "",
+    ntrigraph: "",
+    name: "",
+    bearing: 0,
+    length: 0,
+    nlat: 0,
+    nlng: 0,
+    r1: 0,
+    r2: 0,
+    a1: 0,
+    a2: 0,
+    a12: 0,
+    direction: "",
+    altitude: undefined,
+  };
+}
+
+export const TaskLeg = {
+  encode(message: TaskLeg, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.legno !== 0) {
+      writer.uint32(8).uint32(message.legno);
+    }
+    if (message.type !== "") {
+      writer.uint32(18).string(message.type);
+    }
+    if (message.ntrigraph !== "") {
+      writer.uint32(26).string(message.ntrigraph);
+    }
+    if (message.name !== "") {
+      writer.uint32(34).string(message.name);
+    }
+    if (message.bearing !== 0) {
+      writer.uint32(41).double(message.bearing);
+    }
+    if (message.length !== 0) {
+      writer.uint32(49).double(message.length);
+    }
+    if (message.nlat !== 0) {
+      writer.uint32(57).double(message.nlat);
+    }
+    if (message.nlng !== 0) {
+      writer.uint32(65).double(message.nlng);
+    }
+    if (message.r1 !== 0) {
+      writer.uint32(73).double(message.r1);
+    }
+    if (message.r2 !== 0) {
+      writer.uint32(81).double(message.r2);
+    }
+    if (message.a1 !== 0) {
+      writer.uint32(89).double(message.a1);
+    }
+    if (message.a2 !== 0) {
+      writer.uint32(97).double(message.a2);
+    }
+    if (message.a12 !== 0) {
+      writer.uint32(105).double(message.a12);
+    }
+    if (message.direction !== "") {
+      writer.uint32(114).string(message.direction);
+    }
+    if (message.altitude !== undefined) {
+      writer.uint32(121).double(message.altitude);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): TaskLeg {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseTaskLeg();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 8) {
+            break;
+          }
+
+          message.legno = reader.uint32();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.type = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.ntrigraph = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.name = reader.string();
+          continue;
+        case 5:
+          if (tag !== 41) {
+            break;
+          }
+
+          message.bearing = reader.double();
+          continue;
+        case 6:
+          if (tag !== 49) {
+            break;
+          }
+
+          message.length = reader.double();
+          continue;
+        case 7:
+          if (tag !== 57) {
+            break;
+          }
+
+          message.nlat = reader.double();
+          continue;
+        case 8:
+          if (tag !== 65) {
+            break;
+          }
+
+          message.nlng = reader.double();
+          continue;
+        case 9:
+          if (tag !== 73) {
+            break;
+          }
+
+          message.r1 = reader.double();
+          continue;
+        case 10:
+          if (tag !== 81) {
+            break;
+          }
+
+          message.r2 = reader.double();
+          continue;
+        case 11:
+          if (tag !== 89) {
+            break;
+          }
+
+          message.a1 = reader.double();
+          continue;
+        case 12:
+          if (tag !== 97) {
+            break;
+          }
+
+          message.a2 = reader.double();
+          continue;
+        case 13:
+          if (tag !== 105) {
+            break;
+          }
+
+          message.a12 = reader.double();
+          continue;
+        case 14:
+          if (tag !== 114) {
+            break;
+          }
+
+          message.direction = reader.string();
+          continue;
+        case 15:
+          if (tag !== 121) {
+            break;
+          }
+
+          message.altitude = reader.double();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): TaskLeg {
+    return {
+      legno: isSet(object.legno) ? globalThis.Number(object.legno) : 0,
+      type: isSet(object.type) ? globalThis.String(object.type) : "",
+      ntrigraph: isSet(object.ntrigraph) ? globalThis.String(object.ntrigraph) : "",
+      name: isSet(object.name) ? globalThis.String(object.name) : "",
+      bearing: isSet(object.bearing) ? globalThis.Number(object.bearing) : 0,
+      length: isSet(object.length) ? globalThis.Number(object.length) : 0,
+      nlat: isSet(object.nlat) ? globalThis.Number(object.nlat) : 0,
+      nlng: isSet(object.nlng) ? globalThis.Number(object.nlng) : 0,
+      r1: isSet(object.r1) ? globalThis.Number(object.r1) : 0,
+      r2: isSet(object.r2) ? globalThis.Number(object.r2) : 0,
+      a1: isSet(object.a1) ? globalThis.Number(object.a1) : 0,
+      a2: isSet(object.a2) ? globalThis.Number(object.a2) : 0,
+      a12: isSet(object.a12) ? globalThis.Number(object.a12) : 0,
+      direction: isSet(object.direction) ? globalThis.String(object.direction) : "",
+      altitude: isSet(object.altitude) ? globalThis.Number(object.altitude) : undefined,
+    };
+  },
+
+  toJSON(message: TaskLeg): unknown {
+    const obj: any = {};
+    if (message.legno !== 0) {
+      obj.legno = Math.round(message.legno);
+    }
+    if (message.type !== "") {
+      obj.type = message.type;
+    }
+    if (message.ntrigraph !== "") {
+      obj.ntrigraph = message.ntrigraph;
+    }
+    if (message.name !== "") {
+      obj.name = message.name;
+    }
+    if (message.bearing !== 0) {
+      obj.bearing = message.bearing;
+    }
+    if (message.length !== 0) {
+      obj.length = message.length;
+    }
+    if (message.nlat !== 0) {
+      obj.nlat = message.nlat;
+    }
+    if (message.nlng !== 0) {
+      obj.nlng = message.nlng;
+    }
+    if (message.r1 !== 0) {
+      obj.r1 = message.r1;
+    }
+    if (message.r2 !== 0) {
+      obj.r2 = message.r2;
+    }
+    if (message.a1 !== 0) {
+      obj.a1 = message.a1;
+    }
+    if (message.a2 !== 0) {
+      obj.a2 = message.a2;
+    }
+    if (message.a12 !== 0) {
+      obj.a12 = message.a12;
+    }
+    if (message.direction !== "") {
+      obj.direction = message.direction;
+    }
+    if (message.altitude !== undefined) {
+      obj.altitude = message.altitude;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TaskLeg>, I>>(base?: I): TaskLeg {
+    return TaskLeg.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<TaskLeg>, I>>(object: I): TaskLeg {
+    const message = createBaseTaskLeg();
+    message.legno = object.legno ?? 0;
+    message.type = object.type ?? "";
+    message.ntrigraph = object.ntrigraph ?? "";
+    message.name = object.name ?? "";
+    message.bearing = object.bearing ?? 0;
+    message.length = object.length ?? 0;
+    message.nlat = object.nlat ?? 0;
+    message.nlng = object.nlng ?? 0;
+    message.r1 = object.r1 ?? 0;
+    message.r2 = object.r2 ?? 0;
+    message.a1 = object.a1 ?? 0;
+    message.a2 = object.a2 ?? 0;
+    message.a12 = object.a12 ?? 0;
+    message.direction = object.direction ?? "";
+    message.altitude = object.altitude ?? undefined;
+    return message;
+  },
+};
+
 function createBaseTask(): Task {
-  return { startOpen: undefined, geoJSON: undefined, taskJSON: undefined };
+  return { startOpen: undefined, geoJSON: undefined, rules: undefined, details: undefined, legs: [] };
 }
 
 export const Task = {
@@ -1216,8 +1929,14 @@ export const Task = {
     if (message.geoJSON !== undefined) {
       writer.uint32(10).string(message.geoJSON);
     }
-    if (message.taskJSON !== undefined) {
-      writer.uint32(18).string(message.taskJSON);
+    if (message.rules !== undefined) {
+      TaskRules.encode(message.rules, writer.uint32(34).fork()).ldelim();
+    }
+    if (message.details !== undefined) {
+      TaskDetails.encode(message.details, writer.uint32(42).fork()).ldelim();
+    }
+    for (const v of message.legs) {
+      TaskLeg.encode(v!, writer.uint32(50).fork()).ldelim();
     }
     return writer;
   },
@@ -1243,12 +1962,26 @@ export const Task = {
 
           message.geoJSON = reader.string();
           continue;
-        case 2:
-          if (tag !== 18) {
+        case 4:
+          if (tag !== 34) {
             break;
           }
 
-          message.taskJSON = reader.string();
+          message.rules = TaskRules.decode(reader, reader.uint32());
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.details = TaskDetails.decode(reader, reader.uint32());
+          continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.legs.push(TaskLeg.decode(reader, reader.uint32()));
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -1263,7 +1996,9 @@ export const Task = {
     return {
       startOpen: isSet(object.startOpen) ? globalThis.Boolean(object.startOpen) : undefined,
       geoJSON: isSet(object.geoJSON) ? globalThis.String(object.geoJSON) : undefined,
-      taskJSON: isSet(object.taskJSON) ? globalThis.String(object.taskJSON) : undefined,
+      rules: isSet(object.rules) ? TaskRules.fromJSON(object.rules) : undefined,
+      details: isSet(object.details) ? TaskDetails.fromJSON(object.details) : undefined,
+      legs: globalThis.Array.isArray(object?.legs) ? object.legs.map((e: any) => TaskLeg.fromJSON(e)) : [],
     };
   },
 
@@ -1275,8 +2010,14 @@ export const Task = {
     if (message.geoJSON !== undefined) {
       obj.geoJSON = message.geoJSON;
     }
-    if (message.taskJSON !== undefined) {
-      obj.taskJSON = message.taskJSON;
+    if (message.rules !== undefined) {
+      obj.rules = TaskRules.toJSON(message.rules);
+    }
+    if (message.details !== undefined) {
+      obj.details = TaskDetails.toJSON(message.details);
+    }
+    if (message.legs?.length) {
+      obj.legs = message.legs.map((e) => TaskLeg.toJSON(e));
     }
     return obj;
   },
@@ -1288,7 +2029,13 @@ export const Task = {
     const message = createBaseTask();
     message.startOpen = object.startOpen ?? undefined;
     message.geoJSON = object.geoJSON ?? undefined;
-    message.taskJSON = object.taskJSON ?? undefined;
+    message.rules = (object.rules !== undefined && object.rules !== null)
+      ? TaskRules.fromPartial(object.rules)
+      : undefined;
+    message.details = (object.details !== undefined && object.details !== null)
+      ? TaskDetails.fromPartial(object.details)
+      : undefined;
+    message.legs = object.legs?.map((e) => TaskLeg.fromPartial(e)) || [];
     return message;
   },
 };

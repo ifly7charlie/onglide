@@ -317,7 +317,11 @@ async function main() {
             database: process.env.MYSQL_DATABASE,
             user: process.env.MYSQL_USER,
             password: process.env.MYSQL_PASSWORD,
-            decimalNumbers: true
+            decimalNumbers: true,
+            // Return DATE / DATETIME / TIMESTAMP columns as strings so they
+            // match our `: string` type declarations and survive proto
+            // encoding (the encoder rejects Date instances).
+            dateStrings: true
         },
         onError: (e) => {
             console.log(e);
@@ -1457,14 +1461,14 @@ function sendTask(sendTo: Channel | OgnWebSocket, channel: Channel) {
     sendTo.sendBinary(
         OnglideWebSocketMessage.encode({
             //
-            task: {
-                ...(channel.task
-                    ? {
-                          geoJSON: JSON.stringify(channel.geoTask), //
-                          taskJSON: JSON.stringify(channel.task)
-                      }
-                    : {})
-            }
+            task: channel.task
+                ? {
+                      geoJSON: JSON.stringify(channel.geoTask),
+                      rules: channel.task.rules,
+                      details: channel.task.details,
+                      legs: channel.task.legs as any
+                  }
+                : {legs: []}
         }).finish()
     );
 }
