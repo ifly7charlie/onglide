@@ -486,6 +486,12 @@ async function main() {
                 },
                 {} as Record<string, Positions>
             );
+
+            // No class in this comp had any fresh positions — skip the
+            // broadcast entirely. Per-channel keepalive runs on its own
+            // timer (lastKeepAliveMsg), so socket liveness is unaffected.
+            if (!Object.keys(positions).length) continue;
+
             const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
             for (const channel of compChannels) {
@@ -493,12 +499,11 @@ async function main() {
                 channel.statistics.listenerCycles++;
 
                 if (channel.clients.length) {
-                    // We don't need to send empty packets but we should
-                    // occasionally as it keeps socket alive
+                    // Throttle sibling-only updates: a channel with no
+                    // positions of its own only forwards the comp's
+                    // multi-class broadcast every 15s.
                     if (!channel.toSend.length) {
-                        if (now - channel.lastSentPositions < 15) {
-                            continue;
-                        }
+                        if (now - channel.lastSentPositions < 15) continue;
                     } else {
                         // if we sent an actual coordinate then this will ensure
                         // that the webPathData is regenerated
@@ -916,7 +921,7 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
         const channel = channels[cname];
         if (!channel) continue;
         console.log(`${tag}/${channel.displayName}: closing ${channel.clients.length} clients`);
-        const clients = channel.clients;
+        const clients = channel.clients; // adopt so nothing else tries to deal with them
         channel.clients = [];
         for (const client of clients) {
             try {
