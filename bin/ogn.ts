@@ -1711,10 +1711,15 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             // with 5% tracker coverage would land as soon as those 5% touched down.
             // L and S can overwrite H so a class that all-landed and then relaunches
             // (weather hold, regrid, fresh launch) climbs back through the states.
+            // If every tracked pilot has been finalised by the official scorer
+            // (F/H), the class is unambiguously done — widen allowFrom so we
+            // can recover from a class that never progressed past B/G in the
+            // live loop (sparse tracker coverage, late OGN pickup, etc.).
+            const allOfficiallyFinalised = scored.length > 0 && scored.every(isTerminalScored);
             if (allLanded && trackerCoverage >= 0.1) {
                 nextStatus = 'H';
-                allowFrom = ['L', 'S', 'F'];
-                reason = `all ${withStatus.length}/${totalScored} reporting gliders landed`;
+                allowFrom = allOfficiallyFinalised ? ['B', 'G', 'L', 'S', 'F'] : ['L', 'S', 'F'];
+                reason = `all ${withStatus.length}/${totalScored} reporting gliders landed${allOfficiallyFinalised ? ' (officially finalised)' : ''}`;
             } else if (finishingCount > 0) {
                 nextStatus = 'F';
                 allowFrom = ['L', 'S'];
