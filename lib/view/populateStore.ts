@@ -42,7 +42,9 @@ export function dispatchClass(dispatch: AppDispatch, earliestScore: Epoch, lates
 export function dispatchTask(dispatch: AppDispatch, task: any, geoJSON: any) {
     dispatch(
         updateTask({
-            taskJSON: JSON.stringify(task),
+            rules: task.rules,
+            details: task.details,
+            legs: task.legs,
             geoJSON: JSON.stringify(geoJSON),
             startOpen: false
         })
