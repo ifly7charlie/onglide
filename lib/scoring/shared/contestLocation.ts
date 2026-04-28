@@ -39,21 +39,29 @@ export async function findApproximateContestLocation(
 ): Promise<ApproximateContestLocation> {
     const fallback: ApproximateContestLocation = {lt: 0, lg: 0, countrycode: '', timezone: {name: 'Europe/London', offset: 0}};
 
-    const result = await findAirfieldsByName(location).catch((e) => {
-        log('findAirfieldsByName failed:', e);
+    log(`geocoding "${location}" via Nominatim, then Wikidata, then Overpass...`);
+    const result = await findAirfieldsByName(location, undefined, log).catch((e) => {
+        log('findAirfieldsByName threw:', e);
         return null;
     });
-    if (!result?.geocode) return fallback;
+    if (!result?.geocode) {
+        log(`no geocode result for "${location}" — Nominatim and Wikidata both returned no match (or both endpoints failed); leaving competition.lt/lg unset`);
+        return fallback;
+    }
+
+    log(`  geocoded "${location}" -> ${result.geocode.lat.toFixed(4)}, ${result.geocode.lon.toFixed(4)} via ${result.geocode.source}${result.geocode.countryCode ? ` (cc=${result.geocode.countryCode})` : ''} (${result.geocode.displayName})`);
 
     let lt = result.geocode.lat;
     let lg = result.geocode.lon;
     const top = result.ranked[0];
     if (top && top.nameOverlap >= 1) {
-        log(`refined site to OSM "${top.name}" (${top.distanceKm.toFixed(1)} km, match: ${top.matchedTokens.join(',')})`);
+        log(`  refined site to OSM "${top.name}" (${top.distanceKm.toFixed(1)} km, match: ${top.matchedTokens.join(',')})`);
         lt = top.lat;
         lg = top.lon;
     } else if (top) {
-        log(`no name-matching airfield within range; using geocoded point (closest OSM: ${top.name} at ${top.distanceKm.toFixed(1)} km)`);
+        log(`  no name-matching airfield within range; using geocoded point (closest OSM: ${top.name} at ${top.distanceKm.toFixed(1)} km)`);
+    } else {
+        log(`  no OSM aerodromes within range of (${lt.toFixed(4)}, ${lg.toFixed(4)}); using geocoded point as-is`);
     }
 
     const tz = findTimezoneFromLocation(lt, lg);

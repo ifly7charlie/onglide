@@ -22,6 +22,13 @@ import {point} from '@turf/helpers';
 const HTTP_UA = 'onglide-airfield-locator/1.0 (https://github.com/ifly7charlie/onglide)';
 const DEFAULT_RADIUS_KM = 30;
 
+// Optional diagnostic logger threaded through the network helpers so
+// callers (matchtrackers, ssscrape) can surface endpoint-level failures
+// — fetch threw, HTTP non-2xx, or zero results — instead of having them
+// vanish into a generic "no result" verdict.
+type Logger = (msg: string, ...args: unknown[]) => void;
+const noopLogger: Logger = () => {};
+
 // Type-words that say nothing about *which* airfield we're looking at —
 // drop them so a sitename of "Lasham" matches "Lasham Airfield" cleanly.
 // NFD normalisation strips diacritics, so the German "ä" forms collapse
@@ -101,17 +108,24 @@ function tokenize(s: string): string[] {
     return out;
 }
 
-export async function geocodeNominatim(name: string): Promise<NominatimGeocode | null> {
+export async function geocodeNominatim(name: string, log: Logger = noopLogger): Promise<NominatimGeocode | null> {
     const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1&addressdetails=1`;
     let resp: Response;
     try {
         resp = await fetch(url, {headers: {'User-Agent': HTTP_UA}});
-    } catch {
+    } catch (e) {
+        log(`nominatim: fetch threw for "${name}":`, e);
         return null;
     }
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+        log(`nominatim: HTTP ${resp.status} for "${name}"`);
+        return null;
+    }
     const json = (await resp.json().catch(() => null)) as NominatimResult[] | null;
-    if (!json?.length) return null;
+    if (!json?.length) {
+        log(`nominatim: no match for "${name}"`);
+        return null;
+    }
     const r = json[0];
     return {
         lat: parseFloat(r.lat),
@@ -136,7 +150,7 @@ interface SparqlBinding {
 // with P625 coordinate-location and P17 → P297 country ISO code, but
 // have no OSM place feature for Nominatim to anchor on. Free, no API
 // key, just a User-Agent.
-export async function geocodeWikidata(name: string): Promise<NominatimGeocode | null> {
+export async function geocodeWikidata(name: string, log: Logger = noopLogger): Promise<NominatimGeocode | null> {
     const escName = name.replace(/[\\"]/g, '\\$&');
     const query = `SELECT ?item ?itemLabel ?lat ?lon ?cc WHERE {
   SERVICE wikibase:mwapi {
@@ -163,13 +177,20 @@ export async function geocodeWikidata(name: string): Promise<NominatimGeocode | 
             },
             body: 'query=' + encodeURIComponent(query)
         });
-    } catch {
+    } catch (e) {
+        log(`wikidata: fetch threw for "${name}":`, e);
         return null;
     }
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+        log(`wikidata: HTTP ${resp.status} for "${name}"`);
+        return null;
+    }
     const json = (await resp.json().catch(() => null)) as {results?: {bindings?: SparqlBinding[]}} | null;
     const row = json?.results?.bindings?.[0];
-    if (!row) return null;
+    if (!row) {
+        log(`wikidata: no match for "${name}"`);
+        return null;
+    }
     return {
         lat: parseFloat(row.lat.value),
         lon: parseFloat(row.lon.value),
@@ -179,7 +200,7 @@ export async function geocodeWikidata(name: string): Promise<NominatimGeocode | 
     };
 }
 
-export async function nearbyAerodromes(lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM): Promise<OsmAerodrome[]> {
+export async function nearbyAerodromes(lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM, log: Logger = noopLogger): Promise<OsmAerodrome[]> {
     const r = Math.round(radiusKm * 1000);
     const q = `[out:json][timeout:25];
 (
@@ -196,12 +217,19 @@ out center tags;`;
             headers: {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': HTTP_UA},
             body: 'data=' + encodeURIComponent(q)
         });
-    } catch {
+    } catch (e) {
+        log(`overpass: fetch threw at (${lat}, ${lon}):`, e);
         return [];
     }
-    if (!resp.ok) return [];
+    if (!resp.ok) {
+        log(`overpass: HTTP ${resp.status} at (${lat}, ${lon})`);
+        return [];
+    }
     const json = (await resp.json().catch(() => null)) as {elements: OverpassElement[]} | null;
-    if (!json?.elements) return [];
+    if (!json?.elements) {
+        log(`overpass: no elements field in response at (${lat}, ${lon})`);
+        return [];
+    }
 
     const origin = point([lon, lat]);
     const out: OsmAerodrome[] = [];
@@ -242,18 +270,35 @@ export function rankAirfieldsBySite(sitename: string, aerodromes: OsmAerodrome[]
     return ranked;
 }
 
-export async function findAirfieldsByPoint(sitename: string, lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM): Promise<RankedAirfield[]> {
-    const aerodromes = await nearbyAerodromes(lat, lon, radiusKm);
+export async function findAirfieldsByPoint(sitename: string, lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM, log: Logger = noopLogger): Promise<RankedAirfield[]> {
+    const aerodromes = await nearbyAerodromes(lat, lon, radiusKm, log);
     return rankAirfieldsBySite(sitename, aerodromes);
 }
 
 export async function findAirfieldsByName(
     sitename: string,
-    radiusKm: number = DEFAULT_RADIUS_KM
+    radiusKm: number = DEFAULT_RADIUS_KM,
+    log: Logger = noopLogger
 ): Promise<{geocode: NominatimGeocode | null; ranked: RankedAirfield[]}> {
-    let geocode = await geocodeNominatim(sitename);
-    if (!geocode) geocode = await geocodeWikidata(sitename);
+    let geocode = await geocodeNominatim(sitename, log);
+    if (!geocode) geocode = await geocodeWikidata(sitename, log);
+
+    // If both endpoints reject the full string, retry with the trailing
+    // ", <suffix>" segment stripped. Common case: "Garbenheimer Wiesen,
+    // Germany" — both Nominatim and Wikidata's label search fail on the
+    // country-suffixed form but resolve "Garbenheimer Wiesen" cleanly.
+    // Original sitename is still used for airfield ranking, so the
+    // dropped segment doesn't affect the name-match score.
+    if (!geocode) {
+        const stripped = sitename.replace(/\s*,\s*[^,]+$/, '').trim();
+        if (stripped && stripped !== sitename) {
+            log(`retrying geocode with trailing suffix stripped: "${stripped}"`);
+            geocode = await geocodeNominatim(stripped, log);
+            if (!geocode) geocode = await geocodeWikidata(stripped, log);
+        }
+    }
+
     if (!geocode) return {geocode: null, ranked: []};
-    const ranked = await findAirfieldsByPoint(sitename, geocode.lat, geocode.lon, radiusKm);
+    const ranked = await findAirfieldsByPoint(sitename, geocode.lat, geocode.lon, radiusKm, log);
     return {geocode, ranked};
 }
