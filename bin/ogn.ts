@@ -95,7 +95,7 @@ import {getElevationOffset, getCacheSize} from '../lib/getelevationoffset';
 // handle unkownn gliders
 import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding';
 
-import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocessing/timehelper';
+import {dateToText} from '../lib/flightprocessing/timehelper';
 
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation, PositionStatus} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
@@ -899,11 +899,6 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
         console.log(`${compShort(competition.compid)} site altitude: ${agl}`);
     });
 
-    // Timezone is a process-wide global today (landmine — see plan §9).
-    // Setting it from whichever comp just started means the last one
-    // wins. Fine for single-comp; multi-comp tz needs a follow-up.
-    setSiteTz(location.tz);
-
     contexts[competition.compid] = competition;
     return competition;
 }
@@ -1031,7 +1026,7 @@ function getSunset(competition: CompetitionContext, datecode: Datecode) {
     const sunset = Math.round(SunCalc.getTimes(new Date(localMidday), loc.lat, loc.lng).night.getTime() / 1000) as Epoch;
     if (sunset != loc.sunset) {
         console.log(
-            `${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch)})`
+            `${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset, loc.tz)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch, loc.tz)})`
         );
         loc.sunset = sunset;
     }

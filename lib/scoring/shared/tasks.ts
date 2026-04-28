@@ -86,6 +86,10 @@ export async function upsertTaskAndLegs(
     // a previous day must yield to the new task's 'B'. 'Z' (scrubbed) is
     // intentionally allowed so a new task on a later day overrides a
     // stale scrubbed status from a previous datecode.
+    //
+    // Never regress compstatus.datecode: re-walking historical task days
+    // (e.g. on scraper restart) must not overwrite today's live state with
+    // yesterday's 'B'. Only act when dateCode >= current datecode.
     if (day.result_status != 'cancelled') {
         await db.query(escape`
             UPDATE compstatus
@@ -94,6 +98,7 @@ export async function upsertTaskAndLegs(
                 datecode = ${dateCode}
             WHERE
                 class = ${classid}
+                AND (datecode IS NULL OR ${dateCode} >= datecode)
                 AND (
                     status NOT IN ('L', 'S', 'R', 'H')
                     OR datecode IS NULL
@@ -108,6 +113,7 @@ export async function upsertTaskAndLegs(
                 datecode = ${dateCode}
             WHERE
                 class = ${classid}
+                AND (datecode IS NULL OR ${dateCode} >= datecode)
         `);
     }
 

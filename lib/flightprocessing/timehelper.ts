@@ -1,21 +1,11 @@
-let tz = 'UTC';
-
 import {Epoch} from '../types';
 
-export function setSiteTz(newtz: string): void {
-    tz = newtz;
-}
-
-export function getSiteTz(): string {
-    return tz;
-}
-
-export function timeToText(t: Epoch): string {
+export function timeToText(t: Epoch, tz: string): string {
     const dt = new Date(t * 1000);
     return dt.toLocaleTimeString('en-GB', {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'});
 }
 
-export function dateToText(t: Epoch): string {
+export function dateToText(t: Epoch, tz: string): string {
     const dt = new Date(t * 1000);
     return dt.toLocaleString('en-GB', {timeZone: tz, dateStyle: 'medium', timeStyle: 'medium'});
 }
