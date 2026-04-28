@@ -1032,21 +1032,24 @@ export async function processPacket(packet: aprsPacket) {
 
     message.j = jPoint;
 
-    // Figure out where to insert (sorted by time)
+    // Figure out where to insert (sorted by time). Clone per aircraft so
+    // each pipeline owns its own message with its own compno — sharing the
+    // reference and mutating .c per iteration leaves the last aircraft's
+    // compno on every queued copy, which the downstream IOG filter
+    // (`message.c != compno`) then drops for everyone except whoever was
+    // last in the loop.
     for (let aircraft of aircraftList) {
-        message.c = aircraft.compno as Compno;
+        const perAircraftMessage = {...message, c: aircraft.compno as Compno};
         const messageQueue = aircraft.messages;
-        if ((messageQueue.at(-1)?.t ?? 0) > message.t) {
+        if ((messageQueue.at(-1)?.t ?? 0) > perAircraftMessage.t) {
             statistics.outOfOrder++;
-            const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
-            if (insertIndex != messageQueue.length) {
-            }
-            if (insertIndex > 0 && messageQueue[insertIndex - 1].t == message.t) {
+            const insertIndex = _sortedLastIndexBy(messageQueue, perAircraftMessage, messageSortKey);
+            if (insertIndex > 0 && messageQueue[insertIndex - 1].t == perAircraftMessage.t) {
                 statistics.duplicates++;
             }
-            messageQueue.splice(insertIndex, 0, message);
+            messageQueue.splice(insertIndex, 0, perAircraftMessage);
         } else {
-            messageQueue.push(message);
+            messageQueue.push(perAircraftMessage);
         }
     }
 }
