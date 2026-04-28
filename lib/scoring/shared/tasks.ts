@@ -375,7 +375,11 @@ export async function upsertTaskAndLegs(
             WHERE
                 class = ${classid}
         `)
-        /*        .query(escape`
+        // Fallback for comps where geocoding never succeeded — backfill
+        // lt/lg from the final taskleg point. Geocode (when it works) is
+        // the source of truth, so guard on lt being NULL/0 to make this
+        // a one-shot per comp rather than overwriting on every task.
+        .query(escape`
             UPDATE competition
             SET
                 lt = (
@@ -402,7 +406,8 @@ export async function upsertTaskAndLegs(
                 )
             WHERE
                 compid = (SELECT compid FROM classes WHERE class = ${classid})
-                `) */
+                AND (lt IS NULL OR lt = 0 OR lg IS NULL OR lg = 0)
+        `)
         .rollback((_e: any) => {
             log(`task transaction rolled back for ${classid} - ${date}`);
         })

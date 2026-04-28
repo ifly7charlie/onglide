@@ -28,7 +28,7 @@ import {processIGC, checkForOGNMatches} from '../../flightprocessing/launchlandi
 
 import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
-import {findAirfieldsByName} from '../shared/airfield';
+import {findApproximateContestLocation} from '../shared/contestLocation';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctHandicap, type PilotRecord} from '../shared/pilots';
 import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
 import {upsertTaskAndLegs} from '../shared/tasks';
@@ -68,53 +68,6 @@ export function deriveSoaringspotCompId(urlString: string): string | null {
     } catch {
         return null;
     }
-}
-
-// Approximate site location used to seed competition.lt/lg before any
-// tasks have been scraped. Filled by Nominatim + Overpass: geocode the
-// free-text sitename, then look for nearby OSM aerodromes; if one's name
-// overlaps with the sitename we snap lt/lg to its centroid (more accurate
-// than the geocoded town point), otherwise keep the geocoded point.
-interface ApproximateContestLocation {
-    lt: number;
-    lg: number;
-    countrycode: string;
-    timezone: {
-        name: string;
-        offset: number;
-    };
-}
-
-async function findApproximateContestLocation(
-    log: (msg: string, ...args: unknown[]) => void, //
-    location: string
-): Promise<ApproximateContestLocation> {
-    const fallback: ApproximateContestLocation = {lt: 0, lg: 0, countrycode: '', timezone: {name: 'Europe/London', offset: 0}};
-
-    const result = await findAirfieldsByName(location).catch((e) => {
-        log('findAirfieldsByName failed:', e);
-        return null;
-    });
-    if (!result?.geocode) return fallback;
-
-    let lt = result.geocode.lat;
-    let lg = result.geocode.lon;
-    const top = result.ranked[0];
-    if (top && top.nameOverlap >= 1) {
-        log(`refined site to OSM "${top.name}" (${top.distanceKm.toFixed(1)} km, match: ${top.matchedTokens.join(',')})`);
-        lt = top.lat;
-        lg = top.lon;
-    } else if (top) {
-        log(`no name-matching airfield within range; using geocoded point (closest OSM: ${top.name} at ${top.distanceKm.toFixed(1)} km)`);
-    }
-
-    const tz = findTimezoneFromLocation(lt, lg);
-    return {
-        lt: Math.round(lt * 100) / 100,
-        lg: Math.round(lg * 100) / 100,
-        countrycode: result.geocode.countryCode || '',
-        timezone: {name: tz, offset: getTzOffset(tz)}
-    };
 }
 
 // Tidy up free-text strings extracted from SoaringSpot HTML — collapse

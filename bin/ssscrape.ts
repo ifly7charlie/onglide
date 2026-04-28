@@ -28,6 +28,7 @@ import escape from 'sql-template-strings';
 import {runScheduler, SourceRegistry} from '../lib/scoring/scheduler';
 import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape';
 import type {SourceCtx} from '../lib/scoring/source';
+import {regeocodeMissingCompetitions} from '../lib/scoring/shared/contestLocation';
 
 const mysql = require('serverless-mysql');
 const dotenv = require('dotenv');
@@ -222,6 +223,11 @@ async function main(): Promise<void> {
 
     // Daemon mode: scheduler heartbeat + roboControl loop.
     console.log('Background scoring scraper enabled');
+
+    // One-shot sweep at boot: any competition rows whose lt/lg are still
+    // NULL/0 get re-geocoded from `sitename`. Fire-and-forget so we don't
+    // block the scheduler from starting; failures inside log per-row.
+    regeocodeMissingCompetitions(mysql_db, (msg, ...args) => console.log(msg, ...args)).catch((e) => console.log('regeocodeMissingCompetitions failed:', e));
 
     runScheduler({
         db: mysql_db,
