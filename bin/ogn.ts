@@ -67,7 +67,7 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 // Launch our listener
 import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
 
-import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_SLACK_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -1769,7 +1769,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             // out of the per-class loop entirely, leaving compstatus stuck.
             if (t.scoredStatus !== 'S' && t.scoredStatus !== 'F' && t.scoredStatus !== 'H') continue;
             totalScoredByClass.set(t.className, (totalScoredByClass.get(t.className) || 0) + 1);
-            if (t.dbTrackerId) {
+            if (t.dbTrackerId && t.dbTrackerId !== 'unknown' && t.dbTrackerId !== 'blocked') {
                 const list = trackedByClass.get(t.className) || [];
                 list.push(t);
                 trackedByClass.set(t.className, list);
@@ -1795,13 +1795,17 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 const fs = channel?.allScores[p.compno]?.flightStatus;
                 return fs !== undefined && fs !== PositionStatus.Unknown;
             });
-            const allLanded =
-                withStatus.length > 0 &&
-                withStatus.every((p) => {
-                    if (isTerminalScored(p)) return true;
-                    const fs = channel!.allScores[p.compno]!.flightStatus;
-                    return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
-                });
+            // Pilots in withStatus that haven't officially finalised AND
+            // whose live flightStatus isn't Landed/Home/Finished. We allow
+            // a small fraction of these (e.g. one glider stuck on grid or
+            // landed-out and not yet trickled through) before we lock the
+            // verdict in.
+            const notHomeCount = withStatus.filter((p) => {
+                if (isTerminalScored(p)) return false;
+                const fs = channel!.allScores[p.compno]!.flightStatus;
+                return !(fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished);
+            }).length;
+            const allLanded = withStatus.length > 0 && notHomeCount / scored.length < HOME_SLACK_FRACTION;
             const startedCount = scored.filter((p) => (channel?.allScores[p.compno]?.utcStart ?? 0) > 0).length;
             const airborneCount = scored.filter((p) => {
                 const fs = channel?.allScores[p.compno]?.flightStatus;
@@ -1834,10 +1838,16 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             // can recover from a class that never progressed past B/G in the
             // live loop (sparse tracker coverage, late OGN pickup, etc.).
             const allOfficiallyFinalised = scored.length > 0 && scored.every(isTerminalScored);
+            // OGN evidence on its own can drive the widening once we've got
+            // decent tracker coverage — we don't need to wait for the
+            // official scorer to finalise everyone before recovering a
+            // class stuck at B/G.
+            const ognDeterminedHome = allLanded && trackerCoverage >= HOME_OGN_COVERAGE;
             if (allLanded && trackerCoverage >= 0.1) {
                 nextStatus = 'H';
-                allowFrom = allOfficiallyFinalised ? ['B', 'G', 'L', 'S', 'F'] : ['L', 'S', 'F'];
-                reason = `all ${withStatus.length}/${totalScored} reporting gliders landed${allOfficiallyFinalised ? ' (officially finalised)' : ''}`;
+                allowFrom = allOfficiallyFinalised || ognDeterminedHome ? ['B', 'G', 'L', 'S', 'F'] : ['L', 'S', 'F'];
+                const homeBy = allOfficiallyFinalised ? ' (officially finalised)' : ognDeterminedHome ? ' (OGN coverage)' : '';
+                reason = `${withStatus.length - notHomeCount}/${withStatus.length} of ${totalScored} reporting gliders landed${notHomeCount > 0 ? ` (${notHomeCount} within slack)` : ''}${homeBy}`;
             } else if (finishingCount > 0) {
                 nextStatus = 'F';
                 allowFrom = ['L', 'S'];
@@ -1846,10 +1856,17 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 nextStatus = 'S';
                 allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'L', 'H'];
                 reason = `${startedCount}/${scored.length} tracked gliders started`;
-            } else if (airborneCount > 0) {
+            } else if (airborneCount > Math.max(LAUNCHING_TRACKED_FRACTION * scored.length, LAUNCHING_TOTAL_FRACTION * totalScored)) {
+                // Require enough of the field to be airborne before declaring 'launching'.
+                // One ferry/training/test flight on a non-task day shouldn't flip the
+                // whole class to 'L' — and in that situation `resetStaleCompStatus`
+                // can't undo it because the row's datecode is already today's. Compare
+                // against both the tracked subset (so a class with 5 trackers needs
+                // ≥2 airborne, not just 1) and the full field (so a 40-pilot class
+                // doesn't go 'L' on the back of 1 tracked pilot).
                 nextStatus = 'L';
                 allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'H'];
-                reason = `${airborneCount}/${scored.length} tracked gliders airborne`;
+                reason = `${airborneCount}/${scored.length} tracked gliders airborne (of ${totalScored} total)`;
             } else if (griddedCount > 0) {
                 nextStatus = 'G';
                 allowFrom = [':', '?', 'P', 'B', 'X'];

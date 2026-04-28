@@ -21,6 +21,24 @@ export const scoreChunkSize = 30 * 60;
 // this many minutes, the class is treated as imminently finishing.
 export const FINISHING_ETA_MINUTES = 5;
 
+// Thresholds for promoting a class compstatus to 'L' (launching). A single
+// pilot getting airborne shouldn't flip the whole class — it could be a ferry,
+// training flight, or test hop on a non-task day. Require enough of the field
+// to be airborne that "the class is launching" is actually plausible.
+export const LAUNCHING_TRACKED_FRACTION = 0.2; // 20% of tracked gliders
+export const LAUNCHING_TOTAL_FRACTION = 0.1; // 10% of all gliders in the class
+
+// Slack on the all-landed verdict for promoting a class to 'H' (home). One
+// glider stuck on grid or landed-out shouldn't keep the whole class flagged
+// as still flying — allow a small fraction of tracked pilots to be in
+// non-landed states and still call it home.
+export const HOME_SLACK_FRACTION = 0.05;
+// Minimum tracker coverage (fraction of pilots in the class with a real,
+// non-'unknown'/'blocked' tracker) before OGN evidence alone — without the
+// official scorer finalising everyone — is allowed to widen allowFrom and
+// recover a class stuck at B/G into H.
+export const HOME_OGN_COVERAGE = 0.5;
+
 export const inorderAdditionalDelay = 6;
 
 // How far beyond the finite extent of a start line a near-miss is accepted (metres)
