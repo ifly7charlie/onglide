@@ -21,6 +21,7 @@ async function run() {
         .option('url', {type: 'string', description: 'full ws/wss URL (overrides host/port/channel)'})
         .option('host', {type: 'string', default: 'localhost', description: 'host:port (default localhost:WEBSOCKET_PORT or 8080)'})
         .option('channel', {type: 'string', default: 'all', description: 'channel name to subscribe to (default: /all landing-page feed)'})
+        .option('messages', {type: 'number', default: '0', description: 'how many messages to wait for'})
         .option('tls', {type: 'boolean', default: false, description: 'use wss instead of ws'})
         .option('details', {type: 'boolean', default: false, description: 'after each summary, pretty-print the decoded message as JSON'})
         .help()
@@ -65,6 +66,9 @@ async function run() {
                 // fields become base64 strings) which is far more readable
                 // than dumping the raw decoded object.
                 console.log(JSON.stringify(OnglideWebSocketMessage.toJSON(decoded), null, 2));
+            }
+            if (args.messages && frames == args.messages) {
+                ws.close();
             }
         } catch (e) {
             console.log(`${ts} decode-error: ${(e as Error).message}`);
