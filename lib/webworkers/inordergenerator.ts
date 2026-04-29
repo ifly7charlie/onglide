@@ -140,6 +140,21 @@ export function bindChannelForInOrderPackets(
         let now: Epoch = getNow();
         log(`${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${d(now)}, replayed to: ${d(messageQueue.at(-1)?.t ?? 0)} <${messageQueueId},${currentMessageQueueId}>`);
 
+        // Bridge tick between replay and live: gives EPG a chance to fire
+        // gap-based home/landout detection on the gap from the last replayed
+        // point up to "now", before TPG starts emitting live-marked scores.
+        // Without this, a rescore (or any restart that walks the persistent
+        // queue) emits its first post-replay score with whatever cruise-state
+        // flightStatus the last airborne fix had — even if the pilot has been
+        // sat on the airfield for hours.
+        {
+            const bridgeNext = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
+            if (messageQueueId !== currentMessageQueueId) return;
+            if (bridgeNext) {
+                position = _sortedIndexBy(messageQueue, {t: bridgeNext} as any, (o) => o.t);
+            }
+        }
+
         // Find the position of the message we got up to, should always be increasing but better safe than sorry
         // as we may have had a reset of the message
         //        let position = _sortedIndexBy(messageQueue, {t: now} as any, (o) => o.t);
