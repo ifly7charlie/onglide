@@ -29,7 +29,7 @@ export interface PilotRecord {
     compno: CompNo;
     fullName: string; // "First Last" — used for FAI search and gravatar
     club: string | null;
-    country: string; // 2-letter code
+    country: string | null; // 2-letter code; null = source doesn't provide one (don't touch existing)
     glider: string | null;
     greg: string | null;
     handicap: number;
@@ -211,7 +211,7 @@ export async function upsertPilot(
                     NULL,
                     ${fainumber},
                     ${newSig},
-                    ${pilot.country},
+                    ${pilot.country ?? ''},
                     ${gravatar(pilot.fullName)},
                     ${pilot.compno},
                     'Y',
@@ -239,9 +239,7 @@ export async function upsertPilot(
                 idsig =
             VALUES
                 (idsig),
-                country =
-            VALUES
-                (country),
+                country = COALESCE(NULLIF(VALUES(country), ''), country),
                 email =
             VALUES
                 (email),

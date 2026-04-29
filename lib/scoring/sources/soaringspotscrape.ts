@@ -504,7 +504,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     compno,
                     fullName: raw.Contestant,
                     club: raw.Club ?? null,
-                    country: '',
+                    country: null,
                     glider: raw.Glider ?? null,
                     greg: null,
                     handicap
