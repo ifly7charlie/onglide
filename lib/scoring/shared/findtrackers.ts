@@ -158,6 +158,7 @@ async function scanLine(
     const state = new Map<FlarmID, FlarmState>();
     const crossings: CrossingMap = new Map();
     let lateDropped = 0;
+    let staleDropped = 0;
 
     // Per-debug-flarmid stats and trace storage. We aggregate inline and
     // only print at end-of-scan to keep the trace one tidy block per id.
@@ -167,6 +168,7 @@ async function scanLine(
         skipped: boolean;
         accepted: number;
         late: number;
+        stale: number;
         duplicates: number;
         drainedPairs: number;
         crossingsRecorded: number;
@@ -180,7 +182,7 @@ async function scanLine(
         if (!isDebug(f)) return undefined;
         let d = dbg.get(f);
         if (!d) {
-            d = {skipped: false, accepted: 0, late: 0, duplicates: 0, drainedPairs: 0, crossingsRecorded: 0, pairTraces: []};
+            d = {skipped: false, accepted: 0, late: 0, stale: 0, duplicates: 0, drainedPairs: 0, crossingsRecorded: 0, pairTraces: []};
             dbg.set(f, d);
         }
         return d;
@@ -246,6 +248,18 @@ async function scanLine(
     for await (const msg of loadPointsForIds({since, until})) {
         const f = msg.f;
         if (excludeFlarmids.has(f)) continue;
+        // The packet itself records the latency at write time as `d` (now − fix
+        // time). A packet declaring d > REORDER_WINDOW_SEC is by definition
+        // older than our reorder buffer can absorb when its real-time peers
+        // have already passed through — drop it before it enters the buffer.
+        // This is more reliable than the file-order-based "predates prev"
+        // check because some late packets sneak in before prev advances.
+        if (typeof msg.d === 'number' && msg.d > REORDER_WINDOW_SEC) {
+            staleDropped++;
+            const d = dbgFor(f);
+            if (d) d.stale++;
+            continue;
+        }
         const pos: BasePositionMessage = {lat: msg.lat, lng: msg.lng, a: msg.a, t: msg.t};
         let st = state.get(f);
         if (!st) {
@@ -315,7 +329,7 @@ async function scanLine(
         drain(f, st, Infinity);
     }
 
-    log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${lateDropped} late packets dropped (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
+    log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${staleDropped} stale (self-reported d>${REORDER_WINDOW_SEC}s), ${lateDropped} late (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
 
     // Emit the per-debug-flarmid trace as a tidy block per id per scan.
     if (debugFlarmids.size && debugWatchTimes.length) {
@@ -355,10 +369,10 @@ async function scanLine(
     return {crossings, skipped};
 }
 
-function formatDebugStats(d: {firstArrivalT?: number; firstArrivalDistKm?: number; skipped: boolean; accepted: number; late: number; duplicates: number; drainedPairs: number; crossingsRecorded: number}): string {
+function formatDebugStats(d: {firstArrivalT?: number; firstArrivalDistKm?: number; skipped: boolean; accepted: number; late: number; stale: number; duplicates: number; drainedPairs: number; crossingsRecorded: number}): string {
     const arr = d.firstArrivalT !== undefined ? `first arrival t=${d.firstArrivalT} dist=${d.firstArrivalDistKm?.toFixed(1)}km` : 'no arrivals';
     const skip = d.skipped ? ` SKIPPED (>${MAX_FLARM_DIST_KM}km)` : '';
-    return `${arr}${skip}; accepted=${d.accepted}, late=${d.late}, dup=${d.duplicates}, pairs=${d.drainedPairs}, recorded=${d.crossingsRecorded}`;
+    return `${arr}${skip}; accepted=${d.accepted}, stale=${d.stale}, late=${d.late}, dup=${d.duplicates}, pairs=${d.drainedPairs}, recorded=${d.crossingsRecorded}`;
 }
 
 function normaliseFlarmIds(s: Set<FlarmID> | undefined): Set<FlarmID> {
