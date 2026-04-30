@@ -44,6 +44,13 @@ export interface TrackerMatch {
     withinTolerance: boolean;
     /** >1 within-tolerance candidate per pilot, OR >1 within-tolerance pilot per flarmid */
     ambiguous: boolean;
+    /**
+     * For assigned-tracker rows only: the flarmid was geographically gated
+     * out (first sighting >MAX_FLARM_DIST_KM from the start and/or finish
+     * TP), so it never produced crossings — strong signal that the recorded
+     * id is wrong, or the pilot wasn't actually flying this comp.
+     */
+    skipped: boolean;
 }
 
 export interface FindTrackersOptions {
@@ -93,12 +100,12 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     }
 
     log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots`);
-    const startCrossings = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log);
+    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log);
 
     log(`finish scan: window ${Math.round((maxFinish - minFinish) / 60 + (2 * slack) / 60)} min`);
-    const finishCrossings = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log);
+    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log);
 
-    return matchCrossings(results, startCrossings, finishCrossings, tolerance);
+    return matchCrossings(results, startScan, finishScan, tolerance);
 }
 
 interface FlarmState {
@@ -108,6 +115,11 @@ interface FlarmState {
     skipped: boolean; // failed the geographic gate on first arrival
 }
 
+interface ScanResult {
+    crossings: CrossingMap;
+    skipped: Set<FlarmID>; // failed the geographic gate
+}
+
 async function scanLine(
     tp: PreparedTurnpoint, //
     since: number,
@@ -115,7 +127,7 @@ async function scanLine(
     kind: 'start' | 'finish',
     excludeFlarmids: Set<FlarmID>,
     log: (msg: string) => void
-): Promise<CrossingMap> {
+): Promise<ScanResult> {
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
     const state = new Map<FlarmID, FlarmState>();
     const crossings: CrossingMap = new Map();
@@ -188,19 +200,19 @@ async function scanLine(
 
     // End-of-scan flush: drain remaining buffer (last REORDER_WINDOW_SEC
     // worth) for every non-skipped flarmid.
-    let tracked = 0,
-        skippedCount = 0;
+    let tracked = 0;
+    const skipped = new Set<FlarmID>();
     for (const [f, st] of state) {
         if (st.skipped) {
-            skippedCount++;
+            skipped.add(f);
             continue;
         }
         tracked++;
         drain(f, st, Infinity);
     }
 
-    log(`  → ${tracked} tracked, ${skippedCount} skipped (>${MAX_FLARM_DIST_KM} km), ${lateDropped} late packets dropped (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
-    return crossings;
+    log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${lateDropped} late packets dropped (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
+    return {crossings, skipped};
 }
 
 function pushCrossing(map: CrossingMap, f: FlarmID, t: Epoch): void {
@@ -243,7 +255,9 @@ function bestPair(sList: Epoch[], fList: Epoch[], startUtc: Epoch, finishUtc: Ep
     return {ds: bestDS, df: bestDF, score: bestScore};
 }
 
-function matchCrossings(results: OfficialResult[], startCrossings: CrossingMap, finishCrossings: CrossingMap, tolerance: number): TrackerMatch[] {
+function matchCrossings(results: OfficialResult[], startScan: ScanResult, finishScan: ScanResult, tolerance: number): TrackerMatch[] {
+    const startCrossings = startScan.crossings;
+    const finishCrossings = finishScan.crossings;
     const flarmidsWithBoth: FlarmID[] = [];
     for (const f of startCrossings.keys()) {
         if (finishCrossings.has(f)) flarmidsWithBoth.push(f);
@@ -270,7 +284,8 @@ function matchCrossings(results: OfficialResult[], startCrossings: CrossingMap, 
                     currentTrackerid: r.trackerid,
                     assigned: assignedIds.has(f),
                     withinTolerance: true,
-                    ambiguous: false
+                    ambiguous: false,
+                    skipped: false
                 };
                 listAppend(perPilot, r.compno, m);
                 listAppend(perFlarm, f, m);
@@ -295,6 +310,7 @@ function matchCrossings(results: OfficialResult[], startCrossings: CrossingMap, 
             if (existingIds.has(id)) continue; // already covered by phase 1
             const sList = startCrossings.get(id);
             const fList = finishCrossings.get(id);
+            const wasSkipped = startScan.skipped.has(id) || finishScan.skipped.has(id);
             let row: TrackerMatch;
             if (sList?.length && fList?.length) {
                 const {ds, df, score} = bestPair(sList, fList, r.startUtc, r.finishUtc);
@@ -308,11 +324,13 @@ function matchCrossings(results: OfficialResult[], startCrossings: CrossingMap, 
                     currentTrackerid: r.trackerid,
                     assigned: true,
                     withinTolerance: false,
-                    ambiguous: false
+                    ambiguous: false,
+                    skipped: false
                 };
             } else {
-                // No usable crossings for the assigned id — tracker was off,
-                // out of OGN coverage, or the assignment is just wrong.
+                // No usable crossings for the assigned id — could be skipped
+                // by the geographic gate (id was active but never near the
+                // task), tracker off, or out of coverage.
                 row = {
                     compno: r.compno,
                     name: r.name,
@@ -323,7 +341,8 @@ function matchCrossings(results: OfficialResult[], startCrossings: CrossingMap, 
                     currentTrackerid: r.trackerid,
                     assigned: true,
                     withinTolerance: false,
-                    ambiguous: false
+                    ambiguous: false,
+                    skipped: wasSkipped
                 };
             }
             listAppend(perPilot, r.compno, row);

@@ -251,7 +251,7 @@ function fmtConfidence(c: number | null): string {
 }
 
 function rowTag(m: TrackerMatch): string {
-    if (m.confidence === null) return '[assigned, no crossings]';
+    if (m.confidence === null) return m.skipped ? '[assigned, skipped: out-of-area]' : '[assigned, no crossings]';
     if (m.assigned && m.withinTolerance) return '[assigned ✓]';
     if (m.assigned) return '[assigned, outside tolerance]';
     if (m.withinTolerance) return '[match]';
@@ -262,7 +262,9 @@ function pilotHeaderTag(rows: TrackerMatch[]): string {
     const flags: string[] = [];
     const assignedRow = rows.find((m) => m.assigned);
     if (assignedRow && !assignedRow.withinTolerance) {
-        flags.push(assignedRow.confidence === null ? 'assigned ID has no crossings' : 'assigned ID outside tolerance');
+        if (assignedRow.skipped) flags.push('assigned ID skipped (first sighting out of task area)');
+        else if (assignedRow.confidence === null) flags.push('assigned ID has no crossings');
+        else flags.push('assigned ID outside tolerance');
     }
     const altMatch = rows.find((m) => m.withinTolerance && !m.assigned);
     if (assignedRow && !assignedRow.withinTolerance && altMatch) flags.push('alternative match found');
