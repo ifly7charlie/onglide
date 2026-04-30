@@ -3,10 +3,7 @@ import Head from 'next/head';
 import {useTranslation} from 'next-i18next/pages';
 import {serverSideTranslations} from 'next-i18next/pages/serverSideTranslations';
 
-import {useState} from 'react';
-
-// Helpers for loading contest information etc
-import {useContest, Spinner} from '../../lib/react/loaders';
+import {useState, useMemo} from 'react';
 
 // And connect to websockets...
 import {OgnFeed} from '../../lib/react/ognfeed';
@@ -15,12 +12,10 @@ import {query} from '../../lib/react/db';
 import escape from 'sql-template-strings';
 
 import {MeasureContext} from '../../lib/react/measure';
-import {ClassName} from '../../lib/types';
+import {ClassName, Datecode} from '../../lib/types';
 
-import {find as _find} from 'lodash';
-
-import {Provider} from 'react-redux';
-import store from '../../lib/redux/store';
+import {useSelector} from '../../lib/redux';
+import {selectCompByCompid} from '../../lib/redux/competitionsSlice';
 
 //
 // Main page rendering :)
@@ -39,9 +34,11 @@ export default function CombinePage(props) {
         className = className[0];
     }
 
-    // Next up load the contest and the pilots, we can use defaults for pilots
-    // if the className matches
-    const {comp, isLoading, isError} = useContest(compid);
+    // Comp metadata + per-class status comes from the /all websocket via
+    // Redux. summary === null means the snapshot hasn't arrived yet OR this
+    // compid isn't in the live list — both render the loading spinner.
+    const compByCompid = useMemo(() => selectCompByCompid(compid), [compid]);
+    const summary = useSelector(compByCompid);
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
@@ -61,23 +58,21 @@ export default function CombinePage(props) {
 
     //
     // And display in progress until they are loaded
-    if (isLoading || !props.options)
+    if (!summary || !props.options)
         return (
             <div className="loading">
                 <div className="loadinginner" />
             </div>
         );
 
-    if (isError || !comp?.competition) return <Spinner />;
-
     // Make sure we have the class object
-    const selectedClass = _find(comp.classes, {class: className});
+    const selectedClass = summary.classes.find((c) => c.class === className);
 
     if (!selectedClass) {
         return (
             <>
                 <Head>
-                    <title>{comp.competition.name}</title>
+                    <title>{summary.name}</title>
                 </Head>
                 <h1>{t('competition.no_class_selected')}</h1>
             </>
@@ -89,29 +84,26 @@ export default function CombinePage(props) {
             <MeasureContext>
                 <Head>
                     <title>
-                        {comp.competition.name}
+                        {summary.name}
                         {selectedClass?.classname ? ' - ' + selectedClass.classname : ''}
                     </title>
                 </Head>
                 {selectedClass?.datecode ? (
                     <div className="resizingContainer">
-                        <Provider store={store}>
-                            <OgnFeed
-                                comp={comp}
-                                compid={compid}
-                                vc={className as ClassName} //
-                                tz={props.tz}
-                                datecode={selectedClass.datecode}
-                                selectedCompno={selectedCompno}
-                                setSelectedCompno={setSelectedCompno}
-                                viewport={viewport}
-                                setViewport={setViewport}
-                                options={props.options}
-                                setOptions={props.setOptions}
-                                handicapped={selectedClass?.handicapped == 'Y'}
-                                notes={selectedClass?.notes}
-                            />
-                        </Provider>
+                        <OgnFeed
+                            comp={summary}
+                            compid={compid}
+                            vc={className as ClassName} //
+                            tz={props.tz}
+                            datecode={selectedClass.datecode as Datecode}
+                            selectedCompno={selectedCompno}
+                            setSelectedCompno={setSelectedCompno}
+                            viewport={viewport}
+                            setViewport={setViewport}
+                            options={props.options}
+                            setOptions={props.setOptions}
+                            handicapped={selectedClass?.taskRules?.handicapped === true}
+                        />
                     </div>
                 ) : (
                     <div

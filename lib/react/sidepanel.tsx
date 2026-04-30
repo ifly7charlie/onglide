@@ -1,4 +1,5 @@
 import {ReactNode} from 'react';
+import Link from 'next/link';
 import {useTranslation} from 'next-i18next/pages';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
@@ -6,7 +7,8 @@ import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 import {Options} from './options';
 import {LanguageSwitcher} from './language-switcher';
-import {classDisplayStatus, StatusIcon, STATUS_LABEL_KEYS} from './competition-status';
+import {StatusIcon, STATUS_LABEL_KEYS} from './competition-status';
+import type {CompetitionDisplayStatus} from '../competition-display-status';
 
 import type {Options as OptionsType, ClassName} from '../types';
 
@@ -23,12 +25,12 @@ interface SidePanelProps {
 
 export function compShortName(comp: any) {
     return (
-        comp?.competition?.name
+        comp?.name
             ?.replace(/.*Women's World Gliding Championship[s]*/gi, 'WWGC')
             .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
             .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
             .replace(/.*Sailplane Grandprix]*/gi, 'SGP')
-            ?.trim() || comp?.competition?.name || ''
+            ?.trim() || comp?.name || ''
     );
 }
 
@@ -37,22 +39,22 @@ export function SidePanelHeader({comp}: {comp: any}) {
     const shortName = compShortName(comp);
     return (
         <div className="sidepanel-header">
-            <a href="/" className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+            <Link href="/" className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                 <FontAwesomeIcon icon={faGlobe} />
-            </a>
+            </Link>
             <div className="sidepanel-title">
                 <div className="sidepanel-comp-name">
-                    {comp?.competition?.mainwebsite ? (
-                        <a href={comp.competition.mainwebsite} style={{color: 'inherit'}}>
+                    {comp?.mainwebsite ? (
+                        <a href={comp.mainwebsite} style={{color: 'inherit'}}>
                             {shortName}
                         </a>
                     ) : (
                         shortName
                     )}
                 </div>
-                {comp?.competition?.start && comp?.competition?.end ? (
+                {comp?.start && comp?.end ? (
                     <div className="sidepanel-comp-dates">
-                        {comp.competition.start} → {comp.competition.end}
+                        {comp.start} → {comp.end}
                     </div>
                 ) : null}
             </div>
@@ -65,13 +67,12 @@ export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: Cl
     const {t} = useTranslation('common');
     const multipleClasses = (comp?.classes?.length ?? 0) > 1;
     if (!multipleClasses) return null;
-    // The user is viewing this competition, so it's effectively current —
-    // pass inWindow=true so a class with status B/P maps to 'task_set'
-    // rather than falling through to 'upcoming'.
     return (
         <div className="sidepanel-classes" role="tablist">
             {comp.classes.map((c: any) => {
-                const ds = classDisplayStatus(c.status ?? '', true);
+                // displayStatus is computed by the daemon (bin/ogn.ts:buildCompetitionSummary)
+                // with proper datecode-staleness demotion; trust it as-is.
+                const ds = (c.displayStatus ?? 'notask') as CompetitionDisplayStatus;
                 return (
                     <button
                         key={c.class}

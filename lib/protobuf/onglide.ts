@@ -38,6 +38,12 @@ export interface CompetitionClassStatus {
     | undefined;
   /** matches CompetitionDisplayStatus union in TS */
   displayStatus: string;
+  /** when a task is briefed, full rules; pre-task, a stub carrying handicapped/dh from the classes table */
+  taskRules?:
+    | TaskRules
+    | undefined;
+  /** per-class WS-channel datecode (10am-local cutoff) */
+  datecode?: string | undefined;
 }
 
 export interface CompetitionSummary {
@@ -619,7 +625,16 @@ export const OnglideWebSocketMessage = {
 };
 
 function createBaseCompetitionClassStatus(): CompetitionClassStatus {
-  return { class: "", classname: "", status: "", pilotCount: 0, statusDatecode: undefined, displayStatus: "" };
+  return {
+    class: "",
+    classname: "",
+    status: "",
+    pilotCount: 0,
+    statusDatecode: undefined,
+    displayStatus: "",
+    taskRules: undefined,
+    datecode: undefined,
+  };
 }
 
 export const CompetitionClassStatus = {
@@ -641,6 +656,12 @@ export const CompetitionClassStatus = {
     }
     if (message.displayStatus !== "") {
       writer.uint32(50).string(message.displayStatus);
+    }
+    if (message.taskRules !== undefined) {
+      TaskRules.encode(message.taskRules, writer.uint32(58).fork()).ldelim();
+    }
+    if (message.datecode !== undefined) {
+      writer.uint32(66).string(message.datecode);
     }
     return writer;
   },
@@ -694,6 +715,20 @@ export const CompetitionClassStatus = {
 
           message.displayStatus = reader.string();
           continue;
+        case 7:
+          if (tag !== 58) {
+            break;
+          }
+
+          message.taskRules = TaskRules.decode(reader, reader.uint32());
+          continue;
+        case 8:
+          if (tag !== 66) {
+            break;
+          }
+
+          message.datecode = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -711,6 +746,8 @@ export const CompetitionClassStatus = {
       pilotCount: isSet(object.pilotCount) ? globalThis.Number(object.pilotCount) : 0,
       statusDatecode: isSet(object.statusDatecode) ? globalThis.String(object.statusDatecode) : undefined,
       displayStatus: isSet(object.displayStatus) ? globalThis.String(object.displayStatus) : "",
+      taskRules: isSet(object.taskRules) ? TaskRules.fromJSON(object.taskRules) : undefined,
+      datecode: isSet(object.datecode) ? globalThis.String(object.datecode) : undefined,
     };
   },
 
@@ -734,6 +771,12 @@ export const CompetitionClassStatus = {
     if (message.displayStatus !== "") {
       obj.displayStatus = message.displayStatus;
     }
+    if (message.taskRules !== undefined) {
+      obj.taskRules = TaskRules.toJSON(message.taskRules);
+    }
+    if (message.datecode !== undefined) {
+      obj.datecode = message.datecode;
+    }
     return obj;
   },
 
@@ -748,6 +791,10 @@ export const CompetitionClassStatus = {
     message.pilotCount = object.pilotCount ?? 0;
     message.statusDatecode = object.statusDatecode ?? undefined;
     message.displayStatus = object.displayStatus ?? "";
+    message.taskRules = (object.taskRules !== undefined && object.taskRules !== null)
+      ? TaskRules.fromPartial(object.taskRules)
+      : undefined;
+    message.datecode = object.datecode ?? undefined;
     return message;
   },
 };

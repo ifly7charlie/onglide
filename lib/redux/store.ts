@@ -5,6 +5,7 @@ import taskSlice from '../redux/taskSlice';
 import nowSlice from '../redux/nowSlice';
 import scoresSlice from '../redux/scoresSlice';
 import otherPilotsSlice from '../redux/otherPilotsSlice';
+import competitionsSlice from '../redux/competitionsSlice';
 
 // ...
 
@@ -14,7 +15,8 @@ const store = configureStore({
         tracks: tracksSlice,
         scores: scoresSlice,
         otherPilots: otherPilotsSlice,
-        now: nowSlice
+        now: nowSlice,
+        competitions: competitionsSlice
     },
     middleware: (getDefaultMiddleware) =>
         getDefaultMiddleware({

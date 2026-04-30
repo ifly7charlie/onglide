@@ -21,6 +21,8 @@ message CompetitionClassStatus {
 	uint32 pilotCount = 4;
 	optional string statusDatecode = 5;
 	string displayStatus = 6;    // matches CompetitionDisplayStatus union in TS
+	optional TaskRules taskRules = 7;  // when a task is briefed, full rules; pre-task, a stub carrying handicapped/dh from the classes table
+	optional string datecode = 8;      // per-class WS-channel datecode (10am-local cutoff)
 }
 
 message CompetitionSummary {

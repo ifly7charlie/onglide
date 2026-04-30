@@ -180,6 +180,7 @@ interface Channel {
     // CompetitionsList feed without re-querying the DB.
     compStatus: string; // raw compstatus.status (L/S/H/F/B/P/G/'')
     statusDatecode: Datecode | null; // compstatus.datecode
+    classHandicapped: string; // raw classes.handicapped column ('Y'/'N'/'D'/'') — used pre-task to populate /all TaskRules.handicapped
     pilotCount: number;
 
     toSend: PositionMessage[]; // messages waiting to be sent
@@ -1095,8 +1096,9 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // Fetch the trackers from the database and the channel they are supposed to be in.
     // Scoped to this OGN process's compid so we don't pick up other competitions sharing
     // the same database.
-    const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string; classname: string; status: string}[]>(
-        `SELECT cs.class, cs.datecode, cl.compid, cl.classname, COALESCE(cs.status, '') AS status
+    const classes = await db.query<{class: ClassName; datecode: Datecode; compid: string; classname: string; status: string; handicapped: string}[]>(
+        `SELECT cs.class, cs.datecode, cl.compid, cl.classname, COALESCE(cs.status, '') AS status,
+                COALESCE(cl.handicapped, '') AS handicapped
          FROM classes cl
          LEFT JOIN compstatus cs ON cs.class = cl.class
          WHERE cl.compid = ?`,
@@ -1152,6 +1154,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 datecode: datecode,
                 compStatus: c.status || '',
                 statusDatecode: (c.datecode as Datecode | null) ?? null,
+                classHandicapped: c.handicapped || '',
                 pilotCount: 0, // populated by updateTrackers from configured gliders
                 gliderHash: '',
                 statistics: {
@@ -1224,6 +1227,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
         // is populated by updateTrackers from the configured glider set.
         channel.compStatus = c.status || '';
         channel.statusDatecode = (c.datecode as Datecode | null) ?? null;
+        channel.classHandicapped = c.handicapped || '';
         channel.classname = c.classname;
 
         newchannels[cname] = channel;
@@ -1409,6 +1413,11 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
                 channel.scoreIdUpdateRequired = true;
                 sendTask(channel, channel);
             }
+
+            // The /all CompetitionClassStatus.taskRules just changed for this
+            // class — push a delta now so the per-comp page picks up the new
+            // rules without waiting for the next 60s tick.
+            broadcastCompetitionsDelta([competition.compid], []);
         }
     }
 }
@@ -2395,13 +2404,32 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         } else {
             displayStatus = classDisplayStatus(ch.compStatus, inWindow);
         }
+        // Prefer the live TaskRules from the briefed task. Pre-task, fall back
+        // to a stub carrying just the class's configured handicapped/dh flags
+        // so the per-comp page can still tell whether to surface handicapped
+        // sort options before a task lands. Clients should not consult the
+        // dummy zero fields (grandprixstart/nostartutc/maxHandicap) until a
+        // real task message arrives over the per-class channel.
+        const taskRules = ch.task?.rules
+            ? ch.task.rules
+            : ch.classHandicapped
+              ? {
+                    grandprixstart: false,
+                    nostartutc: 0,
+                    handicapped: ch.classHandicapped === 'Y' || ch.classHandicapped === 'D',
+                    dh: ch.classHandicapped === 'D',
+                    maxHandicap: 0
+                }
+              : undefined;
         classes.push({
             class: ch.className,
             classname: ch.classname || ch.className,
             status: ch.compStatus,
             pilotCount: ch.pilotCount,
             statusDatecode: sdc ?? undefined,
-            displayStatus
+            displayStatus,
+            taskRules,
+            datecode: ch.datecode
         });
     }
     classes.sort((a, b) => a.classname.localeCompare(b.classname));

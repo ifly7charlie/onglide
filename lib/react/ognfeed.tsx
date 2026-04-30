@@ -8,6 +8,7 @@
 
 import {useState, useMemo, useCallback, useEffect, memo} from 'react';
 import {useRouter} from 'next/router';
+import Link from 'next/link';
 import {useTranslation} from 'next-i18next/pages';
 
 import {usePilots} from './loaders';
@@ -93,8 +94,7 @@ export const OgnFeed = memo(
         setViewport,
         options,
         setOptions,
-        handicapped,
-        notes
+        handicapped
     }: //
     {
         comp: any;
@@ -109,7 +109,6 @@ export const OgnFeed = memo(
         options: Options;
         setOptions: Function;
         handicapped: any;
-        notes: string;
     }) {
         const {pilots, isPLoading} = usePilots(vc);
         const {t} = useTranslation('common');
@@ -300,9 +299,9 @@ export const OgnFeed = memo(
                     {map}
                     <div className="mobile-top-strip">
                         <div className="mobile-strip-header">
-                            <a href="/" className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+                            <Link href="/" className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                                 <FontAwesomeIcon icon={faGlobe} />
-                            </a>
+                            </Link>
                             <div className="mobile-comp-name">{compShortName(comp)}</div>
                             <button
                                 className="drawer-toggle"
@@ -350,11 +349,13 @@ export const OgnFeed = memo(
                                     <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
                                 </div>
                             </div>
+                            {/* notes block disabled — DB column not currently populated; restore wiring once it is.
                             {notes && notes != '' && (
                                 <div className="sidepanel-section" style={{color: 'red'}}>
                                     {notes}
                                 </div>
                             )}
+                            */}
                             <div className="drawer-group">
                                 <div className="sidepanel-section">
                                     <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} defaultOpen />
@@ -384,11 +385,13 @@ export const OgnFeed = memo(
                     setOptions={setOptions}
                     head={
                         <>
+                            {/* notes block disabled — DB column not currently populated; restore wiring once it is.
                             {notes && notes != '' && (
                                 <div className="sidepanel-section" style={{color: 'red'}}>
                                     {notes}
                                 </div>
                             )}
+                            */}
                             <div className="sidepanel-section">
                                 <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
                                 {connectionStatus}
@@ -432,9 +435,7 @@ export const OgnFeed = memo(
         o.datecode == n.datecode &&
         _isEqual(o.viewport, n.viewport) &&
         _isEqual(o.options, n.options) &&
-        o.notes === n.notes &&
         o.handicapped === n.handicapped
-    //    function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
 );
 
 function formatTimes(time: number, tz: TZ, lang: string) {

@@ -3,7 +3,8 @@ import {useTranslation} from 'next-i18next/pages';
 import {serverSideTranslations} from 'next-i18next/pages/serverSideTranslations';
 
 import {CompetitionGlobe} from '../lib/react/globe';
-import {useCompetitionsWebsocket} from '../lib/react/useCompetitionsWebsocket';
+import {useSelector} from '../lib/redux';
+import {selectCompetitionsList} from '../lib/redux/competitionsSlice';
 
 //
 // Landing page: 3D globe showing every competition that is live or within
@@ -13,9 +14,11 @@ import {useCompetitionsWebsocket} from '../lib/react/useCompetitionsWebsocket';
 //
 // Competition list comes from the OGN daemon's /all websocket — initial
 // snapshot on connect, then deltas as compstatus / pilot rosters change.
+// The websocket is opened once in pages/_app.tsx and feeds the Redux
+// `competitions` slice; this page is a passive consumer.
 //
 export default function GlobeLandingPage({countriesGeoJson}: {countriesGeoJson: any}) {
-    const {competitions} = useCompetitionsWebsocket();
+    const competitions = useSelector(selectCompetitionsList);
     const {t} = useTranslation('common');
 
     return (

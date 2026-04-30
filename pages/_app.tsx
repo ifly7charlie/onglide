@@ -11,9 +11,12 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import '../styles/onglide.scss';
 
 import {useState, useCallback, useEffect} from 'react';
+import {Provider} from 'react-redux';
 
 import type {Options} from '../lib/types';
 import {PathLength, Units, MapType, TaskUp} from '../lib/types';
+import store from '../lib/redux/store';
+import {CompetitionsSocket} from '../lib/react/competitionsSocket';
 
 const defaultOptions: Options = {
     //
@@ -66,12 +69,13 @@ export function useOptions() {
 function MyApp({Component, pageProps}) {
     const [options, setOptions] = useOptions();
     return (
-        <>
+        <Provider store={store}>
+            <CompetitionsSocket />
             <Head>
                 <meta name="viewport" content="width=device-width, minimal-ui" />
             </Head>
             <Component {...pageProps} options={options} setOptions={setOptions} />
-        </>
+        </Provider>
     );
 }
 

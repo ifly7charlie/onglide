@@ -8,11 +8,12 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faMagnifyingGlassLocation, faCaretUp, faCaretDown} from '@fortawesome/free-solid-svg-icons';
 
 import {useState} from 'react';
-import {useContest, Spinner, Error} from './loaders';
+import {Spinner} from './loaders';
 
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
 import {selectTask, selectHasTask} from '../redux/taskSlice';
+import {selectCompByCompid} from '../redux/competitionsSlice';
 import {useSelector} from '../redux';
 
 import type {TaskLeg, ClassName, TZ, Epoch} from '../types';
@@ -24,14 +25,13 @@ export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz,
     const {t} = useTranslation('common');
     const task = useSelector((state) => selectTask(state, vc));
     const hasTask = useSelector((state) => selectHasTask(state, vc));
-    const {comp, isLoading} = useContest(compid);
+    const compByCompid = useMemo(() => selectCompByCompid(compid), [compid]);
+    const summary = useSelector(compByCompid);
     const [open, setOpen] = useState(!!defaultOpen);
 
     const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
-    // And then produce a string to display it locally. `comp` is undefined
-    // until useContest() resolves, so guard the lookup — the early return
-    // below handles the unresolved case.
-    const fClass = comp?.classes?.find((c: any) => c.class == vc);
+    // `summary` is null until the /all snapshot lands; guard the lookup.
+    const fClass = summary?.classes?.find((c) => c.class == vc);
     const dateString = useMemo(() => {
         const date = (task?.details?.calendardate ?? fClass?.datecode) ? fromDateCode(fClass.datecode) : null;
         return date ? `${new Date(date).toLocaleDateString(lang, {day: 'numeric', month: 'short'})}` : '';
@@ -43,11 +43,11 @@ export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz,
             : '';
     }, [lang, tz, task?.rules?.nostartutc, t]);
 
-    if (isLoading || !hasTask) {
+    if (!summary || !hasTask) {
         return <Spinner />;
     }
 
-    if (!comp || !fClass || !task) {
+    if (!fClass || !task) {
         return (
             <>
                 <h5>{dateString}: {t('task.no_task_configured')}</h5>
