@@ -67,6 +67,7 @@
         "edit_handicap": "Rediger handicap",
         "edit_handicap_prompt": "Indtast handicap (lad være tom for at rydde):",
         "country_fallback": "Landekode: {{country}}",
+        "tracking_declined": "Live-sporing blokeret — dette svæveflys tracker er sat til at afvise live-sporing i OGN DDB eller FlarmNet",
         "view_no_signal": "Ingen sporing endnu",
         "view_old": ">1 time siden",
         "view_last_point": "Sidste punkt for {{delay}} siden",

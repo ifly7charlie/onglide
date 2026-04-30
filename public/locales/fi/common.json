@@ -67,6 +67,7 @@
         "edit_handicap": "Muokkaa tasoitusta",
         "edit_handicap_prompt": "Anna tasoitusarvo (tyhjä nollaa):",
         "country_fallback": "Maakoodi: {{country}}",
+        "tracking_declined": "Reaaliaikainen seuranta estetty — tämän purjelentokoneen seurantalaite on asetettu kieltämään reaaliaikainen seuranta OGN DDB:ssä tai FlarmNetissä",
         "view_no_signal": "Ei vielä seurantaa",
         "view_old": ">1 tunti sitten",
         "view_last_point": "Viimeisin piste {{delay}} sitten",

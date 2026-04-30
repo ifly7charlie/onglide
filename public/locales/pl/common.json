@@ -67,6 +67,7 @@
         "edit_handicap": "Edytuj handicap",
         "edit_handicap_prompt": "Wprowadź wartość handicapu (puste, aby wyczyścić):",
         "country_fallback": "Kod kraju: {{country}}",
+        "tracking_declined": "Śledzenie na żywo zablokowane — tracker tego szybowca jest ustawiony na odrzucenie śledzenia na żywo w OGN DDB lub FlarmNet",
         "view_no_signal": "Brak śledzenia",
         "view_old": ">1 godz. temu",
         "view_last_point": "Ostatni punkt {{delay}} temu",

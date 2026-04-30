@@ -67,6 +67,7 @@
         "edit_handicap": "Editar handicap",
         "edit_handicap_prompt": "Introduce el valor de handicap (vacío para borrar):",
         "country_fallback": "Código de país: {{country}}",
+        "tracking_declined": "Seguimiento en vivo bloqueado — el tracker de este planeador está configurado para rechazar el seguimiento en vivo en la DDB de OGN o FlarmNet",
         "view_no_signal": "Sin seguimiento aún",
         "view_old": ">1 hora",
         "view_last_point": "Último punto hace {{delay}}",

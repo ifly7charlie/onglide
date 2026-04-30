@@ -67,6 +67,7 @@
         "edit_handicap": "Edit handicap",
         "edit_handicap_prompt": "Enter handicap value (leave empty to clear):",
         "country_fallback": "Country Code: {{country}}",
+        "tracking_declined": "Live tracking blocked — this glider's tracker is set to decline live tracking in the OGN DDB or FlarmNet",
         "view_no_signal": "No tracking yet",
         "view_old": ">1 hour ago",
         "view_last_point": "Last point {{delay}} ago",

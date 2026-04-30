@@ -67,6 +67,7 @@
         "edit_handicap": "Handicap bewerken",
         "edit_handicap_prompt": "Voer handicap in (leeg om te wissen):",
         "country_fallback": "Landcode: {{country}}",
+        "tracking_declined": "Live tracking geblokkeerd — de tracker van dit zweefvliegtuig is ingesteld om live tracking te weigeren in de OGN DDB of FlarmNet",
         "view_no_signal": "Nog geen tracking",
         "view_old": ">1 uur geleden",
         "view_last_point": "Laatste punt {{delay}} geleden",

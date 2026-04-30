@@ -67,6 +67,7 @@
         "edit_handicap": "Ändra handicap",
         "edit_handicap_prompt": "Ange handicap (lämna tomt för att rensa):",
         "country_fallback": "Landskod: {{country}}",
+        "tracking_declined": "Livespårning blockerad — denna seglares spårare är inställd på att avböja livespårning i OGN DDB eller FlarmNet",
         "view_no_signal": "Ingen spårning än",
         "view_old": ">1 timme sedan",
         "view_last_point": "Senaste punkt för {{delay}} sedan",

@@ -805,12 +805,14 @@ export const PilotList = memo(function PilotList({
 
     // Generate the pilot list, sorted by the correct key
     const pilotComponents = pilotList.map((pilot, idx) => {
+        const status = pilotStatus?.[pilot.compno]?.status ?? 0;
         return (
             <Pilot //
                 key={pilot.compno}
                 {...pilot}
                 pilot={pilots[pilot.compno]}
-                icon={icons[pilotStatus?.[pilot.compno]?.status ?? 0]}
+                icon={icons[status]}
+                blocked={status === PositionStatus.Blocked}
                 selected={selectedPilot === pilot.compno}
                 vertical={vertical}
                 position={idx + 1}

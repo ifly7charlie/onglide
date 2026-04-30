@@ -67,6 +67,7 @@
         "edit_handicap": "Modifica handicap",
         "edit_handicap_prompt": "Inserisci il valore di handicap (vuoto per cancellare):",
         "country_fallback": "Codice paese: {{country}}",
+        "tracking_declined": "Tracciamento dal vivo bloccato — il tracker di questo aliante è impostato per rifiutare il tracciamento dal vivo nel DDB di OGN o in FlarmNet",
         "view_no_signal": "Tracciamento non disponibile",
         "view_old": ">1 ora fa",
         "view_last_point": "Ultimo punto {{delay}} fa",

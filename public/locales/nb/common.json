@@ -67,6 +67,7 @@
         "edit_handicap": "Rediger handikap",
         "edit_handicap_prompt": "Skriv inn handikap (la stå tomt for å fjerne):",
         "country_fallback": "Landskode: {{country}}",
+        "tracking_declined": "Direkte sporing blokkert — denne seilflyets tracker er satt til å avvise direkte sporing i OGN DDB eller FlarmNet",
         "view_no_signal": "Ingen sporing ennå",
         "view_old": ">1 time siden",
         "view_last_point": "Siste punkt for {{delay}} siden",

@@ -67,6 +67,7 @@
         "edit_handicap": "Modifier le handicap",
         "edit_handicap_prompt": "Saisir la valeur du handicap (vide pour effacer) :",
         "country_fallback": "Code pays : {{country}}",
+        "tracking_declined": "Suivi en direct bloqué — le tracker de ce planeur est paramétré pour refuser le suivi en direct dans la DDB OGN ou FlarmNet",
         "view_no_signal": "Pas de suivi pour l'instant",
         "view_old": ">1 heure",
         "view_last_point": "Dernier point il y a {{delay}}",

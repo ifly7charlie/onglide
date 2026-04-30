@@ -67,6 +67,7 @@
         "edit_handicap": "Index bearbeiten",
         "edit_handicap_prompt": "Indexwert eingeben (leer lassen zum Zurücksetzen):",
         "country_fallback": "Ländercode: {{country}}",
+        "tracking_declined": "Live-Tracking blockiert — der Tracker dieses Flugzeugs ist in der OGN-DDB oder bei FlarmNet auf Live-Tracking-Ablehnung gesetzt",
         "view_no_signal": "Noch kein Tracking",
         "view_old": ">1 Stunde her",
         "view_last_point": "Letzter Punkt vor {{delay}}",

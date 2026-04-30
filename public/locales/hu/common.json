@@ -67,6 +67,7 @@
         "edit_handicap": "Handicap szerkesztése",
         "edit_handicap_prompt": "Add meg a handicap értéket (üres a törléshez):",
         "country_fallback": "Országkód: {{country}}",
+        "tracking_declined": "Élő követés blokkolva — ennek a vitorlázógépnek a követője az OGN DDB-ben vagy a FlarmNet-en élő követés elutasítására van állítva",
         "view_no_signal": "Még nincs nyomkövetés",
         "view_old": ">1 órája",
         "view_last_point": "Utolsó pont {{delay}} ezelőtt",

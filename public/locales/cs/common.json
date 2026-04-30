@@ -67,6 +67,7 @@
         "edit_handicap": "Upravit handicap",
         "edit_handicap_prompt": "Zadejte hodnotu handicapu (prázdné pro vymazání):",
         "country_fallback": "Kód země: {{country}}",
+        "tracking_declined": "Živé sledování zablokováno — sledovač tohoto kluzáku má nastaveno odmítnutí živého sledování v OGN DDB nebo FlarmNet",
         "view_no_signal": "Zatím bez sledování",
         "view_old": ">1 hodina",
         "view_last_point": "Poslední bod před {{delay}}",

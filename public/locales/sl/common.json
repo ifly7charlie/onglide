@@ -67,6 +67,7 @@
         "edit_handicap": "Uredi handicap",
         "edit_handicap_prompt": "Vnesi handicap (prazno za izbris):",
         "country_fallback": "Koda države: {{country}}",
+        "tracking_declined": "Sledenje v živo blokirano — sledilnik tega jadralnega letala je nastavljen za zavrnitev sledenja v živo v OGN DDB ali FlarmNet",
         "view_no_signal": "Še brez sledenja",
         "view_old": ">1 ura",
         "view_last_point": "Zadnja točka pred {{delay}}",
