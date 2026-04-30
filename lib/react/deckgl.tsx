@@ -129,6 +129,34 @@ export default function MApp(props: {
     // Rain Radar
     const router = useRouter();
     const {t} = useTranslation('common');
+
+    // Unmount the deck overlay around any route change. The deck.gl
+    // MapboxOverlay/MapLibre teardown is racy: when the route changes (e.g.
+    // back to the globe landing page) MapLibre can finalize a frame after
+    // the deck instance has been disposed, dereferencing a null viewport
+    // (`TypeError: null is not an object (evaluating 'viewport.id')`).
+    // Flipping this flag on `routeChangeStart` lets React commit the overlay
+    // unmount — which calls `MapboxOverlay.onRemove` and deregisters the
+    // deck custom layer from the painter — before MapLibre itself is torn
+    // down by the page unmount.
+    //
+    // For routes that keep this component mounted (e.g. switching class
+    // within the same competition) we reset the flag on routeChangeComplete
+    // so the overlay re-mounts with the new data.
+    const [unmounting, setUnmounting] = useState(false);
+    useEffect(() => {
+        const onStart = () => setUnmounting(true);
+        const onSettled = () => setUnmounting(false);
+        router.events.on('routeChangeStart', onStart);
+        router.events.on('routeChangeComplete', onSettled);
+        router.events.on('routeChangeError', onSettled);
+        return () => {
+            router.events.off('routeChangeStart', onStart);
+            router.events.off('routeChangeComplete', onSettled);
+            router.events.off('routeChangeError', onSettled);
+        };
+    }, [router]);
+
     const lang = router.locale ?? (typeof navigator !== 'undefined' ? (navigator.languages?.[0] ?? navigator.language) : 'en');
     const radarOverlay = RadarOverlay({options, tz});
 
@@ -478,7 +506,6 @@ export default function MApp(props: {
             <Map //
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}
-                onStyleData={fixupMap}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
                 mapStyle={ONGLIDE_MAP_STYLE}
                 ref={mapRef}
@@ -510,7 +537,7 @@ export default function MApp(props: {
                         <Layer key="scoringPoint" {...scoringPointStyle} />
                     </Source>
                 ) : null}
-                {valid ? (
+                {valid && !unmounting ? (
                     <DeckGLOverlay
                         getTooltip={toolTip}
                         onClick={onClick}

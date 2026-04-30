@@ -359,20 +359,20 @@ function sameNumberArray(a: number[] | undefined, b: number[] | undefined): bool
 function mapScoresToDisplayScores(prev: PilotScoreDisplay | undefined, p: PilotScore): PilotScoreDisplay {
     const result: PilotScoreDisplay = {...p};
 
-    if (p.scoredPoints && p.scoredPoints.length > 3) {
+    if (p?.scoredPoints && p.scoredPoints.length > 3) {
         if (prev?.scoredGeoJSON && sameNumberArray(p.scoredPoints, prev.scoredPoints) && prev.scoringClosestPoint?.lat === p.scoringClosestPoint?.lat && prev.scoringClosestPoint?.lng === p.scoringClosestPoint?.lng) {
             result.scoredGeoJSON = prev.scoredGeoJSON;
         } else {
             result.scoredGeoJSON = assembleLabeledLine(p.scoredPoints, p.scoringClosestPoint);
         }
     }
-    if (p.minDistancePoints && p.minDistancePoints.length > 2) {
+    if (p?.minDistancePoints && p.minDistancePoints.length > 2) {
         result.minGeoJSON = prev?.minGeoJSON && sameNumberArray(p.minDistancePoints, prev.minDistancePoints) ? prev.minGeoJSON : assembleLabeledLine(p.minDistancePoints);
     }
-    if (p.maxDistancePoints && p.maxDistancePoints.length > 2) {
+    if (p?.maxDistancePoints && p.maxDistancePoints.length > 2) {
         result.maxGeoJSON = prev?.maxGeoJSON && sameNumberArray(p.maxDistancePoints, prev.maxDistancePoints) ? prev.maxGeoJSON : assembleLabeledLine(p.maxDistancePoints);
     }
-    if (p.suggestedTrackPoints && p.suggestedTrackPoints.length > 7) {
+    if (p?.suggestedTrackPoints && p.suggestedTrackPoints.length > 7) {
         result.suggestedGeoJSON = prev?.suggestedGeoJSON && sameNumberArray(p.suggestedTrackPoints, prev.suggestedTrackPoints) ? prev.suggestedGeoJSON : assembleLabeledLine(p.suggestedTrackPoints);
     }
 
