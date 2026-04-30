@@ -481,7 +481,6 @@ export default function MApp(props: {
                 onStyleData={fixupMap}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
                 mapStyle={ONGLIDE_MAP_STYLE}
-                reuseMaps={true}
                 ref={mapRef}
                 attributionControl={false}
                 interactiveLayerIds={gridInteractiveLayerIds}
