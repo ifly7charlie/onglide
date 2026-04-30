@@ -16,8 +16,8 @@ import {PreparedTurnpoint} from '../../flightprocessing/preparedTurnpoint';
 import {loadPointsForIds} from '../../webworkers/pointlog';
 
 const MAX_FLARM_DIST_KM = 50; // first sighting >50 km from the relevant TP → skip
-const MAX_GAP_SEC = 60; // don't run hasCrossed across a coverage gap
-const REORDER_WINDOW_SEC = 20; // per-flarmid sliding reorder buffer (relay-path jitter)
+const DEFAULT_MAX_GAP_SEC = 60; // don't run hasCrossed across a coverage gap (override via opts.maxGapSec)
+const DEFAULT_REORDER_WINDOW_SEC = 20; // per-flarmid sliding reorder buffer (override via opts.reorderWindowSec)
 const DEFAULT_TOLERANCE_SEC = 5;
 
 export interface OfficialResult {
@@ -57,6 +57,10 @@ export interface FindTrackersOptions {
     task: Task; // already calculateTask'd (preparedLegs populated)
     results: OfficialResult[];
     toleranceSec?: number;
+    /** Skip running hasCrossed on a pair whose Δt exceeds this. Default 60s. */
+    maxGapSec?: number;
+    /** Per-flarmid sliding reorder buffer (and stale-latency threshold). Default 20s. */
+    reorderWindowSec?: number;
     excludeFlarmids?: Set<FlarmID>;
     log?: (msg: string) => void;
     /**
@@ -72,6 +76,8 @@ type CrossingMap = Map<FlarmID, Epoch[]>;
 export async function findTrackerMatches(opts: FindTrackersOptions): Promise<TrackerMatch[]> {
     const {task, results} = opts;
     const tolerance = opts.toleranceSec ?? DEFAULT_TOLERANCE_SEC;
+    const maxGapSec = opts.maxGapSec ?? DEFAULT_MAX_GAP_SEC;
+    const reorderWindowSec = opts.reorderWindowSec ?? DEFAULT_REORDER_WINDOW_SEC;
     const excludeFlarmids = opts.excludeFlarmids ?? new Set<FlarmID>();
     const log = opts.log ?? (() => {});
     const debugFlarmids = normaliseFlarmIds(opts.debugFlarmids);
@@ -112,11 +118,11 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     const startWatch: WatchTime[] = results.map((r) => ({t: r.startUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
     const finishWatch: WatchTime[] = results.map((r) => ({t: r.finishUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
 
-    log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots`);
-    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch);
+    log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots, maxGap=${maxGapSec}s, reorderWindow=${reorderWindowSec}s`);
+    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch, maxGapSec, reorderWindowSec);
 
     log(`finish scan: window ${Math.round((maxFinish - minFinish) / 60 + (2 * slack) / 60)} min`);
-    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids, finishWatch);
+    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids, finishWatch, maxGapSec, reorderWindowSec);
 
     return matchCrossings(results, startScan, finishScan, tolerance);
 }
@@ -152,7 +158,9 @@ async function scanLine(
     excludeFlarmids: Set<FlarmID>,
     log: (msg: string) => void,
     debugFlarmids: Set<FlarmID>,
-    debugWatchTimes: WatchTime[]
+    debugWatchTimes: WatchTime[],
+    maxGapSec: number,
+    reorderWindowSec: number
 ): Promise<ScanResult> {
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
     const state = new Map<FlarmID, FlarmState>();
@@ -206,7 +214,7 @@ async function scanLine(
         const d = dbgFor(f);
         while (st.buf.length && st.buf[0].t <= threshold) {
             const cur = st.buf.shift()!;
-            if (st.prev && cur.t - st.prev.t <= MAX_GAP_SEC && cur.t > st.prev.t) {
+            if (st.prev && cur.t - st.prev.t <= maxGapSec && cur.t > st.prev.t) {
                 if (d) d.drainedPairs++;
                 const hc = tp.hasCrossed(st.prev, cur);
                 let recorded: number | null = null;
@@ -238,7 +246,7 @@ async function scanLine(
                 // Pair was rejected (gap, non-monotonic). Surface only
                 // those near a watch time so the trace stays focused.
                 const gap = cur.t - st.prev.t;
-                if (gap > MAX_GAP_SEC) d.pairTraces.push({ts: cur.t, line: `pair t=${fmtUtcHms(st.prev.t)}→${fmtUtcHms(cur.t)} skipped: gap ${gap}s > MAX_GAP_SEC`});
+                if (gap > maxGapSec) d.pairTraces.push({ts: cur.t, line: `pair t=${fmtUtcHms(st.prev.t)}→${fmtUtcHms(cur.t)} skipped: gap ${gap}s > ${maxGapSec}s`});
                 else if (gap <= 0) d.pairTraces.push({ts: cur.t, line: `pair t=${fmtUtcHms(st.prev.t)}→${fmtUtcHms(cur.t)} skipped: non-monotonic`});
             }
             st.prev = cur;
@@ -249,12 +257,12 @@ async function scanLine(
         const f = msg.f;
         if (excludeFlarmids.has(f)) continue;
         // The packet itself records the latency at write time as `d` (now − fix
-        // time). A packet declaring d > REORDER_WINDOW_SEC is by definition
+        // time). A packet declaring d > reorderWindowSec is by definition
         // older than our reorder buffer can absorb when its real-time peers
         // have already passed through — drop it before it enters the buffer.
         // This is more reliable than the file-order-based "predates prev"
         // check because some late packets sneak in before prev advances.
-        if (typeof msg.d === 'number' && msg.d > REORDER_WINDOW_SEC) {
+        if (typeof msg.d === 'number' && msg.d > reorderWindowSec) {
             staleDropped++;
             const d = dbgFor(f);
             if (d) d.stale++;
@@ -289,7 +297,7 @@ async function scanLine(
             continue;
         }
         // Falls outside the reorder window — too late to be useful.
-        if (pos.t < st.latestSeen - REORDER_WINDOW_SEC) {
+        if (pos.t < st.latestSeen - reorderWindowSec) {
             lateDropped++;
             if (d) d.late++;
             continue;
@@ -311,12 +319,12 @@ async function scanLine(
 
         if (pos.t > st.latestSeen) st.latestSeen = pos.t;
 
-        // Drain anything that is now older than latestSeen − REORDER_WINDOW_SEC,
+        // Drain anything that is now older than latestSeen − reorderWindowSec,
         // i.e. settled — no later out-of-order packet can shuffle in front.
-        drain(f, st, st.latestSeen - REORDER_WINDOW_SEC);
+        drain(f, st, st.latestSeen - reorderWindowSec);
     }
 
-    // End-of-scan flush: drain remaining buffer (last REORDER_WINDOW_SEC
+    // End-of-scan flush: drain remaining buffer (last reorderWindowSec
     // worth) for every non-skipped flarmid.
     let tracked = 0;
     const skipped = new Set<FlarmID>();
@@ -329,7 +337,7 @@ async function scanLine(
         drain(f, st, Infinity);
     }
 
-    log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${staleDropped} stale (self-reported d>${REORDER_WINDOW_SEC}s), ${lateDropped} late (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
+    log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`);
 
     // Emit the per-debug-flarmid trace as a tidy block per id per scan.
     if (debugFlarmids.size && debugWatchTimes.length) {
