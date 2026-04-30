@@ -445,11 +445,12 @@ export const Details = ({
         </span>
     ) : null;
 
-    if (score?.flightStatus == PositionStatus.Blocked) {
+    const trackingBlocked = score?.flightStatus == PositionStatus.Blocked;
+    if (trackingBlocked) {
         // Pilot is identified but Permit-Livetracking is declined in
-        // the DDB. Show a static "tracking declined" message — no
-        // positions ever arrive for them.
-        flightDetails = <div>{t('pilot.tracking_declined', {defaultValue: 'Tracking declined'})}</div>;
+        // the DDB or FlarmNet. Show an explanatory note — no positions
+        // ever arrive for them.
+        flightDetails = <div>{t('pilot.tracking_declined', {defaultValue: "Live tracking blocked — this glider's tracker is set to decline live tracking in the OGN DDB or FlarmNet"})}</div>;
     } else if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
         flightDetails = <></>;
     } else if (!score?.utcStart) {
@@ -580,7 +581,12 @@ export const Details = ({
         <div className="pilotdetails">
             {flag}
             <h6 style={{width: '100%'}}>
-                {pilot.compno}:<b>{pilot.name}</b>
+                {pilot.compno}
+                {trackingBlocked ? null : (
+                    <>
+                        :<b>{pilot.name}</b>
+                    </>
+                )}
                 <span style={{float: 'right', paddingRight: '0.5em'}}>
                     {pilot.gliderType.substring(0, 20)}
                     {pilot.handicap !== 100 ? ` (${pilot.handicap})` : ''}
@@ -687,6 +693,7 @@ const Pilot = memo(function Pilot({
     suffix,
     icon,
     selected,
+    blocked,
     vertical,
     position,
     onClick
@@ -698,20 +705,24 @@ const Pilot = memo(function Pilot({
     suffix?: string;
     icon: any;
     selected: boolean;
+    blocked?: boolean;
     vertical?: boolean;
     position?: number;
     onClick: any;
 }) {
+    // Pilots whose tracker is blocked (DDB / FlarmNet Permit-Livetracking
+    // declined) are surfaced without their name to respect the opt-out.
+    const linkTitle = blocked ? compno : compno + ': ' + pilot?.name;
     if (vertical) {
         const className = selected ? 'pilot-row pilothovercapture selected' : 'pilot-row pilothovercapture';
         return (
             <li className={className} key={compno}>
-                <a href="#" title={compno + ': ' + pilot?.name} onClick={() => onClick(compno)}>
+                <a href="#" title={linkTitle} onClick={() => onClick(compno)}>
                     <span className="pilot-row-left">
                         <span className="pilot-row-position">{position != null ? `${position}.` : ''}</span>
                         <span className="pilot-row-flag">{pilot?.country ? isoCountryCodeToFlagEmoji(pilot.country) : ''}</span>
                         <span className="pilot-row-compno">{compno}</span>
-                        <span className="pilot-row-name">{pilot?.name}</span>
+                        {blocked ? null : <span className="pilot-row-name">{pilot?.name}</span>}
                     </span>
                     <span className="pilot-row-right">
                         <span className="data">{(value || '-').toString()}</span>
@@ -724,11 +735,11 @@ const Pilot = memo(function Pilot({
     }
 
     const className = selected ? 'small-pic pilot pilot-strip pilothovercapture selected' : 'small-pic pilot pilot-strip pilothovercapture';
-    const displayName = shortenPairName(pilot?.name);
+    const displayName = blocked ? '' : shortenPairName(pilot?.name);
 
     return (
         <li className={className} key={compno}>
-            <a href="#" title={compno + ': ' + pilot?.name} onClick={() => onClick(compno)}>
+            <a href="#" title={linkTitle} onClick={() => onClick(compno)}>
                 <div className="pilot-strip-compno">
                     {pilot?.country ? <span className="pilot-strip-flag">{isoCountryCodeToFlagEmoji(pilot.country)}</span> : null}
                     <span className="pilot-strip-compno-text">{compno}</span>
