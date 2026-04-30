@@ -349,7 +349,9 @@ async function* scanFileAll(fullPath: string, since: number, until: number | und
                 }
                 if (typeof msg.t !== 'number') continue;
                 if (msg.t < since) continue;
-                if (until != null && msg.t > until) return;
+                // See scanFileForIds: file is arrival-ordered, not
+                // strictly t-ordered.
+                if (until != null && msg.t > until) continue;
                 yield msg;
             }
         }
@@ -430,7 +432,12 @@ async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): Asyn
                 }
                 if (typeof msg.t !== 'number') continue;
                 if (msg.t < q.since) continue;
-                if (q.until != null && msg.t > q.until) return;
+                // The log is roughly arrival-ordered, not t-ordered: a
+                // backfill replay or a receiver with clock skew can drop
+                // a packet with future-ish t in the middle of the file.
+                // `continue` (not `return`) past it so the rest of the
+                // file's legitimate records still get scanned.
+                if (q.until != null && msg.t > q.until) continue;
                 if (q.flarmIds && !q.flarmIds.has(msg.f)) continue;
                 yield msg;
             }
@@ -511,7 +518,10 @@ async function* scanFile(fullPath: string, q: LoadPointsQuery): AsyncGenerator<L
                 if (msg.f !== q.flarmId) continue;
                 if (typeof msg.t !== 'number') continue;
                 if (msg.t < q.since) continue;
-                if (q.until != null && msg.t > q.until) return;
+                // See note in scanFileForIds: file is arrival-ordered,
+                // not strictly t-ordered, so a single rogue future-t
+                // packet should not truncate the rest of the scan.
+                if (q.until != null && msg.t > q.until) continue;
                 yield msg;
             }
 
