@@ -8,7 +8,7 @@
 // Read-only: never writes to the DB.
 //
 
-import type {Compno, ClassName, Datecode, Epoch, Task} from '../lib/types';
+import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/types';
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch} from '../lib/scoring/shared/findtrackers';
@@ -30,6 +30,8 @@ const argv = yargs(hideBin(process.argv))
     .option('datecode', {type: 'string', describe: 'limit to one datecode'})
     .option('class', {type: 'string', describe: 'limit to one class'})
     .option('tolerance', {type: 'number', default: 5, describe: 'max |Δstart| and |Δfinish| in seconds'})
+    .option('debug-flarmid', {type: 'string', array: true, default: [], describe: 'trace one or more flarmids through the scan (repeatable)'})
+    .option('debug-compno', {type: 'string', array: true, default: [], describe: 'trace the assigned trackerid(s) of one or more compnos (repeatable)'})
     .check((a) => {
         if (!a.compid && !a.all) throw new Error('specify --compid <id> or --all');
         if (a.compid && a.all) throw new Error('--compid and --all are mutually exclusive');
@@ -66,6 +68,20 @@ interface Job {
 
 async function main() {
     const tolerance = Number(argv.tolerance) || 5;
+    const debugFlarmidsArg = new Set<string>();
+    for (const id of (argv['debug-flarmid'] as string[]) || []) {
+        for (const part of String(id).split(',')) {
+            const t = part.trim();
+            if (t) debugFlarmidsArg.add(t);
+        }
+    }
+    const debugCompnosArg = new Set<string>();
+    for (const c of (argv['debug-compno'] as string[]) || []) {
+        for (const part of String(c).split(',')) {
+            const t = part.trim();
+            if (t) debugCompnosArg.add(t.toUpperCase());
+        }
+    }
 
     const compids = await pickCompetitions();
     if (!compids.length) {
@@ -102,11 +118,24 @@ async function main() {
             continue;
         }
 
+        const debugFlarmids = new Set<FlarmID>(debugFlarmidsArg as Set<FlarmID>);
+        for (const r of results) {
+            if (!debugCompnosArg.has(String(r.compno).toUpperCase())) continue;
+            for (const id of r.trackerid.split(',')) {
+                const t = id.trim();
+                const lc = t.toLowerCase();
+                if (!t || lc === 'unknown' || lc === 'blocked') continue;
+                debugFlarmids.add(t as FlarmID);
+            }
+        }
+        if (debugFlarmids.size) console.log(`  debug flarmids for this scan: ${Array.from(debugFlarmids).join(', ')}`);
+
         const matches = await findTrackerMatches({
             task,
             results,
             toleranceSec: tolerance,
-            log: (m) => console.log(`  ${m}`)
+            log: (m) => console.log(`  ${m}`),
+            debugFlarmids: debugFlarmids.size ? debugFlarmids : undefined
         });
 
         printMatches(results, matches);

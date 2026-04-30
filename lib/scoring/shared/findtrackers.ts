@@ -59,6 +59,12 @@ export interface FindTrackersOptions {
     toleranceSec?: number;
     excludeFlarmids?: Set<FlarmID>;
     log?: (msg: string) => void;
+    /**
+     * If set, emit verbose per-packet / per-segment trace lines through
+     * `log()` for these flarmids — useful when "no crossings" is reported
+     * for a tracker that visibly crossed the line. Case-insensitive match.
+     */
+    debugFlarmids?: Set<FlarmID>;
 }
 
 type CrossingMap = Map<FlarmID, Epoch[]>;
@@ -68,6 +74,7 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     const tolerance = opts.toleranceSec ?? DEFAULT_TOLERANCE_SEC;
     const excludeFlarmids = opts.excludeFlarmids ?? new Set<FlarmID>();
     const log = opts.log ?? (() => {});
+    const debugFlarmids = normaliseFlarmIds(opts.debugFlarmids);
 
     if (!task.preparedLegs?.length) {
         throw new Error('findTrackerMatches: task.preparedLegs missing — call calculateTask first');
@@ -100,10 +107,10 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     }
 
     log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots`);
-    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log);
+    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids);
 
     log(`finish scan: window ${Math.round((maxFinish - minFinish) / 60 + (2 * slack) / 60)} min`);
-    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log);
+    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids);
 
     return matchCrossings(results, startScan, finishScan, tolerance);
 }
@@ -126,30 +133,86 @@ async function scanLine(
     until: number,
     kind: 'start' | 'finish',
     excludeFlarmids: Set<FlarmID>,
-    log: (msg: string) => void
+    log: (msg: string) => void,
+    debugFlarmids: Set<FlarmID>
 ): Promise<ScanResult> {
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
     const state = new Map<FlarmID, FlarmState>();
     const crossings: CrossingMap = new Map();
     let lateDropped = 0;
 
+    // Per-debug-flarmid stats and trace storage. We aggregate inline and
+    // only print at end-of-scan to keep the trace one tidy block per id.
+    interface DebugStats {
+        firstArrivalT?: number;
+        firstArrivalDistKm?: number;
+        skipped: boolean;
+        accepted: number;
+        late: number;
+        duplicates: number;
+        drainedPairs: number;
+        crossingsRecorded: number;
+        // Notable pair traces (capped to keep output readable)
+        pairTraces: string[];
+    }
+    const dbg = new Map<FlarmID, DebugStats>();
+    const isDebug = (f: FlarmID) => debugFlarmids.has(f) || debugFlarmids.has(f.toLowerCase() as FlarmID) || debugFlarmids.has(f.toUpperCase() as FlarmID);
+    const dbgFor = (f: FlarmID): DebugStats | undefined => {
+        if (!isDebug(f)) return undefined;
+        let d = dbg.get(f);
+        if (!d) {
+            d = {skipped: false, accepted: 0, late: 0, duplicates: 0, drainedPairs: 0, crossingsRecorded: 0, pairTraces: []};
+            dbg.set(f, d);
+        }
+        return d;
+    };
+    const PAIR_TRACE_CAP = 12;
+
     // Drain stable points (t ≤ until) from a flarmid's buffer, running
     // hasCrossed on each consecutive pair as we go. Same crossing rules
     // as taskpositiongenerator.ts: strict for start (line 245), first
     // crossing wins for finish (line 395).
     const drain = (f: FlarmID, st: FlarmState, threshold: number) => {
+        const d = dbgFor(f);
         while (st.buf.length && st.buf[0].t <= threshold) {
             const cur = st.buf.shift()!;
             if (st.prev && cur.t - st.prev.t <= MAX_GAP_SEC && cur.t > st.prev.t) {
+                if (d) d.drainedPairs++;
                 const hc = tp.hasCrossed(st.prev, cur);
+                let recorded: number | null = null;
                 if (kind === 'start') {
                     if (hc.everInside && !hc.finalInside && hc.crossings.length) {
-                        pushCrossing(crossings, f, hc.crossings[hc.crossings.length - 1].at.t);
+                        recorded = hc.crossings[hc.crossings.length - 1].at.t;
+                        pushCrossing(crossings, f, recorded as Epoch);
+                        if (d) d.crossingsRecorded++;
                     }
                 } else {
                     if (hc.crossings.length) {
-                        pushCrossing(crossings, f, hc.crossings[0].at.t);
+                        recorded = hc.crossings[0].at.t;
+                        pushCrossing(crossings, f, recorded as Epoch);
+                        if (d) d.crossingsRecorded++;
                     }
+                }
+                if (d && (recorded !== null || hc.everInside || hc.crossings.length || (hc.distanceKm !== undefined && hc.distanceKm < 1))) {
+                    if (d.pairTraces.length < PAIR_TRACE_CAP) {
+                        d.pairTraces.push(
+                            `pair t=${st.prev.t}→${cur.t} (${cur.t - st.prev.t}s)  ` +
+                                `ev=${hc.everInside} fi=${hc.finalInside} xs=${hc.crossings.length}  ` +
+                                `d=${hc.distanceKm?.toFixed(3) ?? '-'}km` +
+                                (hc.nearMissBeyondM !== undefined ? `  nmB=${hc.nearMissBeyondM.toFixed(0)}m` : '') +
+                                (recorded !== null ? `  → recorded ${recorded}` : '')
+                        );
+                    } else if (d.pairTraces.length === PAIR_TRACE_CAP) {
+                        d.pairTraces.push(`(further pair traces suppressed)`);
+                    }
+                }
+            } else if (d && st.prev) {
+                // Pair was rejected — log the gap so the user can spot
+                // missing-coverage gaps that prevent crossings.
+                if (d.pairTraces.length < PAIR_TRACE_CAP) {
+                    const gap = cur.t - st.prev.t;
+                    if (gap > MAX_GAP_SEC) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: gap ${gap}s > MAX_GAP_SEC`);
+                    else if (gap <= 0) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: non-monotonic`);
                 }
             }
             st.prev = cur;
@@ -164,8 +227,14 @@ async function scanLine(
         if (!st) {
             // First sighting in this scan: geographic gate.
             const dist = PreparedTurnpoint.geodesicDistance(center, pos);
+            const d = dbgFor(f);
+            if (d) {
+                d.firstArrivalT = pos.t;
+                d.firstArrivalDistKm = dist;
+            }
             if (dist > MAX_FLARM_DIST_KM) {
                 state.set(f, {buf: [], latestSeen: pos.t, skipped: true});
+                if (d) d.skipped = true;
                 continue;
             }
             st = {buf: [], latestSeen: pos.t, skipped: false};
@@ -173,23 +242,34 @@ async function scanLine(
         }
         if (st.skipped) continue;
 
+        const d = dbgFor(f);
+
         // Predates everything we've already drained → can't reinsert.
         if (st.prev && pos.t <= st.prev.t) {
             lateDropped++;
+            if (d) d.late++;
             continue;
         }
         // Falls outside the reorder window — too late to be useful.
         if (pos.t < st.latestSeen - REORDER_WINDOW_SEC) {
             lateDropped++;
+            if (d) d.late++;
             continue;
         }
 
         // Insertion-sort into the (small) buffer; drop exact-time duplicates.
         let i = st.buf.length;
         while (i > 0 && st.buf[i - 1].t > pos.t) i--;
-        if (i < st.buf.length && st.buf[i].t === pos.t) continue;
-        if (i > 0 && st.buf[i - 1].t === pos.t) continue;
+        if (i < st.buf.length && st.buf[i].t === pos.t) {
+            if (d) d.duplicates++;
+            continue;
+        }
+        if (i > 0 && st.buf[i - 1].t === pos.t) {
+            if (d) d.duplicates++;
+            continue;
+        }
         st.buf.splice(i, 0, pos);
+        if (d) d.accepted++;
 
         if (pos.t > st.latestSeen) st.latestSeen = pos.t;
 
@@ -212,7 +292,37 @@ async function scanLine(
     }
 
     log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${lateDropped} late packets dropped (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
+
+    // Emit the per-debug-flarmid trace as a tidy block per id per scan.
+    for (const f of debugFlarmids) {
+        // Try the id we were asked about, then any case variant present.
+        let key = f;
+        let d = dbg.get(key);
+        if (!d) {
+            for (const [k, v] of dbg) if (k.toUpperCase() === f.toUpperCase()) { key = k; d = v; break; }
+        }
+        log(`  [debug ${kind} ${f}] ` + (d ? formatDebugStats(d) : 'never seen in this window'));
+        if (d?.pairTraces.length) for (const pt of d.pairTraces) log(`    [debug ${kind} ${f}] ${pt}`);
+        const recorded = crossings.get(key);
+        if (recorded?.length) log(`    [debug ${kind} ${f}] recorded crossings: ${recorded.join(', ')}`);
+    }
     return {crossings, skipped};
+}
+
+function formatDebugStats(d: {firstArrivalT?: number; firstArrivalDistKm?: number; skipped: boolean; accepted: number; late: number; duplicates: number; drainedPairs: number; crossingsRecorded: number}): string {
+    const arr = d.firstArrivalT !== undefined ? `first arrival t=${d.firstArrivalT} dist=${d.firstArrivalDistKm?.toFixed(1)}km` : 'no arrivals';
+    const skip = d.skipped ? ` SKIPPED (>${MAX_FLARM_DIST_KM}km)` : '';
+    return `${arr}${skip}; accepted=${d.accepted}, late=${d.late}, dup=${d.duplicates}, pairs=${d.drainedPairs}, recorded=${d.crossingsRecorded}`;
+}
+
+function normaliseFlarmIds(s: Set<FlarmID> | undefined): Set<FlarmID> {
+    if (!s) return new Set();
+    const out = new Set<FlarmID>();
+    for (const id of s) {
+        const t = id.trim();
+        if (t) out.add(t as FlarmID);
+    }
+    return out;
 }
 
 function pushCrossing(map: CrossingMap, f: FlarmID, t: Epoch): void {
