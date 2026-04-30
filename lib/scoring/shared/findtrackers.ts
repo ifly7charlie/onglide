@@ -17,6 +17,7 @@ import {loadPointsForIds} from '../../webworkers/pointlog';
 
 const MAX_FLARM_DIST_KM = 50; // first sighting >50 km from the relevant TP → skip
 const MAX_GAP_SEC = 60; // don't run hasCrossed across a coverage gap
+const REORDER_WINDOW_SEC = 20; // per-flarmid sliding reorder buffer (relay-path jitter)
 const DEFAULT_TOLERANCE_SEC = 5;
 
 export interface OfficialResult {
@@ -100,6 +101,13 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     return matchCrossings(results, startCrossings, finishCrossings, tolerance);
 }
 
+interface FlarmState {
+    prev?: BasePositionMessage; // last drained (processed) point — used for hasCrossed
+    buf: BasePositionMessage[]; // pending points, sorted by t ascending
+    latestSeen: number; // max t observed for this flarmid (across both arrival and reorder)
+    skipped: boolean; // failed the geographic gate on first arrival
+}
+
 async function scanLine(
     tp: PreparedTurnpoint, //
     since: number,
@@ -109,48 +117,89 @@ async function scanLine(
     log: (msg: string) => void
 ): Promise<CrossingMap> {
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
-    const prevByFlarm = new Map<FlarmID, BasePositionMessage>();
-    const skip = new Set<FlarmID>();
+    const state = new Map<FlarmID, FlarmState>();
     const crossings: CrossingMap = new Map();
+    let lateDropped = 0;
+
+    // Drain stable points (t ≤ until) from a flarmid's buffer, running
+    // hasCrossed on each consecutive pair as we go. Same crossing rules
+    // as taskpositiongenerator.ts: strict for start (line 245), first
+    // crossing wins for finish (line 395).
+    const drain = (f: FlarmID, st: FlarmState, threshold: number) => {
+        while (st.buf.length && st.buf[0].t <= threshold) {
+            const cur = st.buf.shift()!;
+            if (st.prev && cur.t - st.prev.t <= MAX_GAP_SEC && cur.t > st.prev.t) {
+                const hc = tp.hasCrossed(st.prev, cur);
+                if (kind === 'start') {
+                    if (hc.everInside && !hc.finalInside && hc.crossings.length) {
+                        pushCrossing(crossings, f, hc.crossings[hc.crossings.length - 1].at.t);
+                    }
+                } else {
+                    if (hc.crossings.length) {
+                        pushCrossing(crossings, f, hc.crossings[0].at.t);
+                    }
+                }
+            }
+            st.prev = cur;
+        }
+    };
 
     for await (const msg of loadPointsForIds({since, until})) {
         const f = msg.f;
-        if (excludeFlarmids.has(f) || skip.has(f)) continue;
+        if (excludeFlarmids.has(f)) continue;
         const pos: BasePositionMessage = {lat: msg.lat, lng: msg.lng, a: msg.a, t: msg.t};
-        const prev = prevByFlarm.get(f);
-        if (prev === undefined) {
-            // First sighting of this flarmid in this scan: geographic gate.
+        let st = state.get(f);
+        if (!st) {
+            // First sighting in this scan: geographic gate.
             const dist = PreparedTurnpoint.geodesicDistance(center, pos);
             if (dist > MAX_FLARM_DIST_KM) {
-                skip.add(f);
+                state.set(f, {buf: [], latestSeen: pos.t, skipped: true});
                 continue;
             }
-            prevByFlarm.set(f, pos);
+            st = {buf: [], latestSeen: pos.t, skipped: false};
+            state.set(f, st);
+        }
+        if (st.skipped) continue;
+
+        // Predates everything we've already drained → can't reinsert.
+        if (st.prev && pos.t <= st.prev.t) {
+            lateDropped++;
             continue;
         }
-        // APRS log isn't strictly ordered per-flarmid (relay paths, dedupe
-        // happens further upstream). Drop anything not strictly newer than
-        // prev — running hasCrossed on a backwards segment would invent
-        // crossings and corrupt prev.
-        if (pos.t <= prev.t) continue;
-        if (pos.t - prev.t <= MAX_GAP_SEC) {
-            const hc = tp.hasCrossed(prev, pos);
-            if (kind === 'start') {
-                // Strict start crossing — same rule as taskpositiongenerator.ts:245
-                if (hc.everInside && !hc.finalInside && hc.crossings.length) {
-                    pushCrossing(crossings, f, hc.crossings[hc.crossings.length - 1].at.t);
-                }
-            } else {
-                // Finish — sector-entry / line-cross, first crossing wins
-                if (hc.crossings.length) {
-                    pushCrossing(crossings, f, hc.crossings[0].at.t);
-                }
-            }
+        // Falls outside the reorder window — too late to be useful.
+        if (pos.t < st.latestSeen - REORDER_WINDOW_SEC) {
+            lateDropped++;
+            continue;
         }
-        prevByFlarm.set(f, pos);
+
+        // Insertion-sort into the (small) buffer; drop exact-time duplicates.
+        let i = st.buf.length;
+        while (i > 0 && st.buf[i - 1].t > pos.t) i--;
+        if (i < st.buf.length && st.buf[i].t === pos.t) continue;
+        if (i > 0 && st.buf[i - 1].t === pos.t) continue;
+        st.buf.splice(i, 0, pos);
+
+        if (pos.t > st.latestSeen) st.latestSeen = pos.t;
+
+        // Drain anything that is now older than latestSeen − REORDER_WINDOW_SEC,
+        // i.e. settled — no later out-of-order packet can shuffle in front.
+        drain(f, st, st.latestSeen - REORDER_WINDOW_SEC);
     }
 
-    log(`  → ${prevByFlarm.size} tracked, ${skip.size} skipped (>${MAX_FLARM_DIST_KM} km), ${crossings.size} with ${kind} crossings`);
+    // End-of-scan flush: drain remaining buffer (last REORDER_WINDOW_SEC
+    // worth) for every non-skipped flarmid.
+    let tracked = 0,
+        skippedCount = 0;
+    for (const [f, st] of state) {
+        if (st.skipped) {
+            skippedCount++;
+            continue;
+        }
+        tracked++;
+        drain(f, st, Infinity);
+    }
+
+    log(`  → ${tracked} tracked, ${skippedCount} skipped (>${MAX_FLARM_DIST_KM} km), ${lateDropped} late packets dropped (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
     return crossings;
 }
 
