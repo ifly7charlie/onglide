@@ -106,11 +106,18 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
         log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on start and finish) — matches will be ambiguous: ${labels}`);
     }
 
+    // Watch times for the debug trace: pilots' official start (resp. finish)
+    // are the moments we most want to see what hasCrossed is reporting. Sort
+    // for tidier output and to enable fast bisect-style lookups later if it
+    // ever becomes hot.
+    const startWatch = results.map((r) => r.startUtc).sort((a, b) => a - b);
+    const finishWatch = results.map((r) => r.finishUtc).sort((a, b) => a - b);
+
     log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots`);
-    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids);
+    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch);
 
     log(`finish scan: window ${Math.round((maxFinish - minFinish) / 60 + (2 * slack) / 60)} min`);
-    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids);
+    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids, finishWatch);
 
     return matchCrossings(results, startScan, finishScan, tolerance);
 }
@@ -127,6 +134,8 @@ interface ScanResult {
     skipped: Set<FlarmID>; // failed the geographic gate
 }
 
+const DEBUG_WATCH_WINDOW_SEC = 60;
+
 async function scanLine(
     tp: PreparedTurnpoint, //
     since: number,
@@ -134,7 +143,8 @@ async function scanLine(
     kind: 'start' | 'finish',
     excludeFlarmids: Set<FlarmID>,
     log: (msg: string) => void,
-    debugFlarmids: Set<FlarmID>
+    debugFlarmids: Set<FlarmID>,
+    debugWatchTimes: number[]
 ): Promise<ScanResult> {
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
     const state = new Map<FlarmID, FlarmState>();
@@ -166,7 +176,16 @@ async function scanLine(
         }
         return d;
     };
-    const PAIR_TRACE_CAP = 12;
+    // A pair is "in a watch window" when at least one official time falls
+    // inside [prev.t - W, cur.t + W]. With watch times sorted we could
+    // bisect, but the list is small (one entry per pilot) so the linear
+    // probe is fine and keeps the code obvious.
+    const inWatchWindow = (prevT: number, curT: number): boolean => {
+        const lo = prevT - DEBUG_WATCH_WINDOW_SEC;
+        const hi = curT + DEBUG_WATCH_WINDOW_SEC;
+        for (const w of debugWatchTimes) if (w >= lo && w <= hi) return true;
+        return false;
+    };
 
     // Drain stable points (t ≤ until) from a flarmid's buffer, running
     // hasCrossed on each consecutive pair as we go. Same crossing rules
@@ -193,27 +212,21 @@ async function scanLine(
                         if (d) d.crossingsRecorded++;
                     }
                 }
-                if (d && (recorded !== null || hc.everInside || hc.crossings.length || (hc.distanceKm !== undefined && hc.distanceKm < 1))) {
-                    if (d.pairTraces.length < PAIR_TRACE_CAP) {
-                        d.pairTraces.push(
-                            `pair t=${st.prev.t}→${cur.t} (${cur.t - st.prev.t}s)  ` +
-                                `ev=${hc.everInside} fi=${hc.finalInside} xs=${hc.crossings.length}  ` +
-                                `d=${hc.distanceKm?.toFixed(3) ?? '-'}km` +
-                                (hc.nearMissBeyondM !== undefined ? `  nmB=${hc.nearMissBeyondM.toFixed(0)}m` : '') +
-                                (recorded !== null ? `  → recorded ${recorded}` : '')
-                        );
-                    } else if (d.pairTraces.length === PAIR_TRACE_CAP) {
-                        d.pairTraces.push(`(further pair traces suppressed)`);
-                    }
+                if (d && (recorded !== null || inWatchWindow(st.prev.t, cur.t))) {
+                    d.pairTraces.push(
+                        `pair t=${st.prev.t}→${cur.t} (${cur.t - st.prev.t}s)  ` +
+                            `ev=${hc.everInside} fi=${hc.finalInside} xs=${hc.crossings.length}  ` +
+                            `d=${hc.distanceKm?.toFixed(3) ?? '-'}km` +
+                            (hc.nearMissBeyondM !== undefined ? `  nmB=${hc.nearMissBeyondM.toFixed(0)}m` : '') +
+                            (recorded !== null ? `  → recorded ${recorded}` : '')
+                    );
                 }
-            } else if (d && st.prev) {
-                // Pair was rejected — log the gap so the user can spot
-                // missing-coverage gaps that prevent crossings.
-                if (d.pairTraces.length < PAIR_TRACE_CAP) {
-                    const gap = cur.t - st.prev.t;
-                    if (gap > MAX_GAP_SEC) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: gap ${gap}s > MAX_GAP_SEC`);
-                    else if (gap <= 0) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: non-monotonic`);
-                }
+            } else if (d && st.prev && inWatchWindow(st.prev.t, cur.t)) {
+                // Pair was rejected (gap, non-monotonic). Surface only
+                // those near a watch time so the trace stays focused.
+                const gap = cur.t - st.prev.t;
+                if (gap > MAX_GAP_SEC) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: gap ${gap}s > MAX_GAP_SEC`);
+                else if (gap <= 0) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: non-monotonic`);
             }
             st.prev = cur;
         }
@@ -294,6 +307,11 @@ async function scanLine(
     log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${lateDropped} late packets dropped (>${REORDER_WINDOW_SEC}s out of order), ${crossings.size} with ${kind} crossings`);
 
     // Emit the per-debug-flarmid trace as a tidy block per id per scan.
+    if (debugFlarmids.size && debugWatchTimes.length) {
+        const head = debugWatchTimes.slice(0, 6).join(', ');
+        const more = debugWatchTimes.length > 6 ? ` … (+${debugWatchTimes.length - 6} more)` : '';
+        log(`  [debug ${kind}] watch times (±${DEBUG_WATCH_WINDOW_SEC}s): ${head}${more}`);
+    }
     for (const f of debugFlarmids) {
         // Try the id we were asked about, then any case variant present.
         let key = f;
