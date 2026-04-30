@@ -343,14 +343,14 @@ async function scanLine(
 
             const merged: Array<{ts: number; line: string; isMarker: boolean}> = [];
             for (const pt of traces) merged.push({ts: pt.ts, line: pt.line, isMarker: false});
-            for (const w of watches) merged.push({ts: w.t, line: `---- ${fmtUtcHms(w.t)} official ${kind}: ${w.label} ----`, isMarker: true});
+            for (const w of watches) merged.push({ts: w.t, line: `---- ${fmtUtcHms(w.t)} (${w.t}) official ${kind}: ${w.label} ----`, isMarker: true});
             // Sort by ts; on ties put the marker before the pair so the
             // marker appears immediately above the relevant pair.
             merged.sort((a, b) => a.ts - b.ts || (a.isMarker === b.isMarker ? 0 : a.isMarker ? -1 : 1));
             for (const e of merged) log(`    [debug ${kind} ${f}] ${e.line}`);
         }
         const recorded = crossings.get(key);
-        if (recorded?.length) log(`    [debug ${kind} ${f}] recorded crossings: ${recorded.map((t) => `${fmtUtcHms(t)}`).join(', ')}`);
+        if (recorded?.length) log(`    [debug ${kind} ${f}] recorded crossings: ${recorded.map((t) => `${fmtUtcHms(t)} (${t})`).join(', ')}`);
     }
     return {crossings, skipped};
 }
