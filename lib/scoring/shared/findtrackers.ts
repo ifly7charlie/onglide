@@ -106,12 +106,11 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
         log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on start and finish) — matches will be ambiguous: ${labels}`);
     }
 
-    // Watch times for the debug trace: pilots' official start (resp. finish)
-    // are the moments we most want to see what hasCrossed is reporting. Sort
-    // for tidier output and to enable fast bisect-style lookups later if it
-    // ever becomes hot.
-    const startWatch = results.map((r) => r.startUtc).sort((a, b) => a - b);
-    const finishWatch = results.map((r) => r.finishUtc).sort((a, b) => a - b);
+    // Watch times for the debug trace: each pilot's official start (resp.
+    // finish), labelled so the trace marker tells you which pilot.
+    const labelOf = (r: OfficialResult) => `${r.compno}${r.name ? ' ' + r.name : ''}`;
+    const startWatch: WatchTime[] = results.map((r) => ({t: r.startUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
+    const finishWatch: WatchTime[] = results.map((r) => ({t: r.finishUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
 
     log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots`);
     const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch);
@@ -134,6 +133,15 @@ interface ScanResult {
     skipped: Set<FlarmID>; // failed the geographic gate
 }
 
+interface WatchTime {
+    t: number;
+    label: string;
+}
+
+function fmtUtcHms(ts: number): string {
+    return new Date(ts * 1000).toISOString().slice(11, 19);
+}
+
 const DEBUG_WATCH_WINDOW_SEC = 60;
 
 async function scanLine(
@@ -144,7 +152,7 @@ async function scanLine(
     excludeFlarmids: Set<FlarmID>,
     log: (msg: string) => void,
     debugFlarmids: Set<FlarmID>,
-    debugWatchTimes: number[]
+    debugWatchTimes: WatchTime[]
 ): Promise<ScanResult> {
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
     const state = new Map<FlarmID, FlarmState>();
@@ -162,8 +170,9 @@ async function scanLine(
         duplicates: number;
         drainedPairs: number;
         crossingsRecorded: number;
-        // Notable pair traces (capped to keep output readable)
-        pairTraces: string[];
+        // Notable pair traces, each tagged with `cur.t` so we can interleave
+        // the official-time markers at the right place when emitting.
+        pairTraces: {ts: number; line: string}[];
     }
     const dbg = new Map<FlarmID, DebugStats>();
     const isDebug = (f: FlarmID) => debugFlarmids.has(f) || debugFlarmids.has(f.toLowerCase() as FlarmID) || debugFlarmids.has(f.toUpperCase() as FlarmID);
@@ -183,7 +192,7 @@ async function scanLine(
     const inWatchWindow = (prevT: number, curT: number): boolean => {
         const lo = prevT - DEBUG_WATCH_WINDOW_SEC;
         const hi = curT + DEBUG_WATCH_WINDOW_SEC;
-        for (const w of debugWatchTimes) if (w >= lo && w <= hi) return true;
+        for (const w of debugWatchTimes) if (w.t >= lo && w.t <= hi) return true;
         return false;
     };
 
@@ -213,20 +222,22 @@ async function scanLine(
                     }
                 }
                 if (d && (recorded !== null || inWatchWindow(st.prev.t, cur.t))) {
-                    d.pairTraces.push(
-                        `pair t=${st.prev.t}→${cur.t} (${cur.t - st.prev.t}s)  ` +
+                    d.pairTraces.push({
+                        ts: cur.t,
+                        line:
+                            `pair t=${fmtUtcHms(st.prev.t)}→${fmtUtcHms(cur.t)} (${cur.t - st.prev.t}s)  ` +
                             `ev=${hc.everInside} fi=${hc.finalInside} xs=${hc.crossings.length}  ` +
                             `d=${hc.distanceKm?.toFixed(3) ?? '-'}km` +
                             (hc.nearMissBeyondM !== undefined ? `  nmB=${hc.nearMissBeyondM.toFixed(0)}m` : '') +
-                            (recorded !== null ? `  → recorded ${recorded}` : '')
-                    );
+                            (recorded !== null ? `  → recorded ${fmtUtcHms(recorded)}` : '')
+                    });
                 }
             } else if (d && st.prev && inWatchWindow(st.prev.t, cur.t)) {
                 // Pair was rejected (gap, non-monotonic). Surface only
                 // those near a watch time so the trace stays focused.
                 const gap = cur.t - st.prev.t;
-                if (gap > MAX_GAP_SEC) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: gap ${gap}s > MAX_GAP_SEC`);
-                else if (gap <= 0) d.pairTraces.push(`pair t=${st.prev.t}→${cur.t} skipped: non-monotonic`);
+                if (gap > MAX_GAP_SEC) d.pairTraces.push({ts: cur.t, line: `pair t=${fmtUtcHms(st.prev.t)}→${fmtUtcHms(cur.t)} skipped: gap ${gap}s > MAX_GAP_SEC`});
+                else if (gap <= 0) d.pairTraces.push({ts: cur.t, line: `pair t=${fmtUtcHms(st.prev.t)}→${fmtUtcHms(cur.t)} skipped: non-monotonic`});
             }
             st.prev = cur;
         }
@@ -308,9 +319,10 @@ async function scanLine(
 
     // Emit the per-debug-flarmid trace as a tidy block per id per scan.
     if (debugFlarmids.size && debugWatchTimes.length) {
-        const head = debugWatchTimes.slice(0, 6).join(', ');
+        const fmt = (w: WatchTime) => `${w.label} ${fmtUtcHms(w.t)}`;
+        const head = debugWatchTimes.slice(0, 6).map(fmt).join(', ');
         const more = debugWatchTimes.length > 6 ? ` … (+${debugWatchTimes.length - 6} more)` : '';
-        log(`  [debug ${kind}] watch times (±${DEBUG_WATCH_WINDOW_SEC}s): ${head}${more}`);
+        log(`  [debug ${kind}] ${debugWatchTimes.length} watch times (±${DEBUG_WATCH_WINDOW_SEC}s): ${head}${more}`);
     }
     for (const f of debugFlarmids) {
         // Try the id we were asked about, then any case variant present.
@@ -320,9 +332,25 @@ async function scanLine(
             for (const [k, v] of dbg) if (k.toUpperCase() === f.toUpperCase()) { key = k; d = v; break; }
         }
         log(`  [debug ${kind} ${f}] ` + (d ? formatDebugStats(d) : 'never seen in this window'));
-        if (d?.pairTraces.length) for (const pt of d.pairTraces) log(`    [debug ${kind} ${f}] ${pt}`);
+        if (d?.pairTraces.length) {
+            // Interleave watch-time markers between pair traces. Only show
+            // markers that fall within ±W of an actual emitted pair, so the
+            // marker is always anchored to nearby context.
+            const traces = d.pairTraces;
+            const traceMin = traces[0].ts - DEBUG_WATCH_WINDOW_SEC;
+            const traceMax = traces[traces.length - 1].ts + DEBUG_WATCH_WINDOW_SEC;
+            const watches = debugWatchTimes.filter((w) => w.t >= traceMin && w.t <= traceMax);
+
+            const merged: Array<{ts: number; line: string; isMarker: boolean}> = [];
+            for (const pt of traces) merged.push({ts: pt.ts, line: pt.line, isMarker: false});
+            for (const w of watches) merged.push({ts: w.t, line: `---- ${fmtUtcHms(w.t)} official ${kind}: ${w.label} ----`, isMarker: true});
+            // Sort by ts; on ties put the marker before the pair so the
+            // marker appears immediately above the relevant pair.
+            merged.sort((a, b) => a.ts - b.ts || (a.isMarker === b.isMarker ? 0 : a.isMarker ? -1 : 1));
+            for (const e of merged) log(`    [debug ${kind} ${f}] ${e.line}`);
+        }
         const recorded = crossings.get(key);
-        if (recorded?.length) log(`    [debug ${kind} ${f}] recorded crossings: ${recorded.join(', ')}`);
+        if (recorded?.length) log(`    [debug ${kind} ${f}] recorded crossings: ${recorded.map((t) => `${fmtUtcHms(t)}`).join(', ')}`);
     }
     return {crossings, skipped};
 }
