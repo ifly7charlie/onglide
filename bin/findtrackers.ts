@@ -136,6 +136,8 @@ async function main() {
             task,
             results,
             toleranceSec: tolerance,
+            maxGapSec: argv['max-gap'] != null ? Number(argv['max-gap']) : undefined,
+            reorderWindowSec: argv['reorder-window'] != null ? Number(argv['reorder-window']) : undefined,
             log: (m) => console.log(`  ${m}`),
             debugFlarmids: debugFlarmids.size ? debugFlarmids : undefined
         });
