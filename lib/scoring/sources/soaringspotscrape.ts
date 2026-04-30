@@ -30,6 +30,8 @@ import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsRes
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
 import {findApproximateContestLocation} from '../shared/contestLocation';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctHandicap, type PilotRecord} from '../shared/pilots';
+import {enqueueFaiLookup} from '../shared/fai';
+import {FAI_SYNTHETIC_FLOOR} from '../shared/faiApi';
 import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
 import {upsertTaskAndLegs} from '../shared/tasks';
 
@@ -255,7 +257,16 @@ async function processDayResults(
         const flagExtractor = row.Contestant.match(flagRe);
         if (flagExtractor && dayNumber == 'Task 1') {
             const flag = flagExtractor[1].toUpperCase();
-            db.query(escape`
+            // Pull the current FAI/country before we update so we can
+            // detect the "we now know the country" transition that
+            // unlocks a previously-ambiguous FAI lookup.
+            const before = await db.query(escape`
+                SELECT firstname, country, fai
+                FROM pilots
+                WHERE compno = ${pilot}
+                  AND class = ${classid}
+            `);
+            await db.query(escape`
                 UPDATE pilots
                 SET
                     country = ${flag}
@@ -263,6 +274,23 @@ async function processDayResults(
                     compno = ${pilot}
                     AND class = ${classid}
             `);
+            // If the first-pass FAI search couldn't disambiguate (we
+            // stored a synthetic id) and the flag we just learned is
+            // new information, re-run the lookup — country usually
+            // narrows the ranking-list candidates down to a unique
+            // match.
+            const row0 = before?.[0];
+            if (row0 && row0.fai >= FAI_SYNTHETIC_FLOOR && row0.country !== flag && row0.firstname) {
+                enqueueFaiLookup({
+                    db,
+                    log,
+                    fullName: row0.firstname,
+                    country: flag,
+                    classid,
+                    className,
+                    compno: pilot as CompNo
+                });
+            }
         }
 
         function cDate(d: string | undefined): Date | undefined {
