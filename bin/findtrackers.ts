@@ -8,7 +8,7 @@
 // Read-only: never writes to the DB.
 //
 
-import type {Compno, ClassName, Datecode, Epoch, Task, FlarmID} from '../lib/types';
+import type {Compno, ClassName, Datecode, Epoch, Task} from '../lib/types';
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch} from '../lib/scoring/shared/findtrackers';
@@ -24,13 +24,12 @@ dotenv.config({path: '.env.local'});
 
 const argv = yargs(hideBin(process.argv))
     .scriptName('findtrackers')
-    .usage('$0 [--compid <id> | --all] [--datecode <dc>] [--class <cls>] [--tolerance <sec>] [--include-known]')
+    .usage('$0 [--compid <id> | --all] [--datecode <dc>] [--class <cls>] [--tolerance <sec>]')
     .option('compid', {type: 'string', describe: 'single competition id'})
     .option('all', {type: 'boolean', describe: 'every active competition (start ≤ today ≤ end)'})
     .option('datecode', {type: 'string', describe: 'limit to one datecode'})
     .option('class', {type: 'string', describe: 'limit to one class'})
     .option('tolerance', {type: 'number', default: 5, describe: 'max |Δstart| and |Δfinish| in seconds'})
-    .option('include-known', {type: 'boolean', default: false, describe: 'also match pilots whose tracker.trackerid is already set (sanity check)'})
     .check((a) => {
         if (!a.compid && !a.all) throw new Error('specify --compid <id> or --all');
         if (a.compid && a.all) throw new Error('--compid and --all are mutually exclusive');
@@ -67,7 +66,6 @@ interface Job {
 
 async function main() {
     const tolerance = Number(argv.tolerance) || 5;
-    const includeKnown = !!argv['include-known'];
 
     const compids = await pickCompetitions();
     if (!compids.length) {
@@ -104,19 +102,16 @@ async function main() {
             continue;
         }
 
-        const excludeFlarmids = includeKnown ? new Set<FlarmID>() : await loadKnownTrackers(className);
-
         const matches = await findTrackerMatches({
             task,
             results,
             toleranceSec: tolerance,
-            excludeFlarmids,
             log: (m) => console.log(`  ${m}`)
         });
 
         printMatches(results, matches);
 
-        const matchedCompnos = new Set(matches.filter((m) => !m.ambiguous).map((m) => m.compno));
+        const matchedCompnos = new Set(matches.filter((m) => m.withinTolerance && !m.ambiguous).map((m) => m.compno));
         const ambiguousCompnos = new Set(matches.filter((m) => m.ambiguous).map((m) => m.compno));
         totalPilots += results.length;
         totalMatched += matchedCompnos.size;
@@ -245,37 +240,42 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
     }));
 }
 
-async function loadKnownTrackers(className: ClassName): Promise<Set<FlarmID>> {
-    const rows = await mysql.query<{trackerid: string}[]>(escape`
-        SELECT trackerid FROM tracker
-         WHERE class = ${className}
-           AND trackerid IS NOT NULL
-           AND trackerid <> ''
-           AND trackerid <> 'unknown'
-           AND trackerid <> 'blocked'
-    `);
-    const out = new Set<FlarmID>();
-    for (const r of rows) {
-        // tracker.trackerid is comma-separated for backup units
-        for (const id of r.trackerid.split(',')) {
-            const t = id.trim();
-            if (t) out.add(t as FlarmID);
-        }
-    }
-    return out;
-}
-
-function fmtDelta(d: number): string {
+function fmtDelta(d: number | null): string {
+    if (d === null) return '   n/a';
     const sign = d >= 0 ? '+' : '−';
     return `${sign}${Math.abs(d).toFixed(1)}s`;
 }
 
+function fmtConfidence(c: number | null): string {
+    return c === null ? 'n/a' : `${c.toFixed(1)}s`;
+}
+
+function rowTag(m: TrackerMatch): string {
+    if (m.confidence === null) return '[assigned, no crossings]';
+    if (m.assigned && m.withinTolerance) return '[assigned ✓]';
+    if (m.assigned) return '[assigned, outside tolerance]';
+    if (m.withinTolerance) return '[match]';
+    return '';
+}
+
+function pilotHeaderTag(rows: TrackerMatch[]): string {
+    const flags: string[] = [];
+    const assignedRow = rows.find((m) => m.assigned);
+    if (assignedRow && !assignedRow.withinTolerance) {
+        flags.push(assignedRow.confidence === null ? 'assigned ID has no crossings' : 'assigned ID outside tolerance');
+    }
+    const altMatch = rows.find((m) => m.withinTolerance && !m.assigned);
+    if (assignedRow && !assignedRow.withinTolerance && altMatch) flags.push('alternative match found');
+    if (rows.some((m) => m.ambiguous)) flags.push('ambiguous');
+    return flags.length ? `   ⚠ ${flags.join('; ')}` : '';
+}
+
 function printMatches(results: OfficialResult[], matches: TrackerMatch[]): void {
     if (!matches.length) {
-        console.log(`  (no matches)`);
+        console.log(`  (no matches, no assigned-tracker reports)`);
         return;
     }
-    // Group by compno so we can print all candidates for an ambiguous pilot together.
+    // Group by compno
     const byPilot = new Map<Compno, TrackerMatch[]>();
     for (const m of matches) {
         const arr = byPilot.get(m.compno) ?? [];
@@ -283,22 +283,45 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[]): void 
         byPilot.set(m.compno, arr);
     }
 
-    // Sort compnos by best confidence
+    // Sort compnos: pilots needing attention (assigned-outside-tolerance,
+    // ambiguous, no-crossings-for-assigned) first; within each bucket by
+    // best within-tolerance confidence ascending.
     const compnos = Array.from(byPilot.keys()).sort((a, b) => {
-        const ba = Math.min(...byPilot.get(a)!.map((x) => x.confidence));
-        const bb = Math.min(...byPilot.get(b)!.map((x) => x.confidence));
-        return ba - bb;
+        const ra = bucket(byPilot.get(a)!);
+        const rb = bucket(byPilot.get(b)!);
+        if (ra !== rb) return ra - rb;
+        const ca = bestConfidence(byPilot.get(a)!);
+        const cb = bestConfidence(byPilot.get(b)!);
+        return ca - cb;
     });
 
     for (const compno of compnos) {
-        const arr = byPilot.get(compno)!.sort((a, b) => a.confidence - b.confidence);
+        const arr = byPilot.get(compno)!;
         const r = results.find((x) => x.compno === compno);
         const name = arr[0].name || (r?.name ?? '');
-        const ambTag = arr[0].ambiguous ? `   (ambiguous: ${arr.length} candidate${arr.length === 1 ? '' : 's'})` : '';
-        console.log(`  ${String(compno).padEnd(4)} ${name}${ambTag}`);
+        console.log(`  ${String(compno).padEnd(4)} ${name}${pilotHeaderTag(arr)}`);
         for (const m of arr) {
-            const cur = m.currentTrackerid && m.currentTrackerid !== 'unknown' ? `   (current trackerid: ${m.currentTrackerid})` : m.currentTrackerid === 'unknown' ? `   (current trackerid: unknown)` : '';
-            console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${m.confidence.toFixed(1)}s${cur}`);
+            const tag = rowTag(m);
+            const tagPart = tag ? `   ${tag}` : '';
+            console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
         }
     }
+}
+
+function bucket(rows: TrackerMatch[]): number {
+    // 0 = needs attention (assigned outside tolerance, or ambiguous)
+    // 1 = unknown pilot with a within-tolerance match
+    // 2 = clean (assigned ✓ only)
+    const hasAssigned = rows.some((m) => m.assigned);
+    const assignedBad = rows.some((m) => m.assigned && !m.withinTolerance);
+    const anyAmbig = rows.some((m) => m.ambiguous);
+    if (anyAmbig || assignedBad) return 0;
+    if (!hasAssigned) return 1;
+    return 2;
+}
+
+function bestConfidence(rows: TrackerMatch[]): number {
+    let best = Infinity;
+    for (const m of rows) if (m.confidence !== null && m.confidence < best) best = m.confidence;
+    return best;
 }

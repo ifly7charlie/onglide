@@ -31,11 +31,18 @@ export interface TrackerMatch {
     compno: Compno;
     name: string;
     flarmid: FlarmID;
-    deltaStart: number; // seconds, signed (flarm crossing - official)
-    deltaFinish: number;
-    confidence: number; // max(|deltaStart|, |deltaFinish|), lower is better
+    /** seconds, signed (flarm crossing - official); null when no usable crossing pair (assigned-tracker reports only) */
+    deltaStart: number | null;
+    deltaFinish: number | null;
+    /** max(|deltaStart|, |deltaFinish|), lower is better; null when deltas are null */
+    confidence: number | null;
     currentTrackerid: string;
-    ambiguous: boolean; // >1 candidate per pilot OR >1 pilot per flarmid
+    /** This flarmid is one of the pilot's currently-recorded trackerids. */
+    assigned: boolean;
+    /** confidence ≤ tolerance. False on assigned-only rows that fall outside, or when no crossings. */
+    withinTolerance: boolean;
+    /** >1 within-tolerance candidate per pilot, OR >1 within-tolerance pilot per flarmid */
+    ambiguous: boolean;
 }
 
 export interface FindTrackersOptions {
@@ -72,6 +79,16 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
         if (r.startUtc > maxStart) maxStart = r.startUtc;
         if (r.finishUtc < minFinish) minFinish = r.finishUtc;
         if (r.finishUtc > maxFinish) maxFinish = r.finishUtc;
+    }
+
+    // Pilots whose official start AND finish are both within 2×tolerance of
+    // each other can't be told apart on times alone — any flarmid matching
+    // one will match the others within tolerance. Surface those groups up
+    // front so the operator knows the ambiguity flags downstream are
+    // structural, not a tracker-quality issue.
+    for (const group of findConcurrentPilots(results, tolerance)) {
+        const labels = group.map((r) => `${r.compno} ${r.name}`.trim()).join(', ');
+        log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on start and finish) — matches will be ambiguous: ${labels}`);
     }
 
     log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots`);
@@ -143,45 +160,67 @@ function pushCrossing(map: CrossingMap, f: FlarmID, t: Epoch): void {
     else map.set(f, [t]);
 }
 
+// tracker.trackerid may carry comma-separated backup units. Split into a
+// normalised set; drop the sentinel/blank values.
+function parseAssignedIds(raw: string): Set<FlarmID> {
+    const out = new Set<FlarmID>();
+    if (!raw) return out;
+    for (const part of raw.split(',')) {
+        const id = part.trim();
+        if (!id) continue;
+        const lc = id.toLowerCase();
+        if (lc === 'unknown' || lc === 'blocked') continue;
+        out.add(id as FlarmID);
+    }
+    return out;
+}
+
+function bestPair(sList: Epoch[], fList: Epoch[], startUtc: Epoch, finishUtc: Epoch): {ds: number; df: number; score: number} {
+    let bestDS = 0,
+        bestDF = 0,
+        bestScore = Infinity;
+    for (const sC of sList) {
+        const ds = sC - startUtc;
+        for (const fC of fList) {
+            const dF = fC - finishUtc;
+            const score = Math.max(Math.abs(ds), Math.abs(dF));
+            if (score < bestScore) {
+                bestScore = score;
+                bestDS = ds;
+                bestDF = dF;
+            }
+        }
+    }
+    return {ds: bestDS, df: bestDF, score: bestScore};
+}
+
 function matchCrossings(results: OfficialResult[], startCrossings: CrossingMap, finishCrossings: CrossingMap, tolerance: number): TrackerMatch[] {
     const flarmidsWithBoth: FlarmID[] = [];
     for (const f of startCrossings.keys()) {
         if (finishCrossings.has(f)) flarmidsWithBoth.push(f);
     }
-    if (!flarmidsWithBoth.length) return [];
 
+    // Phase 1 — for each pilot, every flarmid that crosses both lines within
+    // tolerance of that pilot's official times. These are the candidates we
+    // already report.
     const perPilot = new Map<Compno, TrackerMatch[]>();
     const perFlarm = new Map<FlarmID, TrackerMatch[]>();
 
     for (const r of results) {
+        const assignedIds = parseAssignedIds(r.trackerid);
         for (const f of flarmidsWithBoth) {
-            const sList = startCrossings.get(f)!;
-            const fList = finishCrossings.get(f)!;
-            let bestDS = 0,
-                bestDF = 0,
-                bestScore = Infinity;
-            for (const sC of sList) {
-                const ds = sC - r.startUtc;
-                if (Math.abs(ds) > tolerance) continue; // can't beat tolerance even on its own
-                for (const fC of fList) {
-                    const dF = fC - r.finishUtc;
-                    const score = Math.max(Math.abs(ds), Math.abs(dF));
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestDS = ds;
-                        bestDF = dF;
-                    }
-                }
-            }
-            if (bestScore <= tolerance) {
+            const {ds, df, score} = bestPair(startCrossings.get(f)!, finishCrossings.get(f)!, r.startUtc, r.finishUtc);
+            if (score <= tolerance) {
                 const m: TrackerMatch = {
                     compno: r.compno,
                     name: r.name,
                     flarmid: f,
-                    deltaStart: bestDS,
-                    deltaFinish: bestDF,
-                    confidence: bestScore,
+                    deltaStart: ds,
+                    deltaFinish: df,
+                    confidence: score,
                     currentTrackerid: r.trackerid,
+                    assigned: assignedIds.has(f),
+                    withinTolerance: true,
                     ambiguous: false
                 };
                 listAppend(perPilot, r.compno, m);
@@ -190,14 +229,103 @@ function matchCrossings(results: OfficialResult[], startCrossings: CrossingMap, 
         }
     }
 
+    // Ambiguity is only meaningful for within-tolerance candidates.
     for (const arr of perPilot.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
     for (const arr of perFlarm.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
 
-    // Each match was inserted into perPilot AND perFlarm. Flatten via Set
-    // to dedup, then sort by compno then confidence.
-    const out = new Set<TrackerMatch>();
-    for (const arr of perPilot.values()) for (const m of arr) out.add(m);
-    return Array.from(out).sort((a, b) => a.compno.localeCompare(b.compno) || a.confidence - b.confidence);
+    // Phase 2 — for every pilot with a recorded trackerid, ensure there's a
+    // row for each assigned id even if it falls outside tolerance (or has no
+    // crossings at all). Lets the operator spot a bad assignment: the row
+    // shows the actual delta the assigned id achieves, however large.
+    for (const r of results) {
+        const assignedIds = parseAssignedIds(r.trackerid);
+        if (!assignedIds.size) continue;
+        const existing = perPilot.get(r.compno);
+        const existingIds = new Set(existing?.map((m) => m.flarmid) ?? []);
+        for (const id of assignedIds) {
+            if (existingIds.has(id)) continue; // already covered by phase 1
+            const sList = startCrossings.get(id);
+            const fList = finishCrossings.get(id);
+            let row: TrackerMatch;
+            if (sList?.length && fList?.length) {
+                const {ds, df, score} = bestPair(sList, fList, r.startUtc, r.finishUtc);
+                row = {
+                    compno: r.compno,
+                    name: r.name,
+                    flarmid: id,
+                    deltaStart: ds,
+                    deltaFinish: df,
+                    confidence: score,
+                    currentTrackerid: r.trackerid,
+                    assigned: true,
+                    withinTolerance: false,
+                    ambiguous: false
+                };
+            } else {
+                // No usable crossings for the assigned id — tracker was off,
+                // out of OGN coverage, or the assignment is just wrong.
+                row = {
+                    compno: r.compno,
+                    name: r.name,
+                    flarmid: id,
+                    deltaStart: null,
+                    deltaFinish: null,
+                    confidence: null,
+                    currentTrackerid: r.trackerid,
+                    assigned: true,
+                    withinTolerance: false,
+                    ambiguous: false
+                };
+            }
+            listAppend(perPilot, r.compno, row);
+        }
+    }
+
+    // Flatten. perFlarm only held phase-1 rows, but every row also lives in
+    // perPilot, so iterating perPilot covers everything.
+    const out: TrackerMatch[] = [];
+    for (const arr of perPilot.values()) for (const m of arr) out.push(m);
+    out.sort((a, b) => {
+        // group by compno; within a pilot put assigned-and-withinTolerance
+        // first, then other within-tolerance, then assigned-outside-tolerance.
+        const c = a.compno.localeCompare(b.compno);
+        if (c !== 0) return c;
+        const aRank = (a.assigned && a.withinTolerance ? 0 : 0) + (a.withinTolerance ? 0 : 2) + (a.assigned ? 0 : 1);
+        const bRank = (b.assigned && b.withinTolerance ? 0 : 0) + (b.withinTolerance ? 0 : 2) + (b.assigned ? 0 : 1);
+        if (aRank !== bRank) return aRank - bRank;
+        const ac = a.confidence ?? Infinity;
+        const bc = b.confidence ?? Infinity;
+        return ac - bc;
+    });
+    return out;
+}
+
+// Group pilots whose (startUtc, finishUtc) are pairwise within 2×tolerance
+// on BOTH axes. Union-find over the "could-not-be-distinguished" relation;
+// returns groups of size ≥ 2.
+function findConcurrentPilots(results: OfficialResult[], tolerance: number): OfficialResult[][] {
+    const n = results.length;
+    if (n < 2) return [];
+    const parent = Array.from({length: n}, (_, i) => i);
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    const limit = 2 * tolerance;
+    for (let i = 0; i < n; i++) {
+        const a = results[i];
+        for (let j = i + 1; j < n; j++) {
+            const b = results[j];
+            if (Math.abs(a.startUtc - b.startUtc) <= limit && Math.abs(a.finishUtc - b.finishUtc) <= limit) {
+                parent[find(i)] = find(j);
+            }
+        }
+    }
+    const groups = new Map<number, OfficialResult[]>();
+    for (let i = 0; i < n; i++) {
+        const root = find(i);
+        const arr = groups.get(root);
+        if (arr) arr.push(results[i]);
+        else groups.set(root, [results[i]]);
+    }
+    return Array.from(groups.values()).filter((g) => g.length > 1);
 }
 
 function listAppend<K, V>(map: Map<K, V[]>, key: K, value: V): void {
