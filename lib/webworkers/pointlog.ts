@@ -369,8 +369,11 @@ async function* scanFileAll(fullPath: string, since: number, until: number | und
 // per-id queues and any per-id since trim (use the min(since) here, then
 // drop msg.t < target.since at dispatch time). Cuts restart cost from
 // (n_gliders × n_files × scan) down to (n_files × scan).
+//
+// If flarmIds is omitted, every record in the window is yielded — used by
+// matching tools that don't know the candidate ids in advance.
 export interface LoadPointsForIdsQuery {
-    flarmIds: Set<string>;
+    flarmIds?: Set<string>;
     since: number;
     until?: number;
 }
@@ -428,7 +431,7 @@ async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): Asyn
                 if (typeof msg.t !== 'number') continue;
                 if (msg.t < q.since) continue;
                 if (q.until != null && msg.t > q.until) return;
-                if (!q.flarmIds.has(msg.f)) continue;
+                if (q.flarmIds && !q.flarmIds.has(msg.f)) continue;
                 yield msg;
             }
 
@@ -439,7 +442,7 @@ async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): Asyn
         if (leftover) {
             try {
                 const msg: LoggedMessage = JSON.parse(leftover);
-                if (typeof msg.t === 'number' && msg.t >= q.since && (q.until == null || msg.t <= q.until) && q.flarmIds.has(msg.f)) {
+                if (typeof msg.t === 'number' && msg.t >= q.since && (q.until == null || msg.t <= q.until) && (!q.flarmIds || q.flarmIds.has(msg.f))) {
                     yield msg;
                 }
             } catch {}
