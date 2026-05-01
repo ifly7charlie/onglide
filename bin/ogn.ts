@@ -34,7 +34,7 @@ import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
-import {taskBbox, unionBboxes, expandBbox, bboxToAprsArea, bboxContainsCircle, Bbox} from '../lib/flightprocessing/taskBbox';
+import {taskBbox, unionBboxes, expandBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
@@ -1459,25 +1459,27 @@ const AIRFIELD_RADIUS_PRETASK_KM = 250;
 const AIRFIELD_RADIUS_INTASK_KM = 30;
 let lastAprsFilter: string | null = null;
 function rebuildAprsFilter() {
-    const withTasks = Object.values(channels).filter((c) => c.task);
+    // A channel is "live" for APRS purposes if it can still produce traffic
+    // worth filtering for: not past sunset for the day, and not in 'home'
+    // status (everyone landed). Sunset is sticky per channel and home is
+    // a class-level compstatus value.
+    const isLive = (c: Channel) => !c.afterSunset && c.compStatus !== 'H';
+    const liveChannels = Object.values(channels).filter(isLive);
+
+    const withTasks = liveChannels.filter((c) => c.task);
     const compsWithTask = new Set(withTasks.map((c) => c.compid));
+    const liveComps = new Set(liveChannels.map((c) => c.compid));
     const boxes = withTasks.map((c) => taskBbox(c.task!)).filter((b): b is Bbox => b !== null);
     const union = unionBboxes(boxes);
     const expanded = union ? expandBbox(union, 10) : null;
-    const clauses: string[] = [];
-    if (expanded) clauses.push(bboxToAprsArea(expanded));
-    for (const af of currentAirfields) {
-        const radius = compsWithTask.has(af.compid) ? AIRFIELD_RADIUS_INTASK_KM : AIRFIELD_RADIUS_PRETASK_KM;
-        if (expanded && bboxContainsCircle(expanded, af.lt, af.lg, radius)) continue;
-        clauses.push(`r/${af.lt}/${af.lg}/${radius}`);
-    }
-    if (clauses.length === 0) clauses.push('r/0/0/1');
-    // Sort so the memo key is stable across insertion-order churn in
-    // channels / currentAirfields (e.g. a comp removed and re-added
-    // lands at the end of the contexts map and would otherwise produce
-    // a different filter string for the same logical filter set).
-    clauses.sort();
-    const filter = clauses.join(' ');
+    const airfields = currentAirfields
+        .filter((af) => liveComps.has(af.compid))
+        .map((af) => ({
+            lt: af.lt,
+            lg: af.lg,
+            radiusKm: compsWithTask.has(af.compid) ? AIRFIELD_RADIUS_INTASK_KM : AIRFIELD_RADIUS_PRETASK_KM
+        }));
+    const filter = buildAprsFilter(expanded, airfields);
     if (filter === lastAprsFilter) return;
     lastAprsFilter = filter;
     console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
