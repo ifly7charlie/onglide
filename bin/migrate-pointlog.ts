@@ -29,6 +29,16 @@ import {hideBin} from 'yargs/helpers';
 
 import {openLog, closeLog, bulkAppend, type LoggedMessage} from '../lib/webworkers/pointlog';
 
+// Same default + env var as pointlog.ts's purge. Records older than this
+// would be reaped by the next hourly tick anyway, so skip them on the way
+// in. Override by exporting APRS_LOG_RETAIN_HOURS=720 (or higher) before
+// running, to import historical data.
+function retainCutoffSeconds(): number {
+    const hours = Number(process.env.APRS_LOG_RETAIN_HOURS);
+    const retainHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
+    return Math.floor(Date.now() / 1000) - retainHours * 3600;
+}
+
 interface FileResult {
     file: string;
     lines: number;
@@ -36,10 +46,11 @@ interface FileResult {
     inserted: number;
     skipped: number;
     parseErrors: number;
+    tooOld: number;
     elapsedMs: number;
 }
 
-async function migrateFile(file: string, batchSize: number): Promise<FileResult> {
+async function migrateFile(file: string, batchSize: number, cutoff: number): Promise<FileResult> {
     const start = Date.now();
     const stream = createReadStream(file, {encoding: 'utf8'});
     // crlfDelay: Infinity so we treat \r\n the same as \n.
@@ -50,6 +61,7 @@ async function migrateFile(file: string, batchSize: number): Promise<FileResult>
     let parseErrors = 0;
     let inserted = 0;
     let skipped = 0;
+    let tooOld = 0;
     let batch: LoggedMessage[] = [];
 
     const flush = () => {
@@ -76,6 +88,13 @@ async function migrateFile(file: string, batchSize: number): Promise<FileResult>
                 parseErrors++;
                 continue;
             }
+            // Drop anything the next purge would reap anyway. APRS_LOG_RETAIN_HOURS
+            // controls this — set it to e.g. 720 (30 days) before running to import
+            // historical data.
+            if (msg.t < cutoff) {
+                tooOld++;
+                continue;
+            }
             batch.push(msg);
             parsed++;
             if (batch.length >= batchSize) flush();
@@ -87,7 +106,7 @@ async function migrateFile(file: string, batchSize: number): Promise<FileResult>
         console.log(`migrate: read error in ${file} after ${lines} lines: ${e}`);
     }
 
-    return {file, lines, parsed, inserted, skipped, parseErrors, elapsedMs: Date.now() - start};
+    return {file, lines, parsed, inserted, skipped, parseErrors, tooOld, elapsedMs: Date.now() - start};
 }
 
 async function main() {
@@ -101,27 +120,30 @@ async function main() {
 
     const files = argv._.map(String);
     const batchSize = Math.max(1, Number(argv.batch) || 10000);
+    const cutoff = retainCutoffSeconds();
 
-    console.log(`migrate: ${files.length} files, batch size ${batchSize}`);
+    console.log(`migrate: ${files.length} files, batch size ${batchSize}, dropping rows older than ${new Date(cutoff * 1000).toISOString()}`);
 
     await openLog();
 
     let totalInserted = 0;
     let totalSkipped = 0;
     let totalParseErrors = 0;
+    let totalTooOld = 0;
     let totalLines = 0;
     const overallStart = Date.now();
 
     for (const file of files) {
         try {
-            const r = await migrateFile(file, batchSize);
+            const r = await migrateFile(file, batchSize, cutoff);
             totalInserted += r.inserted;
             totalSkipped += r.skipped;
             totalParseErrors += r.parseErrors;
+            totalTooOld += r.tooOld;
             totalLines += r.lines;
             const rate = r.elapsedMs > 0 ? Math.round((r.inserted * 1000) / r.elapsedMs) : 0;
             console.log(
-                `${r.file}: ${r.lines} lines, ${r.parsed} parsed, ${r.inserted} inserted, ${r.skipped} skipped, ${r.parseErrors} parse errors (${r.elapsedMs}ms, ${rate} row/s)`
+                `${r.file}: ${r.lines} lines, ${r.parsed} parsed, ${r.inserted} inserted, ${r.skipped} skipped, ${r.tooOld} too old, ${r.parseErrors} parse errors (${r.elapsedMs}ms, ${rate} row/s)`
             );
         } catch (e) {
             console.log(`migrate: ${file} failed: ${e}`);
@@ -133,7 +155,7 @@ async function main() {
     const overallMs = Date.now() - overallStart;
     const overallRate = overallMs > 0 ? Math.round((totalInserted * 1000) / overallMs) : 0;
     console.log(
-        `\nmigrate: total ${totalLines} lines, ${totalInserted} inserted, ${totalSkipped} skipped, ${totalParseErrors} parse errors (${overallMs}ms, ${overallRate} row/s)`
+        `\nmigrate: total ${totalLines} lines, ${totalInserted} inserted, ${totalSkipped} skipped, ${totalTooOld} too old, ${totalParseErrors} parse errors (${overallMs}ms, ${overallRate} row/s)`
     );
 }
 
