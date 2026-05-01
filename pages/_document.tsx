@@ -8,7 +8,6 @@ export default function Document() {
                 <link rel="icon" type="image/png" href="/logo16.png" sizes="16x16" />
                 <link rel="icon" type="image/png" href="/logo32.png" sizes="32x32" />
                 <link rel="icon" type="image/png" href="/logo128.png" sizes="128x128" />
-                <link href="//api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
             </Head>
             <body>
                 <Main />

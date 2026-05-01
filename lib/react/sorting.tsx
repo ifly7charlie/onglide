@@ -1,67 +1,99 @@
-import {memo} from 'react';
+import {memo, useState, useRef, useEffect, useCallback} from 'react';
+import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
 import {
-    //
     faBatteryThreeQuarters,
-    faCaretUp,
     faCaretDown,
     faCloudUpload,
     faRightFromBracket,
     faRightToBracket,
     faStar,
     faStopwatch,
-    faTasks,
     faTrophy,
     faUpload
 } from '@fortawesome/free-solid-svg-icons';
 
-import {getSortOrderType, getSortDescription} from './pilot-sorting';
+import {getSortOrderType, getSortDescription, getShortLabel, handicappedSortOrders, nonHandicappedSortOrders} from './pilot-sorting';
 import {SortKey} from '../types';
 
-export const Sorting = memo(function Sorting(props: {setSort: Function; sortOrder: SortKey; toggleVisible: Function; visible: boolean; handicapped: boolean}) {
+// Each group binds a UI bucket to a translation key under `pilot_metric.*`
+// in common.json. The translated text is rendered via t(labelKey).
+const sortGroups = [
+    {key: 'auto', icon: faStar, labelKey: 'pilot_metric.auto'},
+    {key: 'speed', icon: faTrophy, labelKey: 'pilot_metric.speed'},
+    {key: 'height', icon: faCloudUpload, labelKey: 'pilot_metric.height'},
+    {key: 'climb', icon: faUpload, labelKey: 'pilot_metric.climb'},
+    {key: 'ld', icon: faBatteryThreeQuarters, labelKey: 'pilot_metric.ld'},
+    {key: 'distance', icon: faRightFromBracket, labelKey: 'pilot_metric.dist_done'},
+    {key: 'remaining', icon: faRightToBracket, labelKey: 'pilot_metric.dist_rem'},
+    {key: 'times', icon: faStopwatch, labelKey: 'pilot_metric.times'}
+] as const;
+
+export const Sorting = memo(function Sorting(props: {setSort: Function; sortOrder: SortKey; handicapped: boolean}) {
+    const {t} = useTranslation('common');
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    const close = useCallback(() => setOpen(false), []);
+
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                close();
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, [open, close]);
+
+    const orders = props.handicapped ? handicappedSortOrders : nonHandicappedSortOrders;
+    const currentType = getSortOrderType(props.sortOrder);
+    const currentOption = sortGroups.find((o) => o.key === currentType) ?? sortGroups[0];
+    const descriptionKey = getSortDescription(props.sortOrder, props.handicapped);
+
     return (
-        <div style={{paddingBottom: '3px'}}>
-            <span className="d-lg-inline d-none" id="sortdescription" style={{fontSize: 'small', maxWidth: '30%', width: '30%', display: 'inline-block'}}>
-                {getSortDescription(props.sortOrder, props.handicapped)}
-            </span>
-            <span className="sorting">
-                <button title="Sort Automatically" onClick={() => props.setSort('auto')} className={props.sortOrder == 'auto' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faStar} />
-                </button>
-                <button title="Show Speed" onClick={() => props.setSort('speed')} className={getSortOrderType(props.sortOrder) == 'speed' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faTrophy} />
-                </button>
-                <button title="Show Height" onClick={() => props.setSort('height')} className={getSortOrderType(props.sortOrder) == 'height' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faCloudUpload} />
-                    &nbsp;
-                </button>
-                <button title="Show Current Climb Average" onClick={() => props.setSort('climb')} className={getSortOrderType(props.sortOrder) == 'climb' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faUpload} />
-                    &nbsp;
-                </button>
-                <button title="Show L/D Remaining" onClick={() => props.setSort('ld')} className={getSortOrderType(props.sortOrder) == 'ld' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faBatteryThreeQuarters} />
-                    &nbsp;
-                </button>
-                <button title="Show Distance Done" onClick={() => props.setSort('distance')} className={getSortOrderType(props.sortOrder) == 'distance' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faRightFromBracket} />
-                    &nbsp;
-                </button>
-                <button title="Show Distance Remaining" onClick={() => props.setSort('remaining')} className={getSortOrderType(props.sortOrder) == 'remaining' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faRightToBracket} />
-                    &nbsp;
-                </button>
-                <button title="Cycle through times" onClick={() => props.setSort('times')} className={getSortOrderType(props.sortOrder) == 'times' ? 'active' : ''}>
-                    <FontAwesomeIcon icon={faStopwatch} />
-                    &nbsp;
-                </button>
-                &nbsp;
-                <button className="d-lg-inline d-none" onClick={() => props.toggleVisible()} title={props.visible ? 'Hide Results' : 'Show Results'} aria-controls="task-collapse" aria-expanded={props.visible}>
-                    <FontAwesomeIcon icon={faTasks} />
-                    <FontAwesomeIcon icon={props.visible ? faCaretUp : faCaretDown} />
-                </button>
-            </span>
+        <div className="sort-dropdown" ref={ref}>
+            <button className="sort-trigger" onClick={() => setOpen(!open)}>
+                <FontAwesomeIcon icon={currentOption.icon} />
+                <span className="sort-label">{descriptionKey ? t(descriptionKey) : ''}</span>
+                <FontAwesomeIcon icon={faCaretDown} className={open ? 'sort-caret open' : 'sort-caret'} />
+            </button>
+            {open ? (
+                <div className="sort-menu">
+                    {sortGroups.map((group) => {
+                        const subKeys = orders[group.key] ?? [];
+                        return (
+                            <div key={group.key} className="sort-row">
+                                <span className="sort-row-label">
+                                    <FontAwesomeIcon icon={group.icon} />
+                                    <span>{t(group.labelKey)}</span>
+                                </span>
+                                <span className="sort-row-options">
+                                    {subKeys.map((sk) => {
+                                        const titleKey = getSortDescription(sk, props.handicapped);
+                                        const labelKey = getShortLabel(sk);
+                                        return (
+                                            <button
+                                                key={sk}
+                                                className={props.sortOrder === sk ? 'active' : ''}
+                                                title={titleKey ? t(titleKey) : ''}
+                                                onClick={() => {
+                                                    props.setSort(sk);
+                                                    setOpen(false);
+                                                }}
+                                            >
+                                                {labelKey ? t(labelKey) : sk}
+                                            </button>
+                                        );
+                                    })}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : null}
         </div>
     );
 });

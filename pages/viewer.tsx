@@ -1,14 +1,11 @@
-import {useState, useCallback, useRef, useMemo} from 'react';
+import {useState, useCallback, useRef, useMemo, useEffect} from 'react';
 import Head from 'next/head';
-
-import Navbar from 'react-bootstrap/Navbar';
-import Nav from 'react-bootstrap/Nav';
-import Collapse from 'react-bootstrap/Collapse';
+import {useTranslation} from 'next-i18next/pages';
+import {serverSideTranslations} from 'next-i18next/pages/serverSideTranslations';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faFileArrowUp, faPlane, faMagnifyingGlassLocation, faTasks, faCaretUp, faCaretDown, faCopy, faRotateLeft, faArrowsRotate} from '@fortawesome/free-solid-svg-icons';
+import {faFileArrowUp, faPlane, faMagnifyingGlassLocation, faCaretUp, faCaretDown, faCopy, faRotateLeft, faArrowsRotate} from '@fortawesome/free-solid-svg-icons';
 
-import {Nbsp} from '../lib/react/htmlhelper';
 import {Options} from '../lib/react/options';
 import {MeasureContext} from '../lib/react/measure';
 
@@ -38,6 +35,7 @@ import {dispatchClass, dispatchTask, dispatchTrack, dispatchScores, dispatchTime
 import {setReferenceDate} from '../lib/flightprocessing/referenceDate';
 
 import {PilotList, Details} from '../lib/react/pilotlist';
+import {getValidSortOrder} from '../lib/react/pilot-sorting';
 
 import * as React from 'react';
 import {styled} from '@mui/material/styles';
@@ -53,6 +51,14 @@ const MApp = dynamic(() => import('../lib/react/deckgl').then((mod) => mod), {
         </div>
     )
 });
+
+export async function getStaticProps({locale}: {locale?: string}) {
+    return {
+        props: {
+            ...(await serverSideTranslations(locale ?? 'en', ['common']))
+        }
+    };
+}
 
 const VC = 'View' as ClassName;
 const TZ_DEFAULT = 'Etc/UTC' as TZ;
@@ -117,6 +123,7 @@ function ViewPlaybackControls({
     setReplayTime: (t: Epoch | undefined) => void;
     tz: TZ;
 }) {
+    const {t} = useTranslation('common');
     const latestTrackUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4);
     const replayEndTime = latestTrackUpdate || latestScore;
 
@@ -161,7 +168,7 @@ function ViewPlaybackControls({
                     onChange={(_, value) => doSetTime(value as Epoch)}
                 />
                 <BoxAfter>
-                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>End</TinyText>}
+                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>{t('connection.end')}</TinyText>}
                     <TinyText>+{formatDuration(replayEndTime - earliestScore)}</TinyText>
                 </BoxAfter>
             </Widget>
@@ -171,12 +178,13 @@ function ViewPlaybackControls({
 
 export default function ViewPage(props) {
     const [store] = useState(createViewStore);
+    const {t} = useTranslation('common');
 
     return (
         <Provider store={store}>
             <MeasureContext>
                 <Head>
-                    <title>OnGlide IGC Viewer</title>
+                    <title>{t('app.viewer_title')}</title>
                 </Head>
                 <ViewPageInner options={props.options} setOptions={props.setOptions} />
             </MeasureContext>
@@ -187,6 +195,7 @@ export default function ViewPage(props) {
 function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions: Function}) {
     const dispatch = useDispatch();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const {t} = useTranslation('common');
 
     const [flights, setFlights] = useState<LoadedFlight[]>([]);
     const [taskBuilt, setTaskBuilt] = useState(false);
@@ -196,6 +205,17 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
     const [follow, setFollow] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
+
+    // Handicaps stored in localStorage, keyed by compno
+    const [handicaps, setHandicaps] = useState<Record<string, number>>(() => {
+        try {
+            const stored = localStorage.getItem('viewerHandicaps');
+            return stored ? JSON.parse(stored) : {};
+        } catch {
+            return {};
+        }
+    });
+    const handicapsRef = useRef(handicaps);
 
     // Override options to disable weather radar (no live data in viewer)
     const viewOptions = useMemo(() => (options ? {...options, rainRadar: false} : options), [options]);
@@ -227,7 +247,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                 compno: f.compno,
                 name: f.pilotName || f.fileName,
                 gliderType: f.gliderType || '',
-                handicap: 100,
+                handicap: handicaps[f.compno] ?? 100,
                 country: '',
                 image: '',
                 forceTP: 0,
@@ -240,7 +260,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
             } as API_ClassName_Pilots_PilotDetail;
         }
         return p;
-    }, [flights]);
+    }, [flights, handicaps]);
 
     const processFiles = useCallback(
         async (fileList: FileList) => {
@@ -257,7 +277,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     const igcData = parseIGC(text);
 
                     if (!igcData.fixes.length) {
-                        setError(`No fixes found in ${file.name}`);
+                        setError(t('viewer.no_fixes', {file: file.name}));
                         continue;
                     }
 
@@ -293,11 +313,16 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     }
 
                     if (taskRef.current) {
+                        const h = handicapsRef.current[compno] ?? 100;
+                        const anyHandicapped = Object.values(handicapsRef.current).some((v) => v !== 100);
+                        taskRef.current.rules.handicapped = anyHandicapped;
+                        taskRef.current.details.handicapped = anyHandicapped ? 'Y' : 'N';
+
                         const allScores = await scoreIGCFlight(
                             taskRef.current,
                             igcData.fixes,
                             compno,
-                            100,
+                            h,
                             0 as Epoch
                         );
 
@@ -332,13 +357,13 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     setSelectedCompno(newFlights[0].compno);
                 }
             } catch (e) {
-                setError(e instanceof Error ? e.message : 'Error processing file');
+                setError(e instanceof Error ? e.message : t('viewer.error_processing'));
                 console.error(e);
             } finally {
                 setProcessing(false);
             }
         },
-        [dispatch, taskBuilt, selectedCompno, availableScores, options, setOptions]
+        [dispatch, taskBuilt, selectedCompno, availableScores, options, setOptions, t]
     );
 
     const handleFileInput = useCallback(
@@ -385,11 +410,17 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
 
     const handleRescore = useCallback(async () => {
         if (!taskRef.current || flights.length === 0) return;
+
+        const anyHandicapped = Object.values(handicapsRef.current).some((v) => v !== 100);
+        taskRef.current.rules.handicapped = anyHandicapped;
+        taskRef.current.details.handicapped = anyHandicapped ? 'Y' : 'N';
+
         setProcessing(true);
         setError(null);
         try {
             for (const flight of flights) {
-                const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, 100, 0 as Epoch);
+                const h = handicapsRef.current[flight.compno] ?? 100;
+                const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, h, 0 as Epoch);
                 const earliestStart = scores.reduce((min, s) => (s.utcStart && s.utcStart < min ? s.utcStart : min), Infinity) as Epoch;
                 const trackFixes = earliestStart < Infinity ? flight.igcData.fixes.filter((f) => f.t >= earliestStart - 30) : flight.igcData.fixes;
                 dispatchTrack(dispatch, flight.compno, flight.pilotName, trackFixes);
@@ -398,12 +429,40 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                 }
             }
         } catch (e) {
-            setError(e instanceof Error ? e.message : 'Error rescoring');
+            setError(e instanceof Error ? e.message : t('viewer.error_rescoring'));
             console.error(e);
         } finally {
             setProcessing(false);
         }
-    }, [dispatch, flights]);
+    }, [dispatch, flights, t]);
+
+    const handleSetHandicap = useCallback((compno: Compno, handicap: number) => {
+        setHandicaps((prev) => {
+            const next = {...prev};
+            if (handicap === 100) {
+                delete next[compno];
+            } else {
+                next[compno] = handicap;
+            }
+            handicapsRef.current = next;
+            if (Object.keys(next).length > 0) {
+                localStorage.setItem('viewerHandicaps', JSON.stringify(next));
+            } else {
+                localStorage.removeItem('viewerHandicaps');
+            }
+            return next;
+        });
+    }, []);
+
+    // Rescore all flights when handicaps change
+    const handicapsInitial = useRef(true);
+    useEffect(() => {
+        if (handicapsInitial.current) {
+            handicapsInitial.current = false;
+            return;
+        }
+        handleRescore();
+    }, [handicaps, handleRescore]);
 
     const fitBounds = useCallback(() => {
         if (options) {
@@ -424,32 +483,6 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
 
     return (
         <>
-            <Navbar bg="light" expand="lg" fixed="top" collapseOnSelect>
-                <Navbar.Brand>
-                    <FontAwesomeIcon icon={faPlane} />
-                    <Nbsp />
-                    OnGlide IGC Viewer
-                </Navbar.Brand>
-                <Navbar.Toggle aria-controls="view-nav-bar" />
-                <Navbar.Collapse id="view-nav-bar" className="justify-content-end" style={{paddingRight: 15}}>
-                    <Nav>
-                        <Nav.Item>
-                            <Nav.Link onClick={() => fileInputRef.current?.click()} style={{cursor: 'pointer'}}>
-                                <FontAwesomeIcon icon={faFileArrowUp} />
-                                <Nbsp />
-                                {hasFlights ? 'Add Files' : 'Open IGC Files'}
-                            </Nav.Link>
-                        </Nav.Item>
-                        {hasFlights && (
-                            <Nav.Item key="settings">
-                                <Options options={viewOptions} setOptions={setOptions} multipleClasses={false} />
-                            </Nav.Item>
-                        )}
-                    </Nav>
-                </Navbar.Collapse>
-            </Navbar>
-            <br style={{clear: 'both'}} />
-
             <input ref={fileInputRef} type="file" multiple accept=".igc" onChange={handleFileInput} style={{display: 'none'}} />
 
             {!hasFlights ? (
@@ -461,8 +494,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     onClick={() => fileInputRef.current?.click()}
                 >
                     <FontAwesomeIcon icon={faFileArrowUp} size="3x" style={{opacity: 0.3, marginBottom: 16}} />
-                    <p style={{fontSize: '1.2rem', opacity: 0.6}}>Drop IGC files here or click to browse</p>
-                    {processing && <p>Processing...</p>}
+                    <p style={{fontSize: '1.2rem', opacity: 0.6}}>{t('viewer.drop_or_browse')}</p>
+                    {processing && <p>{t('viewer.processing')}</p>}
                     {error && <p style={{color: 'red'}}>{error}</p>}
                 </div>
             ) : (
@@ -482,43 +515,54 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             viewport={viewport}
                             setViewport={setViewport}
                             selectedCompno={selectedCompno}
-                            selectedHandicap={100}
-                            status={`${flights.length} flight${flights.length > 1 ? 's' : ''} loaded`}
+                            selectedHandicap={selectedCompno ? (handicaps[selectedCompno] ?? 100) : 100}
+                            status={t('viewer.flights_loaded', {count: flights.length})}
                         />
                     </div>
-                    <div className="resultsOverlay" key="results">
-                        <div className="resultsUnderlay">
+                    <aside className="sidepanel" key="results">
+                        <div className="sidepanel-header">
+                            <FontAwesomeIcon icon={faPlane} />
+                            <div className="sidepanel-title">
+                                <div className="sidepanel-comp-name">{t('app.viewer_title')}</div>
+                                <div className="sidepanel-comp-dates">{t('viewer.flights_loaded', {count: flights.length})}</div>
+                            </div>
+                        </div>
+                        <div className="sidepanel-tools">
+                            <Options options={viewOptions} setOptions={setOptions} multipleClasses={false} />
+                        </div>
+                        <div className="sidepanel-fixed-head">
                             {error && (
-                                <>
-                                    <span style={{color: 'red'}}>{error}</span>
-                                    <br />
-                                </>
+                                <div className="sidepanel-section" style={{color: 'red'}}>
+                                    {error}
+                                </div>
                             )}
-                            {processing && <span>Processing files...</span>}
+                            {processing && <div className="sidepanel-section">{t('viewer.processing_files')}</div>}
                             {task && (
-                                <div style={{padding: '4px 8px'}}>
-                                    <h5 style={{fontSize: '1.1rem'}}>
-                                        {task.rules.aat ? (task.details.duration?.substring(1, 5) !== '0:00' ? `${task.details.duration?.substring(1, 5)} hour Assigned Area Task` : 'Assigned Area Task') : `${task.details.distance}km Speed Task`}
-                                        <span className="sorting" style={{fontSize: 'medium', marginLeft: 8}}>
-                                            <button title="Zoom to task" onClick={fitBounds as any}>
-                                                <FontAwesomeIcon icon={faMagnifyingGlassLocation} />
-                                            </button>
-                                            &nbsp;
-                                            <button onClick={() => setTaskOpen(!taskOpen)} title={taskOpen ? 'Hide Task Details' : 'Show Task Details'} aria-controls="view-task-collapse" aria-expanded={taskOpen}>
-                                                <FontAwesomeIcon icon={faTasks} size="sm" />
-                                                <FontAwesomeIcon icon={taskOpen ? faCaretUp : faCaretDown} size="sm" />
-                                            </button>
+                                <div className="sidepanel-section">
+                                    <h5 className="task-heading">
+                                        <button title={t('task.zoom_to_task')} onClick={fitBounds as any}>
+                                            <FontAwesomeIcon icon={faMagnifyingGlassLocation} />
+                                        </button>
+                                        <span className="task-title">
+                                            {task.rules.aat
+                                                ? task.details.duration?.substring(1, 5) !== '0:00'
+                                                    ? t('task.aat_with_duration', {duration: task.details.duration?.substring(1, 5)})
+                                                    : t('task.aat')
+                                                : t('task.speed_with_distance', {distance: task.details.distance})}
                                         </span>
+                                        <button onClick={() => setTaskOpen(!taskOpen)} title={taskOpen ? t('task.hide_details') : t('task.show_details')} aria-controls="view-task-collapse" aria-expanded={taskOpen}>
+                                            <FontAwesomeIcon icon={taskOpen ? faCaretUp : faCaretDown} />
+                                        </button>
                                     </h5>
-                                    <Collapse in={taskOpen}>
+                                    {taskOpen ? (
                                         <div id="view-task-collapse">
-                                            <table className="table table-condensed" style={{marginBottom: 0, fontSize: '0.85rem'}}>
+                                            <table className="legs-mini" style={{marginBottom: 0}}>
                                                 <thead>
                                                     <tr>
-                                                        <td colSpan={2}>Turnpoint</td>
-                                                        <td>Bearing</td>
-                                                        <td>Leg Length</td>
-                                                        <td>TP Radius</td>
+                                                        <td colSpan={2}>{t('task.turnpoint')}</td>
+                                                        <td>{t('task.bearing')}</td>
+                                                        <td>{t('task.leg_length')}</td>
+                                                        <td>{t('task.tp_radius')}</td>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -536,62 +580,66 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                                 </tbody>
                                             </table>
                                         </div>
-                                    </Collapse>
-                                    <hr />
+                                    ) : null}
                                 </div>
                             )}
-                            {hasPilots && (
-                                <PilotList
-                                    key="pilotList"
-                                    pilots={pilots}
-                                    selectedPilot={selectedCompno}
-                                    setSelectedCompno={setCompno}
-                                    now={replayTime}
-                                    live={false}
-                                    tz={TZ_DEFAULT}
-                                    options={viewOptions}
-                                    setOptions={setOptions}
-                                    handicapped={false}
-                                />
-                            )}
-                            <div style={{padding: '4px 8px', textAlign: 'center', display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap'}}>
-                                <span style={{cursor: 'pointer', opacity: 0.6}} onClick={() => fileInputRef.current?.click()}>
-                                    <FontAwesomeIcon icon={faFileArrowUp} /> Add more flights
-                                </span>
-                                <span style={{cursor: processing ? 'default' : 'pointer', opacity: processing ? 0.3 : 0.6}} onClick={processing ? undefined : handleRescore} title="Re-run scoring on all loaded flights">
-                                    <FontAwesomeIcon icon={faArrowsRotate} /> Rescore
-                                </span>
-                                <span style={{cursor: 'pointer', opacity: 0.6}} onClick={handleReset} title="Clear all flights and start over">
-                                    <FontAwesomeIcon icon={faRotateLeft} /> Reset
-                                </span>
-                                {allScores && Object.keys(allScores).length > 0 && (
-                                    <span
-                                        style={{cursor: 'pointer', opacity: 0.6}}
-                                        onClick={() => {
-                                            const dump = Object.entries(allScores).reduce((acc, [compno, s]: [string, any]) => {
-                                                acc[compno] = s;
-                                                return acc;
-                                            }, {});
-                                            navigator.clipboard.writeText(JSON.stringify(dump, null, 2));
-                                        }}
-                                        title="Copy current scores as JSON to clipboard"
-                                    >
-                                        <FontAwesomeIcon icon={faCopy} /> Copy Scores
-                                    </span>
-                                )}
-                            </div>
                         </div>
-                    </div>
-                    <div className="details" style={{paddingTop: '5px'}}>
+                        <div className="sidepanel-body">
+                            {hasPilots && (
+                                <div className="sidepanel-section">
+                                    <PilotList
+                                        key="pilotList"
+                                        pilots={pilots}
+                                        selectedPilot={selectedCompno}
+                                        setSelectedCompno={setCompno}
+                                        now={replayTime}
+                                        live={false}
+                                        tz={TZ_DEFAULT}
+                                        options={viewOptions}
+                                        sortOrder={getValidSortOrder(viewOptions.sortKey ?? 'auto', Object.keys(handicaps).length > 0)}
+                                    />
+                                </div>
+                            )}
+                            {selectedCompno && pilots[selectedCompno] ? (
+                                <div className="sidepanel-section">
+                                    <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={viewOptions.units} tz={TZ_DEFAULT} replayTime={replayTime} onEditHandicap={handleSetHandicap} />
+                                </div>
+                            ) : null}
+                        </div>
+                        <div className="sidepanel-footer" style={{display: 'flex', justifyContent: 'center', gap: '16px', flexWrap: 'wrap'}}>
+                            <span style={{cursor: 'pointer', opacity: 0.7}} onClick={() => fileInputRef.current?.click()}>
+                                <FontAwesomeIcon icon={faFileArrowUp} /> {t('viewer.add_more')}
+                            </span>
+                            <span style={{cursor: processing ? 'default' : 'pointer', opacity: processing ? 0.3 : 0.7}} onClick={processing ? undefined : handleRescore} title={t('viewer.rescore_title')}>
+                                <FontAwesomeIcon icon={faArrowsRotate} /> {t('viewer.rescore')}
+                            </span>
+                            <span style={{cursor: 'pointer', opacity: 0.7}} onClick={handleReset} title={t('viewer.reset_title')}>
+                                <FontAwesomeIcon icon={faRotateLeft} /> {t('viewer.reset')}
+                            </span>
+                            {allScores && Object.keys(allScores).length > 0 && (
+                                <span
+                                    style={{cursor: 'pointer', opacity: 0.7}}
+                                    onClick={() => {
+                                        const dump = Object.entries(allScores).reduce((acc, [compno, s]: [string, any]) => {
+                                            acc[compno] = s;
+                                            return acc;
+                                        }, {});
+                                        navigator.clipboard.writeText(JSON.stringify(dump, null, 2));
+                                    }}
+                                    title={t('viewer.copy_scores_title')}
+                                >
+                                    <FontAwesomeIcon icon={faCopy} /> {t('viewer.copy_scores')}
+                                </span>
+                            )}
+                        </div>
+                    </aside>
+                    <div className="playbackbar">
                         <ViewPlaybackControls //
                             {...availableScores}
                             replayTime={replayTime}
                             setReplayTime={setReplayTime}
                             tz={TZ_DEFAULT}
                         />
-                        {selectedCompno && pilots[selectedCompno] ? (
-                            <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={viewOptions.units} tz={TZ_DEFAULT} replayTime={replayTime} />
-                        ) : null}
                     </div>
                 </div>
             )}

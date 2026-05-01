@@ -10,6 +10,7 @@ import {taskPositionGenerator} from '../webworkers/taskpositiongenerator';
 import {racingScoringGenerator} from '../webworkers/racingScoringGenerator';
 import {assignedAreaScoringGenerator} from '../webworkers/assignedAreaScoringGenerator';
 import {taskScoresGenerator} from '../webworkers/taskScoresGenerator';
+import {createFlightStatistics} from '../webworkers/flightStatistics';
 
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
@@ -61,17 +62,20 @@ export async function scoreIGCFlight(
 
     // Build the scoring chain (same pattern as getScoringChain in scoring.ts)
     const noop = () => {};
+    const stats = createFlightStatistics(compno, noop);
     const inorder = bindClientInOrderGenerator(compno, fixes);
     const epg = enrichedPositionGenerator(airfield, inorder(getNow), noop);
-    const tpg = taskPositionGenerator(task, utcStart, epg, noop);
+    const observed = stats.observer(epg);
+    const tpg = taskPositionGenerator(task, utcStart, observed, noop);
     const distances = task.rules.aat //
         ? assignedAreaScoringGenerator(task, tpg, noop)
         : racingScoringGenerator(task, tpg, noop);
     const scores = taskScoresGenerator(task, compno, handicap, distances, noop);
+    const attachedScores = stats.attacher(scores);
 
     // Collect all scores
     const allScores: PilotScore[] = [];
-    for await (const score of scores) {
+    for await (const score of attachedScores) {
         allScores.push(score);
     }
 

@@ -13,11 +13,10 @@ let PNG = require('pngjs').PNG;
 
 // Track duplicate requests for the same time and service them together from one response
 let pending = [];
-let referrer: undefined | null | string = undefined;
-let accessToken = undefined;
 
-let cacheHit = 0;
-let cacheMiss = 0;
+// Terrarium-encoded PNG DEM tiles. AWS Open Data public bucket is the default; override
+// via NEXT_PUBLIC_DEM_TILE_URL to front it through your own CDN.
+const DEM_TILE_URL = process.env.NEXT_PUBLIC_DEM_TILE_URL || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
 
 import {LRUCache} from 'lru-cache';
 
@@ -32,9 +31,6 @@ const options = {
 };
 
 const cache = new LRUCache(options);
-setInterval(() => {
-    console.log(`tile cache hit ${cacheHit}, miss ${cacheMiss}, ${cacheMiss ? cacheHit / cacheMiss : 0}%, ${cache.size}/${cache.max} items`);
-}, 60_000);
 
 //    module.exports = function(tk) {
 //      return function(p, cb) {
@@ -59,29 +55,11 @@ export async function getElevationOffset(lat: number, lng: number, cb: Function 
 }
 
 async function _getElevationOffset(lat, lng, cb) {
-    // Checking process.env is expensive so cache this
-    if (referrer === undefined) {
-        accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
-        if (!accessToken) {
-            cb(0);
-            return;
-        }
-        referrer = 'https://' + process.env.NEXT_PUBLIC_SITEURL + '/';
-    }
-
-    if (referrer === null) {
-        cb(0);
-        return;
-    }
-
     // Figure out what tile it is (obvs same order as geojson)
-    // see https://docs.mapbox.com/help/glossary/zoom-level/,
-    // zoom 15 gives 1.8m per pixel at 40 degrees which should be fine
+    // zoom 12 gives ~9.5m/px at 40° — plenty for a per-point elevation query
     let tf = tilebelt.pointToTileFraction(lng, lat, 12);
     let tile = tf.map(Math.floor);
-    let domain = 'https://api.mapbox.com/v4/';
-    let source = `mapbox.terrain-rgb/${tile[2]}/${tile[0]}/${tile[1]}.pngraw`;
-    let url = `${domain}${source}?access_token=${accessToken}`;
+    let url = DEM_TILE_URL.replace('{z}', String(tile[2])).replace('{x}', String(tile[0])).replace('{y}', String(tile[1]));
 
     // Have we cached it
     let pixels = cache.get(url);
@@ -97,7 +75,8 @@ async function _getElevationOffset(lat, lng, cb) {
         let G = npixels.get(x, y, 1);
         let B = npixels.get(x, y, 2);
 
-        let height = -10000 + (R * 256 * 256 + G * 256 + B) * 0.1;
+        // Terrarium encoding: height = (R*256 + G + B/256) - 32768
+        let height = R * 256 + G + B / 256 - 32768;
         return Math.floor(height);
     }
 
@@ -127,17 +106,11 @@ async function _getElevationOffset(lat, lng, cb) {
             delete pending[url];
         }
 
-        cacheMiss++;
-
         // Go and get the URL
-        fetch(url, {headers: {Referer: referrer!}})
+        fetch(url)
             .then((res) => {
                 if (res.status != 200) {
-                    const oldReferrer = referrer;
-                    if (res.status === 401 || res.status === 403) {
-                        referrer = null;
-                    }
-                    throw `MapBox API returns ${res.status}: ${res.statusText}, ensure "${oldReferrer}" is in the allowed ACL`;
+                    throw `DEM tile fetch returned ${res.status}: ${res.statusText} for ${url}`;
                 } else {
                     return res.arrayBuffer();
                 }
@@ -147,12 +120,15 @@ async function _getElevationOffset(lat, lng, cb) {
             })
             .catch((err) => {
                 // We still call the callback on an error as we don't want to drop the packet
-                console.error('unable to read elevation: ' + err);
+                // Node's fetch wraps the real network error on err.cause (ENOTFOUND, ECONNRESET,
+                // ETIMEDOUT, UND_ERR_*, TLS errors, etc.) — surface it so the log is actionable.
+                const cause = err && err.cause;
+                const causeStr = cause ? ` (cause: ${cause.code || cause.name || ''} ${cause.message || cause})`.trimEnd() : '';
+                console.error(`unable to read elevation for ${url}: ${err}${causeStr}`);
                 pending[url].forEach((cbp) => cbp(0));
                 delete pending[url];
             });
     } else {
-        cacheHit++;
         cb(pixelsToElevation(pixels));
     }
 }

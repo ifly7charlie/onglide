@@ -18,11 +18,13 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "moduleResolution": "node"
+    "moduleResolution": "bundler"
   },
   "include": [
     "next-env.d.ts",
     "lib/react/*.ts",
+    "lib/react/*.tsx",
+    "lib/i18n/*.ts",
     "lib/view/*.ts",
     "pages/*.tsx",
     "pages/**/*.tsx",

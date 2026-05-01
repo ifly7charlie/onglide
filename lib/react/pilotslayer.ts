@@ -49,7 +49,6 @@ export function pilotsLayer(selectedCompno: Compno, setSelectedCompno: (compno: 
     if (data.length) {
         return new IconLayer<(typeof data)[0], {beforeId: string}>({
             id: 'labels',
-            beforeId: 'tpe',
             data: data,
             getColor: (d) => (now - d.t > offlineTime ? [0, 0, 0, 96] : [0, 0, 0, 255]),
             getSize: (_d) => 35,

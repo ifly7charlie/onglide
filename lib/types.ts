@@ -111,7 +111,11 @@ export enum PositionStatus {
     Airborne = 4,
     Home = 5,
     Landed = 6,
-    Finished = 7
+    Finished = 7,
+    // Pilot is identified, but the device's DDB Permit-Livetracking
+    // flag is N (and the comp has not opted into explicit consent).
+    // No APRS subscription is created for them.
+    Blocked = 8
 }
 
 export const PositionStatusText = {
@@ -122,7 +126,8 @@ export const PositionStatusText = {
     [PositionStatus.Airborne]: 'airborne',
     [PositionStatus.Home]: 'home',
     [PositionStatus.Landed]: 'landed',
-    [PositionStatus.Finished]: 'finished'
+    [PositionStatus.Finished]: 'finished',
+    [PositionStatus.Blocked]: 'tracking declined'
 };
 
 export interface EnrichedPosition extends PositionMessage {
@@ -263,6 +268,18 @@ export interface CalculatedTaskStatus extends TaskStatus {
     maxPossible?: DistanceKM; // max task distance remaining
     minPossible?: DistanceKM; // shortest distance to home (for aat this is smallest task distance based on what has been flown)
     scoringClosestPoint?: BasePositionMessage; // the point used for scoring on uncompleted leg
+    optimalNextSectorPoint?: BasePositionMessage; // optimal point in next sector for direction visualization
+    optimalGrid?: number[]; // flat [lng, lat, taskDist, ...] per grid cell for AAT direction heatmap
+    optimalGridBaseline?: number; // scored dist to current sector point + max remaining forward
+    optimalGridBaselinePath?: number[]; // flat [lng, lat, ...] for the baseline path visualization
+    suggestedTrackPoints?: number[]; // flat [lng, lat, segDist, 0, ...] aim points from current pos to finish
+}
+
+// Optimal direction grid snapshot, stored independently for replay
+export interface OptimalGridEntry {
+    t: Epoch;
+    currentLeg: number;
+    grid: number[];
 }
 
 // points re-ordered if necessary
@@ -314,6 +331,7 @@ export type SortKey =
     | 'speed'
     | 'aspeed'
     | 'fspeed'
+    | 'faspeed'
     | 'climb'
     | 'remaining'
     | 'aremaining'
@@ -370,6 +388,7 @@ export interface PilotScoreDisplay extends PilotScore {
     scoredGeoJSON?: any;
     minGeoJSON?: any;
     maxGeoJSON?: any;
+    suggestedGeoJSON?: any;
 }
 
 /// Database types

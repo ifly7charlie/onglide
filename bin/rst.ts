@@ -32,13 +32,15 @@ import {groupBy as _groupby, forEach as _forEach, reduce as _reduce} from 'lodas
 // DB access
 import escape from 'sql-template-strings';
 import mysql from 'serverless-mysql';
-let mysql_db = undefined;
+let mysql_db: any = undefined;
 //import fetch from 'node-fetch';
 
 let cnhandicaps = {};
 
 // Load the current file
 const dotenv = require('dotenv');
+
+import {makeClassId} from '../lib/classid';
 
 // Location information, fetched from DB
 var location;
@@ -60,17 +62,18 @@ async function main() {
             host: process.env.MYSQL_HOST || 'db',
             database: process.env.MYSQL_DATABASE || 'ogn',
             user: process.env.MYSQL_USER || 'ogn',
-            password: process.env.MYSQL_PASSWORD
+            password: process.env.MYSQL_PASSWORD,
+            decimalNumbers: true
         }
     });
 
     // Now get data from soaringspot
-    rst();
+    rstAll();
 
     console.log('Background download from rst enabled');
     setInterval(
         function () {
-            rst();
+            rstAll();
         },
         5 * 60 * 1000
     );
@@ -78,33 +81,40 @@ async function main() {
 
 main();
 
-async function rst(deep = false) {
-    // Get the soaring spot keys from database
-    let keys: any = {};
-
-    if (process.env.RST_URL) {
-        keys.url = process.env.RST_URL;
-        console.log('environment variable', keys);
-    } else {
-        keys = (
-            await mysql_db.query(escape`
-                SELECT
-                    *
-                FROM
-                    scoringsource
-                WHERE
-                    type = 'rst'
-            `)
-        )[0];
+async function rstAll(deep = false) {
+    if (process.env.RST_URL && process.env.COMP_ID) {
+        await rst({compid: process.env.COMP_ID, url: process.env.RST_URL}, deep);
+        return;
     }
 
-    if (!keys) {
-        console.log('no rst key configured');
-        return {
-            error: 'no rst key configured'
-        };
+    const allKeys = (await mysql_db.query(escape`
+        SELECT
+            *
+        FROM
+            scoringsource
+        WHERE
+            type = 'rst'
+    `)) as any[];
+
+    if (!allKeys?.length) {
+        console.log('no rst keys configured');
+        return;
     }
 
+    for (const keys of allKeys) {
+        if (!keys.url || !keys.compid) {
+            console.log('skipping rst row: missing compid/url');
+            continue;
+        }
+        try {
+            await rst(keys, deep);
+        } catch (e) {
+            console.log(`rst failed for compid=${keys.compid}:`, e);
+        }
+    }
+}
+
+async function rst(keys: any, _deep = false) {
     let hcaps = {};
 
     await fetch(keys.url)
@@ -172,10 +182,10 @@ async function rst(deep = false) {
                         mappedHtml[sh] = Tabletojson.convert(getInnerHTML(sections[i]), {stripHtmlFromCells: false});
                     }
 
-                    update_contest(keys.contest_name, mapped['Info']);
+                    update_contest(keys.compid, keys.contest_name, mapped['Info']);
 
                     // Put data into the database
-                    update_class(className, mapped, mappedHtml, hcaps);
+                    update_class(keys.compid, className, mapped, mappedHtml, hcaps);
                     console.log('===');
                 }
                 mnumber = mnumber + 1;
@@ -184,30 +194,31 @@ async function rst(deep = false) {
         });
 }
 
-async function update_class(className, data, dataHtml, hcaps) {
+async function update_class(compid: string, className: string, data: any, dataHtml: any, hcaps: any) {
     // Get the name of the class, if not set use the type
     const nameRaw = className;
 
-    // Name for URLs and Database
-    const classid = nameRaw
-        .replace(/\s*(class|klasse)/gi, '')
-        .replace(/[^A-Z0-9]/gi, '')
-        .substring(0, 14);
+    // Globally-unique class identifier: hash of compid + raw name
+    const classid = makeClassId(compid, nameRaw);
 
     const name = nameRaw.replace(/[_]/gi, ' ');
 
     // Add to the database
     await mysql_db.query(escape`
         INSERT INTO
-            classes (class, classname, description, type)
+            classes (class, compid, classname, description, type)
         VALUES
             (
                 ${classid},
+                ${compid},
                 ${name.substr(0, 29)},
                 ${name},
                 'club'
             ) ON DUPLICATE KEY
-        UPDATE classname =
+        UPDATE compid =
+        VALUES
+            (compid),
+            classname =
         VALUES
             (classname),
             description =
@@ -231,6 +242,7 @@ async function update_class(className, data, dataHtml, hcaps) {
         SET
             status = ':',
             datecode = todcode (now())
+        WHERE class = ${classid}
     `);
 
     // Now add details of pilots
@@ -940,15 +952,18 @@ async function process_class_results(classid, className, date, day_number, resul
 // We will now update the competition object, this isn't a new object
 // as you will possibly want to tweak values in it!
 //
-async function update_contest(contest_name, info) {
+async function update_contest(compid: string, contest_name: string, info: any) {
     // All we know is what date range we have
     console.log(info[0]);
 
-    // Add a row if we need to
-    const count = await mysql_db.query('SELECT COUNT(*) cnt FROM competition');
+    // Make sure a competition row exists for this compid
+    const count = await mysql_db.query(escape`SELECT COUNT(*) cnt FROM competition WHERE compid = ${compid}`);
     if (!count || !count[0] || !count[0].cnt) {
-        console.log('Empty competition, pre-populating');
-        mysql_db.query('INSERT IGNORE INTO competition ( tz, tzoffset, mainwebsite ) VALUES ( "Europe/Stockholm", 7200, "http://www.rst-online.se/RSTmain.php?main=excup&cmd=list&excup=list&sub=EX" )');
+        console.log(`Empty competition for compid=${compid}, pre-populating`);
+        await mysql_db.query(escape`
+            INSERT IGNORE INTO competition (compid, tz, tzoffset, mainwebsite)
+            VALUES (${compid}, 'Europe/Stockholm', 7200, 'http://www.rst-online.se/RSTmain.php?main=excup&cmd=list&excup=list&sub=EX')
+        `);
     }
 
     for (const i of info[0]) {
@@ -964,14 +979,15 @@ async function update_contest(contest_name, info) {
                     SET
                         start = ${matches[1]},
                         END = ${matches[2]},
-                        countrycode = 'SE'
+                        countrycode = 'SE',
+                        name = ${contest_name.substring(0, 59)}
+                    WHERE compid = ${compid}
                 `);
             }
         }
     }
 
     // If we have a location then update
-    const ssLocation = undefined;
     location = (
         await mysql_db.query(escape`
             SELECT
@@ -979,6 +995,7 @@ async function update_contest(contest_name, info) {
                 lg
             FROM
                 competition
+            WHERE compid = ${compid}
         `)
     )[0];
 
@@ -998,22 +1015,23 @@ async function update_contest(contest_name, info) {
         // clear it all down, we will load all of this from soaring spot
         // NOTE: this should not be cleared every time, even though at present it is
         // TBD!!
+        // All scoped to compid so one competition's deep reset does not touch other competitions.
         mysql_db
             .transaction()
-            .query(escape`DELETE FROM classes`)
+            .query(escape`DELETE FROM pilots WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM pilotresult WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM contestday WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM compstatus WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM taskleg WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM tasks WHERE class IN (SELECT class FROM classes WHERE compid = ${compid})`)
+            .query(escape`DELETE FROM classes WHERE compid = ${compid}`)
             .query(escape`
                 DELETE FROM logindetails
                 WHERE
                     type = "P"
             `)
-            .query(escape`DELETE FROM pilots`)
-            .query(escape`DELETE FROM pilotresult`)
-            .query(escape`DELETE FROM contestday`)
-            .query(escape`DELETE FROM compstatus`)
-            .query(escape`DELETE FROM taskleg`)
-            .query(escape`DELETE FROM tasks`)
             .commit();
-        console.log('deep update requested, deleted everything');
+        console.log(`deep update requested, deleted everything for compid=${compid}`);
     }
 }
 

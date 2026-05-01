@@ -41,7 +41,10 @@ export const taskSlice = createSlice({
     reducers: {
         updateTask: (state, {payload}: {payload: TaskProto}) => {
             try {
-                state.task = payload.taskJSON ? (JSON.parse(payload.taskJSON) as Task) : undefined;
+                state.task =
+                    payload.rules && payload.details
+                        ? ({rules: payload.rules, details: payload.details, legs: payload.legs ?? []} as unknown as Task)
+                        : undefined;
                 state.geoJSON = payload.geoJSON ? (JSON.parse(payload.geoJSON) as (typeof state)['geoJSON']) : undefined;
                 state.startOpen = payload.startOpen ?? true;
                 state.taskReceived = true;
@@ -72,7 +75,7 @@ export const taskSlice = createSlice({
         selectStartOpen: (state, vc: ClassName) => (state.className == vc ? state.startOpen : true),
         selectTaskGeoJSON: (state, vc: ClassName, handicap: number | undefined) =>
             state.className == vc //
-                ? state.task?.rules?.dh
+                ? state.task?.rules?.dh && handicap
                     ? taskGeoJSON(adjustDistanceHandicapTask(state.task as unknown as Task, handicap))
                     : state.geoJSON
                 : undefined

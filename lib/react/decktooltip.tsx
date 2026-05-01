@@ -1,16 +1,20 @@
 import {displayHeight, displayClimb} from './displayunits';
 import {TZ, ScoreData} from '../types';
 
+type TFn = (key: string, opts?: Record<string, any>) => string;
+
 export function deckTooltip({
     object,
     picked,
     layer,
     coordinate,
     map,
-    //    pilotScores,
+    pilotScores,
     lang,
     tz,
-    units
+    units,
+    modifierHeld,
+    t
 }: //
 {
     object?: any;
@@ -18,13 +22,15 @@ export function deckTooltip({
     layer: any;
     coordinate?: number[];
     map: any;
-    //    pilotScores: ScoreData;
+    pilotScores: ScoreData;
     lang: string;
     tz: TZ;
     units: number | boolean;
+    modifierHeld?: boolean;
+    t: TFn;
 }) {
     if (!picked) {
-        if (process.env.NODE_ENV == 'development' && coordinate) {
+        if (process.env.NODE_ENV == 'development' && coordinate && modifierHeld) {
             return `[${coordinate.map((x) => x.toFixed(4))}, ${map?.queryTerrainElevation({lat: coordinate[1], lng: coordinate[0]}, {exaggerated: false})?.toFixed(0)}]`;
         }
         return null;
@@ -33,7 +39,7 @@ export function deckTooltip({
         // Turnpoint
         if (object.type == 'Feature' && object.properties) {
             const tp = object.properties;
-            return {html: `<strong>${tp.leg} ${tp.trigraph}</strong>: ${tp.name} 📏 ${tp.r1}km<br/>`};
+            return {html: `<strong>${tp.leg} ${tp.trigraph}</strong>: ${tp.name} 📏 ${tp.r1}${t('units.km')}<br/>`};
         }
 
         let response = '';
@@ -48,12 +54,12 @@ export function deckTooltip({
         }
 
         if (time) {
-            /*            if (compno && pilotScores[compno]?.stats?.segments) {
-                const segment = pilotScores[compno].stats?.segments.find((c) => c.start <= time && time <= c.end);
+            if (compno && pilotScores?.[compno]?.stats?.segments) {
+                const segment = pilotScores[compno].stats.segments.find((c) => c.start <= time && time <= c.end);
                 if (segment) {
                     object.stats = segment;
                 }
-            } */
+            }
             // Figure out what the local language is for international date strings
             const dt = new Date(time * 1000);
             response += `✈️ ${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
@@ -86,15 +92,18 @@ export function deckTooltip({
             const elapsed = stats.end - stats.start;
 
             if (elapsed > 30) {
-                response += `<br/> ${stats.state} for ${elapsed} seconds<br/>`;
+                response += `<br/> ${t('tooltip.thermal_for_seconds', {state: stats.state, seconds: elapsed})}<br/>`;
 
                 if (stats.state == 'thermal') {
-                    response += `average: ${displayClimb(stats.avgDelta, units)}`;
+                    response += t('tooltip.thermal_average', {climb: displayClimb(stats.avgDelta, units)});
                 } else if (stats.state == 'straight') {
-                    response += `distance: ${stats.distance} km at a speed of ${(stats.distance / (elapsed / 3600)).toFixed(0)} kph<br/>` + `L/D ${((stats.distance * 1000) / -stats.delta).toFixed(1)}`;
+                    response +=
+                        t('tooltip.straight_distance_speed', {distance: stats.distance, speed: (stats.distance / (elapsed / 3600)).toFixed(0)}) +
+                        '<br/>' +
+                        t('tooltip.straight_ld', {ld: ((stats.distance * 1000) / -stats.delta).toFixed(1)});
                 }
-                if (stats.wind.direction) {
-                    response += `<br/>wind speed: ${stats.wind.speed.toFixed(0)} kph @ ${stats.wind.direction.toFixed(0)}°`;
+                if (stats.wind?.direction) {
+                    response += `<br/>${t('tooltip.wind', {speed: stats.wind.speed?.toFixed(0), direction: stats.wind.direction.toFixed(0)})}`;
                 }
             }
         }

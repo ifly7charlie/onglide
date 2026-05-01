@@ -114,13 +114,18 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                     // and the next Turn Point" — Turn Point is the center coordinate, not the OZ boundary.
                     // Outlanding position is the most favourable fix (closest to TP center).
                     currentLeg.distance = (Math.round(Math.max(task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToTPCenter, 0) * 10) / 10) as DistanceKM;
-                    currentLeg.point = taskStatus.closestToTPCenterPoint;
+                    if (currentLeg.distance > 0) {
+                        currentLeg.point = taskStatus.closestToTPCenterPoint;
+                    }
                     taskStatus.scoringClosestPoint = taskStatus.closestToTPCenterPoint;
                 } else {
                     // In-progress: use boundary distance for live display (more meaningful to viewers)
                     currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
-                    currentLeg.point = preparedLegs[taskStatus.currentLeg]
-                        .scoredPointRemaining(Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (task.legs[taskStatus.currentLeg].legDistanceAdjust || 0), task.legs[taskStatus.currentLeg].length) as DistanceKM);
+                    if (currentLeg.distance > 0) {
+                        const leg = task.legs[taskStatus.currentLeg];
+                        currentLeg.point = preparedLegs[taskStatus.currentLeg]
+                            .scoredPointRemaining(Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (leg.legDistanceAdjust || 0), leg.length + (leg.legDistanceAdjust || 0)) as DistanceKM);
+                    }
                     taskStatus.scoringClosestPoint = taskStatus.closestToNextSectorPoint;
                 }
                 taskStatus.distance = (Math.round((taskStatus.distance + currentLeg.distance) * 10) / 10) as DistanceKM;

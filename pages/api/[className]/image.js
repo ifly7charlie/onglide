@@ -36,7 +36,6 @@ export default async function image(req, res) {
     )?.[0]?.image;
 
     if (!imageBlob) {
-        console.log('no image');
         res.status(404).json({error: 'no image found'});
         return;
     }

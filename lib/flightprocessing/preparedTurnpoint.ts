@@ -317,19 +317,25 @@ export class PreparedTurnpoint {
         polypoints.push(...addArc(from, to, r1, !!r2));
 
         // Inner/second arc combinations
-        if (a2 !== 0 && !Number.isNaN(a2) && !Number.isNaN(r2) && Math.round(Math.abs(a2)) === Math.round(Math.abs(a1)) && r1 !== r2 && r2 !== 0) {
-            // Equal half-angles, different radii => annular wedge; inner arc reversed (order only)
-            polypoints.push(...addArc(centerRad + a1rad, centerRad - a1rad, r2, true));
-            polypoints.push(polypoints[0]);
-        } else if (a2 !== 0 && !Number.isNaN(a2) && !Number.isNaN(r2) && a1 !== a2 && r1 !== r2) {
-            // Different half-angles: two inner arcs with center point between
-            polypoints.push(...addArc(centerRad + a1rad, centerRad + a2rad, r2, false));
-            if (a2 !== 180) polypoints.push([centerLng, centerLat]);
-            polypoints.push(...addArc(centerRad - a2rad, centerRad - a1rad, r2, false));
+        // r2/a2 is the APPROACH lobe, centered on approachMid (opposite to departureMid).
+        // When a1+a2 >= 180 the lobes meet or overlap; the boundary at r2 runs continuously
+        // from depRight to depLeft through the back. When a1+a2 < 180 there is a gap
+        // bridged through the center point.
+        if (a2 !== 0 && !Number.isNaN(a2) && r2 !== 0) {
+            if (a1 + a2 >= 180) {
+                // Approach arc at r2 from depRight to depLeft through the back
+                polypoints.push(...addArc(centerRad + a1rad, centerRad - a1rad, r2, true));
+            } else {
+                // Gap between lobes: connect through center to approach arc
+                const approachCenterRad = centerRad + Math.PI;
+                polypoints.push([centerLng, centerLat]);
+                polypoints.push(...addArc(approachCenterRad - a2rad, approachCenterRad + a2rad, r2, false));
+                polypoints.push([centerLng, centerLat]);
+            }
             polypoints.push(polypoints[0]);
         } else if (a2 === 0 && r1 !== r2 && r2 !== 0) {
-            // a2 configured as 0 but r2 present: inner arc from +a1 to −a1 CCW
-            polypoints.push(...addArc(centerRad + a1rad, centerRad - a1rad, r2, false));
+            // Annular departure wedge (no approach lobe): inner arc the short way
+            polypoints.push(...addArc(centerRad - a1rad, centerRad + a1rad, r2, true).reverse());
         } else if (a1 !== 180) {
             // Simple wedge: add center again at end
             polypoints.push([centerLng, centerLat]);
@@ -351,6 +357,15 @@ export class PreparedTurnpoint {
             const last = coerced[coerced.length - 1];
             if (last && Math.abs(last[0] - x) < 1e-12 && Math.abs(last[1] - y) < 1e-12) continue;
             coerced.push([x, y]);
+        }
+
+        // Ensure GeoJSON polygon ring closure (first == last)
+        if (coerced.length > 1) {
+            const first = coerced[0];
+            const last = coerced[coerced.length - 1];
+            if (Math.abs(first[0] - last[0]) > 1e-12 || Math.abs(first[1] - last[1]) > 1e-12) {
+                coerced.push([first[0], first[1]]);
+            }
         }
 
         return {
@@ -476,7 +491,7 @@ export class PreparedTurnpoint {
 
         // Intersections with the two arcs (outer radii)
         if (this.hasDep) acc = this._circleIntersectionsReduce(acc, this.departureMid, invPrev, invPos, this.r1m, this.leg.a1);
-        if (this.hasApp) acc = this._circleIntersectionsReduce(acc, this.departureMid, invPrev, invPos, this.r2m, this.leg.a2);
+        if (this.hasApp) acc = this._circleIntersectionsReduce(acc, this.approachMid, invPrev, invPos, this.r2m, this.leg.a2);
 
         // Intersections with radial edges - they only exist if it's not a circle
         if (this.hasDepWedge) {

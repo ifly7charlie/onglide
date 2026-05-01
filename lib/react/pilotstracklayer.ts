@@ -74,7 +74,6 @@ export function pilotsTrackLayer(
         return new OgnTripsLayer({
             id: compno + p.trackVersion,
             compno: compno,
-            beforeId: 'tpe',
             data: {
                 length: p.segmentIndex, // note this is not segmentIndex-1 (segmentIndex is one we are in, indices[segmentIndex] is defined)
                 startIndices: p.indices,

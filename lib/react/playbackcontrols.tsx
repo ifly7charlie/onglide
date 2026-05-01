@@ -1,4 +1,6 @@
 import * as React from 'react';
+import {useTranslation} from 'next-i18next/pages';
+import {useRouter} from 'next/router';
 import {styled} from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -95,6 +97,9 @@ const PlaybackControls = ({
     setReplayTime: (t: Epoch | undefined) => void;
     tz: TZ;
 }) => {
+    const {t} = useTranslation('common');
+    const router = useRouter();
+    const lang = router.locale ?? 'en';
     function formatDuration(value: number) {
         const minute = Math.floor(value / 60);
         const secondLeft = value - minute * 60;
@@ -128,9 +133,9 @@ const PlaybackControls = ({
         doSetTime(replayTime);
     }, [className, scoreId]);
 
-    function formatTimes(t) {
-        const dt = new Date(t * 1000);
-        return `${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})}`;
+    function formatTimes(time: number) {
+        const dt = new Date(time * 1000);
+        return `${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})}`;
     }
 
     if (earliestScore > replayEndTime) {
@@ -156,7 +161,7 @@ const PlaybackControls = ({
                     sx={replayTime ? sliderSxReplay : !online ? sliderOffline : undefined}
                 />
                 <BoxAfter>
-                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>{online ? 'Live' : 'Offline'}</TinyText>}
+                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>{online ? t('connection.live') : t('connection.offline')}</TinyText>}
                     <TinyText>+{formatDuration(replayEndTime - earliestScore)}</TinyText>
                 </BoxAfter>
             </Widget>

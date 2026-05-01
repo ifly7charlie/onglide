@@ -8,6 +8,8 @@
 
 import {useState, useMemo, useCallback, useEffect, memo} from 'react';
 import {useRouter} from 'next/router';
+import Link from 'next/link';
+import {useTranslation} from 'next-i18next/pages';
 
 import {usePilots} from './loaders';
 
@@ -20,13 +22,32 @@ import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as
 import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faLinkSlash, faSpinner} from '@fortawesome/free-solid-svg-icons';
+import {faLinkSlash, faSpinner, faCaretDown, faCaretUp} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails} from './taskdetails';
 import {OptionalDurationMM} from './optional';
+import {Sorting} from './sorting';
+import {Options as OptionsPanel} from './options';
+import {getValidSortOrder} from './pilot-sorting';
 
 import Sponsors from './sponsors';
+
+import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {faGlobe} from '@fortawesome/free-solid-svg-icons';
+
+function useIsMobile() {
+    const [m, setM] = useState(false);
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const mq = window.matchMedia('(max-width: 991.98px)');
+        const u = () => setM(mq.matches);
+        u();
+        mq.addEventListener('change', u);
+        return () => mq.removeEventListener('change', u);
+    }, []);
+    return m;
+}
 
 import {proposedUrl} from './fixupUrls';
 
@@ -62,6 +83,8 @@ interface WsStatus {
 export const OgnFeed = memo(
     //
     function OgnFeed({
+        comp,
+        compid,
         vc,
         datecode,
         tz,
@@ -71,10 +94,11 @@ export const OgnFeed = memo(
         setViewport,
         options,
         setOptions,
-        handicapped,
-        notes
+        handicapped
     }: //
     {
+        comp: any;
+        compid: string;
         vc: ClassName;
         datecode: Datecode;
         tz: TZ;
@@ -85,9 +109,9 @@ export const OgnFeed = memo(
         options: Options;
         setOptions: Function;
         handicapped: any;
-        notes: string;
     }) {
         const {pilots, isPLoading} = usePilots(vc);
+        const {t} = useTranslation('common');
         //        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
@@ -155,14 +179,20 @@ export const OgnFeed = memo(
         });
 
         // Do we have a loaded set of details?
-        const valid = !isPLoading && pilots && Object.keys(pilots).length > 0;
+        const pilotKeys = pilots ? Object.keys(pilots) : [];
+        const valid = !isPLoading && pilotKeys.length > 0;
         const connected = wsStatus.state == 'open' || (wsStatus.state == 'retry' && (wsStatus.retry ?? 0) < 16);
+
+        // If only a single pilot is available, treat them as implicitly
+        // selected. The user-explicit `selectedCompno` still wins so
+        // click-to-toggle behaviour is preserved when there are more.
+        const effectiveSelectedCompno = (selectedCompno ?? (pilotKeys.length === 1 ? (pilotKeys[0] as Compno) : undefined)) as Compno;
 
         const connectionStatus = useMemo(() => {
             const connectionStatusO = {
-                connecting: ['Connecting to live feed...', <FontAwesomeIcon icon={faSpinner} spin />],
-                retry: (wsStatus.retry ?? 0) < 16 ? null : ['Connecting to live feed...', <FontAwesomeIcon icon={faSpinner} spin />],
-                closed: ['Connection to tracking is closed, please change the selected class to retry', <FontAwesomeIcon icon={faLinkSlash} />]
+                connecting: [t('connection.connecting'), <FontAwesomeIcon icon={faSpinner} spin />],
+                retry: (wsStatus.retry ?? 0) < 16 ? null : [t('connection.connecting'), <FontAwesomeIcon icon={faSpinner} spin />],
+                closed: [t('connection.closed'), <FontAwesomeIcon icon={faLinkSlash} />]
             }[wsStatus.state ?? 'open'];
 
             if (connectionStatusO) {
@@ -175,7 +205,7 @@ export const OgnFeed = memo(
                 );
             }
             return null;
-        }, [wsStatus.state, wsStatus.retry]);
+        }, [wsStatus.state, wsStatus.retry, t]);
 
         const setCompno = useCallback(
             (cn) => {
@@ -189,11 +219,12 @@ export const OgnFeed = memo(
 
         // Cache the calculated times and only refresh every 60 seconds
         const status = useMemo(() => {
+            const lang = router.locale ?? 'en';
             return (
-                (wsStatus?.at ? 'Updated at ' + formatTimes(wsStatus.at, tz) + ' | ' : '') + //
-                ` <a href='#' title='number of viewers'>${wsStatus.listeners} 👥</a> | <a href='#' title='number of planes currently tracked'>${wsStatus.airborne} ✈️  </a>`
+                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, lang)}) + ' | ' : '') + //
+                ` <a href='#' title='${t('connection.viewers')}'>${wsStatus.listeners} 👥</a> | <a href='#' title='${t('connection.tracked_planes')}'>${wsStatus.airborne} ✈️  </a>`
             );
-        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc]);
+        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, router.locale]);
 
         // Scale map to fit the bounds
         const fitBounds = useCallback(() => {
@@ -204,71 +235,196 @@ export const OgnFeed = memo(
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
         useEffect(() => {
-            sendMessage(JSON.stringify({compno: selectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime}));
-        }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, selectedCompno, sendMessage]); //
+            sendMessage(JSON.stringify({compno: effectiveSelectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime}));
+        }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, effectiveSelectedCompno, sendMessage]); //
 
-        return (
-            <>
-                <div className={'resizingMap'}>
-                    <MApp //
-                        key="map"
-                        vc={vc}
-                        follow={follow}
-                        setFollow={setFollow}
-                        setSelectedCompno={setCompno}
-                        options={options}
-                        setOptions={setOptions}
-                        tz={tz}
+        const onClassChange = useCallback(
+            (nextClass: string) => {
+                setSelectedCompno(null);
+                router.push('/' + compid + '?className=' + nextClass, undefined, {shallow: true}).then(() => setOptions({...options, zoomTask: true}));
+            },
+            [compid, options, router, setOptions, setSelectedCompno]
+        );
+
+        const isMobile = useIsMobile();
+        const [drawerOpen, setDrawerOpen] = useState(false);
+
+        const sortOrder = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
+        const setSort = useCallback(
+            (key: any) => {
+                setOptions(_cloneDeep({...options, sortKey: key}));
+            },
+            [options, setOptions]
+        );
+
+        const map = (
+            <div className={'resizingMap'}>
+                <MApp //
+                    key="map"
+                    comp={comp}
+                    vc={vc}
+                    follow={follow}
+                    setFollow={setFollow}
+                    setSelectedCompno={setCompno}
+                    options={options}
+                    setOptions={setOptions}
+                    tz={tz}
+                    replayTime={replayTime}
+                    setReplayTime={setReplayTime}
+                    viewport={viewport}
+                    setViewport={setViewport}
+                    selectedCompno={effectiveSelectedCompno}
+                    selectedHandicap={effectiveSelectedCompno ? pilots?.[effectiveSelectedCompno]?.handicap : undefined}
+                    status={status}
+                />
+            </div>
+        );
+
+        const playback = (
+            <div className="playbackbar">
+                {valid && connected ? (
+                    <PlaybackControls //
+                        {...availableScores}
                         replayTime={replayTime}
                         setReplayTime={setReplayTime}
-                        viewport={viewport}
-                        setViewport={setViewport}
-                        selectedCompno={selectedCompno}
-                        selectedHandicap={selectedCompno ? pilots?.[selectedCompno]?.handicap : undefined}
-                        status={status}
+                        tz={tz}
                     />
-                </div>
-                <div className="resultsOverlay" key="results">
-                    <div className="resultsUnderlay">
-                        {notes && notes != '' && (
-                            <>
-                                <span style={{clear: 'both', color: 'red'}}>{notes}</span>
-                                <br />
-                            </>
-                        )}
-                        <TaskDetails vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
-                        {connectionStatus}
+                ) : null}
+            </div>
+        );
+
+        if (isMobile) {
+            return (
+                <>
+                    {map}
+                    <div className="mobile-top-strip">
+                        <div className="mobile-strip-header">
+                            <Link href="/" className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+                                <FontAwesomeIcon icon={faGlobe} />
+                            </Link>
+                            <div className="mobile-comp-name">{compShortName(comp)}</div>
+                            <button
+                                className="drawer-toggle"
+                                onClick={() => setDrawerOpen((o) => !o)}
+                                aria-expanded={drawerOpen}
+                                title={drawerOpen ? t('drawer.hide_menu') : t('drawer.show_menu')}
+                            >
+                                <FontAwesomeIcon icon={drawerOpen ? faCaretUp : faCaretDown} />
+                            </button>
+                        </div>
                         {valid && connected ? (
-                            <PilotList
+                            <PilotList //
                                 key="pilotList"
                                 pilots={pilots}
-                                selectedPilot={selectedCompno}
+                                selectedPilot={effectiveSelectedCompno}
                                 setSelectedCompno={setCompno}
                                 now={replayTime}
                                 live={availableScores.live}
                                 tz={tz}
                                 options={options}
-                                setOptions={setOptions}
-                                handicapped={handicapped}
+                                sortOrder={sortOrder}
+                                horizontal
                             />
-                        ) : null}
+                        ) : (
+                            <div className="mobile-strip-placeholder">{connectionStatus}</div>
+                        )}
                     </div>
-                </div>
-                <div className="details" style={{paddingTop: '5px'}}>
-                    {valid && connected && (replayTime || !selectedCompno) ? (
-                        <PlaybackControls //
-                            {...availableScores}
-                            replayTime={replayTime}
-                            setReplayTime={setReplayTime}
-                            tz={tz}
-                        />
+                    {drawerOpen ? (
+                        <div className="mobile-drawer">
+                            {(comp?.classes?.length ?? 0) > 1 ? (
+                                <div className="drawer-group">
+                                    <div className="drawer-label">{t('drawer.class')}</div>
+                                    <SidePanelClassTabs comp={comp} vc={vc} onClassChange={onClassChange} />
+                                </div>
+                            ) : null}
+                            <div className="drawer-group">
+                                <div className="drawer-label">{t('drawer.display')}</div>
+                                <div className="sidepanel-tools">
+                                    <OptionsPanel options={options} setOptions={setOptions} multipleClasses={(comp?.classes?.length ?? 0) > 1} />
+                                </div>
+                            </div>
+                            <div className="drawer-group">
+                                <div className="drawer-label">{t('drawer.sort_by')}</div>
+                                <div className="sidepanel-section">
+                                    <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
+                                </div>
+                            </div>
+                            {/* notes block disabled — DB column not currently populated; restore wiring once it is.
+                            {notes && notes != '' && (
+                                <div className="sidepanel-section" style={{color: 'red'}}>
+                                    {notes}
+                                </div>
+                            )}
+                            */}
+                            <div className="drawer-group">
+                                <div className="sidepanel-section">
+                                    <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} defaultOpen />
+                                    {connectionStatus}
+                                </div>
+                            </div>
+                        </div>
                     ) : null}
-                    {selectedCompno ? ( //
-                        <Details compno={selectedCompno} pilot={pilots[selectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
-                    ) : (
-                        <Sponsors at={wsStatus.at} />
-                    )}
-                </div>
+                    {effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? (
+                        <div className="mobile-pilot-details">
+                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
+                        </div>
+                    ) : null}
+                    {playback}
+                </>
+            );
+        }
+
+        return (
+            <>
+                {map}
+                <SidePanel //
+                    comp={comp}
+                    vc={vc}
+                    onClassChange={onClassChange}
+                    options={options}
+                    setOptions={setOptions}
+                    head={
+                        <>
+                            {/* notes block disabled — DB column not currently populated; restore wiring once it is.
+                            {notes && notes != '' && (
+                                <div className="sidepanel-section" style={{color: 'red'}}>
+                                    {notes}
+                                </div>
+                            )}
+                            */}
+                            <div className="sidepanel-section">
+                                <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
+                                {connectionStatus}
+                            </div>
+                        </>
+                    }
+                    footer={
+                        effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? ( //
+                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
+                        ) : (
+                            <Sponsors at={wsStatus.at} />
+                        )
+                    }
+                >
+                    {valid && connected ? (
+                        <div className="sidepanel-section">
+                            <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
+                            <PilotList //
+                                key="pilotList"
+                                pilots={pilots}
+                                selectedPilot={effectiveSelectedCompno}
+                                setSelectedCompno={setCompno}
+                                now={replayTime}
+                                live={availableScores.live}
+                                tz={tz}
+                                options={options}
+                                sortOrder={sortOrder}
+                                vertical
+                            />
+                        </div>
+                    ) : null}
+                </SidePanel>
+                {playback}
             </>
         );
     },
@@ -279,15 +435,10 @@ export const OgnFeed = memo(
         o.datecode == n.datecode &&
         _isEqual(o.viewport, n.viewport) &&
         _isEqual(o.options, n.options) &&
-        o.notes === n.notes &&
         o.handicapped === n.handicapped
-    //    function OgnFeed({vc, datecode, tz, selectedCompno, setSelectedCompno, viewport, setViewport, options, setOptions, measureFeatures, handicapped, notes}) {
 );
 
-function formatTimes(t, tz: TZ) {
-    // Figure out what the local language is for international date strings
-    const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
-
+function formatTimes(time: number, tz: TZ, lang: string) {
     const competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
         ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                 <span style={{color: 'grey'}}>
@@ -296,11 +447,10 @@ function formatTimes(t, tz: TZ) {
           </a>`
         : '';
 
-    // And then produce a string to display it locally
-    const dt = new Date(t * 1000);
-    const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((t + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
+    const dt = new Date(time * 1000);
+    const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((time + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
     return (
-        `<a href='#' title='competition time'>${dt.toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
+        `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
         `<a href='#' title='your time'>${dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`
     );
 }

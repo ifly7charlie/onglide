@@ -21,7 +21,7 @@ export function buildTask(igcData: IGCData): {task: Task; geoJSON: ReturnType<ty
         return null;
     }
 
-    const isAAT = Array.from(ozParams.values()).some((oz) => oz.aat);
+    const isAAT = Array.from(ozParams.values()).some((oz) => oz.aat) || (taskParams.taskTimeSecs != null && taskParams.taskTimeSecs > 0);
 
     // Build TaskLeg array from C records + LSEEYOU OZ params
     const legs: TaskLeg[] = taskDeclaration.map((tp, index) => {
@@ -93,7 +93,7 @@ export function buildTask(igcData: IGCData): {task: Task; geoJSON: ReturnType<ty
             a1: a1 as Bearing,
             r2: r2 as DistanceKM,
             a2: a2 as Bearing,
-            a12: 0 as Bearing, // computed by PreparedTurnpoint from direction
+            a12: (oz?.a12 ?? 0) as Bearing, // from LSEEYOU A12, or computed by PreparedTurnpoint from direction
             type,
             direction,
             length: length as DistanceKM,

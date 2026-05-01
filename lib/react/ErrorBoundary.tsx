@@ -1,11 +1,13 @@
-class ErrorBoundary extends React.Component {
-    state: {
-        hasError: boolean;
-    };
+import * as React from 'react';
+import {withTranslation, type WithTranslation} from 'next-i18next/pages';
 
-    constructor(props) {
+interface ErrorBoundaryProps extends WithTranslation {
+    children?: React.ReactNode;
+}
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, {hasError: boolean}> {
+    constructor(props: ErrorBoundaryProps) {
         super(props);
-
         // Define a state variable to track whether is an error or not
         this.state = {hasError: false};
     }
@@ -21,12 +23,12 @@ class ErrorBoundary extends React.Component {
     render() {
         // Check if the error is thrown
         if (this.state.hasError) {
-            // You can render any custom fallback UI
+            const {t} = this.props;
             return (
                 <div>
-                    <h2>Oops, there is an error!</h2>
+                    <h2>{t('errors.boundary_title')}</h2>
                     <button type="button" onClick={() => this.setState({hasError: false})}>
-                        Try again?
+                        {t('errors.try_again')}
                     </button>
                 </div>
             );
@@ -38,4 +40,4 @@ class ErrorBoundary extends React.Component {
     }
 }
 
-export default ErrorBoundary;
+export default withTranslation('common')(ErrorBoundary);

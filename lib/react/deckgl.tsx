@@ -1,24 +1,39 @@
 'use client';
 
 import {useCallback, useMemo, useRef, useEffect, useState} from 'react';
+import {useRouter} from 'next/router';
+import {useTranslation} from 'next-i18next/pages';
 import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
 
-import Map, {Source, Layer, LayerProps, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl';
+import Map, {Source, Layer, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl/maplibre';
+import maplibregl from 'maplibre-gl';
+import {Protocol as PMTilesProtocol} from 'pmtiles';
+
+import {buildMapStyle} from './mapStyle';
+
+// Register the pmtiles:// protocol once, client-side only
+if (typeof window !== 'undefined' && !(maplibregl as any).__onglidePmtilesRegistered) {
+    maplibregl.addProtocol('pmtiles', new PMTilesProtocol().tile);
+    (maplibregl as any).__onglidePmtilesRegistered = true;
+}
+
+const ONGLIDE_MAP_STYLE = buildMapStyle();
 
 import {deckTooltip} from './decktooltip';
 
-import type {Epoch, ClassName, Compno, Options, PilotScore, TZ} from '../types';
+import type {Epoch, ClassName, Compno, Options, TZ} from '../types';
 import {TaskUp} from '../types';
 
 import {distanceLineLabelStyle} from './distanceLine';
 
 import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
-import {selectPilotScore} from '../redux/scoresSlice';
+import {selectPilotScore, selectAllScores, selectOptimalGrid} from '../redux/scoresSlice';
 import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {ErrorBoundary} from 'react-error-boundary';
 
 import {assembleHullLine} from './hullLine';
+import {useOptimalGridLayers, OptimalGridSources} from './optimalGridLayers';
 
 function DeckGLOverlay(
     props: MapboxOverlayProps & {
@@ -30,11 +45,8 @@ function DeckGLOverlay(
     return null;
 }
 
-// Figure out where the sun should be
-import SunCalc from 'suncalc';
-
 // For displaying rain radar
-import {AttributionControl} from 'react-map-gl';
+import {AttributionControl} from 'react-map-gl/maplibre';
 import {RadarOverlay} from './rainradar';
 
 import {MeasureLayers, useMeasure} from './measure';
@@ -48,7 +60,24 @@ import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} 
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
 import {pilotsTrackLayer} from './pilotstracklayer';
+import {homeLocationLayer} from './homeLocationLayer';
 //import {turnpointLayer} from './turnpointlayer';
+
+import {registerMapIcons} from './mapIcons';
+import {
+    DmPointStyle,
+    hullLineStyle,
+    hullPointStyle,
+    maxLineStyle,
+    maxSignStyle,
+    minLineStyle,
+    minSignStyle,
+    scoredLineStyle,
+    scoringPointStyle,
+    suggestedLineStyle,
+    turnpointStyle2d,
+    turnpointStyle3d
+} from './mapLayerStyles';
 
 export default function MApp(props: {
     options: Options;
@@ -65,6 +94,7 @@ export default function MApp(props: {
     status: string; // status line
     replayTime: Epoch;
     setReplayTime: (t: Epoch | undefined) => void;
+    comp?: any;
 }) {
     // For remote updating of the map
     const mapRef = useRef<MapRef | null>(null);
@@ -75,6 +105,8 @@ export default function MApp(props: {
 
     // Score details for selected pilot
     const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
+    const optimalGrid = useSelector((state) => selectOptimalGrid(state, selectedCompno, props.replayTime));
+    const pilotScores = useSelector((state) => selectAllScores(state, props.replayTime));
     const latestUpdate = useSelector(selectLatestUpdate);
     const selectedPosition = useSelector((state) => (selectedCompno ? selectPilotPosition(state, selectedCompno, props.replayTime) : undefined));
 
@@ -95,7 +127,37 @@ export default function MApp(props: {
     const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
-    const lang = useMemo(() => (navigator.languages != undefined ? navigator.languages[0] : navigator.language), []);
+    const router = useRouter();
+    const {t} = useTranslation('common');
+
+    // Unmount the deck overlay around any route change. The deck.gl
+    // MapboxOverlay/MapLibre teardown is racy: when the route changes (e.g.
+    // back to the globe landing page) MapLibre can finalize a frame after
+    // the deck instance has been disposed, dereferencing a null viewport
+    // (`TypeError: null is not an object (evaluating 'viewport.id')`).
+    // Flipping this flag on `routeChangeStart` lets React commit the overlay
+    // unmount — which calls `MapboxOverlay.onRemove` and deregisters the
+    // deck custom layer from the painter — before MapLibre itself is torn
+    // down by the page unmount.
+    //
+    // For routes that keep this component mounted (e.g. switching class
+    // within the same competition) we reset the flag on routeChangeComplete
+    // so the overlay re-mounts with the new data.
+    const [unmounting, setUnmounting] = useState(false);
+    useEffect(() => {
+        const onStart = () => setUnmounting(true);
+        const onSettled = () => setUnmounting(false);
+        router.events.on('routeChangeStart', onStart);
+        router.events.on('routeChangeComplete', onSettled);
+        router.events.on('routeChangeError', onSettled);
+        return () => {
+            router.events.off('routeChangeStart', onStart);
+            router.events.off('routeChangeComplete', onSettled);
+            router.events.off('routeChangeError', onSettled);
+        };
+    }, [router]);
+
+    const lang = router.locale ?? (typeof navigator !== 'undefined' ? (navigator.languages?.[0] ?? navigator.language) : 'en');
     const radarOverlay = RadarOverlay({options, tz});
 
     // What task are we using on display
@@ -106,14 +168,15 @@ export default function MApp(props: {
 
     const legAdvance = task && task.rules.aat && selectedScore?.inSector && selectedScore.legs[selectedScore.currentLeg + 1]?.actual.distance > 10;
 
-    const nextPoint =
-        !task || !selectedScore
-            ? null //
-            : !selectedScore?.utcStart
-              ? task.legs[0].point // if we are before start
-              : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
-                ? task.legs.at(-1)?.point // or at finish or only finish left
-                : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0))?.point; // mindistance is from us so this is the next point
+    const nextPoint = (() => {
+        if (!task || !selectedScore) return null;
+        const leg = !selectedScore?.utcStart
+            ? task.legs[0]
+            : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
+              ? task.legs.at(-1)
+              : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0));
+        return leg ? ([leg.nlng, leg.nlat] as [number, number]) : undefined;
+    })();
 
     const handleKeyPress = useCallback(
         (e) => {
@@ -204,9 +267,10 @@ export default function MApp(props: {
                         pointCheck(newScreenPoint.y, screenPoint.y, screenSizeY) || //
                         fbearing >> 3 != Math.round(props.viewport.bearing) >> 3)
                 ) {
-                    mapRef?.current?.flyTo({
+                    mapRef?.current?.easeTo({
                         center: [lng, lat],
-                        bearing: fbearing
+                        bearing: fbearing,
+                        duration: 600
                     });
                 }
             }
@@ -236,30 +300,46 @@ export default function MApp(props: {
         }
     }, [map2d, mapRef.current, props.viewport.pitch, isMoving]);
 
+    // Kill pan inertia — MapLibre's glide after drag release reprojects against
+    // the terrain mesh each frame, producing a visible "jump back and forwards"
+    // shift when terrain is enabled. `maxSpeed: 0` is how maplibre-gl v4 disables
+    // the inertia glide (the boolean `inertia` option from mapbox-gl was removed).
+    useEffect(() => {
+        const map = mapRef?.current?.getMap();
+        if (!map) return;
+        map.dragPan.enable({maxSpeed: 0});
+    }, [mapRef?.current]);
+
     // ======= ZOOM TO TASK EFFECT =========
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
         if (options.zoomTask && taskGeoJSONtp && mapRef?.current) {
             try {
-                const canvas = mapRef?.current?.getCanvasContainer();
-                const rect = canvas?.getBoundingClientRect?.() ?? {width: 0};
+                const map = mapRef.current.getMap();
+                // The sidebar UI is rendered outside the map container via CSS
+                // (.resizingMap { right: 390px }) — fitBounds should only pad for
+                // visual breathing room, not account for the sidebar again.
+                const padding = {top: 20, bottom: 20, left: 20, right: 20};
 
-                const overlayWidth = Math.max(Math.trunc(rect.width * 0.3), 275);
-                const offset = rect.width >= 992 ? {padding: {right: overlayWidth, left: 10, top: 10, bottom: 10}} : {};
-
-                const [minLng, minLat, maxLng, maxLat] = bbox(buffer(taskGeoJSONtp, 15));
+                const [minLng, minLat, maxLng, maxLat] = bbox(buffer(taskGeoJSONtp, 5));
                 setOptions({...options, zoomTask: false});
-                mapRef?.current?.fitBounds(
+
+                const camera = map.cameraForBounds(
                     [
                         [minLng, minLat],
                         [maxLng, maxLat]
                     ],
-                    {
-                        ...offset,
-                        pitch: map2d ? 0 : 70,
-                        bearing: 0 // north up
-                    }
+                    {padding, bearing: 0}
                 );
+                if (camera) {
+                    map.easeTo({
+                        center: camera.center,
+                        zoom: camera.zoom,
+                        pitch: map2d ? 0 : 70,
+                        bearing: 0,
+                        duration: 1000
+                    });
+                }
             } catch (e) {
                 console.error(e);
             }
@@ -267,13 +347,31 @@ export default function MApp(props: {
     }, [options.zoomTask, taskGeoJSONtp, vc, mapRef.current]);
 
     // ====== LOCK NORTH UP ===========
-    // If we are north up then reset north on bearing change
-    // NOOP for others
+    // If we are north up then reset north on bearing change.
+    // Debounced + larger dead-zone so MapLibre's 3D terrain-aware pan, which can
+    // introduce sub-degree bearing drift, doesn't repeatedly trigger a 250ms
+    // resetNorth animation that shows up as a pan-release stutter.
     useEffect(() => {
-        if (!isMoving && options.taskUp === 0 && Math.trunc(viewport.bearing / 2) != 0) {
-            mapRef?.current?.resetNorth({duration: 250});
-        }
+        if (options.taskUp !== 0) return;
+        const timer = setTimeout(() => {
+            const map = mapRef?.current;
+            if (!map || map.isMoving()) return;
+            const bearing = map.getBearing();
+            if (Math.abs(bearing) > 5) {
+                map.resetNorth({duration: 250});
+            }
+        }, 150);
+        return () => clearTimeout(timer);
     }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving]);
+
+    // Runtime-generated icon images for map symbols (track arrows, peaks,
+    // airports). Registered once per map instance; MapLibre preserves them
+    // across style mutations unless you call setStyle, which we don't.
+    useEffect(() => {
+        const map = mapRef?.current?.getMap();
+        if (!map) return;
+        registerMapIcons(map);
+    }, [mapRef.current]);
 
     //
     // Colour and style the task based on the selected pilot and their destination
@@ -284,33 +382,32 @@ export default function MApp(props: {
     // Do we have a loaded set of details?
     const valid = taskGeoJSON?.tp && taskGeoJSON?.track;
 
-    const skyLayer: any = {
-        id: 'sky',
-        type: 'sky',
-        paint: {
-            'sky-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0, 5, 0.3, 8, 1],
-            // set up the sky layer for atmospheric scattering
-            'sky-type': 'atmosphere',
-            // explicitly set the position of the sun rather than allowing the sun to be attached to the main light source
-            'sky-atmosphere-sun': getSunPosition(mapRef),
-            // set the intensity of the sun as a light source (0-100 with higher values corresponding to brighter skies)
-            'sky-atmosphere-sun-intensity': 5,
-            'sky-atmosphere-color': 'rgba(135, 206, 235, 1.0)'
-        }
-    };
-
     //
+    // Track modifier keys for dev tooltip
+    const modifierRef = useRef(false);
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            modifierRef.current = e.shiftKey || e.ctrlKey || e.metaKey;
+        };
+        window.addEventListener('keydown', onKey);
+        window.addEventListener('keyup', onKey);
+        return () => {
+            window.removeEventListener('keydown', onKey);
+            window.removeEventListener('keyup', onKey);
+        };
+    }, []);
+
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, lang, tz: props?.tz, units: props?.options?.units}), //
-        [vc, props.options.units, props.tz, mapRef?.current]
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, t}), //
+        [vc, props.options.units, props.tz, mapRef?.current, pilotScores, t, lang]
     );
 
     const attribution = useMemo(
         () => (
             <AttributionControl //
                 key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')}
-                customAttribution={[radarOverlay.attribution, props.status].join(' | ')}
+                customAttribution={[radarOverlay.attribution, props.status].filter(Boolean).join(' | ')}
                 style={attributionStyle}
             />
         ),
@@ -332,16 +429,26 @@ export default function MApp(props: {
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
-    // Adjust to satellite or not, style has all layers in it so we just need to change the visibility which is
-    // much quicker than changing the style.
+    // Adjust to satellite or not. Style has all layers in it; we just toggle visibility
+    // (much quicker than swapping styles). Vector base layers (fills/lines from the
+    // openmaptiles source) are hidden on satellite to prevent a flicker where streets
+    // briefly render before the raster arrives. Symbol layers (labels) stay visible
+    // in both modes. contour-line is the exception — it's an overlay shown only on
+    // satellite, hidden in street mode.
     const fixupMap = useCallback(() => {
         try {
             const map = mapRef?.current?.getMap();
-            if (map) {
-                map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
-                map.setLayoutProperty('background', 'visibility', mapStreet ? 'none' : 'visible');
-                map.setLayoutProperty('contour-line', 'visibility', mapStreet ? 'none' : 'visible');
+            if (!map) return;
+            const style = map.getStyle();
+            if (!style?.layers) return;
+            for (const layer of style.layers) {
+                if (layer.id === 'contour-line') {
+                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'none' : 'visible');
+                } else if ((layer as any).source === 'openmaptiles' && layer.type !== 'symbol') {
+                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
+                }
             }
+            map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
         } catch (e) {}
     }, [mapStreet, mapRef?.current]);
     useEffect(fixupMap, [mapStreet, mapRef?.current]);
@@ -370,29 +477,43 @@ export default function MApp(props: {
     // If we are on last leg of AAT then we stop showing construction lines
     const lastLeg = task?.rules?.aat && debouncedScore?.currentLeg == task?.legs?.length - 1;
 
+    const {optimalDirectionGeoJSON, baselineGeoJSON, hoverGeoJSON, onGridHover, onGridLeave, gridHoverEnabled} = useOptimalGridLayers({
+        optimalGrid,
+        debouncedScore,
+        selectedPosition,
+        taskGeoJSONtp,
+        lastLeg,
+        constructionLines: options.constructionLines,
+        aat: task?.rules?.aat
+    });
+
+    // Stable array ref for interactiveLayerIds — otherwise a new literal each render
+    // makes react-map-gl re-register hit testing on the Map every render.
+    const gridInteractiveLayerIds = useMemo(() => (gridHoverEnabled ? ['optimal_heatmap'] : undefined), [gridHoverEnabled]);
+
     // If we are displaying other pilots
     const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
+
+    // X-marker at the competition's site (competition.lt/lg). Hidden when
+    // zoomed out so it doesn't clutter the regional view — by zoom 8 the
+    // airfield itself is visible on the basemap, so the marker only adds
+    // value when the user has zoomed in to look at the site.
+    const HOME_MARKER_MIN_ZOOM = 8;
+    const homeMarker = (props.viewport?.zoom ?? 0) >= HOME_MARKER_MIN_ZOOM ? homeLocationLayer(props.comp?.competition?.lt, props.comp?.competition?.lg) : null;
 
     return (
         <ErrorBoundary fallback={<p style={{marginTop: 100}}>Please reload me!</p>}>
             <Map //
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}
-                onStyleData={fixupMap}
-                mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
-                mapStyle={'mapbox://styles/ifly7charlie/clmbzpceq01au01r7abhp42mm'}
-                reuseMaps={true}
+                mapStyle={ONGLIDE_MAP_STYLE}
                 ref={mapRef}
                 attributionControl={false}
+                interactiveLayerIds={gridInteractiveLayerIds}
+                onMouseMove={gridHoverEnabled ? onGridHover : undefined}
+                onMouseLeave={gridHoverEnabled ? onGridLeave : undefined}
             >
-                <DeckGLOverlay
-                    getTooltip={toolTip}
-                    onClick={onClick}
-                    onDragStart={onDragStart}
-                    layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer]} //
-                    interleaved={true}
-                />
                 {options.constructionLines && taskGeoJSON?.Dm ? (
                     <Source type="geojson" data={taskGeoJSON.Dm} key="y">
                         <Layer {...DmPointStyle} />
@@ -409,18 +530,36 @@ export default function MApp(props: {
                         <Layer {...trackLineStyle} key="tls" />
                     </Source>
                 ) : null}
-                {debouncedScore && options.constructionLines ? (
+                {debouncedScore?.scoredGeoJSON ? (
+                    <Source type="geojson" data={debouncedScore.scoredGeoJSON} key={'scored_'} id={'scored'}>
+                        <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: 'visible'}}} />
+                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, true)} />
+                        <Layer key="scoringPoint" {...scoringPointStyle} />
+                    </Source>
+                ) : null}
+                {valid && !unmounting ? (
+                    <DeckGLOverlay
+                        getTooltip={toolTip}
+                        onClick={onClick}
+                        onDragStart={onDragStart}
+                        layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]} //
+                        interleaved={true}
+                    />
+                ) : null}
+                {debouncedScore && options.constructionLines && debouncedScore.scoredGeoJSON ? (
                     <>
                         {debouncedScore.minGeoJSON && !lastLeg ? (
                             <Source type="geojson" data={debouncedScore.minGeoJSON} key={'min_'} id={'min'}>
                                 <Layer {...distanceLineLabelStyle(minLineStyle)} beforeId={'scored_line'} />
-                                <Layer {...minLineStyle} beforeId={'minpossible_label'} />
+                                <Layer {...minSignStyle} beforeId={'minpossible_label'} />
+                                <Layer {...minLineStyle} beforeId={'min_sign'} />
                             </Source>
                         ) : null}
                         {debouncedScore.maxGeoJSON && !lastLeg ? (
                             <Source type="geojson" data={debouncedScore.maxGeoJSON} key={'max_'} id={'max'}>
                                 <Layer {...distanceLineLabelStyle(maxLineStyle)} beforeId={'scored_line'} />
-                                <Layer {...maxLineStyle} beforeId={'maxpossible_label'} />
+                                <Layer {...maxSignStyle} beforeId={'maxpossible_label'} />
+                                <Layer {...maxLineStyle} beforeId={'max_sign'} />
                             </Source>
                         ) : null}
                         {debouncedScore.legs && task?.rules?.aat ? (
@@ -429,18 +568,16 @@ export default function MApp(props: {
                                 <Layer {...hullPointStyle} />
                             </Source>
                         ) : null}
+                        {debouncedScore.suggestedGeoJSON && !lastLeg ? (
+                            <Source type="geojson" data={debouncedScore.suggestedGeoJSON} key={'suggested_'} id={'suggested'}>
+                                <Layer {...suggestedLineStyle} />
+                                <Layer {...distanceLineLabelStyle(suggestedLineStyle)} />
+                            </Source>
+                        ) : null}
+                        <OptimalGridSources optimalDirectionGeoJSON={optimalDirectionGeoJSON} baselineGeoJSON={baselineGeoJSON} hoverGeoJSON={hoverGeoJSON} />
                     </>
                 ) : null}
-                {debouncedScore?.scoredGeoJSON ? (
-                    <Source type="geojson" data={debouncedScore.scoredGeoJSON} key={'scored_'} id={'scored'}>
-                        <Layer key="scoredLine" {...{...scoredLineStyle, layout: {visibility: 'visible'}}} />
-                        <Layer key="distanceLabels" {...distanceLineLabelStyle(scoredLineStyle, true)} />
-                        <Layer key="scoringPoint" {...scoringPointStyle} />
-                    </Source>
-                ) : null}
                 <MeasureLayers key="measure" />
-                <Source id="mapbox-dem" type="raster-dem" url="mapbox://mapbox.mapbox-terrain-dem-v1" tileSize={512} />
-                {!map2d && <Layer key="skylayer" {...skyLayer} />}
                 {attribution}
                 {!props.replayTime ? radarOverlay.layer : null}
                 <ScaleControl position="bottom-left" />
@@ -450,254 +587,8 @@ export default function MApp(props: {
     );
 }
 
-// scored track for selected pilot
-const scoredLineStyle: LayerProps = {
-    id: 'scored_line',
-    type: 'line',
-    paint: {
-        'line-color': '#0f0',
-        'line-width': 5,
-        'line-opacity': 1
-    }
-};
-
-const scoringPointStyle: LayerProps = {
-    id: 'scoring_point',
-    type: 'circle',
-    filter: ['==', ['get', 'scoringPoint'], true],
-    paint: {
-        'circle-radius': 5,
-        'circle-color': '#0f0',
-        'circle-stroke-color': '#000',
-        'circle-stroke-width': 1,
-        'circle-opacity': 1
-    }
-};
-
-const minLineStyle: LayerProps = {
-    id: 'minpossible',
-    type: 'line',
-    paint: {
-        'line-color': '#f00',
-        'line-width': 4,
-        'line-opacity': 0.7,
-        'line-dasharray': [1, 1]
-    }
-};
-
-const maxLineStyle: LayerProps = {
-    id: 'maxpossible',
-    type: 'line',
-    paint: {
-        'line-color': '#0f0',
-        'line-width': 4,
-        'line-opacity': 0.7,
-        'line-dasharray': [2, 1]
-    }
-};
-const hullPointStyle: LayerProps = {
-    id: 'hullPoint',
-    type: 'circle',
-    paint: {
-        'circle-color': '#00f',
-        'circle-radius': 4,
-        'circle-opacity': 0.3
-    }
-};
-const hullLineStyle: LayerProps = {
-    id: 'hullLine',
-    type: 'line',
-    paint: {
-        'line-color': '#00f',
-        'line-width': 2,
-        'line-opacity': 0.6,
-        'line-dasharray': [4, 1]
-    }
-};
-
-const DmPointStyle: LayerProps = {
-    id: 'y-points',
-    type: 'symbol',
-    minzoom: 8,
-    paint: {
-        'text-color': '#000',
-        'text-halo-blur': 0.5,
-        'text-halo-width': 3,
-        'text-halo-color': '#fff'
-    },
-    layout: {
-        'symbol-placement': 'point',
-        'icon-image': 'za-provincial-2',
-        'icon-allow-overlap': true,
-        'icon-size': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            // zoom is 5 (or less) -> circle radius will be 1px
-            8,
-            0.4,
-            // zoom is 10 (or greater) -> circle radius will be 5px
-            11,
-            1.5
-        ],
-        'text-allow-overlap': true,
-        'symbol-sort-key': 999999999,
-        'text-font': ['Open Sans Regular'],
-        'text-field': 'Dm',
-        'text-size': [
-            'interpolate',
-            ['linear'],
-            ['zoom'],
-            // zoom is 5 (or less) -> circle radius will be 1px
-            8,
-            3,
-            // zoom is 10 (or greater) -> circle radius will be 5px
-            11,
-            10
-        ],
-        'text-max-width': 1
-    }
-};
-
-function getSunPosition(mapRef, date?) {
-    const map = mapRef?.current; //?.getMap();
-    if (map) {
-        const center = map.getCenter();
-        const sunPos = SunCalc.getPosition(date || Date.now(), center.lat, center.lng);
-        const sunAzimuth = 180 + (sunPos.azimuth * 180) / Math.PI;
-        const sunAltitude = 90 - (sunPos.altitude * 180) / Math.PI;
-        return [Math.round(sunAzimuth * 10) / 10, Math.round(sunAltitude * 10) / 10];
-    } else {
-        return [0, 0];
-    }
-}
-
 const attributionStyle = {
     right: 0,
     bottom: 0,
     fontSize: '13px'
 };
-
-function turnpointStyle3d(selectedPilot: PilotScore | null, mapLight: boolean, startOpen: boolean): LayerProps[] {
-    return [
-        {
-            // Track line
-            id: 'track',
-            type: 'line',
-            paint: {
-                'line-color': mapLight ? 'darkgrey' : 'white',
-                'line-width': ['case', ['==', !selectedPilot, true], 15, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 15, 6],
-                'line-opacity': 1,
-                'line-pattern': !mapLight ? 'oneway-large' : 'oneway-white-large' //the white one is actually orange
-            }
-        },
-        {
-            // Turnpoints
-            id: 'tp',
-            type: 'fill',
-            filter: ['case', ['==', !selectedPilot, true], false, ['==', ['get', 'leg'], selectedPilot?.utcStart ? selectedPilot?.currentLeg || 0 : 0], false, true],
-            paint: {
-                //                'line-color': 'grey',
-                //                'line-width': 1,
-                'fill-opacity': 0.5,
-                'fill-color': [
-                    'case',
-                    ['==', !selectedPilot, true],
-                    mapLight ? 'darkgrey' : 'white',
-                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
-                    mapLight ? 'green' : '#7cfc00',
-                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
-                    'orange',
-                    mapLight ? 'darkgrey' : 'white'
-                ]
-            }
-        },
-        {
-            // Turnpoints
-            id: 'tpe',
-            type: 'fill-extrusion',
-            filter: ['case', ['==', !selectedPilot, true], true, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], true, false],
-            paint: {
-                //                'line-color': 'grey',
-                //                'line-width': 1,
-                'fill-extrusion-color': [
-                    'case',
-                    ['==', startOpen, false],
-                    'red',
-                    ['==', !selectedPilot, true],
-                    mapLight ? 'darkgrey' : 'white',
-                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
-                    mapLight ? 'green' : '#7cfc00',
-                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
-                    'orange',
-                    mapLight ? 'darkgrey' : 'white'
-                ],
-                'fill-extrusion-opacity': 0.6,
-                'fill-extrusion-base': [
-                    'case',
-                    ['==', !selectedPilot, true],
-                    10,
-                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0],
-                    5,
-                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
-                    10,
-                    0
-                ],
-                'fill-extrusion-height': [
-                    'case',
-                    ['==', !selectedPilot, true],
-                    5000,
-                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0],
-                    900,
-                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
-                    5000,
-                    2
-                ]
-            }
-        }
-    ];
-}
-
-function turnpointStyle2d(selectedPilot: PilotScore | null, mapLight: boolean, startOpen: boolean): LayerProps[] {
-    console.log('tps2d', mapLight);
-    return [
-        {
-            // Track line
-            id: 'track',
-            type: 'line',
-            paint: {
-                'line-color': mapLight ? 'black' : 'pink',
-                'line-width': ['case', ['==', !selectedPilot, true], 20, ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0], 20, 10],
-                'line-opacity': 1,
-                'line-pattern': !mapLight ? 'oneway-large' : 'oneway-white-large' //the white one is actually orange
-            }
-        },
-        {
-            // Turnpoints flat
-            id: 'tp',
-            type: 'fill',
-            paint: {
-                'fill-opacity': 0.5,
-                'fill-color': [
-                    'case',
-                    ['==', !selectedPilot, true],
-                    mapLight ? 'black' : 'white',
-                    ['<', ['get', 'leg'], selectedPilot?.utcFinish || selectedPilot?.currentLeg || 0], //
-                    mapLight ? 'green' : 'lawngreen',
-                    ['==', ['get', 'leg'], selectedPilot?.currentLeg || 0],
-                    'orange',
-                    mapLight ? 'darkgrey' : 'white'
-                ]
-            }
-        },
-        {
-            // Turnpoints not flat
-            id: 'tpe',
-            layout: {
-                visibility: 'none'
-            },
-            paint: {},
-            type: 'fill-extrusion'
-        }
-    ];
-}

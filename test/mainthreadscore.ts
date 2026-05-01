@@ -17,11 +17,12 @@ import {enrichedPositionGenerator} from '../lib/webworkers/enrichedPositionGener
 // Figure out where in the task we are and produce status around that - no speeds or scores
 import {taskPositionGenerator} from '../lib/webworkers/taskpositiongenerator';
 import {taskScoresGenerator} from '../lib/webworkers/taskScoresGenerator';
+import {createFlightStatistics} from '../lib/webworkers/flightStatistics';
 
-import type {Aircraft, Tracker} from '../lib/webworkers/aprs';
-import {loadPointsForTracker, initDB, processMessageQueue} from '../lib/webworkers/aprs';
-
-import {fromDateCode} from '../lib/datecode';
+import type {Aircraft} from '../lib/webworkers/aprs';
+import {processMessageQueue} from '../lib/webworkers/aprs';
+import {loadPoints} from '../lib/webworkers/pointlog';
+import {competitionStartTs, fromDateCode} from '../lib/datecode';
 
 import escape from 'sql-template-strings';
 import Mysql from 'serverless-mysql';
@@ -99,7 +100,6 @@ const argv = yargs(hideBin(process.argv))
     .parseSync();
 
 let location: AirfieldLocation;
-let db: Awaited<ReturnType<typeof initDB>>;
 
 run();
 
@@ -130,9 +130,6 @@ async function run() {
     location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
     const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
 
-    // Make sure we have the latest datecode for the database
-    db = await initDB(argv.datecode as Datecode, internalName);
-
     const results = (await Promise.allSettled(pilots.map((p) => runScore(argv.datecode as Datecode, p.class, p.compno, p.trackerid, p.handicap))))
         .filter((r) => r.status == 'fulfilled')
         .map((p) => p.value)
@@ -161,7 +158,7 @@ async function run() {
     process.exit(1);
 }
 
-async function runScore(datecode: Datecode, className: ClassName, compno: Compno, trackerDb: string, handicap: number) {
+async function runScore(datecode: Datecode, className: ClassName, compno: Compno, trackerDb: string, handicap: number, tzoffset: number = 0) {
     const log = argv.log
         ? console.log
         : () => {
@@ -178,6 +175,9 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         className: className,
         trackers: trackerDb.split(',') as FlarmID[],
 
+        datecode,
+        tzoffset,
+
         // Not had a message
         stationary: 0,
         ground: false,
@@ -192,26 +192,20 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
     const interimQueue: any[] = [];
 
-    // Link the tracker(s) in
-    const trackerList = glider.trackers;
-    const trackers: Tracker[] = [];
-    let index = 0;
-    for (const id of [...new Set(trackerList)]) {
+    const dayMidday = new Date(fromDateCode(datecode)).getTime() / 1000 + 12 * 3600;
+    const since = competitionStartTs(tzoffset, dayMidday);
+    const until = since + 24 * 3600;
+
+    for (const id of [...new Set(glider.trackers)]) {
         console.log('load tracker', glider.compno, id);
-        if (trackers[id]) {
-            trackers[id].aircraftList.push(glider);
-            trackers[id].receiveNewPoints = trackers[id].receiveNewPoints;
-        } else {
-            trackers[id] = {
-                id: id as FlarmID,
-                index: index++,
-                aircraftList: [glider],
-                receiveNewPoints: true,
-                db: db?.sublevel(id, {})
-            };
+        for await (const msg of loadPoints({flarmId: id, since, until})) {
+            const m = msg as any;
+            if (typeof m.d === 'number' && m.d > 1200) continue;
+            m.c = compno;
+            interimQueue.push(m);
         }
-        await loadPointsForTracker(glider, trackers[id], interimQueue);
     }
+    interimQueue.sort((a, b) => a.t - b.t);
 
     log(`${className}/${compno}: fetched ${interimQueue.length} rows of trackpoints (getInitialTrackPoints)`);
 
@@ -263,11 +257,16 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     const start = process.hrtime.bigint();
     const inorder = bindChannelForInOrderPackets(className, datecode, compno as Compno, simplifiedQueue, iterative, !iterative);
 
+    // Optional flight statistics — opt in via FLIGHTSTATS=1 or argv.flightstats
+    const flightstats = !!(argv as any).flightstats || process.env.FLIGHTSTATS === '1';
+    const stats = flightstats ? createFlightStatistics(compno as Compno, log) : null;
+
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(location, inorder(getNow), log);
+    const observed = stats ? stats.observer(epg) : epg;
 
     // 1. Figure out where in the task we are
-    const tpg = taskPositionGenerator(task, 0 as Epoch, epg, log);
+    const tpg = taskPositionGenerator(task, 0 as Epoch, observed, log);
 
     // 2. Figure out what that means for leg distances
     const distances = task.rules.aat // what kind of scoring do we do
@@ -276,7 +275,8 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
     // 3. Once we have distances we can calculate task lengths
     //    and therefore speeds
-    const scores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
+    const rawScores = taskScoresGenerator(task, compno as Compno, handicap, distances, log);
+    const scores = stats ? stats.attacher(rawScores) : rawScores;
 
     let lastScore: PilotScore | undefined;
     let numberOfScores = 0;

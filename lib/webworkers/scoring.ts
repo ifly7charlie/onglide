@@ -36,6 +36,9 @@ import {taskPositionGenerator} from './taskpositiongenerator';
 import {taskScoresGenerator} from './taskScoresGenerator';
 import {scoreCollector} from './scoreCollector';
 
+// Optional flight statistics (thermals/straights/wind), per competition flag
+import {createFlightStatistics} from './flightStatistics';
+
 import {cloneDeep as _clonedeep} from 'lodash';
 
 import {getNow} from '../now';
@@ -76,6 +79,7 @@ export interface ScoringConfig {
     className: ClassName;
     datecode: Datecode;
     airfield: AirfieldLocation;
+    flightstats?: boolean;
 }
 
 export class ScoringController {
@@ -140,8 +144,25 @@ export class ScoringController {
         this.worker.postMessage({action: ScoringCommandEnum.clearGlider, className: this.className, datecode: this.datecode, compno} as ScoringCommand);
     }
 
-    shutdown() {
-        this.worker.postMessage({action: ScoringCommandEnum.shutdown} as ScoringCommand);
+    setAirfield(airfield: AirfieldLocation) {
+        this.worker.postMessage({action: ScoringCommandEnum.setAirfield, className: this.className, datecode: this.datecode, airfield} as ScoringCommand);
+    }
+
+    // Send the shutdown command to the worker and return a promise that
+    // resolves when the worker process has actually exited, or after a
+    // 5-second timeout (so teardown doesn't hang if the worker is stuck).
+    shutdown(): Promise<void> {
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                resolve();
+            };
+            this.worker.once('exit', finish);
+            this.worker.postMessage({action: ScoringCommandEnum.shutdown} as ScoringCommand);
+            setTimeout(finish, 5000);
+        });
     }
 
     hookScore(callback: scoreCallback) {
@@ -190,10 +211,11 @@ enum ScoringCommandEnum {
     initialTrack,
     rescoreGlider,
     updateScoreId,
-    clearGlider
+    clearGlider,
+    setAirfield
 }
 
-export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | ScoringCommandClearGlider | ScoringCommandClearTask;
+export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | ScoringCommandClearGlider | ScoringCommandClearTask | ScoringCommandSetAirfield;
 
 interface ScoringCommandBase {
     className: ClassName;
@@ -253,6 +275,13 @@ interface ScoringCommandClearTask extends ScoringCommandBase {
     action: ScoringCommandEnum.clearTask;
 }
 
+// Site coordinates moved in the DB; mutate the worker's airfield in place
+// and rescore every glider so sticky landing classifications recompute.
+interface ScoringCommandSetAirfield extends ScoringCommandBase {
+    action: ScoringCommandEnum.setAirfield;
+    airfield: AirfieldLocation;
+}
+
 //
 // Start a listener
 function spawnScoringContestListener(config: ScoringConfig): Worker {
@@ -261,7 +290,7 @@ function spawnScoringContestListener(config: ScoringConfig): Worker {
     }
     console.log(`Starting Scoring:${config.className} worker thread`);
 
-    return new Worker(__filename, {env: SHARE_ENV, workerData: config, name: `${config.airfield}:${config.className}`});
+    return new Worker(__filename, {env: SHARE_ENV, workerData: config, name: `${config.airfield.name}:${config.className}`});
 }
 
 if (!isMainThread) {
@@ -289,6 +318,13 @@ if (!isMainThread) {
                 console.log(`${task.className}/${task.compno}: ${itTask.handicap} hcap, ${itTask.utcStart} utcStart [${itTask.scoreId}]`);
                 const alreadyScoring = !!scoreCollector;
 
+                // Structured cloning across the worker boundary strips class
+                // prototypes, so any preparedLegs in the incoming task are
+                // plain objects. Rebuild them as PreparedTurnpoint instances.
+                if (task.task?.legs) {
+                    task.task.preparedLegs = task.task.legs.map((_leg, i) => new PreparedTurnpoint(task.task.legs, i));
+                }
+
                 gliders[makeClassname_Compno(task)] = {
                     className: task.className,
                     compno: task.compno,
@@ -301,7 +337,7 @@ if (!isMainThread) {
                 };
 
                 if (alreadyScoring) {
-                    rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+                    rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, task.handicap, task.utcStart, task.scoreId);
                 }
 
                 break;
@@ -310,7 +346,7 @@ if (!isMainThread) {
             // Actually start scoring the task, will score all the gliders we have tracks for
             case ScoringCommandEnum.newTask:
                 console.log(`${task.className}: scoring started ${JSON.stringify(task?.task?.rules || {no: 'task'})} [${task.scoreId}]`);
-                startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.task, task.scoreId);
+                startScoring({className: task.className, datecode: task.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, task.task, task.scoreId);
                 break;
 
             case ScoringCommandEnum.clearTask:
@@ -324,7 +360,7 @@ if (!isMainThread) {
 
             case ScoringCommandEnum.rescoreGlider:
                 console.log(`${task.className}/${task.compno}: scoring started hcap: ${task.handicap}, start:${task.utcStart ? new Date(task.utcStart * 1000).toISOString() : '-'}`);
-                rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield}, task.handicap, task.utcStart, task.scoreId);
+                rescoreGlider(task.compno, {className: task.className, datecode: task.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, task.handicap, task.utcStart, task.scoreId);
                 break;
 
             case ScoringCommandEnum.updateScoreId:
@@ -335,6 +371,16 @@ if (!isMainThread) {
             case ScoringCommandEnum.clearGlider:
                 console.log(`${task.className}/${task.compno}: stopping scoring for ${task.compno}`);
                 scoreUpdater?.clearGlider(task.compno);
+                break;
+
+            case ScoringCommandEnum.setAirfield:
+                // Mutate in place so any in-flight enrichedPositionGenerator
+                // closures see the new point on their next read.
+                Object.assign(workerData.airfield, task.airfield);
+                console.log(`${task.className}: airfield moved to (${workerData.airfield.lat},${workerData.airfield.lng}), rescoring ${Object.keys(gliders).length} gliders`);
+                for (const g of Object.values(gliders)) {
+                    rescoreGlider(g.compno, {className: g.className, datecode: workerData.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, g.handicap, g.utcStart, g.scoreId);
+                }
                 break;
         }
     });
@@ -383,7 +429,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
     const log =
-        glider.compno == 'I'
+        process.env.NEXT_PUBLIC_COMPNO && glider.compno == process.env.NEXT_PUBLIC_COMPNO
             ? console.log
             : () => {
                   /*noop*/
@@ -398,11 +444,17 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
         //        handicap = 100;
     }
 
+    // Optional: per-flight statistics (thermals/straights/wind). When
+    // enabled we build a single FlightStatistics instance and wrap the
+    // chain with it at both ends so the rest of the pipeline is unaware.
+    const stats = config.flightstats ? createFlightStatistics(glider.compno, log) : null;
+
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
+    const observed = stats ? stats.observer(epg) : epg;
 
     // 1. Figure out where in the task we are
-    const tpg = taskPositionGenerator(task, glider.utcStart, epg, log);
+    const tpg = taskPositionGenerator(task, glider.utcStart, observed, log);
 
     // 2. Figure out what that means for leg distances
     const distances = task.rules.aat // what kind of scoring do we do
@@ -413,5 +465,5 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
     //    and therefore speeds
     const scores = taskScoresGenerator(task, glider.compno, handicap, distances, log);
 
-    return scores;
+    return stats ? stats.attacher(scores) : scores;
 }

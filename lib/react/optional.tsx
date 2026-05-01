@@ -44,11 +44,16 @@ export function OptionalText(b, iv, e = null) {
     }
     return '';
 }
+// `hour12: false` forces 24-hour formatting regardless of the user's locale —
+// the previous code achieved this by hardcoding the 'uk' (Ukrainian) locale,
+// which was a side-effect of Ukrainian using 24-hour time. Switching to the
+// proper hour12 option lets locale numerals (eg Arabic-Indic digits in 'ar')
+// follow the user's actual language without changing the time format.
 export function OptionalTime(before: string, t: Epoch | number, tz: TZ, after: string | null = null) {
     if (!t) {
         return '';
     }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    const v = new Date(t * 1000).toLocaleTimeString(undefined, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
@@ -58,7 +63,7 @@ export function OptionalTimeHHMM(before: string, t: Epoch | number, tz: TZ, afte
     if (!t) {
         return '';
     }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    const v = new Date(t * 1000).toLocaleTimeString(undefined, {timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
@@ -68,7 +73,7 @@ export function OptionalDuration(before: string, t: Epoch, after: string | null 
     if (!t) {
         return '';
     }
-    const v = (t < 0 ? '-' : '') + new Date(Math.abs(t) * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    const v = (t < 0 ? '-' : '') + new Date(Math.abs(t) * 1000).toLocaleTimeString(undefined, {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
@@ -78,7 +83,7 @@ export function OptionalDurationHHMM(before: string, t: Epoch, after: string | n
     if (!t) {
         return '';
     }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', hour: '2-digit', minute: '2-digit'});
+    const v = new Date(t * 1000).toLocaleTimeString(undefined, {timeZone: 'UTC', hour: '2-digit', minute: '2-digit', hour12: false});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }
@@ -88,7 +93,7 @@ export function OptionalDurationMM(before: string, t: Epoch, after: string | nul
     if (!t) {
         return '';
     }
-    const v = new Date(t * 1000).toLocaleTimeString('uk', {timeZone: 'UTC', minute: '2-digit'});
+    const v = new Date(t * 1000).toLocaleTimeString(undefined, {timeZone: 'UTC', minute: '2-digit', hour12: false});
     if (v) {
         return `${before || ''}${v}${after || ''}`;
     }

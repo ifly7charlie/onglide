@@ -6,6 +6,7 @@ export interface OZParams {
     a1: number; // half-angle degrees
     r2: number; // metres
     a2: number; // half-angle degrees
+    a12: number; // direction angle (bisector of sector) in degrees, 0 = not set
     line: boolean;
     aat: boolean;
     reduce: boolean;
@@ -83,6 +84,7 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
 
     const fixes: PositionMessage[] = [];
     const cRecords: {lat: number; lng: number; name: string}[] = [];
+    const lcuCRecords: {lat: number; lng: number; name: string}[] = []; // SeeYou LCU:: task override
     const ozParams = new Map<number, OZParams>();
     const llxvOZParams = new Map<number, OZParams>(); // fallback if no LSEEYOU lines
     let taskParams: {noStartUTC: string | null; taskTimeSecs: number | null} = {noStartUTC: null, taskTimeSecs: null};
@@ -211,8 +213,57 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
             continue;
         }
 
-        // L record - comment (LSEEYOU lines, LCU:: timezone)
+        // L record - comment (LSEEYOU lines, LCU:: overrides)
         if (first === 'L') {
+            // LCU::C record - SeeYou task override (takes precedence over original C records)
+            if (line.startsWith('LCU::C')) {
+                const cLine = line.substring(5); // strip 'LCU::' to get 'C...'
+                const cm = cRecordRegex.exec(cLine);
+                if (cm) {
+                    const latDeg = parseInt(cm[1]);
+                    const latMin = parseInt(cm[2]);
+                    const latMinDec = parseInt(cm[3]);
+                    const latSign = cm[4] === 'S' ? -1 : 1;
+                    const lat = latSign * (latDeg + (latMin + latMinDec / 1000) / 60);
+
+                    const lngDeg = parseInt(cm[5]);
+                    const lngMin = parseInt(cm[6]);
+                    const lngMinDec = parseInt(cm[7]);
+                    const lngSign = cm[8] === 'W' ? -1 : 1;
+                    const lng = lngSign * (lngDeg + (lngMin + lngMinDec / 1000) / 60);
+
+                    const name = cm[9].trim();
+
+                    if (latDeg !== 0 || latMin !== 0 || latMinDec !== 0 || lngDeg !== 0 || lngMin !== 0 || lngMinDec !== 0) {
+                        lcuCRecords.push({lat, lng, name});
+                    }
+                }
+                continue;
+            }
+
+            // LCU::H record - SeeYou pilot/glider overrides
+            if (line.startsWith('LCU::H')) {
+                const hLine = line.substring(5); // strip 'LCU::' to get 'H...'
+                const hm = /^HPCID[^:]*:\s*(.*)/i.exec(hLine);
+                if (hm) {
+                    const cid = hm[1].trim();
+                    if (cid) compno = cid as Compno;
+                    continue;
+                }
+                const hpm = /^HPPLT[^:]*:\s*(.*)/i.exec(hLine);
+                if (hpm) {
+                    const n = hpm[1].trim();
+                    if (n) pilotName = n;
+                    continue;
+                }
+                const hgm = /^HPGTY[^:]*:\s*(.*)/i.exec(hLine);
+                if (hgm) {
+                    const g = hgm[1].trim();
+                    if (g) gliderType = g;
+                    continue;
+                }
+            }
+
             // LCU::HPTZNTIMEZONE:N - SeeYou appended timezone (takes precedence over HFTZN)
             let m = tzRegex.exec(line);
             if (m) {
@@ -230,6 +281,7 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
                     a1: parseFloat(kv['A1'] ?? '180'),
                     r2: parseMetres(kv['R2']),
                     a2: parseFloat(kv['A2'] ?? '0'),
+                    a12: parseFloat(kv['A12'] ?? '0'),
                     line: kv['Line'] === '1',
                     aat: kv['AAT'] === '1',
                     reduce: kv['Reduce'] === '1'
@@ -258,6 +310,7 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
                     a1: parseFloat(kv['A1'] ?? '180'),
                     r2: parseMetres(kv['R2']),
                     a2: parseFloat(kv['A2'] ?? '0'),
+                    a12: parseFloat(kv['A12'] ?? '0'),
                     line: kv['Line'] === '1',
                     aat: kv['AAT'] === '1',
                     reduce: kv['Reduce'] === '1'
@@ -280,6 +333,19 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
             continue;
         }
     }
+
+    // LCU::C records override original C records (SeeYou convention)
+    // Strip home airfield: if first and last LCU C records have the same coordinates
+    // they are takeoff/landing (like zero-coordinate lines in standard IGC)
+    if (lcuCRecords.length >= 3) {
+        const first = lcuCRecords[0];
+        const last = lcuCRecords[lcuCRecords.length - 1];
+        if (Math.abs(first.lat - last.lat) < 0.0001 && Math.abs(first.lng - last.lng) < 0.0001) {
+            lcuCRecords.shift();
+            lcuCRecords.pop();
+        }
+    }
+    const finalCRecords = lcuCRecords.length > 0 ? lcuCRecords : cRecords;
 
     // Use LLXV as fallback if no LSEEYOU OZ/TSK lines were found
     const finalOZParams = ozParams.size > 0 ? ozParams : llxvOZParams;
@@ -326,7 +392,7 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
         tzOffset,
         date: {epochBase, day, month, year},
         fixes,
-        taskDeclaration: cRecords.length > 0 ? cRecords : null,
+        taskDeclaration: finalCRecords.length > 0 ? finalCRecords : null,
         ozParams: finalOZParams,
         taskParams: finalTaskParams
     };

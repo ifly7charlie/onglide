@@ -1,6 +1,5 @@
-// What do we need to render the bootstrap part of the page
 import {memo, useMemo} from 'react';
-import Collapse from 'react-bootstrap/Collapse';
+import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {
     faBackward,
@@ -24,8 +23,11 @@ import {
     faHourglassHalf,
     faHourglassEnd,
     faHouse,
+    faLocationArrow,
     faPaperPlane,
+    faPenToSquare,
     faQuestion, //
+    faEyeSlash,
     faRightFromBracket,
     faRightToBracket,
     faSignal,
@@ -35,6 +37,7 @@ import {
     faTachometerAlt,
     faTriangleExclamation,
     faTrophy,
+    faWind,
     IconDefinition
 } from '@fortawesome/free-solid-svg-icons';
 
@@ -46,7 +49,6 @@ import {Optional, OptionalTime, OptionalDuration, OptionalDurationMM} from './op
 import {useState, useCallback} from 'react';
 
 import {FlightLegs} from './flightLegs';
-import {Sorting} from './sorting';
 
 // Helpers for loading contest information etc
 import {delayToText} from './timehelper.js';
@@ -60,7 +62,7 @@ import {selectLatestUpdate} from '../redux/tracksSlice';
 import {sortKeyEqualityCheck, sortOrders, type AllNormalDisplayKeys} from '../redux/selectPilotResult';
 
 // Helpers for sorting pilot list
-import {nextSortOrder, getValidSortOrder} from './pilot-sorting';
+import {getValidSortOrder} from './pilot-sorting';
 import {displayHeight, convertHeight, convertClimb} from './displayunits';
 
 import {offlineTime} from '../constants';
@@ -77,7 +79,8 @@ const icons: IconDefinition[] = [
     faPaperPlane, // Airborne
     faHouse, // Home
     faCow, // Landed
-    faTrophy // Finished
+    faTrophy, // Finished
+    faEyeSlash // Blocked = 8 (DDB Permit-Livetracking declined)
 ];
 
 // Figure out what image to display for the pilot. If they have an image then display the thumbnail for it,
@@ -137,7 +140,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
                     {data1.units ? <div className="units">{data1.units}</div> : null}
                     <div className="data-icon">
                         <a href="#" title={data1.description} className="tooltipicon">
-                            <FontAwesomeIcon icon={data1.icon} />
+                            <FontAwesomeIcon icon={data1.icon} style={data1.iconStyle} />
                         </a>
                     </div>
                 </div>
@@ -160,6 +163,7 @@ function SummaryComponent({id, title, titleIcon, main, data1, data2, width}: any
 }
 
 function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
+    const {t} = useTranslation('common');
     const howMuchClimb = vario //
         ? vario.average > 0.2
             ? faCircleArrowUp
@@ -173,21 +177,34 @@ function ClimbComponent({units, vario}: {units: boolean; vario: VarioData}) {
     return vario?.valid ? (
         <SummaryComponent
             id="climb"
-            title="vario" //
+            title={t('pilot_metric.vario')} //
             main={{value: !isNaN(convertedClimb[0]) ? convertedClimb[0] : null, icon: howMuchClimb, units: convertedClimb[1]}}
-            data1={{value: convertHeight(vario.total, units)[0], units: units ? 'ft' : 'm', icon: vario?.average >= 0 ? faCloudUpload : faCloudArrowDown}}
-            data2={{value: vario.Xperiod, units: 'sec', icon: faHourglassHalf}}
+            data1={{value: convertHeight(vario.total, units)[0], units: units ? t('units.ft') : t('units.m'), icon: vario?.average >= 0 ? faCloudUpload : faCloudArrowDown}}
+            data2={{value: vario.Xperiod, units: t('units.sec'), icon: faHourglassHalf}}
         />
     ) : (
         <SummaryComponent
             id="climb"
-            title="vario" //
+            title={t('pilot_metric.vario')} //
             main={{value: null, icon: faSignal, units: ''}}
         />
     );
 }
 
-const StartComponent = memo(function StartComponent({
+function WindComponent({wind}: {wind: {speed: number; direction: number} | undefined}) {
+    const {t} = useTranslation('common');
+    if (!wind?.speed) return null;
+    return (
+        <SummaryComponent
+            id="wind"
+            title={t('pilot_metric.wind')} //
+            main={{value: wind.speed, units: t('units.kph'), icon: faWind, description: t('pilot_metric.recent_wind_speed')}}
+            data1={{value: wind.direction, units: '°', icon: faLocationArrow, description: t('pilot_metric.wind_bearing'), iconStyle: {transform: `rotate(${wind.direction + 135}deg)`}}}
+        />
+    );
+}
+
+function StartComponent({
     utcStart,
     utcFinish,
     taskTimeRemaining,
@@ -201,27 +218,28 @@ const StartComponent = memo(function StartComponent({
     taskDuration: Epoch;
     tz: TZ;
 }) {
+    const {t} = useTranslation('common');
     const [endTime, description, icon] = utcFinish
-        ? [OptionalTime(' ', utcFinish, tz), 'finish time', faHourglassEnd] //
+        ? [OptionalTime(' ', utcFinish, tz), t('pilot_metric.finish_time'), faHourglassEnd] //
         : taskTimeRemaining
-          ? [OptionalDuration('', taskTimeRemaining), 'remaining time', faHistory]
-          : ['', 'finish time', null];
+          ? [OptionalDuration('', taskTimeRemaining), t('pilot_metric.remaining_time'), faHistory]
+          : ['', t('pilot_metric.finish_time'), null];
 
     const duration = OptionalDuration('+', taskDuration as Epoch).split(':');
 
     return (
         <SummaryComponent
             id="times"
-            title="times" //
-            width="130px"
-            main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: faStopwatch, description: 'elapsed time'}}
-            data1={{value: OptionalTime('', utcStart, tz), icon: faHourglassStart, description: 'start time'}}
+            title={t('pilot_metric.times')} //
+            width="120px"
+            main={{value: duration[0] ? duration[0] + ':' + duration[1] : null, units: ':' + duration[2], icon: faStopwatch, description: t('pilot_metric.elapsed_time')}}
+            data1={{value: OptionalTime('', utcStart, tz), icon: faHourglassStart, description: t('pilot_metric.start_time')}}
             data2={{value: endTime, icon, description: description}}
         />
     );
-});
+}
 
-const HandicappedSpeedComponent = memo(function HandicappedSpeedComponent({
+function HandicappedSpeedComponent({
     utcFinish,
     handicappedTaskSpeed,
     actualTaskSpeed
@@ -231,16 +249,18 @@ const HandicappedSpeedComponent = memo(function HandicappedSpeedComponent({
     handicappedTaskSpeed: number;
     actualTaskSpeed: number;
 }) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             id="speed"
-            title="speed" //
-            main={{value: handicappedTaskSpeed, units: 'kph', icon: utcFinish ? faTrophy : faPaperPlane, description: 'handicapped speed'}}
-            data1={{value: actualTaskSpeed, units: 'kph', icon: faTachometerAlt, description: 'actual speed'}}
+            title={t('pilot_metric.speed')} //
+            main={{value: handicappedTaskSpeed, units: t('units.kph'), icon: utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.handicapped_speed')}}
+            data1={{value: actualTaskSpeed, units: t('units.kph'), icon: faTachometerAlt, description: t('pilot_metric.actual_speed')}}
         />
     );
-});
-const ActualSpeedComponent = memo(function ActualSpeedComponent({
+}
+
+function ActualSpeedComponent({
     utcFinish,
     actualTaskSpeed
 }: //
@@ -248,42 +268,45 @@ const ActualSpeedComponent = memo(function ActualSpeedComponent({
     utcFinish: Epoch;
     actualTaskSpeed: number;
 }) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="100px"
             id="speed"
-            title="speed" //
-            main={{value: actualTaskSpeed, units: 'kph', icon: utcFinish ? faTrophy : faPaperPlane, description: 'actual speed'}}
+            title={t('pilot_metric.speed')} //
+            main={{value: actualTaskSpeed, units: t('units.kph'), icon: utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.actual_speed')}}
         />
     );
-});
+}
 
 function HandicappedDistanceComponent({score}: {score: PilotScore}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
-            width="100px"
+            width="90px"
             id="hdistance"
-            title="distance" //
-            main={{value: score.handicapped.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'handicapped distance done'}}
-            data1={{value: score.actual.taskDistance, units: 'km', icon: faRightFromBracket, description: 'actual distance done'}}
+            title={t('pilot_metric.distance')} //
+            main={{value: score.handicapped.taskDistance, units: t('units.km'), icon: score.utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.handicapped_distance')}}
+            data1={{value: score.actual.taskDistance, units: t('units.km'), icon: faRightFromBracket, description: t('pilot_metric.actual_distance')}}
             data2={{
                 value: !score.utcFinish ? (score.handicapped.distanceRemaining ?? score.handicapped.minPossible) : undefined,
-                units: 'km',
+                units: t('units.km'),
                 icon: faRightToBracket,
-                description: 'handicapped minimum distance remaining'
+                description: t('pilot_metric.handicapped_distance_remaining')
             }}
         />
     );
 }
 
 function ActualDistanceComponent({score}: {score: PilotScore}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
-            width="100px"
+            width="90px"
             id="distance"
-            title="distance" //
-            main={{value: score.actual.taskDistance, units: 'km', icon: score.utcFinish ? faTrophy : faPaperPlane, description: 'actual distance done'}}
-            data1={{value: !score.utcFinish ? (score.actual.distanceRemaining ?? score.actual.minPossible) : undefined, units: 'km', icon: faRightToBracket, description: 'actual minimum distance remaining'}}
+            title={t('pilot_metric.distance')} //
+            main={{value: score.actual.taskDistance, units: t('units.km'), icon: score.utcFinish ? faTrophy : faPaperPlane, description: t('pilot_metric.actual_distance')}}
+            data1={{value: !score.utcFinish ? (score.actual.distanceRemaining ?? score.actual.minPossible) : undefined, units: t('units.km'), icon: faRightToBracket, description: t('pilot_metric.actual_distance_remaining')}}
         />
     );
 }
@@ -301,35 +324,52 @@ function grBattery(gr: number): any {
     return faBatteryEmpty;
 }
 
-const HandicappedGRComponent = memo(function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
+function HandicappedGRComponent({handicappedGrRemaining, actualGrRemaining}: {handicappedGrRemaining: number; actualGrRemaining: number}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="100px"
             id="hgr"
-            title="L/D" //
-            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : '∞', units: ' :1', icon: grBattery(handicappedGrRemaining), description: 'handicapped L/D remaining'}}
-            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
+            title={t('pilot_metric.ld')} //
+            main={{value: handicappedGrRemaining < 999 ? handicappedGrRemaining : '∞', units: ' ' + t('units.ratio'), icon: grBattery(handicappedGrRemaining), description: t('pilot_metric.handicapped_ld_remaining')}}
+            data1={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: t('units.ratio'), icon: grBattery(actualGrRemaining), description: t('pilot_metric.actual_ld_remaining')}}
         />
     );
-});
+}
 
-const ActualGRComponent = memo(function ActualGRComponent({actualGrRemaining, homeGr}: {actualGrRemaining: number; homeGr: number}) {
+function ActualGRComponent({actualGrRemaining, homeGr}: {actualGrRemaining: number; homeGr: number}) {
+    const {t} = useTranslation('common');
     return (
         <SummaryComponent
             width="100px"
             id="gr"
-            title="L/D" //
-            main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: ':1', icon: grBattery(actualGrRemaining), description: 'actual L/D remaining'}}
-            data1={{value: homeGr < 999 ? homeGr : '∞', units: ':1', icon: faHome, description: 'L/D to home'}}
+            title={t('pilot_metric.ld')} //
+            main={{value: actualGrRemaining < 999 ? actualGrRemaining : '∞', units: t('units.ratio'), icon: grBattery(actualGrRemaining), description: t('pilot_metric.actual_ld_remaining')}}
+            data1={{value: homeGr < 999 ? homeGr : '∞', units: t('units.ratio'), icon: faHome, description: t('pilot_metric.ld_to_home')}}
         />
     );
-});
+}
 
-export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno; pilot: API_ClassName_Pilots_PilotDetail; tz: TZ; units: Units; replayTime: Epoch | undefined}) => {
+export const Details = ({
+    compno,
+    pilot,
+    units,
+    tz,
+    replayTime,
+    onEditHandicap
+}: {
+    compno: Compno;
+    pilot: API_ClassName_Pilots_PilotDetail;
+    tz: TZ;
+    units: Units;
+    replayTime: Epoch | undefined;
+    onEditHandicap?: (compno: Compno, handicap: number) => void;
+}) => {
+    const {t} = useTranslation('common');
     let competitionDelay = useMemo(() => {
         if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
             return (
-                <a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
+                <a href="#" title={t('pilot.view_delayed_official')} className="tooltipicon">
                     <span style={{color: 'grey'}}>
                         &nbsp;+&nbsp;
                         <FontAwesomeIcon icon={faClockRotateLeft} size="sm" />
@@ -339,7 +379,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
             );
         }
         return null;
-    }, []);
+    }, [t]);
 
     // Get vario for specific time
     const vario = useSelector((state) => selectPilotVario(state, compno, replayTime));
@@ -368,6 +408,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
             <ActualGRComponent actualGrRemaining={score.actual.grRemaining} homeGr={score.home?.grRemaining} />
         )
     ) : null;
+    const wind = score?.stats ? <WindComponent wind={score.wind} /> : null;
 
     let times = null;
     if (score?.utcStart) {
@@ -386,7 +427,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
     // gets updated regularily
     const delay = (replayTime ?? latestUpdate ?? Infinity) - (vario?.t || 0);
     const uptodate = delay < 45;
-    const old = delay > offlineTime && score && score.flightStatus != PositionStatus.Home && score.flightStatus != PositionStatus.Finished && score.flightStatus != PositionStatus.Landed;
+    const old = delay > offlineTime && score && score.flightStatus != PositionStatus.Home && score.flightStatus != PositionStatus.Finished && score.flightStatus != PositionStatus.Landed && score.flightStatus != PositionStatus.Blocked;
 
     // Figure out what to show based on the db status
     let flightDetails = null;
@@ -400,19 +441,25 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
                     <FontAwesomeIcon icon={faSignal} />{' '}
                 </>
             ) : null}
-            Altitude {displayHeight(vario.altitude, units)} (AGL {displayHeight(vario.agl, units)})
+            {t('pilot.altitude_with_agl', {altitude: displayHeight(vario.altitude, units), agl: displayHeight(vario.agl, units)})}
         </span>
     ) : null;
 
-    if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
+    const trackingBlocked = score?.flightStatus == PositionStatus.Blocked;
+    if (trackingBlocked) {
+        // Pilot is identified but Permit-Livetracking is declined in
+        // the DDB or FlarmNet. Show an explanatory note — no positions
+        // ever arrive for them.
+        flightDetails = <div>{t('pilot.tracking_declined', {defaultValue: "Live tracking blocked — this glider's tracker is set to decline live tracking in the OGN DDB or FlarmNet"})}</div>;
+    } else if ((!score || score.flightStatus == PositionStatus.Unknown) && !vario) {
         flightDetails = <></>;
     } else if (!score?.utcStart) {
         if (score?.flightStatus == PositionStatus.Grid) {
-            flightDetails = <div>Gridded, waiting to fly</div>;
+            flightDetails = <div>{t('pilot.gridded_waiting')}</div>;
         } else {
             flightDetails = (
                 <div>
-                    No start reported yet
+                    {t('pilot.no_start')}
                     <ul className={statusClassName}>
                         <ClimbComponent vario={vario} units={!!units} />
                     </ul>
@@ -434,7 +481,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
         if (score?.flightStatus == PositionStatus.Landed) {
             flightDetails = (
                 <div>
-                    Landed out
+                    {t('pilot.landed_out')}
                     <ul className={statusClassName}>{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
@@ -442,7 +489,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
         } else if (score?.flightStatus == PositionStatus.Home) {
             flightDetails = (
                 <div>
-                    Landed back
+                    {t('pilot.landed_back')}
                     <ul className={statusClassName}>{distance}</ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </div>
@@ -456,6 +503,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
                         {distance}
                         {times}
                         {gr}
+                        {wind}
                     </ul>
                     <FlightLegs score={score} tz={tz} units={!!units} />
                 </>
@@ -465,7 +513,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
 
     // Are we in coverage or not, keyed off uptodate
     const ognCoverage = score?.utcFinish ? (
-        'Finished' //
+        t('pilot.finished') //
     ) : replayTime ? (
         <span>
             &nbsp;
@@ -482,8 +530,8 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
     ) : uptodate ? (
         <span>
             &nbsp;
-            <a href="#" style={{color: 'black'}} title="In OGN Flarm coverage" className="tooltipicon">
-                <FontAwesomeIcon icon={faSquareCheck} /> {Math.round(delay)}s delay
+            <a href="#" style={{color: 'black'}} title={t('pilot.view_in_coverage')} className="tooltipicon">
+                <FontAwesomeIcon icon={faSquareCheck} /> {t('pilot.view_delay', {seconds: Math.round(delay)})}
                 {process.env.NODE_ENV == 'development' && score ? ', ' + Math.round(latestUpdate - score?.t) + 's delay' + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
                 {process.env.NODE_ENV == 'development' ? (
                     <p>
@@ -495,17 +543,17 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
     ) : (
         <span>
             &nbsp;
-            <a href="#" style={{color: 'grey'}} title="No recent points, waiting for glider to return to coverage" className="tooltipicon">
+            <a href="#" style={{color: 'grey'}} title={t('pilot.view_no_recent')} className="tooltipicon">
                 {(delay || Infinity) < 3600 ? (
                     <>
                         <FontAwesomeIcon icon={faSpinner} spin />
-                        &nbsp; Last point {delayToText(delay)} ago
+                        &nbsp; {t('pilot.view_last_point', {delay: delayToText(delay)})}
                     </>
                 ) : (
                     <>
                         <FontAwesomeIcon icon={faTriangleExclamation} />
                         &nbsp;
-                        {vario ? <>&gt;1 hour ago</> : <>No tracking yet</>}
+                        {vario ? <>{t('pilot.view_old')}</> : <>{t('pilot.view_no_signal')}</>}
                     </>
                 )}
                 {process.env.NODE_ENV == 'development' && score ? ', ' + delayToText(latestUpdate - score?.t) + OptionalTime(', ', score?.t ?? 0, tz) + ' ' + (score?.live ? 'live' : 'rebuilt') : null}
@@ -521,7 +569,7 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
     const flag =
         (pilot.country || '') !== '' ? (
             <div className="details-flag">
-                <a href="#" title={new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) || 'Country Code: ' + pilot.country} className="tooltipicon">
+                <a href="#" title={new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) || t('pilot.country_fallback', {country: pilot.country})} className="tooltipicon">
                     {isoCountryCodeToFlagEmoji(pilot.country)}
                 </a>
             </div>
@@ -533,8 +581,36 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
         <div className="pilotdetails">
             {flag}
             <h6 style={{width: '100%'}}>
-                {pilot.compno}:<b>{pilot.name}</b>
-                <span style={{float: 'right', paddingRight: '0.5em'}}>{pilot.gliderType.substring(0, 20)}</span>
+                {pilot.compno}
+                {trackingBlocked ? null : (
+                    <>
+                        :<b>{pilot.name}</b>
+                    </>
+                )}
+                <span style={{float: 'right', paddingRight: '0.5em'}}>
+                    {pilot.gliderType.substring(0, 20)}
+                    {pilot.handicap !== 100 ? ` (${pilot.handicap})` : ''}
+                    {onEditHandicap ? (
+                        <FontAwesomeIcon
+                            icon={faPenToSquare}
+                            size="xs"
+                            style={{cursor: 'pointer', marginLeft: 4, opacity: 0.6}}
+                            onClick={() => {
+                                const value = window.prompt(t('pilot.edit_handicap_prompt'), pilot.handicap !== 100 ? String(pilot.handicap) : '');
+                                if (value === null) return;
+                                if (value.trim() === '') {
+                                    onEditHandicap(compno, 100);
+                                } else {
+                                    const h = parseFloat(value);
+                                    if (!isNaN(h) && h > 0) {
+                                        onEditHandicap(compno, h);
+                                    }
+                                }
+                            }}
+                            title={t('pilot.edit_handicap')}
+                        />
+                    ) : null}
+                </span>
                 <br />
                 <span className="largeScreen">{pilot.country ? new Intl.DisplayNames([], {type: 'region'})?.of(pilot.country) : ''}</span>
                 <br className="largeScreen" />
@@ -544,7 +620,6 @@ export const Details = ({compno, pilot, units, tz, replayTime}: {compno: Compno;
                     <span>{altitude}</span>
                 </span>
             </h6>
-            <hr style={{borderColor: 'white', height: '1px', margin: '0'}} />
             {flightDetails}
         </div>
     );
@@ -599,6 +674,18 @@ function PilotStatusIcon({displayIcon}: {displayIcon: string | any}) {
 
 //
 // Render the pilot
+// Pair / team names ("John & Jack", "Anna and Beth") get collapsed to
+// initials ("J & J") so they fit in the narrow horizontal strip caption.
+function shortenPairName(name?: string): string {
+    if (!name) return '';
+    const parts = name.split(/\s*(?:&|\sand\s)\s*/i);
+    if (parts.length < 2) return name;
+    return parts
+        .map((p) => p.trim()[0])
+        .filter(Boolean)
+        .join(' & ');
+}
+
 const Pilot = memo(function Pilot({
     pilot,
     compno,
@@ -606,6 +693,9 @@ const Pilot = memo(function Pilot({
     suffix,
     icon,
     selected,
+    blocked,
+    vertical,
+    position,
     onClick
 }: //
 {
@@ -615,18 +705,48 @@ const Pilot = memo(function Pilot({
     suffix?: string;
     icon: any;
     selected: boolean;
+    blocked?: boolean;
+    vertical?: boolean;
+    position?: number;
     onClick: any;
 }) {
-    const className = selected ? 'small-pic pilot pilothovercapture selected' : 'small-pic pilot pilothovercapture';
+    // Pilots whose tracker is blocked (DDB / FlarmNet Permit-Livetracking
+    // declined) are surfaced without their name to respect the opt-out.
+    const linkTitle = blocked ? compno : compno + ': ' + pilot?.name;
+    if (vertical) {
+        const className = selected ? 'pilot-row pilothovercapture selected' : 'pilot-row pilothovercapture';
+        return (
+            <li className={className} key={compno}>
+                <a href="#" title={linkTitle} onClick={() => onClick(compno)}>
+                    <span className="pilot-row-left">
+                        <span className="pilot-row-position">{position != null ? `${position}.` : ''}</span>
+                        <span className="pilot-row-flag">{pilot?.country ? isoCountryCodeToFlagEmoji(pilot.country) : ''}</span>
+                        <span className="pilot-row-compno">{compno}</span>
+                        {blocked ? null : <span className="pilot-row-name">{pilot?.name}</span>}
+                    </span>
+                    <span className="pilot-row-right">
+                        <span className="data">{(value || '-').toString()}</span>
+                        {suffix ? <span className="units">{suffix}</span> : null}
+                        <PilotStatusIcon displayIcon={icon} />
+                    </span>
+                </a>
+            </li>
+        );
+    }
 
-    // Render the normal pilot icon
+    const className = selected ? 'small-pic pilot pilot-strip pilothovercapture selected' : 'small-pic pilot pilot-strip pilothovercapture';
+    const displayName = blocked ? '' : shortenPairName(pilot?.name);
+
     return (
         <li className={className} key={compno}>
-            <a href="#" title={compno + ': ' + pilot?.name} onClick={() => onClick(compno)}>
-                <PilotImage image={pilot?.image} country={pilot?.country} compno={compno} class={pilot?.class} />
+            <a href="#" title={linkTitle} onClick={() => onClick(compno)}>
+                <div className="pilot-strip-compno">
+                    {pilot?.country ? <span className="pilot-strip-flag">{isoCountryCodeToFlagEmoji(pilot.country)}</span> : null}
+                    <span className="pilot-strip-compno-text">{compno}</span>
+                </div>
                 <div>
                     <div className="caption">
-                        {compno}
+                        <span className="pilot-strip-name">{displayName}</span>
                         <PilotStatusIcon displayIcon={icon} />
                     </div>
                     <div>
@@ -645,10 +765,11 @@ export const PilotList = memo(function PilotList({
     selectedPilot,
     setSelectedCompno,
     options,
-    setOptions,
-    handicapped,
+    sortOrder,
     now,
-    tz
+    tz,
+    horizontal,
+    vertical
 }: //
 {
     pilots: API_ClassName_Pilots;
@@ -656,22 +777,18 @@ export const PilotList = memo(function PilotList({
     setSelectedCompno: Function;
     options: Options;
     live: boolean;
-    setOptions: Function;
-    handicapped: boolean;
+    sortOrder: string;
     now: Epoch | undefined;
     tz: TZ;
+    horizontal?: boolean;
+    vertical?: boolean;
 }) {
-    // These are the rendering options
-    const [visible, setVisible] = useState(true);
-
-    const order = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
-
     // ensure they sort keys are correct for each pilot, we don't actually
     // want to change the loaded pilots file, just the order they are presented
     // this can be done with a clone and reoder
     const pilotList: AllNormalDisplayKeys = useSelector(
         (state) =>
-            (sortOrders[order] ?? sortOrders['auto'])(state, now)
+            (sortOrders[sortOrder] ?? sortOrders['auto'])(state, now)
                 .map((r) => (r.converter ? r.converter(r, options.units, tz) : r))
                 .sort((a, b) => b.sortKey - a.sortKey),
         sortKeyEqualityCheck
@@ -686,38 +803,32 @@ export const PilotList = memo(function PilotList({
         [selectedPilot]
     );
 
-    // Prevent unneeded re-render by using callbacks
-    const setSort = useCallback(
-        (o) => {
-            setOptions(_cloneDeep({...options, sortKey: nextSortOrder(o, order, handicapped || false)}));
-        },
-        [order, handicapped, options]
-    );
-    const toggleVisible = useCallback(() => {
-        setVisible(!visible);
-    }, [visible]);
-
     // Generate the pilot list, sorted by the correct key
-    const pilotComponents = pilotList.map((pilot) => {
+    const pilotComponents = pilotList.map((pilot, idx) => {
+        const status = pilotStatus?.[pilot.compno]?.status ?? 0;
         return (
             <Pilot //
                 key={pilot.compno}
                 {...pilot}
                 pilot={pilots[pilot.compno]}
-                icon={icons[pilotStatus?.[pilot.compno]?.status ?? 0]}
+                icon={icons[status]}
+                blocked={status === PositionStatus.Blocked}
                 selected={selectedPilot === pilot.compno}
+                vertical={vertical}
+                position={idx + 1}
                 onClick={onClick}
             />
         );
     });
 
-    // Output the whole of the pilots list component
-    return pilotList?.length ? (
-        <>
-            <Sorting setSort={setSort} sortOrder={order} visible={visible} toggleVisible={toggleVisible} handicapped={handicapped || false} />
-            <Collapse in={visible}>
-                <ul className="pilots">{pilotComponents}</ul>
-            </Collapse>
-        </>
-    ) : null;
+    // With a single pilot there's nothing to sort or choose between, so
+    // suppress the whole list (ognfeed auto-selects that pilot via a
+    // derived `effectiveSelectedCompno`, so the footer details pane
+    // still surfaces them).
+    if (!pilotList?.length || pilotList.length <= 1) {
+        return null;
+    }
+
+    const listClass = horizontal ? 'pilots pilots-horizontal' : vertical ? 'pilots pilots-vertical' : 'pilots';
+    return <ul className={listClass}>{pilotComponents}</ul>;
 });

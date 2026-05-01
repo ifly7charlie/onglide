@@ -49,8 +49,13 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
 
             // Merge in any new position reports, one update for all
             if (decoded.positions) {
-                // Update the current class
-                dispatch(updatePositions({positions: decoded.positions.class[className].positions, t: decoded.t as Epoch}));
+                // Server omits classes with no fresh positions, so the
+                // current class may be absent — skip the same-class update
+                // when that's the case.
+                const ownClass = decoded.positions.class[className];
+                if (ownClass) {
+                    dispatch(updatePositions({positions: ownClass.positions, t: decoded.t as Epoch}));
+                }
                 dispatch(updateOtherPilotsPositions({positions: decoded.positions, t: decoded.t as Epoch}));
             }
 

@@ -5,14 +5,16 @@
 
 DROP TABLE IF EXISTS `classes`;
 CREATE TABLE `classes` (
-  `class` char(15) NOT NULL,
+  `class` char(15) NOT NULL COMMENT 'hash of compid+raw class name, globally unique',
+  `compid` varchar(40) NOT NULL COMMENT 'competition this class belongs to',
   `classname` char(30) NOT NULL,
   `description` varchar(200) DEFAULT '',
   `type` char(20) DEFAULT NULL,
   `handicapped` char(1) DEFAULT 'N',
   `grandprixstart` char(1) DEFAULT 'N',
   `Dm` float DEFAULT NULL,
-  UNIQUE KEY `class` (`class`)
+  UNIQUE KEY `class` (`class`),
+  KEY `compid` (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
@@ -32,20 +34,24 @@ CREATE TABLE `compdayshelper` (
 
 DROP TABLE IF EXISTS `competition`;
 CREATE TABLE `competition` (
+  `compid` varchar(40) NOT NULL COMMENT 'url-safe competition identifier, used in routing',
   `name` varchar(60) DEFAULT NULL COMMENT 'Competition name',
   `sitename` varchar(100) DEFAULT NULL COMMENT 'Site name',
-  
+
   `start` date DEFAULT NULL COMMENT 'Displayed as date range',
   `end` date DEFAULT NULL,
-  
+
   `countrycode` char(2) DEFAULT 'UK',
-  
+
   `tzoffset` int(11) DEFAULT 7200 COMMENT 'TZ offset from GMT in seconds (calculated)',
   `tz` char(40) DEFAULT 'Europe/Stockholm' COMMENT 'TZ offset from SoaringSpot',
-  
+
   `mainwebsite` varchar(240) DEFAULT NULL COMMENT 'Used when clicking on comp name to return to primary website',
   `lt` float DEFAULT NULL COMMENT 'launch/landing location',
-  `lg` float DEFAULT NULL COMMENT 'launch/landing location'
+  `lg` float DEFAULT NULL COMMENT 'launch/landing location',
+  `flightstats` char(1) DEFAULT 'N' COMMENT 'Compute per-flight statistics (thermals, wind, etc.) - Y/N',
+  `trackingconsent` char(1) DEFAULT 'N' COMMENT 'Y = comp has obtained explicit livetracking consent from pilots; bypass DDB tracked=N block',
+  PRIMARY KEY (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 
 --
@@ -57,7 +63,7 @@ CREATE TABLE `compstatus` (
   `class` char(15) NOT NULL,
   `datecode` char(3) DEFAULT NULL COMMENT 'current contest date code for this class',
   
-  `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,W=waitlist,X=confirm reg,P=prebrief,B=afterbrief,L=launched,S=startopen/flying,R=all reported,H=all home,Z=scrubbed,O=comp over',
+  `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,X=confirm reg,P=prebrief,B=afterbrief,G=gridded,L=launched,S=startopen/flying,F=first finisher imminent,R=all reported,H=all home,Z=scrubbed,O=comp over',
   `resultsdatecode` char(3) DEFAULT NULL COMMENT 'what date is scoring up to with uploading, results after this date wont be displayed',
   `task` char(1) DEFAULT 'A' COMMENT 'selected task',
   
@@ -121,6 +127,7 @@ CREATE TABLE `images` (
   `compno` char(4) NOT NULL,
   `image` mediumblob,
   `updated` int(11) NOT NULL,
+  `url` varchar(256) DEFAULT NULL COMMENT 'source URL of the last successful download, used as the preferred candidate on refresh',
   PRIMARY KEY (`class`,`compno`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
@@ -207,6 +214,7 @@ CREATE TABLE `pilots` (
   `class` char(15) NOT NULL COMMENT 'classid',
   `compno` char(4) NOT NULL,
   `fai` int(11) DEFAULT '0',
+  `idsig` varchar(64) DEFAULT NULL COMMENT 'hash of fullName|compno used by the scoring scheduler to gate FAI re-resolution; only re-resolved when sig changes',
   `firstname` char(30) DEFAULT NULL,
   `lastname` char(30) DEFAULT NULL,
   `homeclub` char(80) DEFAULT NULL,
@@ -248,6 +256,7 @@ CREATE TABLE `pilots` (
 
 DROP TABLE IF EXISTS `scoringsource`;
 CREATE TABLE `scoringsource` (
+  `compid` varchar(40) NOT NULL COMMENT 'competition this scoring source feeds',
   `type` enum('soaringspotkey','soaringspotscrape','rst','robocontrol','sgp','pictureurl') DEFAULT 'soaringspotkey',
   `url` text,
   `client_id` char(120) DEFAULT NULL,
@@ -256,7 +265,8 @@ CREATE TABLE `scoringsource` (
   `overwrite` int(11) DEFAULT '0',
   `actuals` int(11) DEFAULT '1',
   `portoffset` int(11) DEFAULT '0',
-  `domain` text
+  `domain` text,
+  KEY `compid` (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
@@ -344,7 +354,7 @@ CREATE TABLE `trackerhistory` (
   `flarmid` text DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot') DEFAULT 'none'
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked') DEFAULT 'none'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 

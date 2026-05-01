@@ -67,6 +67,7 @@ export function bindChannelForInOrderPackets(
             log(`${message.c}: IOG: reset on t=0`);
             messageQueue = [];
             messageQueueId = Math.random();
+            resolveAll();
             return;
         }
 
@@ -108,7 +109,7 @@ export function bindChannelForInOrderPackets(
         // Replay all before we start blocking, we will flag that it's a live message
         // when we get to the end which will result downstream events emitting a score
         while ((!messageQueue.length || !messageQueue[position]?._) && currentMessageQueueId == messageQueueId) {
-            if (position == messageQueue.length) {
+            if (position >= messageQueue.length) {
                 log(`${className}/${compno}: end of queue ${position} of ${messageQueue.length} messages, waiting...`);
                 await new Promise((resolve) => resolveNotifications.push(resolve));
                 continue;
@@ -116,18 +117,20 @@ export function bindChannelForInOrderPackets(
 
             const message = messageQueue[position++];
             const nextPoint = yield message;
+            if (messageQueueId !== currentMessageQueueId) return;
 
             // If we need to go backwards then do so
             if (nextPoint) {
-                for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+                for (position--; nextPoint && position > 0 && position < messageQueue.length && nextPoint < messageQueue[position].t; position--) {}
             } else {
                 if (message.t - hiccup > 60) {
                     hiccup = message.t;
                     const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
+                    if (messageQueueId !== currentMessageQueueId) return;
                     if (nextPoint) {
                         log(`${className}/${compno}: rewind to ${nextPoint} (hiccup)`);
 
-                        for (position--; nextPoint && nextPoint < messageQueue[position].t && position > 0; position--) {}
+                        for (position--; nextPoint && position > 0 && position < messageQueue.length && nextPoint < messageQueue[position].t; position--) {}
                         continue;
                     }
                 }
@@ -137,6 +140,21 @@ export function bindChannelForInOrderPackets(
         let now: Epoch = getNow();
         log(`${className}/${compno}: initial replay done ${position}/${messageQueue.length} points, now: ${d(now)}, replayed to: ${d(messageQueue.at(-1)?.t ?? 0)} <${messageQueueId},${currentMessageQueueId}>`);
 
+        // Bridge tick between replay and live: gives EPG a chance to fire
+        // gap-based home/landout detection on the gap from the last replayed
+        // point up to "now", before TPG starts emitting live-marked scores.
+        // Without this, a rescore (or any restart that walks the persistent
+        // queue) emits its first post-replay score with whatever cruise-state
+        // flightStatus the last airborne fix had — even if the pilot has been
+        // sat on the airfield for hours.
+        {
+            const bridgeNext = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
+            if (messageQueueId !== currentMessageQueueId) return;
+            if (bridgeNext) {
+                position = _sortedIndexBy(messageQueue, {t: bridgeNext} as any, (o) => o.t);
+            }
+        }
+
         // Find the position of the message we got up to, should always be increasing but better safe than sorry
         // as we may have had a reset of the message
         //        let position = _sortedIndexBy(messageQueue, {t: now} as any, (o) => o.t);
@@ -144,10 +162,11 @@ export function bindChannelForInOrderPackets(
         // Loop till we are told to stop (an exception on yield)
         while (messageQueueId === currentMessageQueueId) {
             // If we don't have a message we should wait
-            if (position == messageQueue.length) {
+            if (position >= messageQueue.length) {
                 // We will tick on empty queue with the current real time this flushes out
                 // landouts
                 const nextPoint = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
+                if (messageQueueId !== currentMessageQueueId) return;
                 if (nextPoint) {
                     // If scoring needs us to rewind we can do that immediately
                     position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
@@ -161,8 +180,9 @@ export function bindChannelForInOrderPackets(
                 await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
                 clearTimeout(timeout);
 
-                // If we don't have a real message then we can reloop which will cause another tick
-                if (position == messageQueue.length) {
+                // >= (not ==) because the t=0 reset handler can clear messageQueue
+                // while we're awaiting, leaving position stale and > length.
+                if (position >= messageQueue.length) {
                     continue;
                 }
             }
@@ -172,6 +192,7 @@ export function bindChannelForInOrderPackets(
             now = message.t;
             log(` normal loop ${position}/${messageQueue.length}, ${now} < ${getNow()}`);
             const nextPoint = yield {...message, _: position == messageQueue.length};
+            if (messageQueueId !== currentMessageQueueId) return;
             if (nextPoint) {
                 position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
             }
