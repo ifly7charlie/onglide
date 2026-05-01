@@ -654,7 +654,7 @@ async function main() {
             }
         }
         rebuildAprsFilter();
-    }, 60 * 1000);
+    }, 240 * 1000);
 }
 
 process.on('SIGINT', handleExit);
@@ -1689,10 +1689,14 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
             scoredStatus: existing?.scoredStatus,
             flarmIdRegex: existing?.flarmIdRegex
         });
-        gliders[gliderKey] = Object.assign(
-            existing || {},
-            {...t, compid: t.compid, displayName: `${compShort(t.compid)}/${t.classname}`, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
-        );
+        gliders[gliderKey] = Object.assign(existing || {}, {
+            ...t,
+            compid: t.compid,
+            displayName: `${compShort(t.compid)}/${t.classname}`,
+            channelName: channelName(t.className, datecode),
+            greg: t?.greg?.replace(/[^A-Z0-9]/i, ''),
+            datecode
+        } as any as Glider);
     }
 
     // Identify any competition numbers that may be duplicates and mark them.
@@ -1971,7 +1975,6 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             }
         }
     }
-
 }
 
 async function finaliseScoreId(competition: CompetitionContext) {
