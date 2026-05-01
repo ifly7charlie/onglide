@@ -2277,8 +2277,16 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             // We record this as the latest we are aware of - it's possible it will be wrong as
             // we don't differentiate between the two scoreIds but it's not a history so will
             // be fixed after a rescore. It could jump between two scores as the old scoring is terminated
-            channel.allScores[compno] = score;
-            channel.scoreDb?.put(compno, JSON.stringify(score)).catch((e) => {
+            // Carry the prior optimalGrid forward when this tick didn't emit one (the worker only
+            // populates it on leg entry) so sendAllScores / sendIdentifiersToAll / scoreDb restore
+            // still ship a grid for the pilot's current leg.
+            const prior = channel.allScores[compno];
+            const stored =
+                !score.optimalGrid?.length && prior?.optimalGrid?.length && prior.currentLeg === score.currentLeg //
+                    ? {...score, optimalGrid: prior.optimalGrid}
+                    : score;
+            channel.allScores[compno] = stored;
+            channel.scoreDb?.put(compno, JSON.stringify(stored)).catch((e) => {
                 console.log(`error saving score ${compno}, ${e}`);
             });
         }
@@ -3100,6 +3108,15 @@ function setupOgnWebServer(req, res) {
                                 ...scores.filter((score) => score.t >= chunkStart && score.t <= chunkEnd)
                             ]
                         };
+                        // Most ticks no longer carry the optimalGrid — backfill the active one onto the
+                        // first record so the AAT heatmap renders for chunks that span no leg transition
+                        const first = history[compno].history[0];
+                        if (first && !first.optimalGrid?.length) {
+                            const carrier = scores.findLast((s) => s.t <= first.t && s.currentLeg === first.currentLeg && s.optimalGrid?.length);
+                            if (carrier) {
+                                history[compno].history[0] = {...first, optimalGrid: carrier.optimalGrid};
+                            }
+                        }
                         scoreCount += history[compno].history.length;
                         glidersWithScores += history[compno].history.length ? 1 : 0;
                     }

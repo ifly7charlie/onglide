@@ -395,6 +395,23 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
             continue;
         }
 
+        // Pull any optimalGrid carried in this chunk into the dedicated store. The /scorehistory
+        // endpoint backfills the active grid onto the first record per pilot (plus mid-chunk leg
+        // transitions still carry their own), so this is at most a handful of entries. Use a
+        // sorted insert/replace rather than the splice-Infinity rewind used by _updateScores —
+        // older chunks must not drop later-loaded grids from the tail.
+        for (const ns of newScores) {
+            if (!ns.optimalGrid?.length) continue;
+            const entry: OptimalGridEntry = {t: ns.t as Epoch, currentLeg: ns.currentLeg, grid: ns.optimalGrid};
+            const gh = (state.optimalGrids[compno as Compno] ??= []);
+            const gIdx = _sortedIndexBy(gh, entry, (x) => x.t);
+            if (gh[gIdx]?.t === entry.t) {
+                gh[gIdx] = entry;
+            } else {
+                gh.splice(gIdx, 0, entry);
+            }
+        }
+
         // List of the newly received times, we need to remove existing ones from our data so any
         // that are not in the
         const newIndicies = newScores.map((scoreHistoryMessage) => scoreHistoryMessage.t as Epoch);
