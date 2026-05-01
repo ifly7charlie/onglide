@@ -129,6 +129,7 @@ export async function closeLog(): Promise<void> {
         }
         db = undefined;
         insertStmt = undefined;
+        bulkInsertStmt = undefined;
     }
 }
 
@@ -192,6 +193,20 @@ export function endBulkLoad(): void {
     }
 }
 
+// Latest stored row's t (epoch seconds), or undefined if the DB is empty
+// or unreachable. Used by incremental migrations to find the existing tail.
+export function latestTimestamp(): number | undefined {
+    const conn = ensureDb();
+    if (!conn) return undefined;
+    try {
+        const row = conn.prepare('SELECT MAX(t) AS t FROM points').get() as {t: number | null} | undefined;
+        return row?.t ?? undefined;
+    } catch (e) {
+        console.log(`pointlog latestTimestamp: ${e}`);
+        return undefined;
+    }
+}
+
 // Best-effort WAL checkpoint. Use periodically inside a long migration
 // loop so the WAL file doesn't balloon. PASSIVE: doesn't block readers.
 export function checkpointWal(): void {
@@ -205,14 +220,27 @@ export function checkpointWal(): void {
 
 // Bulk insert variant for migrations / replays. Wraps the writes in a
 // single SQLite transaction so the WAL fsync amortizes across the batch
-// (~100× faster than per-row autocommit at 10K-row batches). Returns
-// {inserted, skipped} so the caller can report progress; constraint
-// failures on individual rows are counted as skipped, not fatal.
-export function bulkAppend(messages: LoggedMessage[]): {inserted: number; skipped: number} {
-    if (!db || !insertStmt) return {inserted: 0, skipped: messages.length};
+// (~100× faster than per-row autocommit at 10K-row batches).
+//
+// Uses INSERT OR IGNORE (not OR REPLACE like the live writer's appendPoint)
+// so we can distinguish a fresh insert from a duplicate (PK collision):
+// info.changes is 1 for a new row, 0 for a duplicate. The data is the same
+// either way (same t/f/o ⇒ same packet), so ignoring vs replacing makes no
+// observable difference, but the count split lets the caller report
+// "X new, Y already there" — useful for re-runs of a migration.
+let bulkInsertStmt: Database.Statement | undefined;
+export function bulkAppend(messages: LoggedMessage[]): {inserted: number; duplicates: number; skipped: number} {
+    if (!db) return {inserted: 0, duplicates: 0, skipped: messages.length};
+    if (!bulkInsertStmt) {
+        bulkInsertStmt = db.prepare(
+            `INSERT OR IGNORE INTO points (t, f, o, lat, lng, a, g, b, s, d, ad)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+    }
     let inserted = 0;
+    let duplicates = 0;
     let skipped = 0;
-    const stmt = insertStmt;
+    const stmt = bulkInsertStmt;
     const tx = db.transaction((batch: LoggedMessage[]) => {
         for (const m of batch) {
             if (typeof m.t !== 'number' || !m.f) {
@@ -220,7 +248,7 @@ export function bulkAppend(messages: LoggedMessage[]): {inserted: number; skippe
                 continue;
             }
             try {
-                stmt.run(
+                const info = stmt.run(
                     m.t,
                     m.f,
                     m.o ?? '',
@@ -233,7 +261,8 @@ export function bulkAppend(messages: LoggedMessage[]): {inserted: number; skippe
                     (m as any).d ?? null,
                     (m as any).ad ?? null
                 );
-                inserted++;
+                if (info.changes > 0) inserted++;
+                else duplicates++;
             } catch {
                 skipped++;
             }
@@ -242,13 +271,12 @@ export function bulkAppend(messages: LoggedMessage[]): {inserted: number; skippe
     try {
         tx(messages);
     } catch (e) {
-        // Whole-transaction failure (rare — usually a fatal SQLite error).
-        // Treat any rows not yet counted as skipped.
         console.log(`pointlog: bulkAppend transaction failed: ${e}`);
-        skipped += messages.length - inserted;
+        skipped += messages.length - inserted - duplicates;
         inserted = 0;
+        duplicates = 0;
     }
-    return {inserted, skipped};
+    return {inserted, duplicates, skipped};
 }
 
 function purge(): void {

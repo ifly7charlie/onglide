@@ -27,7 +27,7 @@ import * as readline from 'readline';
 import yargs from 'yargs';
 import {hideBin} from 'yargs/helpers';
 
-import {openLog, closeLog, bulkAppend, beginBulkLoad, endBulkLoad, checkpointWal, type LoggedMessage} from '../lib/webworkers/pointlog';
+import {openLog, closeLog, bulkAppend, beginBulkLoad, endBulkLoad, checkpointWal, latestTimestamp, type LoggedMessage} from '../lib/webworkers/pointlog';
 
 // Same default + env var as pointlog.ts's purge. Records older than this
 // would be reaped by the next hourly tick anyway, so skip them on the way
@@ -44,6 +44,7 @@ interface FileResult {
     lines: number;
     parsed: number;
     inserted: number;
+    duplicates: number;
     skipped: number;
     parseErrors: number;
     tooOld: number;
@@ -60,6 +61,7 @@ async function migrateFile(file: string, batchSize: number, cutoff: number): Pro
     let parsed = 0;
     let parseErrors = 0;
     let inserted = 0;
+    let duplicates = 0;
     let skipped = 0;
     let tooOld = 0;
     let batch: LoggedMessage[] = [];
@@ -68,6 +70,7 @@ async function migrateFile(file: string, batchSize: number, cutoff: number): Pro
         if (batch.length === 0) return;
         const r = bulkAppend(batch);
         inserted += r.inserted;
+        duplicates += r.duplicates;
         skipped += r.skipped;
         batch = [];
     };
@@ -106,21 +109,44 @@ async function migrateFile(file: string, batchSize: number, cutoff: number): Pro
         console.log(`migrate: read error in ${file} after ${lines} lines: ${e}`);
     }
 
-    return {file, lines, parsed, inserted, skipped, parseErrors, tooOld, elapsedMs: Date.now() - start};
+    return {file, lines, parsed, inserted, duplicates, skipped, parseErrors, tooOld, elapsedMs: Date.now() - start};
 }
 
 async function main() {
     const argv = await yargs(hideBin(process.argv))
         .scriptName('migrate-pointlog')
-        .usage('$0 [--batch <N>] <file>...')
+        .usage('$0 [--batch <N>] [--incremental [--overlap <hours>]] <file>...')
         .option('batch', {type: 'number', default: 10000, description: 'rows per SQLite transaction'})
+        .option('incremental', {type: 'boolean', default: false, description: 'skip rows older than (latestRowT − overlap hours); for fast incremental top-up runs'})
+        .option('overlap', {type: 'number', default: 1, description: 'with --incremental, hours of overlap with the existing tail to catch out-of-order packets near the boundary'})
         .demandCommand(1, 'specify one or more legacy aprs-*.log files')
         .help()
         .alias('help', 'h').argv;
 
     const files = argv._.map(String);
     const batchSize = Math.max(1, Number(argv.batch) || 10000);
-    const cutoff = retainCutoffSeconds();
+
+    // Two floors apply: rows older than retention would be reaped on the
+    // next purge anyway, and rows older than (latestRowT − overlap) are
+    // already in the DB on an incremental re-run. Take the more recent.
+    let cutoff = retainCutoffSeconds();
+    if (argv.incremental) {
+        // ensureDb opens read-only-ish; latestTimestamp returns undefined if
+        // the DB is empty (first run) — in that case --incremental is a no-op.
+        const tail = latestTimestamp();
+        if (tail != null) {
+            const overlapHours = Math.max(0, Number(argv.overlap) || 1);
+            const incCutoff = tail - overlapHours * 3600;
+            if (incCutoff > cutoff) {
+                console.log(`migrate: incremental: existing tail at ${new Date(tail * 1000).toISOString()}, overlap ${overlapHours}h → cutoff lifted to ${new Date(incCutoff * 1000).toISOString()}`);
+                cutoff = incCutoff;
+            } else {
+                console.log(`migrate: incremental requested but retention floor is more recent than (tail − ${overlapHours}h); using retention cutoff`);
+            }
+        } else {
+            console.log(`migrate: incremental requested but DB is empty; using retention cutoff`);
+        }
+    }
 
     console.log(`migrate: ${files.length} files, batch size ${batchSize}, dropping rows older than ${new Date(cutoff * 1000).toISOString()}`);
 
@@ -128,6 +154,7 @@ async function main() {
     beginBulkLoad();
 
     let totalInserted = 0;
+    let totalDuplicates = 0;
     let totalSkipped = 0;
     let totalParseErrors = 0;
     let totalTooOld = 0;
@@ -140,13 +167,14 @@ async function main() {
             try {
                 const r = await migrateFile(file, batchSize, cutoff);
                 totalInserted += r.inserted;
+                totalDuplicates += r.duplicates;
                 totalSkipped += r.skipped;
                 totalParseErrors += r.parseErrors;
                 totalTooOld += r.tooOld;
                 totalLines += r.lines;
                 const rate = r.elapsedMs > 0 ? Math.round((r.inserted * 1000) / r.elapsedMs) : 0;
                 console.log(
-                    `${r.file}: ${r.lines} lines, ${r.parsed} parsed, ${r.inserted} inserted, ${r.skipped} skipped, ${r.tooOld} too old, ${r.parseErrors} parse errors (${r.elapsedMs}ms, ${rate} row/s)`
+                    `${r.file}: ${r.lines} lines, ${r.parsed} parsed, ${r.inserted} inserted, ${r.duplicates} duplicates, ${r.skipped} skipped, ${r.tooOld} too old, ${r.parseErrors} parse errors (${r.elapsedMs}ms, ${rate} row/s)`
                 );
             } catch (e) {
                 console.log(`migrate: ${file} failed: ${e}`);
@@ -166,7 +194,7 @@ async function main() {
     const overallMs = Date.now() - overallStart;
     const overallRate = overallMs > 0 ? Math.round((totalInserted * 1000) / overallMs) : 0;
     console.log(
-        `\nmigrate: total ${totalLines} lines, ${totalInserted} inserted, ${totalSkipped} skipped, ${totalTooOld} too old, ${totalParseErrors} parse errors (${overallMs}ms, ${overallRate} row/s)`
+        `\nmigrate: total ${totalLines} lines, ${totalInserted} inserted, ${totalDuplicates} duplicates, ${totalSkipped} skipped, ${totalTooOld} too old, ${totalParseErrors} parse errors (${overallMs}ms, ${overallRate} row/s)`
     );
 }
 
