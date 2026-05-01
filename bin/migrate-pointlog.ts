@@ -26,6 +26,12 @@ import {createReadStream} from 'fs';
 import * as readline from 'readline';
 import yargs from 'yargs';
 import {hideBin} from 'yargs/helpers';
+import * as dotenv from 'dotenv';
+
+// Load DB_PATH (and any other vars) from .env.local before importing any
+// module that reads them. Match the convention used by bin/findtrackers.ts
+// and the other CLI entry points.
+dotenv.config({path: '.env.local'});
 
 import {openLog, closeLog, bulkAppend, beginBulkLoad, endBulkLoad, checkpointWal, latestTimestamp, type LoggedMessage} from '../lib/webworkers/pointlog';
 
@@ -151,7 +157,12 @@ async function main() {
     console.log(`migrate: ${files.length} files, batch size ${batchSize}, dropping rows older than ${new Date(cutoff * 1000).toISOString()}`);
 
     await openLog();
-    beginBulkLoad();
+    // Bulk-load mode (drop secondary index, big cache, mmap) is a big win
+    // on a multi-million-row first import. For an incremental top-up we're
+    // adding at most a few thousand new rows alongside many duplicates —
+    // dropping and rebuilding the (f, t) index would dominate the runtime.
+    // Stick with the live insert path in that case.
+    if (!argv.incremental) beginBulkLoad();
 
     let totalInserted = 0;
     let totalDuplicates = 0;
@@ -184,10 +195,10 @@ async function main() {
             if (++filesProcessed % 4 === 0) checkpointWal();
         }
     } finally {
-        // Always try to rebuild the secondary index — without it, runtime
-        // loadPoints({flarmId, ...}) does a full table scan on the next ogn
-        // start. Logged inside endBulkLoad.
-        endBulkLoad();
+        // Only rebuild the index if we dropped it. Without this guard an
+        // incremental run would call CREATE INDEX IF NOT EXISTS (cheap no-op)
+        // followed by a TRUNCATE checkpoint (not cheap) for nothing.
+        if (!argv.incremental) endBulkLoad();
         await closeLog();
     }
 
