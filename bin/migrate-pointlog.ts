@@ -27,7 +27,7 @@ import * as readline from 'readline';
 import yargs from 'yargs';
 import {hideBin} from 'yargs/helpers';
 
-import {openLog, closeLog, bulkAppend, type LoggedMessage} from '../lib/webworkers/pointlog';
+import {openLog, closeLog, bulkAppend, beginBulkLoad, endBulkLoad, checkpointWal, type LoggedMessage} from '../lib/webworkers/pointlog';
 
 // Same default + env var as pointlog.ts's purge. Records older than this
 // would be reaped by the next hourly tick anyway, so skip them on the way
@@ -125,32 +125,43 @@ async function main() {
     console.log(`migrate: ${files.length} files, batch size ${batchSize}, dropping rows older than ${new Date(cutoff * 1000).toISOString()}`);
 
     await openLog();
+    beginBulkLoad();
 
     let totalInserted = 0;
     let totalSkipped = 0;
     let totalParseErrors = 0;
     let totalTooOld = 0;
     let totalLines = 0;
+    let filesProcessed = 0;
     const overallStart = Date.now();
 
-    for (const file of files) {
-        try {
-            const r = await migrateFile(file, batchSize, cutoff);
-            totalInserted += r.inserted;
-            totalSkipped += r.skipped;
-            totalParseErrors += r.parseErrors;
-            totalTooOld += r.tooOld;
-            totalLines += r.lines;
-            const rate = r.elapsedMs > 0 ? Math.round((r.inserted * 1000) / r.elapsedMs) : 0;
-            console.log(
-                `${r.file}: ${r.lines} lines, ${r.parsed} parsed, ${r.inserted} inserted, ${r.skipped} skipped, ${r.tooOld} too old, ${r.parseErrors} parse errors (${r.elapsedMs}ms, ${rate} row/s)`
-            );
-        } catch (e) {
-            console.log(`migrate: ${file} failed: ${e}`);
+    try {
+        for (const file of files) {
+            try {
+                const r = await migrateFile(file, batchSize, cutoff);
+                totalInserted += r.inserted;
+                totalSkipped += r.skipped;
+                totalParseErrors += r.parseErrors;
+                totalTooOld += r.tooOld;
+                totalLines += r.lines;
+                const rate = r.elapsedMs > 0 ? Math.round((r.inserted * 1000) / r.elapsedMs) : 0;
+                console.log(
+                    `${r.file}: ${r.lines} lines, ${r.parsed} parsed, ${r.inserted} inserted, ${r.skipped} skipped, ${r.tooOld} too old, ${r.parseErrors} parse errors (${r.elapsedMs}ms, ${rate} row/s)`
+                );
+            } catch (e) {
+                console.log(`migrate: ${file} failed: ${e}`);
+            }
+            // Keep WAL bounded across files. Checkpoint every 4 files
+            // (~2.8M rows at the user's 700K/file scale).
+            if (++filesProcessed % 4 === 0) checkpointWal();
         }
+    } finally {
+        // Always try to rebuild the secondary index — without it, runtime
+        // loadPoints({flarmId, ...}) does a full table scan on the next ogn
+        // start. Logged inside endBulkLoad.
+        endBulkLoad();
+        await closeLog();
     }
-
-    await closeLog();
 
     const overallMs = Date.now() - overallStart;
     const overallRate = overallMs > 0 ? Math.round((totalInserted * 1000) / overallMs) : 0;

@@ -155,6 +155,54 @@ export function appendPoint(m: LoggedMessage): void {
     }
 }
 
+// Begin bulk-load mode. Caller is expected to be a one-shot migration /
+// replay tool (not the live APRS worker). Three knobs at once:
+//   - drop the secondary index so we don't pay random b-tree maintenance
+//     on every insert; we'll rebuild it sequentially in endBulkLoad.
+//     Index inserts dominate cost once the index outgrows the page cache.
+//   - boost cache_size and mmap_size so the PK b-tree pages stay hot.
+//   - clear the hourly purge timer so a checkpoint can't fire mid-migration.
+// Pair with endBulkLoad() before closeLog().
+export function beginBulkLoad(opts: {cacheBytes?: number; mmapBytes?: number} = {}): void {
+    if (!db) return;
+    if (purgeTimer) {
+        clearTimeout(purgeTimer);
+        purgeTimer = undefined;
+    }
+    const cacheBytes = opts.cacheBytes ?? 200 * 1024 * 1024;
+    const mmapBytes = opts.mmapBytes ?? 256 * 1024 * 1024;
+    // negative cache_size = KB rather than pages
+    db.pragma(`cache_size = ${-Math.floor(cacheBytes / 1024)}`);
+    db.pragma(`mmap_size = ${mmapBytes}`);
+    db.exec('DROP INDEX IF EXISTS idx_points_f_t');
+    console.log(`pointlog: bulk-load mode (cache ${(cacheBytes / 1024 / 1024).toFixed(0)}MB, mmap ${(mmapBytes / 1024 / 1024).toFixed(0)}MB, dropped idx_points_f_t)`);
+}
+
+// Recreate the secondary index (single sequential build, much cheaper than
+// maintaining it during inserts), checkpoint the WAL.
+export function endBulkLoad(): void {
+    if (!db) return;
+    const start = Date.now();
+    db.exec('CREATE INDEX IF NOT EXISTS idx_points_f_t ON points (f, t)');
+    console.log(`pointlog: rebuilt idx_points_f_t (${Date.now() - start}ms)`);
+    try {
+        db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch (e) {
+        console.log(`pointlog: post-bulk checkpoint failed: ${e}`);
+    }
+}
+
+// Best-effort WAL checkpoint. Use periodically inside a long migration
+// loop so the WAL file doesn't balloon. PASSIVE: doesn't block readers.
+export function checkpointWal(): void {
+    if (!db) return;
+    try {
+        db.pragma('wal_checkpoint(PASSIVE)');
+    } catch (e) {
+        console.log(`pointlog: passive checkpoint failed: ${e}`);
+    }
+}
+
 // Bulk insert variant for migrations / replays. Wraps the writes in a
 // single SQLite transaction so the WAL fsync amortizes across the batch
 // (~100× faster than per-row autocommit at 10K-row batches). Returns
