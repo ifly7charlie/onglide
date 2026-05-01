@@ -28,6 +28,9 @@ export interface Identifiers {
   earliestScore?: number | undefined;
   latestScore?: number | undefined;
   scoreId?: string | undefined;
+  meanAgl?: number | undefined;
+  highestAgl?: number | undefined;
+  deviationAgl?: number | undefined;
 }
 
 export interface Task {
@@ -460,6 +463,9 @@ function createBaseIdentifiers(): Identifiers {
     earliestScore: undefined,
     latestScore: undefined,
     scoreId: undefined,
+    meanAgl: undefined,
+    highestAgl: undefined,
+    deviationAgl: undefined,
   };
 }
 
@@ -482,6 +488,15 @@ export const Identifiers = {
     }
     if (message.scoreId !== undefined) {
       writer.uint32(50).string(message.scoreId);
+    }
+    if (message.meanAgl !== undefined) {
+      writer.uint32(56).uint32(message.meanAgl);
+    }
+    if (message.highestAgl !== undefined) {
+      writer.uint32(64).uint32(message.highestAgl);
+    }
+    if (message.deviationAgl !== undefined) {
+      writer.uint32(72).uint32(message.deviationAgl);
     }
     return writer;
   },
@@ -535,6 +550,27 @@ export const Identifiers = {
 
           message.scoreId = reader.string();
           continue;
+        case 7:
+          if (tag !== 56) {
+            break;
+          }
+
+          message.meanAgl = reader.uint32();
+          continue;
+        case 8:
+          if (tag !== 64) {
+            break;
+          }
+
+          message.highestAgl = reader.uint32();
+          continue;
+        case 9:
+          if (tag !== 72) {
+            break;
+          }
+
+          message.deviationAgl = reader.uint32();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -552,6 +588,9 @@ export const Identifiers = {
       earliestScore: isSet(object.earliestScore) ? globalThis.Number(object.earliestScore) : undefined,
       latestScore: isSet(object.latestScore) ? globalThis.Number(object.latestScore) : undefined,
       scoreId: isSet(object.scoreId) ? globalThis.String(object.scoreId) : undefined,
+      meanAgl: isSet(object.meanAgl) ? globalThis.Number(object.meanAgl) : undefined,
+      highestAgl: isSet(object.highestAgl) ? globalThis.Number(object.highestAgl) : undefined,
+      deviationAgl: isSet(object.deviationAgl) ? globalThis.Number(object.deviationAgl) : undefined,
     };
   },
 
@@ -575,6 +614,15 @@ export const Identifiers = {
     if (message.scoreId !== undefined) {
       obj.scoreId = message.scoreId;
     }
+    if (message.meanAgl !== undefined) {
+      obj.meanAgl = Math.round(message.meanAgl);
+    }
+    if (message.highestAgl !== undefined) {
+      obj.highestAgl = Math.round(message.highestAgl);
+    }
+    if (message.deviationAgl !== undefined) {
+      obj.deviationAgl = Math.round(message.deviationAgl);
+    }
     return obj;
   },
 
@@ -589,6 +637,9 @@ export const Identifiers = {
     message.earliestScore = object.earliestScore ?? undefined;
     message.latestScore = object.latestScore ?? undefined;
     message.scoreId = object.scoreId ?? undefined;
+    message.meanAgl = object.meanAgl ?? undefined;
+    message.highestAgl = object.highestAgl ?? undefined;
+    message.deviationAgl = object.deviationAgl ?? undefined;
     return message;
   },
 };

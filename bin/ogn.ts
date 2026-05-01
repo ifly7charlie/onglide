@@ -79,6 +79,8 @@ import {setSiteTz, getSiteTz, timeToText, dateToText} from '../lib/flightprocess
 import {Epoch, Datecode, Compno, FlarmID, ClassName, ClassName_Compno, makeClassname_Compno, ChannelName, Task, DeckData, AirfieldLocation} from '../lib/types';
 import {ScoringController} from '../lib/webworkers/scoring';
 
+import Stats from 'stats-incremental';
+
 let userLogStream: WriteStream | null = null;
 
 let scoreFrequency = 60;
@@ -131,6 +133,7 @@ interface Channel {
     lastKeepAliveMsg?: any;
 
     statistics: Statistics;
+    heightStatistics: any;
 
     // Tasks we are working on or have had
 
@@ -715,6 +718,7 @@ async function updateClasses(internalName: string, datecode: Datecode) {
                     totalViewingTime: 0,
                     bytesSent: 0
                 },
+                heightStatistics: new Stats(),
                 // Info on what has been sent via https
                 webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
@@ -1333,7 +1337,10 @@ function getIdentifiers(channel: Channel) {
         competition: '1', //
         earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
         latestScore: channel.latestScore,
-        scoreId: channel.liveScoreId
+        scoreId: channel.liveScoreId,
+        meanAgl: channel.heightStatistics.mean,
+        highestAgl: channel.heightStatistics.max,
+        deviationAgl: channel.heightStatistics.standard_deviation
     };
 }
 
@@ -1599,6 +1606,8 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     if ('tick' in message) {
         return;
     }
+
+    channel.heightStatistics.update(message.g);
 
     // Check if they are a launch
     if (message.g > 100 && !channel.launching) {

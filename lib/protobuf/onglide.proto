@@ -18,6 +18,9 @@ message Identifiers {
 	optional uint32 earliestScore = 4;
 	optional uint32 latestScore = 5;
 	optional string scoreId = 6;
+	optional uint32 meanAgl = 7;
+	optional uint32 highestAgl = 8;
+	optional uint32 deviationAgl = 9;
 }
 
 message Task {
