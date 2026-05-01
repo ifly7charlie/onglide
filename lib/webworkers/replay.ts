@@ -129,7 +129,7 @@ function spawnReplayContestListener(config: ReplayConfig): Worker {
     }
     console.log(`Starting Replay:${config.className} worker thread`);
 
-    return new Worker(__filename, {env: SHARE_ENV, workerData: config});
+    return new Worker(__filename, {env: SHARE_ENV, workerData: config, name: `replay:${config.className}`});
 }
 
 if (!isMainThread) {

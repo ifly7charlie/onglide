@@ -94,6 +94,10 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
             const recentStart = score.utcStart && c.mostRecentStart[compno] != score.utcStart ? score.utcStart : undefined;
             c.mostRecentStart[compno] = score.utcStart as Epoch;
 
+            score.scoreId = scoreId;
+            c.allScores[compno] = score;
+            port.postMessage({compno, score, recentStart, t: score.t, scoreId});
+
             // If we are now live we can close off the older ones
             if (score.live && !c.live[compno]) {
                 c.live[compno] = true;
@@ -108,10 +112,6 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
 
                 checkIfScoreIdIsLive(scoreId);
             }
-
-            score.scoreId = scoreId;
-            c.allScores[compno] = score;
-            port.postMessage({compno, score, recentStart, t: score.t, scoreId});
         }
         return running;
     }
@@ -208,7 +208,7 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
             await setTimeout(1); // explicit yield - ensures logging and stuff are working and spreads out between the different compnos so one doesn't starve the rest on restart
         }
     } catch (e) {
-        console.log(compno, '[', options.scoreId, '] scoreCollector exception', e);
+        console.log(compno, '[', options.scoreId, '] scoreCollector exception', e, (e as Error)?.stack);
     }
     trackMetric('sc.done.' + className, 1);
     trackMetric('sc.done', 1);

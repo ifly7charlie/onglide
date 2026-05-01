@@ -80,7 +80,8 @@ async function main() {
         host: response.dbhost,
         database: response.database,
         user: response.dbuser,
-        password: response.dbpw
+        password: response.dbpw,
+        decimalNumbers: true
     });
 
     mysql.connect();
@@ -361,7 +362,8 @@ NEXT_PUBLIC_SITEURL=${wsresponse.url}
             host: response.dbhost,
             database: response.database,
             user: nE.MYSQL_ADMIN_USER,
-            password: nE.MYSQL_ADMIN_PW
+            password: nE.MYSQL_ADMIN_PW,
+            decimalNumbers: true
         });
 
         mysql_admin.connect();

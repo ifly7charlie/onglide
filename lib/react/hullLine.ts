@@ -1,5 +1,3 @@
-import {LayerProps} from 'react-map-gl';
-
 import type {LineString, Feature} from 'geojson';
 import {lineString, featureCollection} from '@turf/helpers';
 

@@ -46,6 +46,30 @@ import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, C
 let connection: ISSocket & {valid: boolean; aprsc: string};
 const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern5.glidernet.org'];
 
+// Pending filter string, set if setFilter is called before we're connected
+// and logged in. Drained in the connect handler after sendLogin().
+let pendingFilter: string | null = null;
+
+// Last successfully applied filter — re-sent after reconnects so we don't
+// fall back to the login-time r/0/0/1 placeholder.
+let currentFilter: string | null = null;
+
+// True from the moment the connect handler has fired and sendLogin() has
+// been called. This gates #filter — aprsc only accepts in-band filter
+// updates after login. Note: connection.valid is set in the packet
+// handler on first received line, so we can't use it here — with a
+// minimal initial filter (r/0/0/1) no packets arrive until the filter
+// is updated, so valid stays false and applyFilter would loop deferring
+// itself forever.
+let loggedIn = false;
+
+// Guard against concurrent restarts. The error handler and kaInterval
+// can both trip the "too unstable" threshold in the same tick; without
+// this guard they'd each spin up a fresh listener (with its own
+// interval/socket), leaking the previous one's kaInterval since each
+// closure clears only the interval it captured.
+let restarting = false;
+
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
 import {trackMetric, initialiseInsights} from '../insights';
@@ -59,10 +83,11 @@ export enum AprsCommandEnum {
     track,
     finish,
     untrack,
-    datecode
+    setFilter,
+    setAirfields
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandDatecode;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandSetFilter | AprsCommandSetAirfields;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
@@ -70,8 +95,9 @@ export interface AprsCommandTrack {
 
     className: ClassName;
     channelName: string;
-    compno: string | Compno;
+    compno: Compno;
     datecode: Datecode;
+    tzoffset: number; // seconds east of UTC — used to derive competition start time for point backfill
     receiveNewPoints: boolean;
     trackerId: string | string[];
 }
@@ -79,18 +105,18 @@ export interface AprsCommandTrack {
 export interface AprsCommandUntrack {
     action: AprsCommandEnum.untrack;
 
-    className: string | ClassName;
+    className: ClassName;
     channelName: string;
-    compno: string | Compno;
+    compno: Compno;
     trackerId: string | string[];
 }
 
 export interface AprsCommandFinish {
     action: AprsCommandEnum.finish;
 
-    className: string | ClassName;
+    className: ClassName;
     channelName: string;
-    compno: string | Compno;
+    compno: Compno;
 }
 
 // Exit
@@ -98,17 +124,24 @@ export interface AprsCommandShutdown {
     action: AprsCommandEnum.shutdown;
 }
 
-export interface AprsCommandDatecode {
-    action: AprsCommandEnum.datecode;
-    datecode: Datecode;
+export interface AprsCommandSetFilter {
+    action: AprsCommandEnum.setFilter;
+    filter: string;
+}
+
+export interface AirfieldSpec {
+    compid: string;
+    lt: number;
+    lg: number;
+}
+
+export interface AprsCommandSetAirfields {
+    action: AprsCommandEnum.setAirfields;
+    airfields: AirfieldSpec[];
 }
 
 export interface AprsListenerConfig {
-    competition: string;
-    location: {
-        lt: number;
-        lg: number;
-    };
+    airfields: AirfieldSpec[];
 }
 
 // Keep track of some basic statistics
@@ -134,9 +167,12 @@ const statistics = {
 
 // Keep track of the aircraft requested
 export interface Aircraft {
-    compno: string;
-    className: string;
+    compno: Compno;
+    className: ClassName;
     trackers: FlarmID[];
+
+    datecode: Datecode; // competition day this aircraft belongs to (internal signal for reset-on-change)
+    tzoffset: number; // competition timezone offset; drives backfill start time
 
     receiveNewPoints: boolean;
 
@@ -165,15 +201,70 @@ export interface Tracker {
     index: number;
     aircraftList: Aircraft[];
     receiveNewPoints: boolean;
-    db: AbstractSublevel<DB, string | Uint8Array | Buffer, string, string> | undefined;
 }
 
-// Where is the airfield?
-let airfieldLocation: Coord;
-let airfieldElevation: AltitudeAgl;
+// All active airfields with their elevation. Populated from the initial
+// config and updated at runtime via AprsCommandEnum.setAirfields.
+interface Airfield {
+    compid: string;
+    point: Coord;
+    elevation: AltitudeAgl;
+}
+const airfields: Airfield[] = [];
 
-// And where to send unknown gliders close to the airfield
-let unknownChannel: BroadcastChannel;
+// Per-comp channels for unknown gliders that land near that comp's airfield.
+// Lazily created on first dispatch; closed when the airfield goes away.
+const unknownChannels: Record<string, BroadcastChannel> = {};
+
+function nearestAirfield(jPoint: Coord): {field: Airfield; distance: number} | null {
+    let best: Airfield | null = null;
+    let bestD = Infinity;
+    for (const a of airfields) {
+        const d = distance(jPoint, a.point);
+        if (d < bestD) {
+            bestD = d;
+            best = a;
+        }
+    }
+    return best ? {field: best, distance: bestD} : null;
+}
+
+function getUnknownChannel(compid: string): BroadcastChannel {
+    if (!unknownChannels[compid]) {
+        const name = 'Unknown_' + compid;
+        console.log(`[UNKTRACE] aprs: opening dispatch channel ${name}`);
+        unknownChannels[compid] = new BroadcastChannel(name);
+    }
+    return unknownChannels[compid];
+}
+
+function setAirfields(specs: AirfieldSpec[]) {
+    const keep = new Set(specs.map((s) => s.compid));
+
+    // Drop airfields that are no longer configured, closing their unknown channel
+    for (let i = airfields.length - 1; i >= 0; i--) {
+        if (!keep.has(airfields[i].compid)) {
+            const compid = airfields[i].compid;
+            airfields.splice(i, 1);
+            unknownChannels[compid]?.close();
+            delete unknownChannels[compid];
+        }
+    }
+
+    // Add or update each spec
+    for (const s of specs) {
+        const existing = airfields.find((a) => a.compid === s.compid);
+        const p = point([s.lt, s.lg]);
+        if (existing) {
+            existing.point = p;
+        } else {
+            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl};
+            airfields.push(a);
+            getElevationOffset(s.lt, s.lg, (e: any) => (a.elevation = e));
+        }
+    }
+    console.log(`aprs airfields: ${airfields.map((a) => a.compid).join(',') || 'none'}`);
+}
 
 // Mapping by class/compno to aircraft record
 const allAircraft: Record<ClassName_Compno, Aircraft> = {};
@@ -189,13 +280,9 @@ const receivers: Record<string, number> = {};
 const channels: Record<ChannelName, BroadcastChannel> = {};
 
 // Our persistence
-import {ClassicLevel} from 'classic-level';
-import type {AbstractSublevel} from 'abstract-level';
+import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
+import {competitionStartTs} from '../datecode';
 import {inorderAdditionalDelay} from '../constants';
-
-class DB extends ClassicLevel<string, string> {}
-let db: DB | undefined;
-let dbDatecode: Datecode = '000' as Datecode;
 
 //
 // Start a listener
@@ -208,11 +295,11 @@ export class AprsController {
         }
         console.log('Starting APRS worker thread');
 
-        this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config});
+        this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config, name: 'aprs'});
     }
 
     validateGlider(trackerIds: string): boolean {
-        if (!trackerIds || trackerIds == 'unknown') {
+        if (!trackerIds || trackerIds == 'unknown' || trackerIds == 'blocked') {
             return false;
         }
         const flarmIDs = trackerIds
@@ -222,7 +309,7 @@ export class AprsController {
         return flarmIDs && flarmIDs.length > 0;
     }
 
-    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
+    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
@@ -236,6 +323,7 @@ export class AprsController {
             className: className,
             channelName,
             datecode,
+            tzoffset,
             receiveNewPoints,
             trackerId: flarmIDs
         };
@@ -270,18 +358,38 @@ export class AprsController {
         };
         this.worker.postMessage?.(command);
     }
-    datecode(datecode: Datecode) {
-        const command: AprsCommandDatecode = {
-            action: AprsCommandEnum.datecode,
-            datecode
+    setFilter(filter: string) {
+        const command: AprsCommandSetFilter = {
+            action: AprsCommandEnum.setFilter,
+            filter
         };
         this.worker.postMessage?.(command);
     }
-    shutdown() {
-        const command: AprsCommandShutdown = {
-            action: AprsCommandEnum.shutdown
+    setAirfields(airfields: AirfieldSpec[]) {
+        const command: AprsCommandSetAirfields = {
+            action: AprsCommandEnum.setAirfields,
+            airfields
         };
         this.worker.postMessage?.(command);
+    }
+    // Send the shutdown command to the worker and return a promise that
+    // resolves when the worker process has actually exited, or after a
+    // 5-second timeout (so teardown doesn't hang if the worker is stuck).
+    shutdown(): Promise<void> {
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done) return;
+                done = true;
+                resolve();
+            };
+            this.worker.once('exit', finish);
+            const command: AprsCommandShutdown = {
+                action: AprsCommandEnum.shutdown
+            };
+            this.worker.postMessage?.(command);
+            setTimeout(finish, 5000);
+        });
     }
 }
 
@@ -295,14 +403,11 @@ if (!isMainThread && parentPort) {
     //
     // action: shutdown
     // action: track
-    parentPort.on('message', (task: AprsCommand) => {
+    parentPort.on('message', async (task: AprsCommand) => {
         // If we have been asked to exit then do so
         if (task.action == AprsCommandEnum.shutdown) {
             console.log('closing worker');
-            if (db) {
-                db.close();
-                db = undefined;
-            }
+            await closeLog();
             process.exit();
         }
 
@@ -318,61 +423,48 @@ if (!isMainThread && parentPort) {
             case AprsCommandEnum.finish:
                 finishGlider(task);
                 break;
-            case AprsCommandEnum.datecode:
-                setupDatecode(task);
+            case AprsCommandEnum.setFilter:
+                applyFilter(task.filter);
+                break;
+            case AprsCommandEnum.setAirfields:
+                setAirfields(task.airfields);
                 break;
         }
     });
 
-    // Any unknown gliders get sent to this for identification
-    unknownChannel = new BroadcastChannel('Unknown_' + workerData.competition);
-
-    startAprsListener(<AprsListenerConfig>workerData);
+    openLog().then(() => startAprsListener(<AprsListenerConfig>workerData));
 }
 
-export async function initDB(datecode: Datecode, competitionName?: string) {
-    if (db && dbDatecode == datecode) {
-        return db;
+
+//
+// Apply a new aprsc filter string in-band. aprsc supports `#filter <string>`
+// on an authenticated connection with no reconnect required.
+//
+// If we're not yet connected (or the connection hasn't been authenticated
+// and marked valid), we stash the filter and the connect handler will
+// re-emit it once sendLogin() completes.
+//
+function applyFilter(filter: string) {
+    if (filter.length > 900) {
+        console.log(`aprs filter length warning: ${filter.length} bytes (aprsc practical cap ~1KB)`);
     }
-
-    const old = db;
-
-    const path = `${process.env.DB_PATH ?? './db/'}/aprs-${datecode}-${competitionName ?? workerData.competition}.db`;
-    const openedDb = (db = new DB(path));
-    console.log('opening points database', path);
-    dbDatecode = datecode;
-    await openedDb.open().catch((e: any) => {
-        console.log(`${path}: Failed to open: ${e.cause?.code || e.code}`);
-        return undefined;
-    });
-
-    if (!(openedDb?.status == 'open' || openedDb?.status == 'opening')) {
-        console.log(path, openedDb?.status, new Error('db status invalid'));
-        db = undefined;
-        return undefined;
+    currentFilter = filter;
+    if (loggedIn && connection) {
+        try {
+            connection.send(`#filter ${filter}\r\n`);
+            console.log(`aprs filter updated: ${filter.length} bytes: ${filter}`);
+        } catch (e) {
+            // Socket can drop between the loggedIn check and send (e.g.
+            // after an error that hasn't yet flipped loggedIn). Stash
+            // the filter so the next connect handler re-applies it.
+            loggedIn = false;
+            pendingFilter = filter;
+            console.log(`aprs filter send failed, deferring until reconnect: ${filter.length} bytes: ${filter}: ${e}`);
+        }
+    } else {
+        pendingFilter = filter;
+        console.log(`aprs filter deferred until login: ${filter}`);
     }
-
-    console.log(`changing database for ${Object.keys(trackers).length} trackers`);
-    for (const t of Object.values(trackers)) {
-        t.db = db.sublevel(t.id, {});
-    }
-
-    // Reset aircraft to new day as well
-    for (const a of Object.values(allAircraft)) {
-        a.messages = [];
-        delete a.lastTime;
-        delete a.lastSent;
-        delete a.lastMoved;
-        a.lastTick = 0 as Epoch;
-        a.stationary = 0;
-        a.ground = true;
-    }
-
-    if (old) {
-        old.close();
-    }
-
-    return openedDb;
 }
 
 //
@@ -382,26 +474,57 @@ function startAprsListener(config: AprsListenerConfig) {
         return;
     }
 
+    // Clear the restart guard so this fresh listener can itself trigger
+    // a restart later if it becomes unstable.
+    restarting = false;
+
     // Settings for connecting to the APRS server
     const PASSCODE = -1;
     const APRSSERVER = (statistics.server = process.env.APRS_SERVER || possibleServers[Math.trunc(possibleServers.length * Math.random())]);
     const PORTNUMBER = 14580;
-    const FILTER = `r/${config.location.lt}/${config.location.lg}/250`;
+
+    // Seed the airfield list. The main thread follows up with setAirfields
+    // whenever the set of active competitions changes.
+    setAirfields(config.airfields);
+
+    // Initial FILTER: minimise bandwidth until the main thread pushes the
+    // real filter after updateTasks. aprsc requires a filter in the login
+    // for -1 passcode clients, so we can't omit it — use a 1km radius
+    // around (0,0) which matches effectively nothing and lets the worker
+    // sit idle until #filter comes in. Once the main thread knows which
+    // comps are active it calls setFilter() with the union of task
+    // bboxes + 10km margin + 30km airfield fallback.
+    const FILTER = 'r/0/0/1';
 
     let unstableCount = 0;
 
-    // Save away where we are
-    airfieldLocation = point([config.location.lt, config.location.lg]);
-    getElevationOffset(config.location.lt, config.location.lg, (e) => (airfieldElevation = e));
-
     // Connect to the APRS server
-    connection = new ISSocket(`onglide ${config.competition.substring(0, 6)}/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
+    connection = new ISSocket(`onglide/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
     let parser = new aprsParser();
 
     // Handle a connect
     connection.on('connect', () => {
-        connection.sendLogin();
-        connection.send(`# onglide ${config.competition}`);
+        // sendLogin can throw "Socket not connected" if the socket was
+        // disconnected between net's afterConnect and this handler firing
+        // (e.g. an error handler already called disconnect()). Letting it
+        // throw crashes the worker via EventEmitter's uncaught path, so
+        // swallow it and let the normal retry loop reconnect.
+        try {
+            connection.sendLogin();
+            connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+        } catch (e) {
+            console.log(`aprs sendLogin failed on ${APRSSERVER}, will retry: ${e}`);
+            return;
+        }
+        loggedIn = true;
+        console.log(`aprs connected and logged in to ${APRSSERVER}`);
+        // Re-apply the active filter: either a pending one (set while
+        // disconnected) or the last applied filter (on reconnect).
+        const filterToApply = pendingFilter ?? currentFilter;
+        pendingFilter = null;
+        if (filterToApply) {
+            applyFilter(filterToApply);
+        }
     });
 
     // Handle a data packet
@@ -433,13 +556,19 @@ function startAprsListener(config: AprsListenerConfig) {
     // Failed to connect
     connection.on('error', (err) => {
         console.log('Error: ' + err);
+        if (restarting) {
+            return;
+        }
+        loggedIn = false;
         connection.disconnect();
         statistics.server += '!';
         unstableCount += 2;
         if (unstableCount > 5) {
             console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+            restarting = true;
             clearInterval(kaInterval);
             startAprsListener(config);
+            return;
         }
         setTimeout(() => connection.connect(), unstableCount * 2000);
     });
@@ -504,22 +633,29 @@ function startAprsListener(config: AprsListenerConfig) {
 
             try {
                 // Send APRS keep alive or we will get dumped
-                connection.send(`# ${config.competition}`);
+                connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
             } catch (x) {
                 console.log('unable to send keepalive', x);
                 connection.valid = false;
+                loggedIn = false;
             }
 
             // Re-establish the APRS connection if we haven't had anything in
-            if (!connection.valid) {
+            if (!connection.valid && !restarting) {
                 console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
+                loggedIn = false;
                 connection.disconnect(() => {
+                    if (restarting) {
+                        return;
+                    }
                     unstableCount += 2;
                     if (unstableCount > 5) {
                         console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
+                        restarting = true;
                         clearInterval(kaInterval);
                         startAprsListener(config);
                         trackMetric('aprs.restart', 1);
+                        return;
                     }
                     connection.connect();
                 });
@@ -530,16 +666,33 @@ function startAprsListener(config: AprsListenerConfig) {
     );
 }
 
-async function setupDatecode(config: AprsCommandDatecode) {
-    // Make sure we have the latest datecode for the database
-    db = await initDB(config.datecode);
+// Backfills are debounced and scanned in one pass over the pointlog files
+// regardless of how many gliders need points loaded. Each glider gets its
+// own queue and per-glider since trim; the actual file scan uses min(since)
+// across the batch. This collapses (n_gliders × n_files × scan) — which
+// pinned the APRS worker thread at 100% on restart while scoring workers
+// sat idle — down to (n_files × scan).
+interface PendingBackfill {
+    key: ClassName_Compno;
+    glider: Aircraft;
+    queue: InterimPositionMessage[];
+    flarmIds: string[];
+    since: number;
+    label: string;
+    channelName: string;
+    trackerIdForLog: any;
 }
+let pendingBackfills: PendingBackfill[] = [];
+let backfillTimer: NodeJS.Timeout | null = null;
+const BACKFILL_DEBOUNCE_MS = 250;
 
-async function trackGlider(task: AprsCommandTrack) {
+function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
 
+    const key = makeClassname_Compno(task);
+
     // Check if already tracking...
-    const existingTracker = allAircraft[makeClassname_Compno(task)];
+    const existingTracker = allAircraft[key];
     if (existingTracker) {
         console.log(`${task.compno}: closing existing tracker entry ${existingTracker.trackers.join(',')}`);
         // remove the trackers
@@ -547,11 +700,14 @@ async function trackGlider(task: AprsCommandTrack) {
             const tracker = trackers[t];
             tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != existingTracker.channel || a.compno != existingTracker.compno);
             if (!tracker.aircraftList.length) {
-                tracker.db?.close();
                 delete trackers[t];
             }
         });
         clearInterval(existingTracker.interval);
+        // Drop any pending backfill for the previous glider object so it
+        // doesn't dispatch points into an orphaned queue when the next
+        // flush fires.
+        pendingBackfills = pendingBackfills.filter((b) => b.key !== key);
     }
 
     const glider: Aircraft = {
@@ -559,15 +715,18 @@ async function trackGlider(task: AprsCommandTrack) {
         className: task.className,
         trackers: task.trackerId as FlarmID[],
 
+        datecode: task.datecode,
+        tzoffset: task.tzoffset,
+
         // Not had a message
         stationary: 0,
         ground: false,
-        lastTick: (getNow() - inorderAdditionalDelay) as Epoch,
+        lastTick: 0 as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
         // Setup logging
         log:
-            task.compno == (process.env.NEXT_PUBLIC_COMPNO || 'I')
+            process.env.NEXT_PUBLIC_COMPNO && task.compno == process.env.NEXT_PUBLIC_COMPNO
                 ? function log() {
                       console.log(task.compno, ...arguments);
                   }
@@ -577,19 +736,17 @@ async function trackGlider(task: AprsCommandTrack) {
     };
 
     // Link the glider in
-    allAircraft[makeClassname_Compno(task)] = glider;
+    allAircraft[key] = glider;
 
-    // Make sure we have the latest datecode for the database
-    if (!db) {
-        db = await initDB(task.datecode);
-    }
+    const interimQueue: InterimPositionMessage[] = [];
+    const since = competitionStartTs(task.tzoffset);
 
-    const interimQueue = [];
-
-    // Link the tracker(s) in
+    // Link the tracker(s) in (synchronous — no point-log scan here, that
+    // happens in the debounced batch).
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
+    const dedupedIds = [...new Set(trackerList)];
     let index = 0;
-    for (const id of [...new Set(trackerList)]) {
+    for (const id of dedupedIds) {
         console.log('load tracker', glider.compno, id);
         if (trackers[id]) {
             trackers[id].aircraftList.push(glider);
@@ -599,26 +756,113 @@ async function trackGlider(task: AprsCommandTrack) {
                 id: id as FlarmID,
                 index: index++,
                 aircraftList: [glider],
-                receiveNewPoints: task.receiveNewPoints,
-                db: db?.sublevel(id, {})
+                receiveNewPoints: task.receiveNewPoints
             };
         }
-        await loadPointsForTracker(glider, trackers[id], interimQueue);
     }
 
-    // And make sure we have a channel for it
+    // Wire up the channel and the queue immediately so live packets arriving
+    // during the backfill window land on this glider (the final sort fixes
+    // any interleaving). The per-glider interval starts only after the
+    // batch flush — same ordering as the previous synchronous design.
     if (!channels[task.channelName]) {
         channels[task.channelName] = new BroadcastChannel(task.channelName);
     }
-
-    // And link the broadcast channel to it
     glider.channel = channels[task.channelName];
     glider.messages = interimQueue;
+
+    if (dedupedIds.length === 0) {
+        // No backfill possible (e.g. unknown tracker) — start the interval
+        // straight away so live packets, if any ever arrive, get processed.
+        startGliderInterval(glider, task.className, task.compno, task.trackerId, task.channelName);
+        return;
+    }
+
+    pendingBackfills.push({
+        key,
+        glider,
+        queue: interimQueue,
+        flarmIds: dedupedIds,
+        since,
+        label: `${task.className}/${task.compno}`,
+        channelName: task.channelName,
+        trackerIdForLog: task.trackerId
+    });
+    if (backfillTimer) clearTimeout(backfillTimer);
+    backfillTimer = setTimeout(flushBackfills, BACKFILL_DEBOUNCE_MS);
+}
+
+function startGliderInterval(glider: Aircraft, className: ClassName, compno: Compno, trackerId: any, channelName: string) {
     setTimeout(() => {
-        console.log(`APRS: tracking ${task.className}/${task.compno} with ${task.trackerId} on channel ${task.channelName}`);
+        console.log(`APRS: tracking ${className}/${compno} with ${trackerId} on channel ${channelName}`);
         glider.channel!.postMessage({c: glider.compno, t: 0, _: false, tick: true} as any);
         glider.interval = setInterval(() => processMessageQueue(glider), 1000);
     }, Math.random() * 1000);
+}
+
+interface BackfillTarget {
+    queue: InterimPositionMessage[];
+    compno: Compno;
+    since: number;
+}
+
+async function flushBackfills() {
+    backfillTimer = null;
+    const batch = pendingBackfills;
+    pendingBackfills = [];
+    if (batch.length === 0) return;
+
+    // Build flarmId → [target] map. One flarm ID can map to multiple
+    // gliders if two pilots share a tracker (rare but supported by the
+    // existing trackers[id].aircraftList structure).
+    const idToTargets = new Map<string, BackfillTarget[]>();
+    let minSince = Infinity;
+    for (const b of batch) {
+        if (b.since < minSince) minSince = b.since;
+        const target: BackfillTarget = {queue: b.queue, compno: b.glider.compno, since: b.since};
+        for (const id of b.flarmIds) {
+            const existing = idToTargets.get(id);
+            if (existing) existing.push(target);
+            else idToTargets.set(id, [target]);
+        }
+    }
+
+    const allIds = new Set(idToTargets.keys());
+    const startMs = Date.now();
+    let yielded = 0;
+    let dispatched = 0;
+
+    try {
+        for await (const raw of loadPointsForIds({flarmIds: allIds, since: minSince})) {
+            yielded++;
+            const targets = idToTargets.get(raw.f);
+            if (!targets) continue;
+            const baseMessage = raw as InterimPositionMessage & {d?: number};
+            if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
+
+            // Build the GeoJSON point once per loaded record, share across
+            // any targets that have this flarm ID.
+            const j = point([baseMessage.lat, baseMessage.lng]);
+
+            for (const target of targets) {
+                if (raw.t < target.since) continue;
+                target.queue.push({...baseMessage, c: target.compno, j});
+                dispatched++;
+            }
+        }
+    } catch (err) {
+        console.error(`flushBackfills: ${err}`);
+    }
+
+    // Sort each glider's queue once and start its interval.
+    for (const b of batch) {
+        b.queue.sort(messageSortKeyCompare);
+        if (b.queue.length) {
+            console.log(`${b.label}: ${b.queue.length} points sorted ${d(b.queue[0].t)}-${d(b.queue[b.queue.length - 1].t)}`);
+        }
+        startGliderInterval(b.glider, b.glider.className, b.glider.compno, b.trackerIdForLog, b.channelName);
+    }
+    console.log(`flushBackfills: ${batch.length} gliders, ${allIds.size} flarmIds, ${yielded} read / ${dispatched} dispatched, ${Date.now() - startMs}ms`);
 }
 
 function finishGlider(task: AprsCommandFinish) {
@@ -657,7 +901,6 @@ function untrackGlider(task: AprsCommandUntrack) {
         const tracker = trackers[t];
         tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != toRemove.channel || a.compno != toRemove.compno);
         if (!tracker.aircraftList.length) {
-            tracker.db?.close();
             delete trackers[t];
         }
     });
@@ -676,6 +919,10 @@ function sortKey(sender: string, tracker: Tracker | undefined): number {
 
 function messageSortKey(m: InterimPositionMessage): number {
     return m.t; //sortKey(m.o, trackers[m.f]);
+}
+
+function messageSortKeyCompare(a: InterimPositionMessage, b: InterimPositionMessage): number {
+    return a.t - b.t;
 }
 
 //
@@ -734,11 +981,11 @@ export async function processPacket(packet: aprsPacket) {
             id: flarmId,
             index: -1,
             aircraftList: [],
-            receiveNewPoints: true,
-            db: db ? db.sublevel(flarmId, {}) : undefined
+            receiveNewPoints: true
         });
     const aircraftList = tracker?.aircraftList;
-    const airfieldDistance = distance(jPoint, airfieldLocation);
+    const nearest = nearestAirfield(jPoint);
+    const airfieldDistance = nearest?.distance ?? Infinity;
     const agl = await getElevationOffset(packet.latitude, packet.longitude).then((e) => Math.round(Math.max(altitude - e, 0)));
 
     if (altitude > 7500) {
@@ -765,16 +1012,18 @@ export async function processPacket(packet: aprsPacket) {
         ad: airfieldDistance
     };
 
-    if (tracker.db) {
-        tracker.db.put([message.t, sender].join('/'), JSON.stringify(message));
-    }
+    // Persist every packet, known or unknown. Downstream trackers for any
+    // competition can later backfill from the log regardless of whether
+    // someone was tracking this flarmid at the time it arrived.
+    appendPoint(message);
 
     // If it is undefined then we will enrich and send to the
-    // airfield channel if it's close enough
+    // airfield channel if it's close enough. Dispatch goes to the
+    // Unknown_<compid> channel of the nearest airfield.
     if (!aircraftList.length) {
-        if (airfieldDistance < 20 && packet.altitude < airfieldElevation + 750) {
+        if (nearest && airfieldDistance < 20 && packet.altitude < nearest.field.elevation + 750) {
             statistics.unknownReceived++;
-            unknownChannel.postMessage(message);
+            getUnknownChannel(nearest.field.compid).postMessage(message);
         }
         return;
     }
@@ -783,52 +1032,29 @@ export async function processPacket(packet: aprsPacket) {
 
     message.j = jPoint;
 
-    // Figure out where to insert (sorted by time)
+    // Figure out where to insert (sorted by time). Clone per aircraft so
+    // each pipeline owns its own message with its own compno — sharing the
+    // reference and mutating .c per iteration leaves the last aircraft's
+    // compno on every queued copy, which the downstream IOG filter
+    // (`message.c != compno`) then drops for everyone except whoever was
+    // last in the loop.
     for (let aircraft of aircraftList) {
-        message.c = aircraft.compno as Compno;
+        const perAircraftMessage = {...message, c: aircraft.compno as Compno};
         const messageQueue = aircraft.messages;
-        if ((messageQueue.at(-1)?.t ?? 0) > message.t) {
+        if ((messageQueue.at(-1)?.t ?? 0) > perAircraftMessage.t) {
             statistics.outOfOrder++;
-            const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
-            if (insertIndex != messageQueue.length) {
-            }
-            if (insertIndex > 0 && messageQueue[insertIndex - 1].t == message.t) {
+            const insertIndex = _sortedLastIndexBy(messageQueue, perAircraftMessage, messageSortKey);
+            if (insertIndex > 0 && messageQueue[insertIndex - 1].t == perAircraftMessage.t) {
                 statistics.duplicates++;
             }
-            messageQueue.splice(insertIndex, 0, message);
+            messageQueue.splice(insertIndex, 0, perAircraftMessage);
         } else {
-            messageQueue.push(message);
+            messageQueue.push(perAircraftMessage);
         }
     }
 }
 
 //
-// Read the database for all points for a specific aircraft tracker
-//
-export async function loadPointsForTracker(aircraft: Aircraft, tracker: Tracker, messageQueue: InterimPositionMessage[]) {
-    if (!tracker.db) {
-        console.log('no database available for loading trackpoints');
-        return;
-    }
-    try {
-        let loaded = 0;
-        for await (const [key, messageJson] of tracker.db.iterator()) {
-            const message = JSON.parse(messageJson);
-            loaded++;
-            // Ignore if the delay is too big
-            if (message.d > 1200) {
-                continue;
-            }
-            message.c = aircraft.compno; // correct competition number as it may be wrong in the db
-            const insertIndex = _sortedLastIndexBy(messageQueue, message, messageSortKey);
-            message.j = point([message.lat, message.lng]);
-            messageQueue.splice(insertIndex, 0, message);
-        }
-        console.log(`${aircraft.className}/${tracker.id}/${aircraft.compno}: ${messageQueue.length}/${loaded} points loaded ${d(messageQueue.at(0)?.t || 0)}-${d(messageQueue.at(-1)?.t || 0)}`);
-    } catch (err) {
-        console.error(`${aircraft.className}/${aircraft.compno}/${tracker.id}: ${err}...`);
-    }
-}
 
 //
 // This iterates through the queue on a regular basis and deals with each point
@@ -849,7 +1075,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     if (!log) {
         log = aircraft.log;
     }
-    if (log) {
+    if (log && messages.length > 0 && position < messages.length) {
         log(`PMQ: ${aircraft.compno}: m: ${messages.length}, s:${start}/${d(start)}, to:${to}/${d(to)}, p: ${position}`);
     }
 
@@ -954,7 +1180,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         aircraft.lastTick = (realNow - (!aircraft.lastTick ? Math.random() * 60 : 0)) as Epoch;
     }
 
-    if (log) {
+    if (log && count > 0) {
         log(`PMQ: ${aircraft.compno}: processed ${count}, pos: ${position}/${messages.length} @ ${messages[position]?.t}, s:${start} t:${to}`);
     }
 }

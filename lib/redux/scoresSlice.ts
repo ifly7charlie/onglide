@@ -2,7 +2,7 @@
 // This slice maintains the deck.gl data for scores
 //
 
-import {createSlice, createAsyncThunk, createSelector} from '@reduxjs/toolkit';
+import {createSlice, createAsyncThunk, createSelector, original} from '@reduxjs/toolkit';
 
 import type {PayloadAction} from '@reduxjs/toolkit';
 
@@ -16,7 +16,7 @@ import {ClassScoreHistory, OnglideWebSocketMessage} from '../protobuf/onglide';
 //const updateScoresAction = createAction<PilotScores>('updateScores');
 import {assembleLabeledLine} from '../react/distanceLine';
 
-import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey} from '../types';
+import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey, OptimalGridEntry} from '../types';
 
 import {
     reduce as _reduce,
@@ -39,6 +39,7 @@ interface ScoresSliceState {
     className: ClassName;
     scores: ScoreData;
     historical: HistoricalScoreData;
+    optimalGrids: Record<Compno, OptimalGridEntry[]>;
     loading: Record<Epoch, string>; // request id for requests to load - we only remove on error (so it retries) otherwise
     scoreId: string; //  copy of track version set when loading something
     // leave the ID in the structure so we don't keep trying to get missing scores
@@ -49,6 +50,7 @@ const initialState: ScoresSliceState = {
     className: '' as ClassName,
     scores: {},
     historical: {},
+    optimalGrids: {},
     loading: {},
     scoreId: ''
 };
@@ -72,6 +74,7 @@ export const scoresSlice = createSlice({
                     className: className as ClassName,
                     scores: {},
                     historical: {},
+                    optimalGrids: {},
                     loading: {},
                     scoreId
                 };
@@ -220,9 +223,27 @@ export const scoresSlice = createSlice({
                 return index >= 0 ? historical[index] : undefined;
             },
             {
-                //                memoizeOptions: {
-                //                    resultEqualityCheck: (a, b) => a?.t === b?.t // t is enough for a unique time
-                //                }
+                memoizeOptions: {
+                    resultEqualityCheck: (a, b) => a?.t === b?.t
+                }
+            }
+        ),
+        selectOptimalGrid: createSelector(
+            [
+                (_state: ScoresSliceState, _compno: Compno | undefined, t: Epoch | undefined) => t,
+                (_state: ScoresSliceState, compno: Compno | undefined) => compno,
+                (state: ScoresSliceState, compno: Compno | undefined) => (compno ? state.optimalGrids[compno] : undefined)
+            ],
+            (t: Epoch | undefined, compno: Compno | undefined, entries: OptimalGridEntry[] | undefined) => {
+                if (!compno || !entries?.length) return undefined;
+                if (!t) return entries.at(-1);
+                const index = _sortedIndexBy(entries, {t} as OptimalGridEntry, (x) => x.t) - 1;
+                return index >= 0 ? entries[index] : undefined;
+            },
+            {
+                memoizeOptions: {
+                    resultEqualityCheck: (a, b) => a?.t === b?.t
+                }
             }
         )
     }
@@ -276,7 +297,7 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
 
 export default scoresSlice.reducer;
 export const {updateScores} = scoresSlice.actions;
-export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus} = scoresSlice.selectors;
+export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus, selectOptimalGrid} = scoresSlice.selectors;
 
 //////////////////////////////////////////
 // Logic for updates
@@ -292,7 +313,20 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     _reduce(
         action.payload.pilots,
         (result, score: PilotScore, compno) => {
-            result[compno] = mapScoresToDisplayScores(score);
+            // Extract optimal grid into separate storage (emitted once per sector entry)
+            const {optimalGrid, ...scoreWithoutGrid} = score;
+            if (optimalGrid?.length) {
+                const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: optimalGrid};
+                const gh = (state.optimalGrids[compno as Compno] ??= []);
+                const gIdx = _sortedIndexBy(gh, entry, (x) => x.t);
+                gh.splice(gIdx, Infinity, entry);
+            }
+
+            // Read the prior display score via original() so we get the plain
+            // pre-draft value — passing an Immer draft as prev risks smuggling
+            // draft references into the new object.
+            const prev = result[compno] ? (original(result[compno]) as PilotScoreDisplay | undefined) : undefined;
+            result[compno] = mapScoresToDisplayScores(prev, scoreWithoutGrid as PilotScore);
 
             // If the scoreId is the current one then we will use that
             const sh = (state.historical[compno] ??= []);
@@ -309,30 +343,40 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     );
 }
 
-function mapScoresToDisplayScores(p: PilotScore): PilotScoreDisplay {
-    return {
-        ...p,
-        ...(p.scoredPoints && p.scoredPoints.length > 3
-            ? {
-                  scoredGeoJSON: assembleLabeledLine(p.scoredPoints, p.scoringClosestPoint)
-              }
-            : {}),
-        ...(p.minDistancePoints && p.minDistancePoints.length > 2
-            ? {
-                  minGeoJSON: assembleLabeledLine(p.minDistancePoints)
-              }
-            : {}),
-        ...(p.maxDistancePoints && p.maxDistancePoints.length > 2
-            ? {
-                  maxGeoJSON: assembleLabeledLine(p.maxDistancePoints)
-              }
-            : {})
-        /*        ...(p.taskGeoJSON
-            ? {
-                  taskGeoJSON: JSON.parse(p.taskGeoJSON)
-              }
-            : {}) */
-    };
+function sameNumberArray(a: number[] | undefined, b: number[] | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+}
+
+// Reducer-shaped: takes the previously-displayed score for this pilot plus the
+// incoming raw score and returns a new display score. `prev` must be a plain
+// pre-draft value (see original() at the call site). When the underlying point
+// arrays are content-identical to `prev`, the prior FeatureCollection
+// references are reused so mapbox's <Source data> ref stays stable and tiles
+// don't reparse on a tick that emitted an identical path.
+function mapScoresToDisplayScores(prev: PilotScoreDisplay | undefined, p: PilotScore): PilotScoreDisplay {
+    const result: PilotScoreDisplay = {...p};
+
+    if (p?.scoredPoints && p.scoredPoints.length > 3) {
+        if (prev?.scoredGeoJSON && sameNumberArray(p.scoredPoints, prev.scoredPoints) && prev.scoringClosestPoint?.lat === p.scoringClosestPoint?.lat && prev.scoringClosestPoint?.lng === p.scoringClosestPoint?.lng) {
+            result.scoredGeoJSON = prev.scoredGeoJSON;
+        } else {
+            result.scoredGeoJSON = assembleLabeledLine(p.scoredPoints, p.scoringClosestPoint);
+        }
+    }
+    if (p?.minDistancePoints && p.minDistancePoints.length > 2) {
+        result.minGeoJSON = prev?.minGeoJSON && sameNumberArray(p.minDistancePoints, prev.minDistancePoints) ? prev.minGeoJSON : assembleLabeledLine(p.minDistancePoints);
+    }
+    if (p?.maxDistancePoints && p.maxDistancePoints.length > 2) {
+        result.maxGeoJSON = prev?.maxGeoJSON && sameNumberArray(p.maxDistancePoints, prev.maxDistancePoints) ? prev.maxGeoJSON : assembleLabeledLine(p.maxDistancePoints);
+    }
+    if (p?.suggestedTrackPoints && p.suggestedTrackPoints.length > 7) {
+        result.suggestedGeoJSON = prev?.suggestedGeoJSON && sameNumberArray(p.suggestedTrackPoints, prev.suggestedTrackPoints) ? prev.suggestedGeoJSON : assembleLabeledLine(p.suggestedTrackPoints);
+    }
+
+    return result;
 }
 
 function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: ClassScoreHistory}>) {
@@ -378,7 +422,7 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
                 const ns = newScores.at(newIndex);
                 // take from the new score if it's there, otherwise it's a reference to one we have decoded
                 // so use that instead
-                resultScores.push(mapScoresToDisplayScores(ns!));
+                resultScores.push(mapScoresToDisplayScores(resultScores.at(-1), ns!));
                 resultIndex.push(n!);
                 newIndex++;
             }

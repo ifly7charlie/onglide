@@ -9,6 +9,49 @@ message OnglideWebSocketMessage {
     optional KeepAlive ka = 4;
     optional uint32 t = 5;
     optional Task task = 8;
+    optional CompetitionsList competitions = 9;
+}
+
+// Per-class status row shown on the globe landing page; mirrors the JSON
+// previously returned by /api/competitions.
+message CompetitionClassStatus {
+	string class = 1;            // classid
+	string classname = 2;
+	string status = 3;           // raw compstatus.status (L/S/H/F/B/P/G/'')
+	uint32 pilotCount = 4;
+	optional string statusDatecode = 5;
+	string displayStatus = 6;    // matches CompetitionDisplayStatus union in TS
+	optional TaskRules taskRules = 7;  // when a task is briefed, full rules; pre-task, a stub carrying handicapped/dh from the classes table
+	optional string datecode = 8;      // per-class WS-channel datecode (10am-local cutoff)
+}
+
+message CompetitionSummary {
+	string compid = 1;
+	string name = 2;
+	optional string sitename = 3;
+	double lat = 4;
+	double lng = 5;
+	string start = 6;            // YYYY-MM-DD
+	string end = 7;              // YYYY-MM-DD
+	string countrycode = 8;
+	string tz = 9;
+	int32 tzoffset = 10;
+	optional string mainwebsite = 11;
+	uint32 classCount = 12;
+	bool classStatusesDiffer = 13;
+	string displayStatus = 14;
+	repeated CompetitionClassStatus classes = 15;
+}
+
+// Pushed to clients of the reserved /all channel. On initial connect the
+// server sends `full=true` with every active competition. Subsequent frames
+// are deltas: `competitions` lists only changed comps, `removed` lists comp
+// ids that have dropped off the live list (end date passed).
+message CompetitionsList {
+	repeated CompetitionSummary competitions = 1;
+	uint32 generatedAt = 2;
+	bool full = 3;
+	repeated string removed = 4;
 }
 
 message Identifiers {
@@ -20,17 +63,61 @@ message Identifiers {
 	optional string scoreId = 6;
 }
 
+message TaskRules {
+	bool grandprixstart = 1;
+	uint32 nostartutc = 2;          // Epoch
+	optional bool aat = 3;
+	optional bool dh = 4;            // distance handicap
+	optional bool handicapped = 5;
+	optional double dm = 6;          // minimum distance for non-AAT speed tasks
+	uint32 maxHandicap = 7;          // highest handicap in the class
+}
+
+message TaskDetails {
+	string type = 1;                 // 'S' | 'D' | 'E' | 'A'
+	double distance = 2;             // task distance in km
+	string duration = 3;             // 'HH:MM:SS' (AAT)
+	string status = 4;               // 'Z' = scrubbed, etc
+	string nostart = 5;              // 'HH:MM:SS' start-open string
+	optional string info = 6;
+	optional string calendardate = 7;
+	optional uint32 taskid = 8;      // diagnostic
+	optional string hash = 9;        // diagnostic
+}
+
+// Per-leg fields the frontend needs. Includes the full geometric inputs
+// (type, r1/r2, a1/a2/a12, direction, altitude) because the client re-runs
+// calculateTask() via adjustDistanceHandicapTask() for DH classes.
+// Server-computed artefacts (per-leg geoJSON / coordinates / lineString /
+// point / pointGeoJSON / maxR / quickSector / legDistanceAdjust / finish)
+// are NOT sent — they get rebuilt on the client when needed.
+message TaskLeg {
+	uint32 legno = 1;
+	string type = 2;                 // 'line' | 'sector'
+	string ntrigraph = 3;
+	string name = 4;
+	double bearing = 5;
+	double length = 6;               // km
+	double nlat = 7;
+	double nlng = 8;
+	double r1 = 9;                   // km
+	double r2 = 10;                  // km
+	double a1 = 11;                  // degrees (half-angle)
+	double a2 = 12;                  // degrees
+	double a12 = 13;                 // bearing
+	string direction = 14;           // 'symmetrical' | 'np' | 'pp' | 'fixed'
+	optional double altitude = 15;
+}
+
 message Task {
 	optional bool startOpen = 3;
-	optional string geoJSON = 1;
-	optional string taskJSON = 2;
+	optional string geoJSON = 1;     // {tp, track, Dm?} FeatureCollection bundle for deck.gl
+	reserved 2;                      // was: string taskJSON
+	reserved "taskJSON";
+	optional TaskRules rules = 4;
+	optional TaskDetails details = 5;
+	repeated TaskLeg legs = 6;
 }
-/*
-message TaskGeoJson {
-	string Dm = 1;
-	string tp = 2;
-	string track = 3;
-	}*/
 
 
 message PilotTracks {
@@ -196,6 +283,21 @@ message PilotScore {
 
     // The point used for scoring on the uncompleted leg (nearest boundary for AAT, pilot position for racing landout)
     optional BasePositionMessage scoringClosestPoint = 63;
+
+    // Optimal point in next sector that maximises total distance (for AAT direction visualization)
+    optional BasePositionMessage optimalNextSectorPoint = 64;
+
+    // Grid of optimal task distances per cell [lng, lat, taskDist, ...] for AAT direction heatmap
+    repeated float optimalGrid = 65;
+
+    // Live baseline: scored distance to current sector point + max remaining forward
+    optional float optimalGridBaseline = 67;
+
+    // Baseline path visualization [lng, lat, ...] from start through scored points + max remaining to finish
+    repeated float optimalGridBaselinePath = 68;
+
+    // Suggested track aim points [lng, lat, dist, hdist, ...] for AAT remaining sectors
+    repeated float suggestedTrackPoints = 69;
 
     // For DH we have a specific task for the pilot
 	//    optional string taskGeoJSON = 53;

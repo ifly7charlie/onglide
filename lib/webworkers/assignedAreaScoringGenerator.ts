@@ -9,6 +9,8 @@ import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelpe
 
 import {convexHull} from '../flightprocessing/convexHull';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
+import {computeOptimalGrid} from '../flightprocessing/computeOptimalGrid';
+import {computeSuggestedTrack} from '../flightprocessing/computeSuggestedTrack';
 
 /*
  * This is used just for scoring an AAT task
@@ -81,6 +83,15 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     let scoredStatus: CalculatedTaskStatus = {} as CalculatedTaskStatus;
     let flightStatus: PositionStatus | undefined = undefined;
 
+    // Optimal direction grid: computed once per sector entry, stored independently in Redux
+    let lastGridLeg = -1;
+
+    // Skip key: set to the leg-fingerprint + flight-state hash of the last iteration
+    // that made it through to a yield. If the next iteration hashes to the same value,
+    // nothing the scoring calculation actually depends on has changed, so we `continue`
+    // and the downstream viewer keeps showing the previous score.
+    let lastScoredKey = '';
+
     for await (const current of taskStatusGenerator) {
         try {
             const taskStatus = Object.assign(scoredStatus, current);
@@ -148,8 +159,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     const newConvexHullPoints = [...aatLeg.convexHull, ...points.slice(aatLeg.lengthConvexHullGeneratedAt)];
                     const newConvexHull = convexHull(newConvexHullPoints);
 
-                    log('================================ >>> cvex h', leg.legno);
-                    log('newConvexHull', newConvexHull);
+                    log(`newConvexHull: ${leg.legno}:`, newConvexHull);
 
                     //
                     // Now we need to make sure the graph matches the hull
@@ -166,7 +176,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     maxGraph.addPointsToGroup(legno, newAdditions);
                     minGraph.addPointsToGroup(legno, newAdditions);
 
-                    maxGraph.printSummary(log);
+                    maxGraph.printSummary('graphSizes' + legno, log);
 
                     // Capture the status
                     aatLeg.convexHull = newConvexHull;
@@ -177,7 +187,31 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 leg.convexHull.push(...leg.convexHull.slice(0, 2));
             }
 
-            maxGraph.printSummary(log);
+            // If no leg has new hull points and flight state is unchanged since the last
+            // yield, skip the full dijkstra block — the previously-emitted score is still
+            // correct. Forced ticks still fall through so time-based heartbeats keep firing.
+            const newScoredKey = [
+                ...aatLegStatus.map((l) => l.fingerPrint),
+                taskStatus.currentLeg,
+                taskStatus.inSector ? '1' : '0',
+                taskStatus.inPenalty ? '1' : '0',
+                taskStatus.utcFinish || 0,
+                taskStatus.startFound ? 1 : 0
+            ].join('|');
+            if (!isTick(taskStatus) && newScoredKey === lastScoredKey) {
+                continue;
+            }
+            lastScoredKey = newScoredKey;
+
+            // Compute optimal direction grid once per sector entry (when previous hull is finalized)
+            const isFinishLegForGrid = taskStatus.currentLeg === task.legs.length - 1;
+            if (taskStatus.currentLeg !== lastGridLeg && taskStatus.currentLeg > 0 && !isFinishLegForGrid) {
+                lastGridLeg = taskStatus.currentLeg;
+                const grid = computeOptimalGrid(task.legs[taskStatus.currentLeg].coordinates as [number, number][], taskStatus.currentLeg, maxGraph, preparedLegs, log);
+                if (grid) {
+                    scoredStatus.optimalGrid = grid;
+                }
+            }
 
             // What we optimize in next stage
             //            let scoredPoints: BasePositionMessage[];
@@ -212,7 +246,31 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             // When in sector, find the maximum distance path from start
                             // through all previous sectors to the best point in the current sector's
                             // convex hull. Don't extend to the next sector - that inflates the scored distance.
+                            const cl = taskStatus.currentLeg;
+                            const groupPoints = maxGraph.getGroups()[cl];
+                            log(
+                                `scoredPoints [t=${taskStatus.t}]: leg=${cl} inSector=${taskStatus.inSector} inPenalty=${taskStatus.inPenalty}` +
+                                    ` groupSize=${groupPoints?.length}` +
+                                    ` hullSize=${aatLegStatus[cl]?.convexHull?.length}` +
+                                    ` penaltyPoints=${aatLegStatus[cl]?.penaltyPoints}` +
+                                    ` points=[${groupPoints?.map((p) => `(${p.lat.toFixed(4)},${p.lng.toFixed(4)},t=${p.t})`).join(', ')}]`
+                            );
                             scoredPoints = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
+                            const numEdges = scoredPoints.path.length - 1;
+                            log(
+                                `  -> scored path[${cl}]=(${scoredPoints.path[cl]?.lat.toFixed(4)},${scoredPoints.path[cl]?.lng.toFixed(4)},t=${scoredPoints.path[cl]?.t})` +
+                                    ` actualDist=${(numEdges * 1000 - scoredPoints.distance).toFixed(1)}km (raw weight=${scoredPoints.distance.toFixed(1)}, edges=${numEdges})`
+                            );
+
+                            // Compute optimal next sector point for direction visualization.
+                            // Use shortestAll() to get the globally optimal point in the next sector,
+                            // not conditioned on the current hull point — this matches the max distance line.
+                            if (taskStatus.currentLeg + 1 < task.legs.length) {
+                                const globalPath = maxGraph.shortestAll();
+                                if (globalPath.path.length > taskStatus.currentLeg + 1) {
+                                    scoredStatus.optimalNextSectorPoint = globalPath.path[taskStatus.currentLeg + 1];
+                                }
+                            }
 
                             // FAI Annex A: also credit progress toward next sector.
                             // Append the nearest boundary point of the next AA to the optimal path
@@ -284,24 +342,33 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     // Next do distance remaining, it's shortest path from current point to home
                     // When in sector, skip the current sector (pilot is already there) and go to next
                     const minRemainingFirstLeg = taskStatus.inSector || taskStatus.inPenalty ? taskStatus.currentLeg + 1 : taskStatus.currentLeg;
-                    const drPath = minGraph.shortestFrom(current.lastProcessedPoint!, minRemainingFirstLeg - 1);
-                    log('drPath:', minRemainingFirstLeg, drPath);
-
                     const drPoints: BasePositionMessage[] = [];
-                    scoredStatus.distanceRemaining = sumPath(drPath.path, minRemainingFirstLeg - 1, preparedLegs, true, (leg, distance, p) => {
-                        log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
-                        scoredStatus.legs[leg].distanceRemaining = distance;
-                        if (p) {
-                            drPoints.push(p);
-                        }
-                    });
+
+                    // Guard: if in the finish sector, there's nowhere left to go
+                    if (minRemainingFirstLeg < task.legs.length) {
+                        const drPath = minGraph.shortestFrom(current.lastProcessedPoint!, minRemainingFirstLeg - 1);
+                        log('drPath:', minRemainingFirstLeg, drPath);
+
+                        scoredStatus.distanceRemaining = sumPath(drPath.path, minRemainingFirstLeg - 1, preparedLegs, true, (leg, distance, p) => {
+                            log(`DR PATH: leg ${leg} distance ${distance} [${JSON.stringify(p)}]`);
+                            scoredStatus.legs[leg].distanceRemaining = distance;
+                            if (p) {
+                                drPoints.push(p);
+                            }
+                        });
+                    } else {
+                        scoredStatus.distanceRemaining = 0 as DistanceKM;
+                    }
 
                     // Finally we need to find min possible remaining task distance
                     // this is basically the maximum distance up until now, and then the
                     // minimum distance from there to the finish.
                     const minPossibleGraph = minGraph.clone();
+                    const minPossibleGroups = minPossibleGraph.getGroups().length;
                     scoredPoints?.path.forEach((sp, index) => {
-                        minPossibleGraph.replaceGroup(index, [sp]);
+                        if (index < minPossibleGroups) {
+                            minPossibleGraph.replaceGroup(index, [sp]);
+                        }
                     });
 
                     const shortestRemainingPath = minPossibleGraph.shortestAll();
@@ -313,16 +380,39 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     scoredStatus.minPossible = sumPath(shortestRemainingPath?.path || [], 0, preparedLegs, true, (leg, distance, point) => {
                         if (point) {
                             if (!scoredStatus.legs[leg]) {
-                                console.log('unable to set scored status', leg, distance, point);
+                                log('unable to set scored status', leg, distance, point);
                             } else {
                                 scoredStatus.legs[leg].minPossible = {distance, point};
                             }
                         }
                     });
+
+                    // Compute aim points for remaining sectors based on current speed + 10%
+                    if (current.lastProcessedPoint) {
+                        const suggestedPoints = computeSuggestedTrack(
+                            (current.t - current.utcStart!) as number,
+                            task.details.durationsecs,
+                            scoredStatus.distance,
+                            taskStatus.currentLeg,
+                            !!(taskStatus.inSector || taskStatus.inPenalty),
+                            current.lastProcessedPoint,
+                            scoredStatus.legs,
+                            {lat: task.legs.at(-1)!.nlat, lng: task.legs.at(-1)!.nlng},
+                            log
+                        );
+                        if (suggestedPoints) {
+                            scoredStatus.suggestedTrackPoints = suggestedPoints;
+                        } else {
+                            delete scoredStatus.suggestedTrackPoints;
+                        }
+                    } else {
+                        delete scoredStatus.suggestedTrackPoints;
+                    }
                 } /* finished */ else {
                     // Calculate the longest path, doesn't include the start for some reason so we'll add it
                     scoredPoints = maxGraph.shortestAll();
                     delete scoredStatus.scoringClosestPoint;
+                    delete scoredStatus.optimalNextSectorPoint;
                     scoredStatus.legs.forEach((l) => {
                         l.distanceRemaining = 0 as DistanceKM;
                         delete l.maxPossible;
@@ -333,12 +423,57 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 // Reverse and output for logging...
                 log('optimal path:', scoredPoints);
 
+                if (!scoredPoints && (taskStatus.inSector || taskStatus.inPenalty)) {
+                    log(`optimalGridBaseline [t=${taskStatus.t}]: SKIPPED - no scoredPoints while inSector=${taskStatus.inSector} inPenalty=${taskStatus.inPenalty} currentLeg=${taskStatus.currentLeg}`);
+                }
                 if (scoredPoints) {
                     scoredStatus.distance = sumPath(scoredPoints.path, 0, preparedLegs, !!scoredStatus.utcFinish, (leg, distance, point) => {
                         log('SSD>', leg, distance, point);
                         scoredStatus.legs[leg].point = point;
                         scoredStatus.legs[leg].distance = distance;
                     });
+
+                    // Compute live baseline for optimal grid: the best total task distance
+                    // achievable from the current scored point (scored path to here + max
+                    // remaining forward). This is the reference each grid cell's taskDist
+                    // is compared against — cells where taskDist > baseline are worth
+                    // detouring to, cells below baseline would reduce overall distance.
+                    const isInSectorForGrid = (taskStatus.inSector || taskStatus.inPenalty) && taskStatus.currentLeg < task.legs.length - 1;
+                    if (isInSectorForGrid) {
+                        // Get the original scored path (without FAI Annex A extension to next sector)
+                        const originalScoredPath = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
+                        if (!originalScoredPath || originalScoredPath.path.length <= taskStatus.currentLeg) {
+                            log(`optimalGridBaseline [t=${taskStatus.t}]: SKIPPED - originalScoredPath length=${originalScoredPath?.path?.length} currentLeg=${taskStatus.currentLeg}`);
+                        } else {
+                            const scoredPointInSector = originalScoredPath.path[taskStatus.currentLeg];
+                            // Scored distance: start → current sector scored point only
+                            const scoredDistToSector = sumPath(originalScoredPath.path, 0, preparedLegs, true);
+                            // Max remaining: scored point → finish via max distance
+                            const maxRemainingPath = maxGraph.shortestFrom(scoredPointInSector, taskStatus.currentLeg);
+                            const maxRemaining = sumPath(maxRemainingPath.path, taskStatus.currentLeg, preparedLegs, true);
+                            scoredStatus.optimalGridBaseline = (scoredDistToSector + maxRemaining) as DistanceKM;
+
+                            // Build baseline path: scored points (start → scored point) + max remaining (→ finish)
+                            const baselinePath: number[] = [];
+                            for (const p of originalScoredPath.path) {
+                                baselinePath.push(p.lng, p.lat);
+                            }
+                            for (let ri = 1; ri < maxRemainingPath.path.length; ri++) {
+                                baselinePath.push(maxRemainingPath.path[ri].lng, maxRemainingPath.path[ri].lat);
+                            }
+                            scoredStatus.optimalGridBaselinePath = baselinePath;
+
+                            log(
+                                `optimalGridBaseline [t=${taskStatus.t}]: scoredDistToSector=${scoredDistToSector.toFixed(1)}` +
+                                    ` + maxRemaining=${maxRemaining.toFixed(1)}` +
+                                    ` = ${scoredStatus.optimalGridBaseline.toFixed(1)}km` +
+                                    ` (scoredPt=(${scoredPointInSector.lat.toFixed(4)},${scoredPointInSector.lng.toFixed(4)})` +
+                                    ` path=[${baselinePath.length / 2} points])`
+                            );
+                        }
+                    }
+                    // Don't delete baseline when not in-sector — keep last known value
+                    // so the grid can still render if debouncing causes a timing gap
 
                     // FAI Annex A: "less the distance from the Outlanding Position to this nearest point"
                     // "If the achieved distance of the uncompleted leg is less than zero, it shall be taken as zero"
@@ -394,8 +529,8 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             console.log('Exception in AAT Generator');
             console.log(e);
             console.log(JSON.stringify(current, stripPoints, 4));
-            maxGraph.printSummary(console.log);
-            minGraph.printSummary(console.log);
+            maxGraph.printSummary('maxGraph', console.log);
+            minGraph.printSummary('minGraph', console.log);
             return;
         }
     }

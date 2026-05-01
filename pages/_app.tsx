@@ -1,21 +1,26 @@
 'use client';
 
 import Head from 'next/head';
+import {appWithTranslation} from 'next-i18next/pages';
 
 import '@fortawesome/fontawesome-svg-core/styles.css';
 import {config} from '@fortawesome/fontawesome-svg-core';
 config.autoAddCss = false;
 
+import 'maplibre-gl/dist/maplibre-gl.css';
 import '../styles/onglide.scss';
 
 import {useState, useCallback, useEffect} from 'react';
+import {Provider} from 'react-redux';
 
 import type {Options} from '../lib/types';
 import {PathLength, Units, MapType, TaskUp} from '../lib/types';
+import store from '../lib/redux/store';
+import {CompetitionsSocket} from '../lib/react/competitionsSocket';
 
 const defaultOptions: Options = {
     //
-    rainRadar: true,
+    rainRadar: false,
     rainRadarAdvance: 0,
     units: Units.metric,
     mapType: MapType.satellite,
@@ -27,7 +32,8 @@ const defaultOptions: Options = {
     showOthers: false,
     fullPaths: PathLength.selectedFull,
     options2d: {taskUp: TaskUp.north, mapType: MapType.street, follow: true},
-    options3d: {taskUp: TaskUp.track, mapType: MapType.satellite, follow: true}
+    options3d: {taskUp: TaskUp.track, mapType: MapType.satellite, follow: true},
+    constructionLines: true
 };
 
 export function useOptions() {
@@ -36,7 +42,7 @@ export function useOptions() {
         const saved = window?.localStorage.getItem('options');
         if (saved) {
             try {
-                set({...JSON.parse(saved), zoomTask: true});
+                set({...JSON.parse(saved), zoomTask: true, rainRadar: false});
             } catch (e) {
                 set(defaultOptions);
             }
@@ -47,7 +53,6 @@ export function useOptions() {
     const setOptions = useCallback(
         (newOptions: Options) => {
             try {
-                console.log('set options', newOptions);
                 window?.localStorage.setItem('options', JSON.stringify(newOptions));
             } catch (e) {
                 /**/
@@ -61,14 +66,17 @@ export function useOptions() {
 }
 
 // This default export is required in a new `pages/_app.js` file.
-export default function MyApp({Component, pageProps}) {
+function MyApp({Component, pageProps}) {
     const [options, setOptions] = useOptions();
     return (
-        <>
+        <Provider store={store}>
+            <CompetitionsSocket />
             <Head>
                 <meta name="viewport" content="width=device-width, minimal-ui" />
             </Head>
             <Component {...pageProps} options={options} setOptions={setOptions} />
-        </>
+        </Provider>
     );
 }
+
+export default appWithTranslation(MyApp);
