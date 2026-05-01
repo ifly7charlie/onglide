@@ -41,6 +41,7 @@ interface InterimPositionMessage extends PositionMessage {
 }
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
+import {APRS_MAX_FILTER_BYTES} from '../flightprocessing/taskBbox';
 
 // APRS connection
 let connection: ISSocket & {valid: boolean; aprsc: string};
@@ -440,8 +441,13 @@ if (!isMainThread && parentPort) {
 // re-emit it once sendLogin() completes.
 //
 function applyFilter(filter: string) {
-    if (filter.length > 900) {
-        console.log(`aprs filter length warning: ${filter.length} bytes (aprsc practical cap ~1KB)`);
+    if (filter.length > APRS_MAX_FILTER_BYTES) {
+        // The builder in taskBbox.ts is supposed to keep us under cap;
+        // an over-cap filter here means a regression. Refuse rather than
+        // send a line aprsc rejects (which would kick the connection on
+        // login or silently truncate in-band).
+        console.error(`aprs filter ${filter.length} bytes exceeds cap ${APRS_MAX_FILTER_BYTES}; dropping update: ${filter}`);
+        return;
     }
     currentFilter = filter;
     if (loggedIn && connection) {

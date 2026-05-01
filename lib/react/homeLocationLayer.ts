@@ -7,7 +7,7 @@ const X_SIZE = 32;
 const X_URL =
     `data:image/svg+xml;utf8,` +
     encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${X_SIZE} ${X_SIZE}">` +
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${X_SIZE}" height="${X_SIZE}" viewBox="0 0 ${X_SIZE} ${X_SIZE}">` +
             `<g stroke="rgba(40,40,40,0.85)" stroke-width="3" stroke-linecap="round" fill="none">` +
             `<line x1="9" y1="9" x2="23" y2="23"/>` +
             `<line x1="23" y1="9" x2="9" y2="23"/>` +

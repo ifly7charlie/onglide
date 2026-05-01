@@ -34,6 +34,7 @@ import {getValidSortOrder} from './pilot-sorting';
 import Sponsors from './sponsors';
 
 import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {LanguageSwitcher} from './language-switcher';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 function useIsMobile() {
@@ -339,8 +340,9 @@ export const OgnFeed = memo(
                             ) : null}
                             <div className="drawer-group">
                                 <div className="drawer-label">{t('drawer.display')}</div>
-                                <div className="sidepanel-tools">
+                                <div className="sidepanel-tools sidepanel-tools-row">
                                     <OptionsPanel options={options} setOptions={setOptions} multipleClasses={(comp?.classes?.length ?? 0) > 1} />
+                                    <LanguageSwitcher className="drawer-lang" />
                                 </div>
                             </div>
                             <div className="drawer-group">

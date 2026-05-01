@@ -46,8 +46,8 @@ function DeckGLOverlay(
 }
 
 // For displaying rain radar
-import {AttributionControl} from 'react-map-gl/maplibre';
 import {RadarOverlay} from './rainradar';
+import {AttributionInfo} from './attributionInfo';
 
 import {MeasureLayers, useMeasure} from './measure';
 
@@ -403,16 +403,7 @@ export default function MApp(props: {
         [vc, props.options.units, props.tz, mapRef?.current, pilotScores, t, lang]
     );
 
-    const attribution = useMemo(
-        () => (
-            <AttributionControl //
-                key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')}
-                customAttribution={[radarOverlay.attribution, props.status].filter(Boolean).join(' | ')}
-                style={attributionStyle}
-            />
-        ),
-        [radarOverlay.key, props.status]
-    );
+    const attribution = useMemo(() => <AttributionInfo customParts={[radarOverlay.attribution, props.status]} />, [radarOverlay.key, radarOverlay.attribution, props.status]);
 
     // Initial options depending on if we are on 2d or 3d
     const viewOptions = map2d ? {minPitch: 0, maxPitch: 80, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
@@ -587,8 +578,3 @@ export default function MApp(props: {
     );
 }
 
-const attributionStyle = {
-    right: 0,
-    bottom: 0,
-    fontSize: '13px'
-};
