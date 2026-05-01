@@ -25,7 +25,7 @@ import * as dotenv from 'dotenv';
 import {findAirfieldsByName, type RankedAirfield} from '../lib/scoring/shared/airfield';
 import {nowInTz} from '../lib/scoring/shared/timezone';
 import {toDateCode} from '../lib/datecode';
-import {loadMergedDDB, isBlocked, type DDBEntry} from '../lib/ddb';
+import {loadMergedDDB, isBlocked, blockedMethod, type DDBEntry} from '../lib/ddb';
 
 dotenv.config({path: '.env.local'});
 
@@ -101,6 +101,7 @@ interface Match {
     // instead of the real flarm id, and never apply gregChange.
     blocked?: boolean;
     blockedSources?: string;
+    blockedMethod?: 'ogn-blocked' | 'flarmnet-blocked' | 'ddb-blocked';
 }
 
 function onCancel() {
@@ -237,7 +238,7 @@ async function resolveBySitename(sitename: string): Promise<ResolvedAirfield[]> 
     if (!search) return [];
 
     console.log(`\nGeocoding "${search}" via Nominatim, then Wikidata...`);
-    const {geocode, ranked} = await findAirfieldsByName(search);
+    const {geocode, ranked} = await findAirfieldsByName(search, undefined, (msg, ...args) => console.log(`  ${msg}`, ...args));
     if (!geocode) {
         console.log('  no result — falling back to text search');
         return [];
@@ -420,8 +421,9 @@ function buildMatches(
         const ddbf = ddb && apiFlarm ? ddb[apiFlarm.toLowerCase()] || ddb[apiFlarm.toUpperCase()] || ddb[apiFlarm] : undefined;
         const blocked = isBlocked(ddbf, trackingconsent);
         const blockedSources = blocked ? ddbf?.sources?.join('+') : undefined;
+        const blockedMethodValue = blocked ? blockedMethod(ddbf) : undefined;
 
-        matches.push({pilot, device: d, flarmChange, gregChange, gliderDiffers, blocked, blockedSources});
+        matches.push({pilot, device: d, flarmChange, gregChange, gliderDiffers, blocked, blockedSources, blockedMethod: blockedMethodValue});
     }
     // Stable sort: actionable first, then compno
     matches.sort((a, b) => {
@@ -559,7 +561,7 @@ async function applyDecisions(decisions: Map<Match, Decision>) {
             // rather than the real flarm id, and skip the trackerhistory
             // line that would otherwise leak the address.
             const writeId = m.blocked ? 'blocked' : device.address;
-            const method = m.blocked ? 'ddb-blocked' : 'ognddb';
+            const method = m.blocked ? m.blockedMethod ?? 'ddb-blocked' : 'ognddb';
             const histFlarm = m.blocked ? 'blocked' : device.address;
             t.query(escape`
                 INSERT IGNORE INTO tracker (class, compno, type, trackerid)

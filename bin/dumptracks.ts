@@ -7,7 +7,7 @@ import yargs from 'yargs';
 
 import {d} from '../lib/now';
 import type {Epoch, FlarmID} from '../lib/types';
-import {loadPoints, scanAll} from '../lib/webworkers/pointlog';
+import {loadPoints, scanAll, summarize} from '../lib/webworkers/pointlog';
 
 async function run() {
     const args = await yargs(process.argv.slice(2)) //
@@ -19,36 +19,23 @@ async function run() {
         .alias('help', 'h').argv;
 
     if (args.summary) {
-        interface Stat {
-            flarmId: string;
-            count: number;
-            oldest: number;
-            newest: number;
-        }
-        const stats = new Map<string, Stat>();
-        const iter = args.tracker
-            ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until})
-            : scanAll({since: args.since, until: args.until});
+        // Server-side aggregation: a single GROUP BY scan instead of
+        // streaming every row across the JS boundary just to feed COUNT/
+        // MIN/MAX. Already sorted by flarmid.
+        const stats = summarize({
+            flarmId: args.tracker ? (args.tracker.toUpperCase() as FlarmID) : undefined,
+            since: args.since,
+            until: args.until
+        });
 
-        for await (const msg of iter) {
-            const id = (msg.f ?? '??????') as string;
-            let s = stats.get(id);
-            if (!s) {
-                s = {flarmId: id, count: 0, oldest: Infinity, newest: 0};
-                stats.set(id, s);
-            }
-            s.count++;
-            if (msg.t < s.oldest) s.oldest = msg.t;
-            if (msg.t > s.newest) s.newest = msg.t;
-        }
-
-        if (stats.size === 0) {
+        if (stats.length === 0) {
             console.log('no tracker data in this range');
         } else {
-            const sorted = [...stats.values()].sort((a, b) => (a.flarmId < b.flarmId ? -1 : 1));
-            console.log('flarm   oldest                   newest                   count');
-            for (const s of sorted) {
-                console.log(`${s.flarmId}  ${d(s.oldest as Epoch).padEnd(22)}  ${d(s.newest as Epoch).padEnd(22)}  ${String(s.count).padStart(6)}`);
+            console.log('flarm   oldest                   newest                   count       rate');
+            for (const s of stats) {
+                const span = s.newest - s.oldest;
+                const rate = span > 0 ? `${(s.count / span).toFixed(2)} msg/s` : '-';
+                console.log(`${s.flarmId}  ${d(s.oldest as Epoch).padEnd(22)}  ${d(s.newest as Epoch).padEnd(22)}  ${String(s.count).padStart(6)}  ${rate.padStart(9)}`);
             }
         }
     } else {

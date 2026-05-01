@@ -272,15 +272,11 @@ const allAircraft: Record<ClassName_Compno, Aircraft> = {};
 // Mapping by trackerid to aircraft record
 const trackers: Record<FlarmID, Tracker> = {};
 
-// ID for each receiver
-let highestReceiverId: number = 0;
-const receivers: Record<string, number> = {};
-
 // And for sending message onwards - all we do here is fetch and enrich
 const channels: Record<ChannelName, BroadcastChannel> = {};
 
 // Our persistence
-import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
+import {appendPoint, closeLog, loadPoints, openLog} from './pointlog';
 import {competitionStartTs} from '../datecode';
 import {inorderAdditionalDelay} from '../constants';
 
@@ -434,7 +430,6 @@ if (!isMainThread && parentPort) {
 
     openLog().then(() => startAprsListener(<AprsListenerConfig>workerData));
 }
-
 
 //
 // Apply a new aprsc filter string in-band. aprsc supports `#filter <string>`
@@ -633,7 +628,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
             try {
                 // Send APRS keep alive or we will get dumped
-                connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+                connection.send(`# www.onglide.com airfields=${airfields?.length ?? 0}`);
             } catch (x) {
                 console.log('unable to send keepalive', x);
                 connection.valid = false;
@@ -666,36 +661,20 @@ function startAprsListener(config: AprsListenerConfig) {
     );
 }
 
-// Backfills are debounced and scanned in one pass over the pointlog files
-// regardless of how many gliders need points loaded. Each glider gets its
-// own queue and per-glider since trim; the actual file scan uses min(since)
-// across the batch. This collapses (n_gliders × n_files × scan) — which
-// pinned the APRS worker thread at 100% on restart while scoring workers
-// sat idle — down to (n_files × scan).
-interface PendingBackfill {
-    key: ClassName_Compno;
-    glider: Aircraft;
-    queue: InterimPositionMessage[];
-    flarmIds: string[];
-    since: number;
-    label: string;
-    channelName: string;
-    trackerIdForLog: any;
-}
-let pendingBackfills: PendingBackfill[] = [];
-let backfillTimer: NodeJS.Timeout | null = null;
-const BACKFILL_DEBOUNCE_MS = 250;
-
+// Track a glider: register the tracker(s) and per-glider channel synchronously
+// so live processPacket calls start landing in glider.messages immediately,
+// then fire-and-forget a per-flarmid SQL load that pushes any historical points
+// (since competition start) into the same queue with the same sorted-insert
+// path the live writer uses. One write path (live appendPoint), one read path
+// (SQL scan on track-glider) — no debounced batch, no interim queue.
 function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
 
     const key = makeClassname_Compno(task);
 
-    // Check if already tracking...
     const existingTracker = allAircraft[key];
     if (existingTracker) {
         console.log(`${task.compno}: closing existing tracker entry ${existingTracker.trackers.join(',')}`);
-        // remove the trackers
         existingTracker.trackers.forEach((t) => {
             const tracker = trackers[t];
             tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != existingTracker.channel || a.compno != existingTracker.compno);
@@ -704,10 +683,6 @@ function trackGlider(task: AprsCommandTrack) {
             }
         });
         clearInterval(existingTracker.interval);
-        // Drop any pending backfill for the previous glider object so it
-        // doesn't dispatch points into an orphaned queue when the next
-        // flush fires.
-        pendingBackfills = pendingBackfills.filter((b) => b.key !== key);
     }
 
     const glider: Aircraft = {
@@ -718,13 +693,11 @@ function trackGlider(task: AprsCommandTrack) {
         datecode: task.datecode,
         tzoffset: task.tzoffset,
 
-        // Not had a message
         stationary: 0,
         ground: false,
         lastTick: 0 as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
-        // Setup logging
         log:
             process.env.NEXT_PUBLIC_COMPNO && task.compno == process.env.NEXT_PUBLIC_COMPNO
                 ? function log() {
@@ -735,14 +708,13 @@ function trackGlider(task: AprsCommandTrack) {
         messages: []
     };
 
-    // Link the glider in
     allAircraft[key] = glider;
 
-    const interimQueue: InterimPositionMessage[] = [];
-    const since = competitionStartTs(task.tzoffset);
+    if (!channels[task.channelName]) {
+        channels[task.channelName] = new BroadcastChannel(task.channelName);
+    }
+    glider.channel = channels[task.channelName];
 
-    // Link the tracker(s) in (synchronous — no point-log scan here, that
-    // happens in the debounced batch).
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
     const dedupedIds = [...new Set(trackerList)];
     let index = 0;
@@ -761,35 +733,10 @@ function trackGlider(task: AprsCommandTrack) {
         }
     }
 
-    // Wire up the channel and the queue immediately so live packets arriving
-    // during the backfill window land on this glider (the final sort fixes
-    // any interleaving). The per-glider interval starts only after the
-    // batch flush — same ordering as the previous synchronous design.
-    if (!channels[task.channelName]) {
-        channels[task.channelName] = new BroadcastChannel(task.channelName);
-    }
-    glider.channel = channels[task.channelName];
-    glider.messages = interimQueue;
+    startGliderInterval(glider, task.className, task.compno, task.trackerId, task.channelName);
 
-    if (dedupedIds.length === 0) {
-        // No backfill possible (e.g. unknown tracker) — start the interval
-        // straight away so live packets, if any ever arrive, get processed.
-        startGliderInterval(glider, task.className, task.compno, task.trackerId, task.channelName);
-        return;
-    }
-
-    pendingBackfills.push({
-        key,
-        glider,
-        queue: interimQueue,
-        flarmIds: dedupedIds,
-        since,
-        label: `${task.className}/${task.compno}`,
-        channelName: task.channelName,
-        trackerIdForLog: task.trackerId
-    });
-    if (backfillTimer) clearTimeout(backfillTimer);
-    backfillTimer = setTimeout(flushBackfills, BACKFILL_DEBOUNCE_MS);
+    if (dedupedIds.length === 0) return;
+    void loadHistorical(glider, dedupedIds, competitionStartTs(task.tzoffset));
 }
 
 function startGliderInterval(glider: Aircraft, className: ClassName, compno: Compno, trackerId: any, channelName: string) {
@@ -800,69 +747,35 @@ function startGliderInterval(glider: Aircraft, className: ClassName, compno: Com
     }, Math.random() * 1000);
 }
 
-interface BackfillTarget {
-    queue: InterimPositionMessage[];
-    compno: Compno;
-    since: number;
-}
-
-async function flushBackfills() {
-    backfillTimer = null;
-    const batch = pendingBackfills;
-    pendingBackfills = [];
-    if (batch.length === 0) return;
-
-    // Build flarmId → [target] map. One flarm ID can map to multiple
-    // gliders if two pilots share a tracker (rare but supported by the
-    // existing trackers[id].aircraftList structure).
-    const idToTargets = new Map<string, BackfillTarget[]>();
-    let minSince = Infinity;
-    for (const b of batch) {
-        if (b.since < minSince) minSince = b.since;
-        const target: BackfillTarget = {queue: b.queue, compno: b.glider.compno, since: b.since};
-        for (const id of b.flarmIds) {
-            const existing = idToTargets.get(id);
-            if (existing) existing.push(target);
-            else idToTargets.set(id, [target]);
-        }
-    }
-
-    const allIds = new Set(idToTargets.keys());
+async function loadHistorical(glider: Aircraft, flarmIds: string[], since: number) {
     const startMs = Date.now();
-    let yielded = 0;
-    let dispatched = 0;
-
+    let loaded = 0;
     try {
-        for await (const raw of loadPointsForIds({flarmIds: allIds, since: minSince})) {
-            yielded++;
-            const targets = idToTargets.get(raw.f);
-            if (!targets) continue;
-            const baseMessage = raw as InterimPositionMessage & {d?: number};
-            if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
-
-            // Build the GeoJSON point once per loaded record, share across
-            // any targets that have this flarm ID.
-            const j = point([baseMessage.lat, baseMessage.lng]);
-
-            for (const target of targets) {
-                if (raw.t < target.since) continue;
-                target.queue.push({...baseMessage, c: target.compno, j});
-                dispatched++;
+        for (const id of flarmIds) {
+            for await (const raw of loadPoints({flarmId: id as FlarmID, since})) {
+                const baseMessage = raw as InterimPositionMessage & {d?: number};
+                if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
+                const j = point([baseMessage.lat, baseMessage.lng]);
+                const msg: InterimPositionMessage = {...baseMessage, c: glider.compno, j};
+                const queue = glider.messages;
+                if ((queue.at(-1)?.t ?? 0) > msg.t) {
+                    const insertIndex = _sortedLastIndexBy(queue, msg, messageSortKey);
+                    queue.splice(insertIndex, 0, msg);
+                } else {
+                    queue.push(msg);
+                }
+                loaded++;
             }
         }
     } catch (err) {
-        console.error(`flushBackfills: ${err}`);
+        console.log(`loadHistorical ${glider.className}/${glider.compno}: ${err}`);
     }
-
-    // Sort each glider's queue once and start its interval.
-    for (const b of batch) {
-        b.queue.sort(messageSortKeyCompare);
-        if (b.queue.length) {
-            console.log(`${b.label}: ${b.queue.length} points sorted ${d(b.queue[0].t)}-${d(b.queue[b.queue.length - 1].t)}`);
-        }
-        startGliderInterval(b.glider, b.glider.className, b.glider.compno, b.trackerIdForLog, b.channelName);
+    if (loaded) {
+        const q = glider.messages;
+        console.log(`loadHistorical ${glider.className}/${glider.compno}: ${loaded} points in ${Date.now() - startMs}ms (${d(q[0]!.t)}-${d(q.at(-1)!.t)})`);
+    } else {
+        console.log(`loadHistorical ${glider.className}/${glider.compno}: 0 points in ${Date.now() - startMs}ms`);
     }
-    console.log(`flushBackfills: ${batch.length} gliders, ${allIds.size} flarmIds, ${yielded} read / ${dispatched} dispatched, ${Date.now() - startMs}ms`);
 }
 
 function finishGlider(task: AprsCommandFinish) {
@@ -912,17 +825,8 @@ function untrackGlider(task: AprsCommandUntrack) {
     console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers}`);
 }
 
-function sortKey(sender: string, tracker: Tracker | undefined): number {
-    const rid = (receivers[sender] ??= highestReceiverId++);
-    return (tracker?.index ?? 0) << (16 + (rid & 0xffff));
-}
-
 function messageSortKey(m: InterimPositionMessage): number {
-    return m.t; //sortKey(m.o, trackers[m.f]);
-}
-
-function messageSortKeyCompare(a: InterimPositionMessage, b: InterimPositionMessage): number {
-    return a.t - b.t;
+    return m.t;
 }
 
 //
