@@ -423,23 +423,27 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
         let oldIndex = 0;
         let newIndex = 0;
         while (oldIndex < oldIndicies.length || newIndex < newIndicies.length) {
-            const o = oldIndicies.at(oldIndex);
-            const n = newIndicies.at(newIndex);
+            // Distinguish "ran off the end" from "value is falsy". A pilot with no
+            // tracker / blocked tracker is stored with t === 0 so the live list still
+            // shows them, and a previous version of this loop that gated on `o &&`
+            // spun forever for that compno because oldIndex never advanced past 0.
+            const oOk = oldIndex < oldIndicies.length;
+            const nOk = newIndex < newIndicies.length;
+            const o = oOk ? oldIndicies[oldIndex] : undefined;
+            const n = nOk ? newIndicies[newIndex] : undefined;
 
-            if (o && (!n || o <= n)) {
+            if (oOk && (!nOk || o! <= n!)) {
                 // end of new, or old is older
-                resultIndex.push(o);
-                resultScores.push(oldScores.at(oldIndex));
+                resultIndex.push(o!);
+                resultScores.push(oldScores.at(oldIndex)!);
                 oldIndex++;
-                if (o == n) {
+                if (o === n) {
                     newIndex++;
                 }
-            } else if (!o || n! < o) {
-                // end of old or new is older
-                const ns = newScores.at(newIndex);
-                // take from the new score if it's there, otherwise it's a reference to one we have decoded
-                // so use that instead
-                resultScores.push(mapScoresToDisplayScores(resultScores.at(-1), ns!));
+            } else {
+                // end of old or new is older — take from the new score
+                const ns = newScores.at(newIndex)!;
+                resultScores.push(mapScoresToDisplayScores(resultScores.at(-1), ns));
                 resultIndex.push(n!);
                 newIndex++;
             }
