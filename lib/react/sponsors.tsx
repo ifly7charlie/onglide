@@ -4,7 +4,7 @@ import {TranslationHelpFooter} from './translation-help-footer';
 
 const OGN_LOGO = (
     <a href="http://www.glidernet.org/" title="OGN Network" target="_blank" rel="noreferrer">
-        <img width="120" height="120" src="/ognlogo.png" alt="OGN Network" />
+        <img width="100" height="68" src="/ognlogo.png" alt="OGN Network" />
     </a>
 );
 
