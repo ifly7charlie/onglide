@@ -41,6 +41,12 @@ export const HOME_OGN_COVERAGE = 0.5;
 
 export const inorderAdditionalDelay = 6;
 
+// trackGlider coalescing window: each new glider registration arms (or
+// re-arms) a setTimeout. After this many ms of quiet, flushLoads runs a
+// single loadPointsForIds across the union of every queued glider's
+// flarmIds and dispatches the yielded records to per-glider queues.
+export const PENDING_LOAD_DEBOUNCE_MS = 250;
+
 // How far beyond the finite extent of a start line a near-miss is accepted (metres)
 export const RELAXED_START_TOLERANCE_M = 1500;
 
