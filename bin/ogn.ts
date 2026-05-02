@@ -270,6 +270,10 @@ interface Glider {
     scoredFinish: Epoch;
     scoredStatus: 'S' | 'F' | 'H'; // from scoring
     scoringConfigured?: boolean;
+    // True if dbTrackerId === 'blocked' on the last tick. We never send blocked
+    // pilots to the scoring worker, so flipping back to unblocked has to reset
+    // scoringConfigured so setInitialTrack runs on the next tick.
+    blocked?: boolean;
 
     deck: DeckData;
     webPathEndPosition: number;
@@ -1739,6 +1743,43 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 }
                 const listening = !channel.afterSunset && t.scoredStatus == 'S';
 
+                // Blocked pilots: aprs.ts validateGlider rejects 'blocked', so
+                // they have no track points. We synthesize a Blocked PilotScore
+                // for the frontend and keep them out of the scoring worker
+                // entirely — otherwise the worker emits empty (flightStatus=0)
+                // scores that overwrite the synth, causing scoreId churn.
+                if (t.dbTrackerId === 'blocked') {
+                    // Pilot just transitioned from tracked to blocked: drop them
+                    // from the worker so it stops scoring them.
+                    if (glider.scoringConfigured && !glider.blocked) {
+                        console.log(`${channel.displayName}:${t.compno} now blocked, clearing from worker`);
+                        channel.scoring?.clearGlider(t.compno);
+                    }
+                    glider.blocked = true;
+                    glider.scoringConfigured = true; // skip setInitialTrack on subsequent ticks
+
+                    if (channel.allScores[t.compno]?.flightStatus !== PositionStatus.Blocked) {
+                        channel.allScores[t.compno] = PilotScore.fromPartial({
+                            compno: t.compno,
+                            flightStatus: PositionStatus.Blocked,
+                            t: getNow()
+                        });
+                        channel.scoreIdUpdateRequired = true;
+                    }
+                    return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: true, listening: false};
+                }
+
+                // Pilot transitioned from blocked back to tracked: force
+                // setInitialTrack to run by clearing scoringConfigured, and
+                // drop the synthesised Blocked score so the sendScore guard
+                // doesn't keep refusing to overwrite it.
+                if (glider.blocked) {
+                    console.log(`${channel.displayName}:${t.compno} no longer blocked, restoring scoring`);
+                    glider.blocked = false;
+                    glider.scoringConfigured = false;
+                    delete channel.allScores[t.compno];
+                }
+
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
                         console.log(`Finishing APRS Listener for glider ${t.className}:${t.compno} => ${t.dbTrackerId}`);
@@ -1772,19 +1813,6 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                             .join('|')})`,
                         'i'
                     );
-                }
-
-                // Surface blocked pilots to the front end. They never receive
-                // points (aprs.ts validateGlider rejects 'blocked'), so the
-                // scoring pipeline won't emit a status for them — synthesize
-                // a PilotScore with flightStatus=Blocked.
-                if (t.dbTrackerId === 'blocked' && channel.allScores[t.compno]?.flightStatus !== PositionStatus.Blocked) {
-                    channel.allScores[t.compno] = PilotScore.fromPartial({
-                        compno: t.compno,
-                        flightStatus: PositionStatus.Blocked,
-                        t: getNow()
-                    });
-                    channel.scoreIdUpdateRequired = true;
                 }
 
                 return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: glider.scoringConfigured, listening};
@@ -2281,6 +2309,13 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             // populates it on leg entry) so sendAllScores / sendIdentifiersToAll / scoreDb restore
             // still ship a grid for the pilot's current leg.
             const prior = channel.allScores[compno];
+            // Don't let a stale worker score overwrite the synthesised Blocked
+            // entry — the worker may still have track points cached from before
+            // the pilot was blocked, and migrating them on every updateScoreId
+            // would otherwise resurrect a non-Blocked status.
+            if (prior?.flightStatus === PositionStatus.Blocked) {
+                return;
+            }
             const stored =
                 !score.optimalGrid?.length && prior?.optimalGrid?.length && prior.currentLeg === score.currentLeg //
                     ? {...score, optimalGrid: prior.optimalGrid}
