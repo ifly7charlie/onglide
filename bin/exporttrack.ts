@@ -2,7 +2,7 @@ import {Compno, ClassName, Datecode, Epoch, Task, FlarmID} from '../lib/types';
 
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 
-import type {Aircraft} from '../lib/webworkers/aprs';
+import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
 import {loadPoints} from '../lib/webworkers/pointlog';
 
@@ -87,9 +87,16 @@ async function main() {
     const until = since + 24 * 3600;
     const messageQueue: any[] = [];
 
+    // Stub airfield: this offline export tool never invokes processPacket /
+    // flushBackfills, so the prefilter never reads this field. Bbox is left
+    // undefined (pre-task semantics) so any code that did consult it would
+    // fall through to the broadcast fallback.
+    const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any};
+
     const glider: Aircraft = {
         compno,
         className,
+        airfield: stubAirfield,
         trackers: pilots[0].trackerid.split(',') as any[],
         datecode,
         tzoffset,

@@ -224,7 +224,7 @@ export interface Tracker {
 
 // All active airfields with their elevation. Populated from the initial
 // config and updated at runtime via AprsCommandEnum.setAirfields.
-interface Airfield {
+export interface Airfield {
     compid: string;
     point: Coord;
     elevation: AltitudeAgl;

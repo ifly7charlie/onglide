@@ -19,7 +19,7 @@ import {taskPositionGenerator} from '../lib/webworkers/taskpositiongenerator';
 import {taskScoresGenerator} from '../lib/webworkers/taskScoresGenerator';
 import {createFlightStatistics} from '../lib/webworkers/flightStatistics';
 
-import type {Aircraft} from '../lib/webworkers/aprs';
+import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
 import {loadPoints} from '../lib/webworkers/pointlog';
 import {competitionStartTs, fromDateCode} from '../lib/datecode';
@@ -170,9 +170,15 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         return;
     }
 
+    // Stub airfield: mainthread-score is a replay/test harness that never
+    // invokes the worker prefilter. Bbox absent → pre-task semantics if any
+    // path ever did consult it.
+    const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any};
+
     const glider: Aircraft = {
         compno,
         className: className,
+        airfield: stubAirfield,
         trackers: trackerDb.split(',') as FlarmID[],
 
         datecode,
