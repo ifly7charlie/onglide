@@ -1954,7 +1954,9 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             }).length;
             const griddedCount = scored.filter((p) => channel?.allScores[p.compno]?.flightStatus === PositionStatus.Grid).length;
             // 'finishing' = at least one still-flying, started pilot whose
-            // distanceRemaining / taskSpeed puts them within FINISHING_ETA_MINUTES of home.
+            // distanceRemaining / taskSpeed puts them within FINISHING_ETA_MINUTES of home,
+            // AND who is past the halfway point of the task — otherwise a pilot near home
+            // on the first leg (or a short out-and-back AAT sample) would flip the class to F.
             const finishingCount = scored.filter((p) => {
                 const score = channel?.allScores[p.compno];
                 if (!score) return false;
@@ -1962,8 +1964,10 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 if (fs === PositionStatus.Finished || fs === PositionStatus.Home || fs === PositionStatus.Landed) return false;
                 if ((score.utcStart ?? 0) === 0) return false;
                 const distRemaining = score.actual?.distanceRemaining ?? 0;
+                const distFlown = score.actual?.taskDistance ?? 0;
                 const speed = score.actual?.taskSpeed ?? 0;
                 if (distRemaining <= 0 || speed <= 0) return false;
+                if (distFlown <= distRemaining) return false;
                 return (distRemaining / speed) * 60 < FINISHING_ETA_MINUTES;
             }).length;
 
