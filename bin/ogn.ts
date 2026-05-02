@@ -625,11 +625,7 @@ async function main() {
                     `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
                 );
             }
-            const hasListenerActivity =
-                channel.statistics.activeListeners > 0 ||
-                channel.statistics.peakListeners > 0 ||
-                channel.statistics.totalViewingTime > 0 ||
-                viewTime > 0;
+            const hasListenerActivity = channel.statistics.activeListeners > 0 || channel.statistics.peakListeners > 0 || channel.statistics.totalViewingTime > 0 || viewTime > 0;
             if (hasListenerActivity) {
                 console.log(
                     `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, interacting: ${(
@@ -1123,7 +1119,7 @@ let scoreDb: ClassicLevel<Compno, string> | undefined = undefined;
 // Fetch the trackers from the database
 async function updateClasses(competition: CompetitionContext, datecode: Datecode) {
     if (!scoreDb) {
-        const path = `${process.env.DB_PATH ?? './db/'}/scores-${competition.internalName}.db`;
+        const path = `${process.env.DB_PATH ?? './db/'}/scores.db`;
         console.log(`opening scoreDB ${path}`);
         scoreDb = new ClassicLevel(path);
         await scoreDb.open().catch((e) => console.log(e));
