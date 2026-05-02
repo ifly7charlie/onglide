@@ -494,11 +494,6 @@ async function main() {
                 {} as Record<string, Positions>
             );
 
-            // No class in this comp had any fresh positions — skip the
-            // broadcast entirely. Per-channel keepalive runs on its own
-            // timer (lastKeepAliveMsg), so socket liveness is unaffected.
-            if (!Object.keys(positions).length) continue;
-
             const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
             for (const channel of compChannels) {
