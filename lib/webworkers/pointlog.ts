@@ -1,79 +1,152 @@
-import {promises as fsp, mkdirSync} from 'fs';
+import {createWriteStream, WriteStream, promises as fsp, openSync, closeSync, readSync, fstatSync, statSync} from 'fs';
 import * as path from 'path';
-import Database from 'better-sqlite3';
+import * as os from 'os';
 
-import type {PositionMessage, FlarmID} from '../types';
+import type {PositionMessage} from '../types';
+import type {FlarmID} from '../types';
 
-// LoggedMessage is what callers serialize / deserialize. The on-disk row is
-// columnar (no JSON blob), so reconstruction sets `c` from `f` and `l` to
-// null — both are caller-context fields that the writer never had reason to
-// persist (c is always equal to f at appendPoint time; l is always null).
-export type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
+// Line format: the serialized message itself, one JSON object per line.
+// The message carries t (epoch), f (flarmId), o (sender) already — no
+// wrapper needed.
+type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
 
 // ---------- module state ----------
-// Two connections: better-sqlite3 marks a connection "busy" for the lifetime
-// of an open iterator, and our reader generators (loadPoints*) yield to the
-// event loop mid-iteration. If the writer/purge shared the connection, those
-// yields would let appendPoint or the purge DELETE land while an iterator is
-// open and throw "database connection is busy". WAL lets independent
-// connections read+write concurrently, so we keep them split.
-let writerDb: Database.Database | undefined;
-let readerDb: Database.Database | undefined;
-let insertStmt: Database.Statement | undefined;
-let purgeTimer: NodeJS.Timeout | undefined;
+const hostname = os.hostname();
+const pid = process.pid;
+const basePath = (): string => (process.env.DB_PATH ?? './db/').replace(/\/$/, '') + '/';
+
+let rotateThreshold = 100 * 1024 * 1024;
 let retainMs = 24 * 3600 * 1000;
 
-const dbPath = (): string => path.join((process.env.DB_PATH ?? './db/').replace(/\/$/, '') + '/', 'aprs.sqlite');
-
-const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS points (
-    t   INTEGER NOT NULL,
-    f   TEXT    NOT NULL,
-    o   TEXT    NOT NULL,
-    lat REAL    NOT NULL,
-    lng REAL    NOT NULL,
-    a   INTEGER NOT NULL,
-    g   INTEGER NOT NULL,
-    b   REAL,
-    s   REAL,
-    d   INTEGER,
-    ad  REAL,
-    PRIMARY KEY (t, f, o)
-  ) WITHOUT ROWID;
-  CREATE INDEX IF NOT EXISTS idx_points_f_t ON points (f, t);
-`;
-
 function reloadConfig(): void {
+    const mb = Number(process.env.APRS_LOG_ROTATE_MB);
+    rotateThreshold = (Number.isFinite(mb) && mb > 0 ? mb : 100) * 1024 * 1024;
     const hours = Number(process.env.APRS_LOG_RETAIN_HOURS);
     retainMs = (Number.isFinite(hours) && hours > 0 ? hours : 24) * 3600 * 1000;
 }
 
-// Apply pragmas + schema. Used by both openLog (writer) and ensureReaderDb
-// (reader-only lazy open) so the table exists for fresh installs that
-// haven't run ogn yet, and SQLite knows the file is WAL-mode.
-function configureDb(d: Database.Database): void {
-    d.pragma('journal_mode = WAL');
-    d.pragma('synchronous = NORMAL');
-    d.pragma('temp_store = MEMORY');
-    d.exec(SCHEMA);
+let activeStream: WriteStream | undefined;
+let activePath: string = '';
+let activeFirstTs: number = 0;
+let activeLastTs: number = 0;
+let activeBytes: number = 0;
+let rotating = false;
+const pendingWrites: string[] = [];
+
+// ---------- filename helpers ----------
+// Active:   aprs-<host>-<pid>-<firstTs>.log        (3 segments)
+// Rotated:  aprs-<host>-<pid>-<firstTs>-<lastTs>.log (4 segments)
+const FILE_PREFIX = 'aprs-';
+const FILE_SUFFIX = '.log';
+
+interface ParsedName {
+    file: string;
+    host: string;
+    pid: number;
+    firstTs: number;
+    lastTs?: number; // defined iff rotated
+    rotated: boolean;
 }
 
-// Lazy reader open. CLI tools (dumptracks/findtrackers/exporttrack) don't
-// call openLog — they just iterate. ensureReaderDb opens a dedicated reader
-// connection on demand. In the live ogn process this is a second handle
-// alongside the writer; in CLI tools it's the only handle.
-// Returns undefined if the DB file can't be opened (path inaccessible);
-// callers should treat that as "no points" and yield nothing.
-function ensureReaderDb(): Database.Database | undefined {
-    if (readerDb) return readerDb;
+function parseFilename(file: string): ParsedName | undefined {
+    if (!file.startsWith(FILE_PREFIX) || !file.endsWith(FILE_SUFFIX)) return undefined;
+    const core = file.slice(FILE_PREFIX.length, -FILE_SUFFIX.length);
+    const segments = core.split('-');
+    // host segment itself may contain hyphens (hostnames can) — collapse to last 3 or 4.
+    if (segments.length < 3) return undefined;
+    let host: string, pidStr: string, firstStr: string, lastStr: string | undefined;
+    if (segments.length === 3) {
+        [host, pidStr, firstStr] = segments;
+    } else if (segments.length === 4) {
+        [host, pidStr, firstStr, lastStr] = segments;
+    } else {
+        const tail = segments.slice(-4);
+        const maybeFirst = Number(tail[2]);
+        const maybeLast = Number(tail[3]);
+        if (Number.isFinite(maybeFirst) && Number.isFinite(maybeLast)) {
+            host = segments.slice(0, -3).join('-');
+            pidStr = tail[1];
+            firstStr = tail[2];
+            lastStr = tail[3];
+        } else {
+            host = segments.slice(0, -2).join('-');
+            pidStr = segments[segments.length - 2];
+            firstStr = segments[segments.length - 1];
+        }
+    }
+    const parsedPid = Number(pidStr);
+    const parsedFirst = Number(firstStr);
+    if (!Number.isFinite(parsedPid) || !Number.isFinite(parsedFirst)) return undefined;
+    const parsedLast = lastStr != null ? Number(lastStr) : undefined;
+    if (lastStr != null && !Number.isFinite(parsedLast)) return undefined;
+    return {file, host, pid: parsedPid, firstTs: parsedFirst, lastTs: parsedLast, rotated: lastStr != null};
+}
+
+function activeFilename(firstTs: number): string {
+    return `${FILE_PREFIX}${hostname}-${pid}-${firstTs}${FILE_SUFFIX}`;
+}
+
+function rotatedFilename(host: string, pidN: number, firstTs: number, lastTs: number): string {
+    return `${FILE_PREFIX}${host}-${pidN}-${firstTs}-${lastTs}${FILE_SUFFIX}`;
+}
+
+async function ensureDir(): Promise<void> {
+    await fsp.mkdir(basePath(), {recursive: true});
+}
+
+async function listAprsFiles(): Promise<ParsedName[]> {
+    let entries: string[];
     try {
-        mkdirSync(path.dirname(dbPath()), {recursive: true});
-        readerDb = new Database(dbPath());
-        configureDb(readerDb);
-        return readerDb;
-    } catch (e) {
-        console.log(`pointlog: cannot open reader ${dbPath()}: ${e}`);
+        entries = await fsp.readdir(basePath());
+    } catch (e: any) {
+        if (e.code === 'ENOENT') return [];
+        throw e;
+    }
+    const out: ParsedName[] = [];
+    for (const e of entries) {
+        const p = parseFilename(e);
+        if (p) out.push(p);
+    }
+    return out;
+}
+
+function isPidAlive(p: number): boolean {
+    try {
+        process.kill(p, 0);
+        return true;
+    } catch (e: any) {
+        if (e.code === 'ESRCH') return false;
+        if (e.code === 'EPERM') return true; // exists, just not ours to signal
+        return false;
+    }
+}
+
+// Return the timestamp of the last parseable line in a file, or undefined if
+// there are none. Reads a small tail buffer.
+function readLastTs(filePath: string): number | undefined {
+    const fd = openSync(filePath, 'r');
+    try {
+        const size = fstatSync(fd).size;
+        if (size === 0) return undefined;
+        const tailSize = Math.min(size, 64 * 1024);
+        const buf = Buffer.alloc(tailSize);
+        readSync(fd, buf, 0, tailSize, size - tailSize);
+        const text = buf.toString('utf8');
+        // Find last complete line (preceded by \n).
+        const lines = text.split('\n');
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            try {
+                const msg = JSON.parse(line);
+                if (typeof msg.t === 'number') return msg.t;
+            } catch {
+                // malformed; keep searching backward
+            }
+        }
         return undefined;
+    } finally {
+        closeSync(fd);
     }
 }
 
@@ -81,431 +154,463 @@ function ensureReaderDb(): Database.Database | undefined {
 
 export async function openLog(): Promise<void> {
     reloadConfig();
-    try {
-        await fsp.mkdir(path.dirname(dbPath()), {recursive: true});
-        writerDb = new Database(dbPath());
-        // WAL: concurrent readers + 1 writer across processes (CLIs can read
-        // while ogn is up). synchronous=NORMAL is the standard durability/
-        // speed tradeoff for WAL — the OS may lose the last few packets in a
-        // power cut, which is fine for APRS traffic.
-        configureDb(writerDb);
-        insertStmt = writerDb.prepare(
-            `INSERT OR REPLACE INTO points (t, f, o, lat, lng, a, g, b, s, d, ad)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
-    } catch (e) {
-        console.log(`pointlog: openLog failed (${dbPath()}): ${e}`);
-        // Leave writerDb/insertStmt undefined so appendPoint becomes a no-op.
-        // Readers will lazy-open their own connection via ensureReaderDb. The
-        // APRS worker still functions; we just don't persist or backfill.
-        try {
-            writerDb?.close();
-        } catch {}
-        writerDb = undefined;
-        insertStmt = undefined;
-        return;
-    }
+    await ensureDir();
+    await adoptOrphans();
+    await purgeStale();
 
-    const tick = () => {
-        try {
-            purge();
-        } catch (e) {
-            console.log(`pointlog purge: ${e}`);
-        }
-        // Keep ticking even if a purge throws — transient locks during
-        // a checkpoint mustn't disable retention.
-        purgeTimer = setTimeout(tick, PURGE_TICK_MS);
-    };
-    purgeTimer = setTimeout(tick, PURGE_TICK_MS);
-
-    console.log(`pointlog: opened ${dbPath()} (WAL, retain ${retainMs / 3600000}h)`);
+    activeFirstTs = Math.floor(Date.now() / 1000);
+    activeLastTs = activeFirstTs;
+    activePath = path.join(basePath(), activeFilename(activeFirstTs));
+    activeStream = createWriteStream(activePath, {flags: 'a'});
+    activeBytes = 0;
+    console.log(`pointlog: opened ${activePath}`);
 }
 
 export async function closeLog(): Promise<void> {
-    if (purgeTimer) {
-        clearTimeout(purgeTimer);
-        purgeTimer = undefined;
+    if (!activeStream) return;
+    await new Promise<void>((resolve) => activeStream!.end(() => resolve()));
+    activeStream = undefined;
+}
+
+export function appendPoint(message: LoggedMessage): void {
+    if (!activeStream) return; // not open yet (shouldn't happen in practice)
+    const line = JSON.stringify(message) + '\n';
+    if (rotating) {
+        pendingWrites.push(line);
+        return;
     }
-    if (writerDb) {
+    activeStream.write(line);
+    activeBytes += Buffer.byteLength(line, 'utf8');
+    if (typeof message.t === 'number' && message.t > activeLastTs) activeLastTs = message.t;
+    if (activeBytes >= rotateThreshold) {
+        // Fire and forget — rotation handles its own errors.
+        void rotate();
+    }
+}
+
+async function rotate(): Promise<void> {
+    if (rotating || !activeStream) return;
+    rotating = true;
+    try {
+        const oldStream = activeStream;
+        const oldPath = activePath;
+        const oldFirstTs = activeFirstTs;
+        const oldLastTs = activeLastTs;
+
+        await new Promise<void>((resolve) => oldStream.end(() => resolve()));
+
+        const rotatedPath = path.join(basePath(), rotatedFilename(hostname, pid, oldFirstTs, oldLastTs));
         try {
-            writerDb.close();
-        } catch (e) {
-            console.log(`pointlog: writer close failed: ${e}`);
+            await fsp.rename(oldPath, rotatedPath);
+        } catch (e: any) {
+            console.log(`pointlog: rename failed ${oldPath} → ${rotatedPath}: ${e.message}`);
         }
-        writerDb = undefined;
-        insertStmt = undefined;
-        bulkInsertStmt = undefined;
+
+        activeFirstTs = Math.floor(Date.now() / 1000);
+        if (activeFirstTs <= oldLastTs) activeFirstTs = oldLastTs + 1;
+        activeLastTs = activeFirstTs;
+        activePath = path.join(basePath(), activeFilename(activeFirstTs));
+        activeStream = createWriteStream(activePath, {flags: 'a'});
+        activeBytes = 0;
+        console.log(`pointlog: rotated → ${rotatedPath}; new active ${activePath}`);
+
+        // Flush any writes that queued during rotation.
+        while (pendingWrites.length > 0) {
+            const line = pendingWrites.shift()!;
+            activeStream.write(line);
+            activeBytes += Buffer.byteLength(line, 'utf8');
+        }
+    } finally {
+        rotating = false;
     }
-    if (readerDb) {
+    await purgeStale();
+}
+
+async function adoptOrphans(): Promise<void> {
+    const files = await listAprsFiles();
+    const now = Math.floor(Date.now() / 1000);
+    for (const f of files) {
+        if (f.rotated) continue;
+        if (f.host !== hostname) continue;
+        if (f.pid === pid) continue; // our own (shouldn't exist yet, but be safe)
+        if (isPidAlive(f.pid)) continue;
+        // Orphan — adopt it.
+        const fullPath = path.join(basePath(), f.file);
+        let lastTs: number | undefined;
         try {
-            readerDb.close();
-        } catch (e) {
-            console.log(`pointlog: reader close failed: ${e}`);
+            lastTs = readLastTs(fullPath);
+        } catch (e: any) {
+            console.log(`pointlog: cannot read ${f.file}: ${e.message}`);
         }
-        readerDb = undefined;
-    }
-}
-
-export function appendPoint(m: LoggedMessage): void {
-    if (!insertStmt || typeof m.t !== 'number' || !m.f) return;
-    try {
-        insertStmt.run(
-            m.t,
-            m.f,
-            m.o ?? '',
-            m.lat,
-            m.lng,
-            m.a,
-            m.g,
-            m.b ?? null,
-            m.s ?? null,
-            (m as any).d ?? null,
-            (m as any).ad ?? null
-        );
-    } catch (e) {
-        // A constraint failure (PK collision after a clock-rewind) shouldn't
-        // crash the worker — log and move on.
-        console.log(`pointlog: insert failed (${m.t}/${m.f}/${m.o}): ${e}`);
-    }
-}
-
-// Begin bulk-load mode. Caller is expected to be a one-shot migration /
-// replay tool (not the live APRS worker). Three knobs at once:
-//   - drop the secondary index so we don't pay random b-tree maintenance
-//     on every insert; we'll rebuild it sequentially in endBulkLoad.
-//     Index inserts dominate cost once the index outgrows the page cache.
-//   - boost cache_size and mmap_size so the PK b-tree pages stay hot.
-//   - clear the hourly purge timer so a checkpoint can't fire mid-migration.
-// Pair with endBulkLoad() before closeLog().
-export function beginBulkLoad(opts: {cacheBytes?: number; mmapBytes?: number} = {}): void {
-    if (!writerDb) return;
-    if (purgeTimer) {
-        clearTimeout(purgeTimer);
-        purgeTimer = undefined;
-    }
-    const cacheBytes = opts.cacheBytes ?? 200 * 1024 * 1024;
-    const mmapBytes = opts.mmapBytes ?? 256 * 1024 * 1024;
-    // negative cache_size = KB rather than pages
-    writerDb.pragma(`cache_size = ${-Math.floor(cacheBytes / 1024)}`);
-    writerDb.pragma(`mmap_size = ${mmapBytes}`);
-    writerDb.exec('DROP INDEX IF EXISTS idx_points_f_t');
-    console.log(`pointlog: bulk-load mode (cache ${(cacheBytes / 1024 / 1024).toFixed(0)}MB, mmap ${(mmapBytes / 1024 / 1024).toFixed(0)}MB, dropped idx_points_f_t)`);
-}
-
-// Recreate the secondary index (single sequential build, much cheaper than
-// maintaining it during inserts), checkpoint the WAL.
-export function endBulkLoad(): void {
-    if (!writerDb) return;
-    const start = Date.now();
-    writerDb.exec('CREATE INDEX IF NOT EXISTS idx_points_f_t ON points (f, t)');
-    console.log(`pointlog: rebuilt idx_points_f_t (${Date.now() - start}ms)`);
-    try {
-        writerDb.pragma('wal_checkpoint(TRUNCATE)');
-    } catch (e) {
-        console.log(`pointlog: post-bulk checkpoint failed: ${e}`);
-    }
-}
-
-// Latest stored row's t (epoch seconds), or undefined if the DB is empty
-// or unreachable. Used by incremental migrations to find the existing tail.
-export function latestTimestamp(): number | undefined {
-    const conn = ensureReaderDb();
-    if (!conn) return undefined;
-    try {
-        const row = conn.prepare('SELECT MAX(t) AS t FROM points').get() as {t: number | null} | undefined;
-        return row?.t ?? undefined;
-    } catch (e) {
-        console.log(`pointlog latestTimestamp: ${e}`);
-        return undefined;
-    }
-}
-
-// Best-effort WAL checkpoint. Use periodically inside a long migration
-// loop so the WAL file doesn't balloon. PASSIVE: doesn't block readers.
-export function checkpointWal(): void {
-    if (!writerDb) return;
-    try {
-        writerDb.pragma('wal_checkpoint(PASSIVE)');
-    } catch (e) {
-        console.log(`pointlog: passive checkpoint failed: ${e}`);
-    }
-}
-
-// Bulk insert variant for migrations / replays. Wraps the writes in a
-// single SQLite transaction so the WAL fsync amortizes across the batch
-// (~100× faster than per-row autocommit at 10K-row batches).
-//
-// Uses INSERT OR IGNORE (not OR REPLACE like the live writer's appendPoint)
-// so we can distinguish a fresh insert from a duplicate (PK collision):
-// info.changes is 1 for a new row, 0 for a duplicate. The data is the same
-// either way (same t/f/o ⇒ same packet), so ignoring vs replacing makes no
-// observable difference, but the count split lets the caller report
-// "X new, Y already there" — useful for re-runs of a migration.
-let bulkInsertStmt: Database.Statement | undefined;
-export function bulkAppend(messages: LoggedMessage[]): {inserted: number; duplicates: number; skipped: number} {
-    if (!writerDb) return {inserted: 0, duplicates: 0, skipped: messages.length};
-    if (!bulkInsertStmt) {
-        bulkInsertStmt = writerDb.prepare(
-            `INSERT OR IGNORE INTO points (t, f, o, lat, lng, a, g, b, s, d, ad)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
-    }
-    let inserted = 0;
-    let duplicates = 0;
-    let skipped = 0;
-    const stmt = bulkInsertStmt;
-    const tx = writerDb.transaction((batch: LoggedMessage[]) => {
-        for (const m of batch) {
-            if (typeof m.t !== 'number' || !m.f) {
-                skipped++;
-                continue;
-            }
+        if (lastTs == null) {
+            // Empty / unreadable — delete.
             try {
-                const info = stmt.run(
-                    m.t,
-                    m.f,
-                    m.o ?? '',
-                    m.lat,
-                    m.lng,
-                    m.a,
-                    m.g,
-                    m.b ?? null,
-                    m.s ?? null,
-                    (m as any).d ?? null,
-                    (m as any).ad ?? null
-                );
-                if (info.changes > 0) inserted++;
-                else duplicates++;
-            } catch {
-                skipped++;
+                await fsp.unlink(fullPath);
+                console.log(`pointlog: removed empty orphan ${f.file}`);
+            } catch (e: any) {
+                console.log(`pointlog: unlink ${f.file} failed: ${e.message}`);
             }
+            continue;
         }
-    });
-    try {
-        tx(messages);
-    } catch (e) {
-        console.log(`pointlog: bulkAppend transaction failed: ${e}`);
-        skipped += messages.length - inserted - duplicates;
-        inserted = 0;
-        duplicates = 0;
-    }
-    return {inserted, duplicates, skipped};
-}
-
-// Per-flarmId rotating purge. Each tick deletes one flarmId's expired rows
-// (`WHERE f = ? AND t < ?` — leading-key range delete via idx_points_f_t)
-// rather than one big bulk DELETE. A pass = one full sweep through every
-// flarmId currently in the table; pass-level totals are logged when the
-// queue refills, along with the size of the next pass.
-const PURGE_TICK_MS = 10 * 1000;
-let purgeQueue: string[] = [];
-let purgePassChanges = 0;
-let purgePassFlarms = 0;
-let purgePassStartMs = 0;
-
-function purge(): void {
-    // purge runs writes; never touches the reader connection.
-    const conn = writerDb;
-    if (!conn) return;
-    if (purgeQueue.length === 0) {
-        let nextQueue: string[];
+        if (lastTs < f.firstTs) lastTs = f.firstTs;
+        const newName = rotatedFilename(f.host, f.pid, f.firstTs, lastTs);
         try {
-            const rows = conn.prepare('SELECT DISTINCT f FROM points').all() as {f: string}[];
-            nextQueue = rows.map((r) => r.f);
-        } catch (e) {
-            console.log(`pointlog: purge enumeration failed: ${e}`);
-            return;
+            await fsp.rename(fullPath, path.join(basePath(), newName));
+            console.log(`pointlog: adopted orphan ${f.file} → ${newName}`);
+        } catch (e: any) {
+            console.log(`pointlog: adopt rename failed: ${e.message}`);
         }
-        if (purgePassStartMs > 0) {
-            // Opportunistic passive checkpoint — only if we actually deleted
-            // something this pass, and only PASSIVE so readers aren't blocked.
-            if (purgePassChanges > 0) {
-                try {
-                    conn.pragma('wal_checkpoint(PASSIVE)');
-                } catch (e) {
-                    console.log(`pointlog: passive checkpoint failed: ${e}`);
-                }
+    }
+    void now;
+}
+
+async function purgeStale(): Promise<void> {
+    const files = await listAprsFiles();
+    const nowMs = Date.now();
+    for (const f of files) {
+        const fullPath = path.join(basePath(), f.file);
+        let shouldUnlink = false;
+
+        if (f.rotated) {
+            if (nowMs - (f.lastTs as number) * 1000 > retainMs) shouldUnlink = true;
+        } else {
+            // Active file. Never purge our own or a live same-host peer.
+            if (f.host === hostname && f.pid === pid) continue;
+            if (f.host === hostname && isPidAlive(f.pid)) continue;
+            // Either cross-host, or same-host dead PID that adopt missed — purge by firstTs.
+            if (nowMs - f.firstTs * 1000 > retainMs) shouldUnlink = true;
+        }
+
+        if (shouldUnlink) {
+            try {
+                await fsp.unlink(fullPath);
+                console.log(`pointlog: purged ${f.file}`);
+            } catch (e: any) {
+                if (e.code !== 'ENOENT') console.log(`pointlog: unlink ${f.file}: ${e.message}`);
             }
-            console.log(
-                `pointlog: pass purged ${purgePassChanges} rows across ${purgePassFlarms} flarmIds in ${Date.now() - purgePassStartMs}ms; next pass ${nextQueue.length} flarmIds`
-            );
         }
-        purgeQueue = nextQueue;
-        purgePassChanges = 0;
-        purgePassFlarms = 0;
-        purgePassStartMs = Date.now();
-        if (purgeQueue.length === 0) return;
-    }
-    const f = purgeQueue.shift()!;
-    const cutoff = Math.floor((Date.now() - retainMs) / 1000);
-    try {
-        const changes = (conn.prepare(`DELETE FROM points WHERE f = ? AND t < ?`).run(f, cutoff).changes ?? 0) as number;
-        if (changes > 0) {
-            purgePassChanges += changes;
-            purgePassFlarms++;
-        }
-    } catch (e) {
-        console.log(`pointlog: purge DELETE failed (${f}, cutoff ${cutoff}): ${e}`);
     }
 }
 
-// Row → LoggedMessage. `c` is set from `f` (callers like loadHistorical
-// override with the glider's compno after the load). `l` is always null on
-// disk.
-function rowToMessage(r: any): LoggedMessage {
-    return {
-        t: r.t,
-        f: r.f,
-        o: r.o,
-        c: r.f,
-        lat: r.lat,
-        lng: r.lng,
-        a: r.a,
-        g: r.g,
-        b: r.b ?? undefined,
-        s: r.s ?? undefined,
-        l: null,
-        d: r.d ?? undefined,
-        ad: r.ad ?? undefined
-    } as LoggedMessage;
-}
-
-// ---------- readers ----------
+// ---------- reader ----------
 
 export interface LoadPointsQuery {
     flarmId: FlarmID;
-    since: number; // epoch seconds (inclusive)
+    since: number; // epoch seconds (inclusive, with slack)
     until?: number; // epoch seconds (inclusive)
 }
 
+const OUT_OF_ORDER_SLACK_SEC = 30;
+
+// Iterate every message across every file — diagnostic use (CLI tools that
+// summarise across all flarmids). Slow (O(total bytes)) but simple.
+export async function* scanAll(opts: {since?: number; until?: number} = {}): AsyncGenerator<LoggedMessage> {
+    const files = await listAprsFiles();
+    const since = opts.since ?? 0;
+    const candidates = files
+        .filter((f) => (f.rotated && (f.lastTs as number) < since - OUT_OF_ORDER_SLACK_SEC ? false : true))
+        .sort((a, b) => a.firstTs - b.firstTs);
+    for (const f of candidates) {
+        const fullPath = path.join(basePath(), f.file);
+        try {
+            yield* scanFileAll(fullPath, since, opts.until);
+        } catch (e: any) {
+            if (e.code === 'ENOENT') continue;
+            console.log(`pointlog: scan ${f.file}: ${e.message}`);
+        }
+    }
+}
+
+async function* scanFileAll(fullPath: string, since: number, until: number | undefined): AsyncGenerator<LoggedMessage> {
+    const size = statSync(fullPath).size;
+    if (size === 0) return;
+    const startOffset = since > 0 ? binarySearchForTs(fullPath, size, since - OUT_OF_ORDER_SLACK_SEC) : 0;
+    const fd = openSync(fullPath, 'r');
+    try {
+        const chunkSize = 64 * 1024;
+        const buf = Buffer.alloc(chunkSize);
+        let leftover = '';
+        let offset = startOffset;
+        while (offset < size) {
+            const toRead = Math.min(chunkSize, size - offset);
+            const n = readSync(fd, buf, 0, toRead, offset);
+            if (n <= 0) break;
+            offset += n;
+            const chunk = leftover + buf.subarray(0, n).toString('utf8');
+            const lines = chunk.split('\n');
+            leftover = lines.pop() ?? '';
+            for (const line of lines) {
+                if (!line) continue;
+                let msg: LoggedMessage;
+                try {
+                    msg = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (typeof msg.t !== 'number') continue;
+                if (msg.t < since) continue;
+                // See scanFileForIds: file is arrival-ordered, not
+                // strictly t-ordered.
+                if (until != null && msg.t > until) continue;
+                yield msg;
+            }
+        }
+        if (leftover) {
+            try {
+                const msg: LoggedMessage = JSON.parse(leftover);
+                if (typeof msg.t === 'number' && msg.t >= since && (until == null || msg.t <= until)) yield msg;
+            } catch {}
+        }
+    } finally {
+        closeSync(fd);
+    }
+}
+
+// Bulk variant: scan each candidate file once, yielding any record whose
+// flarmId is in the provided set. Caller is responsible for dispatching to
+// per-id queues and any per-id since trim (use the min(since) here, then
+// drop msg.t < target.since at dispatch time). Cuts restart cost from
+// (n_gliders × n_files × scan) down to (n_files × scan).
+//
+// If flarmIds is omitted, every record in the window is yielded — used by
+// matching tools that don't know the candidate ids in advance.
 export interface LoadPointsForIdsQuery {
     flarmIds?: Set<string>;
     since: number;
     until?: number;
 }
 
-const COLS = `t, f, o, lat, lng, a, g, b, s, d, ad`;
+export async function* loadPointsForIds(q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
+    const files = await listAprsFiles();
+    const candidates = files
+        .filter((f) => {
+            if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
+            return true;
+        })
+        .sort((a, b) => a.firstTs - b.firstTs);
 
-// Walk a prepared statement defensively. SQLite errors during prepare or
-// iterate (table missing, corrupt page, schema mismatch, malformed row) are
-// logged and turned into "no more rows" rather than propagating up to the
-// caller — pointlog readers feed long-running pipelines (scoring backfills,
-// CLI scans) where one bad packet shouldn't kill the run.
-async function* iterateStmt(stmt: Database.Statement, params: any[], label: string): AsyncGenerator<LoggedMessage> {
-    let it: IterableIterator<any>;
-    try {
-        it = stmt.iterate(...params) as IterableIterator<any>;
-    } catch (e) {
-        console.log(`pointlog ${label}: iterate failed: ${e}`);
-        return;
+    for (const f of candidates) {
+        const fullPath = path.join(basePath(), f.file);
+        try {
+            yield* scanFileForIds(fullPath, q);
+        } catch (e: any) {
+            if (e.code === 'ENOENT') continue;
+            console.log(`pointlog: scan ${f.file}: ${e.message}`);
+        }
     }
-    let yielded = 0;
-    while (true) {
-        let next: IteratorResult<any>;
-        try {
-            next = it.next();
-        } catch (e) {
-            console.log(`pointlog ${label}: row read failed after ${yielded} rows: ${e}`);
-            return;
+}
+
+async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
+    const size = statSync(fullPath).size;
+    if (size === 0) return;
+
+    const startOffset = binarySearchForTs(fullPath, size, q.since - OUT_OF_ORDER_SLACK_SEC);
+
+    const fd = openSync(fullPath, 'r');
+    try {
+        const chunkSize = 64 * 1024;
+        const buf = Buffer.alloc(chunkSize);
+        let leftover = '';
+        let offset = startOffset;
+
+        while (offset < size) {
+            const toRead = Math.min(chunkSize, size - offset);
+            const n = readSync(fd, buf, 0, toRead, offset);
+            if (n <= 0) break;
+            offset += n;
+            const chunk = leftover + buf.subarray(0, n).toString('utf8');
+            const lines = chunk.split('\n');
+            leftover = lines.pop() ?? '';
+
+            for (const line of lines) {
+                if (!line) continue;
+                let msg: LoggedMessage;
+                try {
+                    msg = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (typeof msg.t !== 'number') continue;
+                if (msg.t < q.since) continue;
+                // The log is roughly arrival-ordered, not t-ordered: a
+                // backfill replay or a receiver with clock skew can drop
+                // a packet with future-ish t in the middle of the file.
+                // `continue` (not `return`) past it so the rest of the
+                // file's legitimate records still get scanned.
+                if (q.until != null && msg.t > q.until) continue;
+                if (q.flarmIds && !q.flarmIds.has(msg.f)) continue;
+                yield msg;
+            }
+
+            // Yield to the macrotask queue so live APRS data and parentPort
+            // messages don't starve during a long bulk scan.
+            await new Promise<void>((r) => setImmediate(r));
         }
-        if (next.done) return;
-        try {
-            yield rowToMessage(next.value);
-        } catch (e) {
-            console.log(`pointlog ${label}: bad row skipped: ${e}`);
-            continue;
+        if (leftover) {
+            try {
+                const msg: LoggedMessage = JSON.parse(leftover);
+                if (typeof msg.t === 'number' && msg.t >= q.since && (q.until == null || msg.t <= q.until) && (!q.flarmIds || q.flarmIds.has(msg.f))) {
+                    yield msg;
+                }
+            } catch {}
         }
-        if (++yielded % 1000 === 0) await new Promise<void>((r) => setImmediate(r));
+    } finally {
+        closeSync(fd);
     }
 }
 
 export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
-    const conn = ensureReaderDb();
-    if (!conn) return;
-    // Uses idx_points_f_t — index seek on (f, t).
-    let stmt: Database.Statement;
-    try {
-        stmt = conn.prepare(
-            `SELECT ${COLS} FROM points WHERE f = ? AND t >= ?` +
-            (q.until != null ? ` AND t <= ?` : ``) +
-            ` ORDER BY t`
-        );
-    } catch (e) {
-        console.log(`pointlog loadPoints(${q.flarmId}): prepare failed: ${e}`);
-        return;
-    }
-    const params: any[] = q.until != null ? [q.flarmId, q.since, q.until] : [q.flarmId, q.since];
-    yield* iterateStmt(stmt, params, `loadPoints(${q.flarmId})`);
-}
+    const files = await listAprsFiles();
+    // Filename timestamps reflect writer wall-clock (open / close). In live
+    // operation message-t ≈ wall time, so `lastTs < since` is a valid
+    // "this file is too old" prefilter for rotated files. We never prefilter
+    // by `firstTs` against `until` — firstTs is writer-open time, not a
+    // lower bound on message-t (historical-t writes would break that).
+    const candidates = files
+        .filter((f) => {
+            if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
+            return true;
+        })
+        .sort((a, b) => a.firstTs - b.firstTs);
 
-export async function* loadPointsForIds(q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
-    const conn = ensureReaderDb();
-    if (!conn) return;
-    let stmt: Database.Statement;
-    let params: any[];
-    try {
-        if (q.flarmIds && q.flarmIds.size > 0) {
-            const ph = Array(q.flarmIds.size).fill('?').join(',');
-            stmt = conn.prepare(
-                `SELECT ${COLS} FROM points WHERE t >= ?` +
-                (q.until != null ? ` AND t <= ?` : ``) +
-                ` AND f IN (${ph}) ORDER BY t`
-            );
-            params = q.until != null ? [q.since, q.until, ...q.flarmIds] : [q.since, ...q.flarmIds];
-        } else {
-            stmt = conn.prepare(
-                `SELECT ${COLS} FROM points WHERE t >= ?` +
-                (q.until != null ? ` AND t <= ?` : ``) +
-                ` ORDER BY t`
-            );
-            params = q.until != null ? [q.since, q.until] : [q.since];
+    for (const f of candidates) {
+        const fullPath = path.join(basePath(), f.file);
+        try {
+            yield* scanFile(fullPath, q);
+        } catch (e: any) {
+            if (e.code === 'ENOENT') continue; // rotated/purged mid-scan
+            console.log(`pointlog: scan ${f.file}: ${e.message}`);
         }
-    } catch (e) {
-        console.log(`pointlog loadPointsForIds: prepare failed: ${e}`);
-        return;
     }
-    yield* iterateStmt(stmt, params, 'loadPointsForIds');
 }
 
-export async function* scanAll(opts: {since?: number; until?: number} = {}): AsyncGenerator<LoggedMessage> {
-    yield* loadPointsForIds({since: opts.since ?? 0, until: opts.until});
-}
+// Scan a single file, starting at a binary-search position for since.
+async function* scanFile(fullPath: string, q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
+    const size = statSync(fullPath).size;
+    if (size === 0) return;
 
-export interface PointSummaryRow {
-    flarmId: string;
-    count: number;
-    oldest: number;
-    newest: number;
-}
+    const startOffset = binarySearchForTs(fullPath, size, q.since - OUT_OF_ORDER_SLACK_SEC);
 
-// Per-flarmid aggregation done server-side. dumptracks --summary previously
-// iterated every row through JS just to feed COUNT/MIN/MAX — pushing the
-// aggregation into SQLite turns a multi-million-row scan + per-row object
-// allocation into a single GROUP BY scan. Empty array on error / missing DB.
-export function summarize(opts: {flarmId?: FlarmID; since?: number; until?: number} = {}): PointSummaryRow[] {
-    const conn = ensureReaderDb();
-    if (!conn) return [];
-    const since = opts.since ?? 0;
-    const conds: string[] = ['t >= ?'];
-    const params: any[] = [since];
-    if (opts.until != null) {
-        conds.push('t <= ?');
-        params.push(opts.until);
-    }
-    if (opts.flarmId) {
-        conds.push('f = ?');
-        params.push(opts.flarmId);
-    }
-    const sql = `SELECT f, COUNT(*) AS count, MIN(t) AS oldest, MAX(t) AS newest
-                 FROM points
-                 WHERE ${conds.join(' AND ')}
-                 GROUP BY f
-                 ORDER BY f`;
+    const fd = openSync(fullPath, 'r');
     try {
-        const rows = conn.prepare(sql).all(...params) as Array<{f: string; count: number; oldest: number; newest: number}>;
-        return rows.map((r) => ({flarmId: r.f, count: r.count, oldest: r.oldest, newest: r.newest}));
-    } catch (e) {
-        console.log(`pointlog summarize: ${e}`);
-        return [];
+        const chunkSize = 64 * 1024;
+        const buf = Buffer.alloc(chunkSize);
+        let leftover = '';
+        let offset = startOffset;
+
+        while (offset < size) {
+            const toRead = Math.min(chunkSize, size - offset);
+            const n = readSync(fd, buf, 0, toRead, offset);
+            if (n <= 0) break;
+            offset += n;
+            const chunk = leftover + buf.subarray(0, n).toString('utf8');
+            const lines = chunk.split('\n');
+            leftover = lines.pop() ?? '';
+
+            for (const line of lines) {
+                if (!line) continue;
+                let msg: LoggedMessage;
+                try {
+                    msg = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (msg.f !== q.flarmId) continue;
+                if (typeof msg.t !== 'number') continue;
+                if (msg.t < q.since) continue;
+                // See note in scanFileForIds: file is arrival-ordered,
+                // not strictly t-ordered, so a single rogue future-t
+                // packet should not truncate the rest of the scan.
+                if (q.until != null && msg.t > q.until) continue;
+                yield msg;
+            }
+
+            // Yield to the macrotask queue so live APRS data and parentPort
+            // messages don't starve while we're chewing through a long file.
+            // The for-await consumer otherwise drains microtasks back-to-back
+            // and never returns to the event loop.
+            await new Promise<void>((r) => setImmediate(r));
+        }
+        // Try the trailing leftover too (file might not end with \n).
+        if (leftover) {
+            try {
+                const msg: LoggedMessage = JSON.parse(leftover);
+                if (msg.f === q.flarmId && typeof msg.t === 'number' && msg.t >= q.since && (q.until == null || msg.t <= q.until)) {
+                    yield msg;
+                }
+            } catch {
+                // partial last line
+            }
+        }
+    } finally {
+        closeSync(fd);
     }
+}
+
+// Return a byte offset at which to start scanning. The offset points to the
+// start of a line whose t is roughly <= target. Caller is responsible for
+// final filtering (t >= since) during scan.
+function binarySearchForTs(fullPath: string, size: number, target: number): number {
+    const fd = openSync(fullPath, 'r');
+    try {
+        let lo = 0;
+        let hi = size;
+        const probeBuf = Buffer.alloc(512);
+
+        while (hi - lo > 4096) {
+            const mid = Math.floor((lo + hi) / 2);
+            const {offset, t} = readLineAt(fd, size, mid, probeBuf);
+            if (offset == null || t == null) {
+                // Couldn't parse — widen toward lo.
+                hi = mid;
+                continue;
+            }
+            if (t < target) lo = offset + 1; // skip past this line start
+            else hi = offset;
+        }
+        // Align lo to a line start: scan backward from lo to the previous \n (or BOF).
+        return alignToLineStart(fd, lo);
+    } finally {
+        closeSync(fd);
+    }
+}
+
+// Read the line that contains byte `pos`: seek to pos, back up to the
+// previous '\n', read forward to the next '\n', parse. Returns the start
+// offset of that line and its parsed t.
+function readLineAt(fd: number, size: number, pos: number, _scratch: Buffer): {offset: number | null; t: number | null} {
+    const start = alignToLineStart(fd, pos);
+    // Read up to 8 KB from start to find next newline and parse.
+    const maxLine = 8 * 1024;
+    const buf = Buffer.alloc(Math.min(maxLine, size - start));
+    const n = readSync(fd, buf, 0, buf.length, start);
+    if (n <= 0) return {offset: null, t: null};
+    const text = buf.subarray(0, n).toString('utf8');
+    const nl = text.indexOf('\n');
+    const line = nl >= 0 ? text.slice(0, nl) : text;
+    try {
+        const msg = JSON.parse(line);
+        if (typeof msg.t === 'number') return {offset: start, t: msg.t};
+    } catch {
+        // fall through
+    }
+    return {offset: start, t: null};
+}
+
+function alignToLineStart(fd: number, pos: number): number {
+    if (pos <= 0) return 0;
+    const probe = Buffer.alloc(512);
+    let cur = pos;
+    while (cur > 0) {
+        const readFrom = Math.max(0, cur - probe.length);
+        const toRead = cur - readFrom;
+        const n = readSync(fd, probe, 0, toRead, readFrom);
+        if (n <= 0) return 0;
+        // Find last '\n' in probe[0..n]
+        for (let i = n - 1; i >= 0; i--) {
+            if (probe[i] === 0x0a) return readFrom + i + 1;
+        }
+        cur = readFrom;
+    }
+    return 0;
 }
