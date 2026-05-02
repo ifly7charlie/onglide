@@ -572,9 +572,6 @@ async function main() {
 
             channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
-            if (channel.activeGliders.size > 0) {
-                console.log(`${channelName}: active gliders: `, [...channel.activeGliders].join(','));
-            }
 
             // Remove invalid
             const notValid = _remove(channel.clients, (client: OgnWebSocket) => {
@@ -620,20 +617,19 @@ async function main() {
             // We need to accumulate how much time we have had
             const viewTime = channel.clients.reduce((total, client) => total + (now - client.connectedAt), 0);
 
-            if (channel.statistics.totalPackets > 0) {
-                console.log(
-                    `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
-                );
-            }
+            const activeGliderCount = channel.activeGliders.size;
+            const hasPackets = channel.statistics.totalPackets > 0;
             const hasListenerActivity = channel.statistics.activeListeners > 0 || channel.statistics.peakListeners > 0 || channel.statistics.totalViewingTime > 0 || viewTime > 0;
-            if (hasListenerActivity) {
-                console.log(
-                    `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, interacting: ${(
-                        channel.statistics.interactingListeners / channel.statistics.statsCycles
-                    ).toFixed(1)}, visible: ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round(
-                        (channel.statistics.totalViewingTime + viewTime) / 60
-                    )}m total viewing time, peak avg ${channel.statistics.peakListeners.toFixed(0)}`
-                );
+            if (activeGliderCount > 0 || hasPackets || hasListenerActivity) {
+                const parts: string[] = [`${activeGliderCount} active gliders`, `${channel.statistics.positionsSent}/${channel.statistics.totalPackets} positions sent`];
+                if (hasListenerActivity) {
+                    parts.push(
+                        `${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
+                            channel.statistics.interactingListeners / channel.statistics.statsCycles
+                        ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing)`
+                    );
+                }
+                console.log(`${channelName}: ${parts.join(', ')}`);
             }
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
