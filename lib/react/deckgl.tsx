@@ -365,13 +365,14 @@ export default function MApp(props: {
     }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving]);
 
     // Runtime-generated icon images for map symbols (track arrows, peaks,
-    // airports). Registered once per map instance; MapLibre preserves them
-    // across style mutations unless you call setStyle, which we don't.
-    useEffect(() => {
-        const map = mapRef?.current?.getMap();
+    // airports). Registered via the Map's onLoad below — running it via a
+    // post-paint useEffect was too late and produced "Image 'airport' could
+    // not be loaded" warnings as the airport symbol layer painted first.
+    const onMapLoad = useCallback((e: any) => {
+        const map = e.target;
         if (!map) return;
         registerMapIcons(map);
-    }, [mapRef.current]);
+    }, []);
 
     //
     // Colour and style the task based on the selected pilot and their destination
@@ -497,6 +498,7 @@ export default function MApp(props: {
             <Map //
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}
+                onLoad={onMapLoad}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
                 mapStyle={ONGLIDE_MAP_STYLE}
                 ref={mapRef}

@@ -83,14 +83,14 @@ function makeSignpostIcon(label: string): ImageData {
 }
 
 function makeAirportIcon(): ImageData {
-    const size = 16;
+    const size = 32;
     const c = document.createElement('canvas');
     c.width = size;
     c.height = size;
     const ctx = c.getContext('2d')!;
     ctx.fillStyle = '#444';
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.25;
+    ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(size * 0.5, size * 0.1);
     ctx.lineTo(size * 0.58, size * 0.5);
