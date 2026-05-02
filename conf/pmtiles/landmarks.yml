@@ -1,0 +1,184 @@
+schema_name: European Landmarks
+schema_description: Castles, lighthouses, cathedrals, and other large landmarks
+attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>
+
+args:
+  area:
+    description: Geofabrik area to download
+    default: europe
+  osm_url:
+    description: OSM URL
+    default: '${ args.area == "planet" ? "aws:latest" : ("geofabrik:" + args.area) }'
+  languages:
+    description: Languages to include in name attributes
+    default: en,de,fr,es,it,pl,cs,nl,sv,fi
+  minzoom:
+    default: 6
+  maxzoom:
+    default: 14
+
+sources:
+  osm:
+    type: osm
+    url: '${ args.osm_url }'
+
+tag_mappings:
+  name:
+    type: string
+  name_en:
+    key: name:en
+    type: string
+  name_de:
+    key: name:de
+    type: string
+
+layers:
+
+  - id: landmark
+    features:
+
+      # Castles, forts, named historic structures - polygons (most are mapped as areas)
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          historic:
+            - castle
+            - fort
+            - city_gate
+            - manor
+        exclude_when:
+          name: ""
+        attributes:
+          - &name_attr
+            key: name
+          - &name_en_attr
+            key: name_en
+          - &name_de_attr
+            key: name_de
+          - key: class
+            value: '${ feature.tags.get("historic") }'
+          - key: subclass
+            tag_value: castle_type
+
+      # Same set as points (some are tagged on nodes)
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          historic:
+            - castle
+            - fort
+            - city_gate
+            - manor
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - *name_en_attr
+          - *name_de_attr
+          - key: class
+            value: '${ feature.tags.get("historic") }'
+          - key: subclass
+            tag_value: castle_type
+
+      # Ruins of castles specifically (ruins=castle is the common idiom)
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 12
+        include_when:
+          ruins: castle
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - *name_en_attr
+          - *name_de_attr
+          - key: class
+            value: ruins
+
+      # Cathedrals and very large religious buildings (named only)
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          building:
+            - cathedral
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - *name_en_attr
+          - *name_de_attr
+          - key: class
+            value: cathedral
+
+      # Lighthouses
+      - source: osm
+        geometry: point
+        min_zoom: 10
+        include_when:
+          man_made: lighthouse
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - *name_en_attr
+          - *name_de_attr
+          - key: class
+            value: lighthouse
+
+      # Observation and communication towers (only tall or named-and-classed)
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          __all__:
+            man_made: tower
+            tower:type:
+              - observation
+              - communication
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - *name_en_attr
+          - *name_de_attr
+          - key: class
+            value: tower
+          - key: subclass
+            tag_value: tower:type
+          - key: height
+            tag_value: height
+
+      # Memorials and monuments only when named (drops roadside plaques without context)
+      - source: osm
+        geometry: point
+        min_zoom: 13
+        include_when:
+          historic:
+            - monument
+            - memorial
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - *name_en_attr
+          - *name_de_attr
+          - key: class
+            value: '${ feature.tags.get("historic") }'
+
+      # Windmills (often visible landmarks in NL/DE/UK)
+      - source: osm
+        geometry: point
+        min_zoom: 12
+        include_when:
+          man_made: windmill
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - *name_en_attr
+          - *name_de_attr
+          - key: class
+            value: windmill

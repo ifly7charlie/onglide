@@ -1495,9 +1495,22 @@ function rebuildAprsFilter() {
     const withTasks = liveChannels.filter((c) => c.task);
     const compsWithTask = new Set(withTasks.map((c) => c.compid));
     const liveComps = new Set(liveChannels.map((c) => c.compid));
-    const boxes = withTasks.map((c) => taskBbox(c.task!)).filter((b): b is Bbox => b !== null);
+
+    // Per-comp expanded bbox map. Same 10km expansion as the union below —
+    // matches the aprsc filter's slop margin. Bbox is stable for the life
+    // of a task (taskBbox reads leg.maxR = max(r1,r2), set in
+    // preprocessSector from the published task geometry), so the worker
+    // only needs a refresh when a task is republished — which already
+    // routes through here.
+    const perCompExpanded = new Map<string, Bbox>();
+    for (const c of withTasks) {
+        const b = taskBbox(c.task!);
+        if (b) perCompExpanded.set(c.compid, expandBbox(b, 10));
+    }
+
+    const boxes = Array.from(perCompExpanded.values());
     const union = unionBboxes(boxes);
-    const expanded = union ? expandBbox(union, 10) : null;
+    const expanded = union; // already pre-expanded per-comp
     const airfields = currentAirfields
         .filter((af) => liveComps.has(af.compid))
         .map((af) => ({
@@ -1506,6 +1519,15 @@ function rebuildAprsFilter() {
             radiusKm: compsWithTask.has(af.compid) ? AIRFIELD_RADIUS_INTASK_KM : AIRFIELD_RADIUS_PRETASK_KM
         }));
     const filter = buildAprsFilter(expanded, airfields);
+
+    // Push per-comp bboxes to the worker so processPacket can prefilter and
+    // disambiguate multi-comp shared FLARM IDs. setAirfields mutates Airfield
+    // records in place, so this lands without disturbing existing channels
+    // even if `filter` itself didn't change.
+    aprsController?.setAirfields(
+        currentAirfields.filter((af) => liveComps.has(af.compid)).map((af) => ({...af, bbox: perCompExpanded.get(af.compid)}))
+    );
+
     if (filter === lastAprsFilter) return;
     lastAprsFilter = filter;
     console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
@@ -1832,7 +1854,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 }
 
                 if (!hadTracker) {
-                    aprsController?.trackGlider(t.compno, t.className, datecode, location.tzoffset, glider.channelName, t.dbTrackerId, listening);
+                    aprsController?.trackGlider(competition.compid, t.compno, t.className, datecode, location.tzoffset, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
                             .split(',')
@@ -2917,7 +2939,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         match.dbTrackerId = flarmId;
 
         // And we should ask the flarm handler to listen for them properly
-        aprsController?.trackGlider(match.compno, match.className, datecode, competition.location.tzoffset, channelName(match.className, datecode), flarmId, true);
+        aprsController?.trackGlider(competition.compid, match.compno, match.className, datecode, competition.location.tzoffset, channelName(match.className, datecode), flarmId, true);
 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {

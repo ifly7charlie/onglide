@@ -236,3 +236,12 @@ export function buildAprsFilter(expandedTaskBbox: Bbox | null, airfields: Airfie
     const union = unionBboxes(all)!;
     return bboxToAprsArea(union);
 }
+
+//
+// Point-in-bbox membership test, using the [minLat, minLng, maxLat, maxLng]
+// convention. Used by the worker prefilter to decide which competition(s)
+// a packet position belongs to.
+//
+export function pointInBbox(b: Bbox, lat: number, lng: number): boolean {
+    return lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3];
+}

@@ -41,7 +41,7 @@ interface InterimPositionMessage extends PositionMessage {
 }
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
-import {APRS_MAX_FILTER_BYTES} from '../flightprocessing/taskBbox';
+import {APRS_MAX_FILTER_BYTES, Bbox, pointInBbox} from '../flightprocessing/taskBbox';
 
 // APRS connection
 let connection: ISSocket & {aprsc: string; lastPacketTime: number};
@@ -102,6 +102,7 @@ export interface AprsCommandTrack {
 
     className: ClassName;
     channelName: string;
+    compid: string; // resolves the Airfield (with bbox) for prefilter / disambiguation
     compno: Compno;
     datecode: Datecode;
     tzoffset: number; // seconds east of UTC — used to derive competition start time for point backfill
@@ -140,6 +141,10 @@ export interface AirfieldSpec {
     compid: string;
     lt: number;
     lg: number;
+    // Expanded task bbox for the comp at this airfield. Absent when the
+    // comp has no task yet (pre-task) or when the worker should fall back
+    // to broadcasting to every aircraft entry.
+    bbox?: Bbox;
 }
 
 export interface AprsCommandSetAirfields {
@@ -177,6 +182,13 @@ export interface Aircraft {
     compno: Compno;
     className: ClassName;
     trackers: FlarmID[];
+
+    // Direct reference to this aircraft's competition airfield, set once at
+    // trackGlider time. The aircraft↔competition relationship is permanent
+    // for the aircraft's lifetime, so the bbox prefilter inside processPacket
+    // reads aircraft.airfield.bbox without a per-packet lookup. setAirfields
+    // mutates Airfield records in place, so bbox updates land here automatically.
+    airfield: Airfield;
 
     datecode: Datecode; // competition day this aircraft belongs to (internal signal for reset-on-change)
     tzoffset: number; // competition timezone offset; drives backfill start time
@@ -216,6 +228,9 @@ interface Airfield {
     compid: string;
     point: Coord;
     elevation: AltitudeAgl;
+    // Expanded task bbox for the comp. Mutated in place by setAirfields when
+    // the main thread ships a new bbox via rebuildAprsFilter.
+    bbox?: Bbox;
 }
 const airfields: Airfield[] = [];
 
@@ -263,13 +278,39 @@ function setAirfields(specs: AirfieldSpec[]) {
         const p = point([s.lt, s.lg]);
         if (existing) {
             existing.point = p;
+            existing.bbox = s.bbox;
         } else {
-            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl};
+            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl, bbox: s.bbox};
             airfields.push(a);
             getElevationOffset(s.lt, s.lg, (e: any) => (a.elevation = e));
         }
     }
-    console.log(`aprs airfields: ${airfields.map((a) => a.compid).join(',') || 'none'}`);
+    console.log(`aprs airfields: ${airfields.map((a) => `${a.compid}${a.bbox ? '*' : ''}`).join(',') || 'none'}`);
+}
+
+// Look up an Airfield by compid. Returns undefined if no setAirfields call
+// has registered this comp yet — trackGlider treats that as a hard error.
+function airfieldForCompid(compid: string): Airfield | undefined {
+    return airfields.find((a) => a.compid === compid);
+}
+
+//
+// Per-aircraft bbox prefilter / multi-comp disambiguation.
+//
+// Each Aircraft consults its own permanent airfield reference. Aircraft
+// whose comp has no bbox (pre-task) always pass — we can't filter without
+// one. Aircraft whose bbox contains the position pass. This drops false
+// positives the aprsc filter let through (wide union slop) and routes a
+// shared FLARM ID into only the comp(s) whose bbox contain the position
+// (both pass when bboxes overlap).
+//
+// No-match fallback: if every aircraft fails the filter (e.g. the worker
+// is briefly stale between a task republish and the next rebuildAprsFilter
+// push), broadcast to all rather than silently drop. Exported for testing.
+export function selectAircraftForPosition(aircraftList: Aircraft[], lat: number, lng: number): Aircraft[] {
+    if (aircraftList.length === 0) return aircraftList;
+    const matched = aircraftList.filter((ac) => !ac.airfield.bbox || pointInBbox(ac.airfield.bbox, lat, lng));
+    return matched.length > 0 ? matched : aircraftList;
 }
 
 // Mapping by class/compno to aircraft record
@@ -330,16 +371,17 @@ export class AprsController {
         return flarmIDs && flarmIDs.length > 0;
     }
 
-    trackGlider(compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
+    trackGlider(compid: string, compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
             .filter((i) => i.match(/[0-9A-Fa-f]{6}$/)) as string[];
 
         // Tell APRS to start listening for the flarmid
-        console.log(`Starting APRS Listener for glider ${className}:${compno} => ${flarmIDs.join(',')} [${channelName}] receive:${receiveNewPoints}`);
+        console.log(`Starting APRS Listener for glider ${compid}/${className}:${compno} => ${flarmIDs.join(',')} [${channelName}] receive:${receiveNewPoints}`);
         const command: AprsCommandTrack = {
             action: AprsCommandEnum.track,
+            compid,
             compno: compno, //
             className: className,
             channelName,
@@ -733,6 +775,16 @@ function startAprsListener(config: AprsListenerConfig) {
 function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
 
+    // Resolve the airfield up front: prefilter / disambiguation can't work
+    // without it. Main always pushes setAirfields before trackGlider, so a
+    // miss here is a wiring bug — refuse rather than silently routing every
+    // packet for this comp through the no-bbox fallback forever.
+    const airfield = airfieldForCompid(task.compid);
+    if (!airfield) {
+        console.error(`APRS: trackGlider refused for ${task.className}/${task.compno}: compid ${task.compid} not in airfields list`);
+        return;
+    }
+
     const key = makeClassname_Compno(task);
 
     const existingTracker = allAircraft[key];
@@ -756,6 +808,7 @@ function trackGlider(task: AprsCommandTrack) {
         compno: task.compno,
         className: task.className,
         trackers: task.trackerId as FlarmID[],
+        airfield,
 
         datecode: task.datecode,
         tzoffset: task.tzoffset,
@@ -841,6 +894,10 @@ interface LoadTarget {
     queue: InterimPositionMessage[];
     compno: Compno;
     since: number;
+    // Same prefilter as the live path: drop log points outside this comp's
+    // expanded task bbox so multi-comp shared FLARM IDs don't pollute the
+    // wrong queue at registration time.
+    airfield: Airfield;
 }
 
 async function flushLoads() {
@@ -856,7 +913,7 @@ async function flushLoads() {
     let minSince = Infinity;
     for (const b of batch) {
         if (b.since < minSince) minSince = b.since;
-        const target: LoadTarget = {queue: b.queue, compno: b.glider.compno, since: b.since};
+        const target: LoadTarget = {queue: b.queue, compno: b.glider.compno, since: b.since, airfield: b.glider.airfield};
         for (const id of b.flarmIds) {
             const existing = idToTargets.get(id);
             if (existing) existing.push(target);
@@ -883,6 +940,11 @@ async function flushLoads() {
 
             for (const target of targets) {
                 if (raw.t < target.since) continue;
+                // Pre-task comps (no bbox) keep current behaviour; for a comp
+                // with a bbox, drop points that fall outside it. Independent
+                // per target, so multi-comp registrations naturally route
+                // each point to whichever comp(s) actually contain it.
+                if (target.airfield.bbox && !pointInBbox(target.airfield.bbox, baseMessage.lat, baseMessage.lng)) continue;
                 target.queue.push({...baseMessage, c: target.compno, j});
                 dispatched++;
             }
@@ -1064,13 +1126,17 @@ export async function processPacket(packet: aprsPacket) {
 
     message.j = jPoint;
 
+    // Per-aircraft bbox prefilter and multi-comp disambiguation. See
+    // selectAircraftForPosition for the rules.
+    const dispatchTo = selectAircraftForPosition(aircraftList, packet.latitude!, packet.longitude!);
+
     // Figure out where to insert (sorted by time). Clone per aircraft so
     // each pipeline owns its own message with its own compno — sharing the
     // reference and mutating .c per iteration leaves the last aircraft's
     // compno on every queued copy, which the downstream IOG filter
     // (`message.c != compno`) then drops for everyone except whoever was
     // last in the loop.
-    for (let aircraft of aircraftList) {
+    for (let aircraft of dispatchTo) {
         const perAircraftMessage = {...message, c: aircraft.compno as Compno};
         const messageQueue = aircraft.messages;
         if ((messageQueue.at(-1)?.t ?? 0) > perAircraftMessage.t) {
