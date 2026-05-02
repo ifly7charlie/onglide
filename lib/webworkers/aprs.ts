@@ -44,7 +44,7 @@ import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, C
 import {APRS_MAX_FILTER_BYTES} from '../flightprocessing/taskBbox';
 
 // APRS connection
-let connection: ISSocket & {valid: boolean; aprsc: string};
+let connection: ISSocket & {aprsc: string; lastPacketTime: number};
 const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern5.glidernet.org'];
 
 // Pending filter string, set if setFilter is called before we're connected
@@ -57,18 +57,24 @@ let currentFilter: string | null = null;
 
 // True from the moment the connect handler has fired and sendLogin() has
 // been called. This gates #filter — aprsc only accepts in-band filter
-// updates after login. Note: connection.valid is set in the packet
-// handler on first received line, so we can't use it here — with a
-// minimal initial filter (r/0/0/1) no packets arrive until the filter
-// is updated, so valid stays false and applyFilter would loop deferring
-// itself forever.
+// updates after login.
 let loggedIn = false;
+
+// Liveness window: the keepalive tick declares the connection dead if no
+// APRS line — flarm packet or aprsc server line — has arrived within this
+// many ms. aprsc emits its server line every ~20s when idle, so 61s
+// tolerates two missed heartbeats before reconnecting.
+const KA_GRACE_MS = 61_000;
+
+// The currently-live keepalive timer. Tracked at module scope so a fresh
+// startAprsListener can tear down the prior generation's timer even when
+// the restart was triggered by a path that didn't capture a local handle.
+let kaInterval: NodeJS.Timeout | null = null;
 
 // Guard against concurrent restarts. The error handler and kaInterval
 // can both trip the "too unstable" threshold in the same tick; without
-// this guard they'd each spin up a fresh listener (with its own
-// interval/socket), leaking the previous one's kaInterval since each
-// closure clears only the interval it captured.
+// this guard a deferred close/error event on the old socket would race
+// with the new listener and trigger a cascading second restart.
 let restarting = false;
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
@@ -474,8 +480,29 @@ function startAprsListener(config: AprsListenerConfig) {
         return;
     }
 
-    // Clear the restart guard so this fresh listener can itself trigger
-    // a restart later if it becomes unstable.
+    // Tear down the prior listener generation: stop its keepalive timer
+    // and detach event handlers from its socket. Without removeAllListeners
+    // a deferred close/error event on the old socket would race in below
+    // (after restarting=false) and trigger a cascading second restart.
+    if (kaInterval) {
+        clearInterval(kaInterval);
+        kaInterval = null;
+    }
+    if (connection) {
+        try {
+            connection.removeAllListeners();
+        } catch {
+            /**/
+        }
+        try {
+            connection.disconnect();
+        } catch {
+            /**/
+        }
+    }
+
+    // With the prior generation isolated, this fresh listener can itself
+    // trigger a restart later if it becomes unstable.
     restarting = false;
 
     // Settings for connecting to the APRS server
@@ -501,6 +528,10 @@ function startAprsListener(config: AprsListenerConfig) {
     // Connect to the APRS server
     connection = new ISSocket(`onglide/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
     let parser = new aprsParser();
+    // Seed liveness: the first kaInterval fires up to a full grace period
+    // after this point. Without seeding, an early tick before any packet
+    // arrives would falsely declare the connection dead.
+    connection.lastPacketTime = Date.now();
 
     // Handle a connect
     connection.on('connect', () => {
@@ -529,7 +560,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // Handle a data packet
     connection.on('packet', (data: string) => {
-        connection.valid = true;
+        connection.lastPacketTime = Date.now();
         if (data.charAt(0) != '#' && !data.startsWith('user')) {
             const packet = parser.parseaprs(data);
             if (packet && 'latitude' in packet && 'longitude' in packet && 'comment' in packet && packet.comment?.startsWith('id')) {
@@ -566,7 +597,9 @@ function startAprsListener(config: AprsListenerConfig) {
         if (unstableCount > 5) {
             console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
             restarting = true;
-            clearInterval(kaInterval);
+            // Don't clearInterval here — startAprsListener tears down the
+            // current kaInterval at its top. Clearing with our local closure
+            // ref would race if a newer generation has already taken over.
             startAprsListener(config);
             return;
         }
@@ -577,8 +610,10 @@ function startAprsListener(config: AprsListenerConfig) {
     connection.connect();
 
     // And every minute we need to confirm the APRS
-    // connection has had some traffic
-    const kaInterval = setInterval(
+    // connection has had some traffic. Assign to the module-level handle
+    // so a future startAprsListener can tear this generation down even if
+    // the trigger came from a path that didn't capture a local reference.
+    kaInterval = setInterval(
         function () {
             // Log and reset statistics
             const period = (Date.now() - statistics.periodStart) / 1000;
@@ -636,12 +671,16 @@ function startAprsListener(config: AprsListenerConfig) {
                 connection.send(`# www.onglide.com airfields ${airfields?.length ?? 0}`);
             } catch (x) {
                 console.log(`${connection.host}: unable to send keepalive : ${x}`);
-                connection.valid = false;
+                // Force the next liveness check to fail so we reconnect.
+                connection.lastPacketTime = 0;
                 loggedIn = false;
             }
 
-            // Re-establish the APRS connection if we haven't had anything in
-            if (!connection.valid && !restarting) {
+            // Reconnect if we've heard nothing in the grace window. aprsc
+            // sends a server line every ~20s when idle, so silence beyond
+            // KA_GRACE_MS means at least two missed heartbeats — the
+            // connection really is dead.
+            if (Date.now() - connection.lastPacketTime > KA_GRACE_MS && !restarting) {
                 console.log(`${connection.host}: failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
                 loggedIn = false;
                 connection.disconnect(() => {
@@ -652,7 +691,8 @@ function startAprsListener(config: AprsListenerConfig) {
                     if (unstableCount > 5) {
                         console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
                         restarting = true;
-                        clearInterval(kaInterval);
+                        // startAprsListener tears down the current kaInterval
+                        // at its top — don't clear here, see error handler.
                         startAprsListener(config);
                         trackMetric('aprs.restart', 1);
                         return;
@@ -660,7 +700,6 @@ function startAprsListener(config: AprsListenerConfig) {
                     connection.connect();
                 });
             }
-            connection.valid = false;
         },
         1 * 60 * 1000
     );

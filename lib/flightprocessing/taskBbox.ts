@@ -171,9 +171,17 @@ function assembleFilter(taskClause: string | null, otherClauses: string[]): stri
 export function buildAprsFilter(expandedTaskBbox: Bbox | null, airfields: AirfieldFilterInput[]): string {
     // Phase 1: natural construction, matches the pre-cap behaviour.
     const taskClause = expandedTaskBbox ? bboxToAprsArea(expandedTaskBbox) : null;
+    // Dedupe airfields by clause-equivalent identity. Multiple comps sharing
+    // a site (or rounding to the same coords) produce identical r/lat/lng/km
+    // clauses, wasting bytes against the 450-cap and forcing premature
+    // clustering.
+    const seenAirfield = new Set<string>();
     const surviving: AirfieldFilterInput[] = [];
     for (const af of airfields) {
         if (expandedTaskBbox && bboxContainsCircle(expandedTaskBbox, af.lt, af.lg, af.radiusKm)) continue;
+        const key = `${af.lt}|${af.lg}|${af.radiusKm}`;
+        if (seenAirfield.has(key)) continue;
+        seenAirfield.add(key);
         surviving.push(af);
     }
 

@@ -102,6 +102,20 @@ describe('buildAprsFilter', () => {
         expect(clauses.length).toBeLessThan(airfields.length);
     });
 
+    test('duplicate airfield specs collapse to one clause', () => {
+        // Two comps at the same site produce identical AirfieldFilterInput
+        // entries. The natural filter must not list the same r/ clause twice.
+        const airfields: AirfieldFilterInput[] = [
+            {lt: 46.32, lg: 20.05, radiusKm: 250},
+            {lt: 46.32, lg: 20.05, radiusKm: 250},
+            {lt: 51.18, lg: -1.03, radiusKm: 250}
+        ];
+        const filter = buildAprsFilter(null, airfields);
+        const clauses = filter.split(' ');
+        expect(clauses.filter((c) => c === 'r/46.32/20.05/250').length).toBe(1);
+        expect(clauses).toContain('r/51.18/-1.03/250');
+    });
+
     test('exactly-at-cap natural string passes through unchanged', () => {
         // Synthesize an airfield list whose natural Phase 1 string is <= cap.
         const airfields: AirfieldFilterInput[] = [];
