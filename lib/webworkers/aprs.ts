@@ -511,7 +511,7 @@ function startAprsListener(config: AprsListenerConfig) {
         // swallow it and let the normal retry loop reconnect.
         try {
             connection.sendLogin();
-            connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+            connection.send(`# www.onglide.com airfields=${airfields?.length ?? 0}`);
         } catch (e) {
             console.log(`aprs sendLogin failed on ${APRSSERVER}, will retry: ${e}`);
             return;
