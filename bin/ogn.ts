@@ -1080,7 +1080,11 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
 // Falls back to a 6-char truncation when no alphabetic run is present.
 function compShort(compid: string): string {
     const m = compid.match(/[a-z]+/i);
-    return (m ? m[0] : compid.substring(0, 6)).toLowerCase();
+    const base = m ? m[0] : compid;
+    // Never shorter than 8 chars (when the compid has enough material) so log
+    // identifiers stay unambiguous — a short letter run like "az" gets padded
+    // out from the raw compid (e.g. "az23region" -> "az23regi").
+    return (base.length >= 8 ? base : compid.substring(0, 8)).toLowerCase();
 }
 
 //
@@ -1318,7 +1322,6 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // nearest airfield, so we listen on the per-compid channel.
     if (!competition.unknownChannel) {
         const unknownChannelName = 'Unknown_' + competition.compid;
-        console.log(`[UNKTRACE] subscribing to ${unknownChannelName} (${competition.internalName})`);
         competition.unknownChannel = new BroadcastChannel(unknownChannelName);
         competition.unknownChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(competition, ev.data, datecode)) as any;
     }
@@ -2815,7 +2818,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     if (firstSighting) {
         const ddbf = ddb[flarmId];
         const ddbInfo = ddbf ? `ddb: ${ddbf.cn || '-'}/${ddbf.registration || '-'} ${ddbf.aircraft_model || ''}` : 'not in ddb';
-        console.log(`[UNKTRACE] unknown glider ${flarmId} first seen in ${competition.compid} @ ${data.lat.toFixed(4)},${data.lng.toFixed(4)} (${ddbInfo})`);
+        console.log(`${compShort(competition.compid)}: unknown glider ${flarmId} first seen @ ${data.lat.toFixed(4)},${data.lng.toFixed(4)} (${ddbInfo})`);
     }
 
     // Do we have it in the DDB?

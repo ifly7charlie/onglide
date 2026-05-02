@@ -233,7 +233,6 @@ function nearestAirfield(jPoint: Coord): {field: Airfield; distance: number} | n
 function getUnknownChannel(compid: string): BroadcastChannel {
     if (!unknownChannels[compid]) {
         const name = 'Unknown_' + compid;
-        console.log(`[UNKTRACE] aprs: opening dispatch channel ${name}`);
         unknownChannels[compid] = new BroadcastChannel(name);
     }
     return unknownChannels[compid];
