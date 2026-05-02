@@ -276,7 +276,7 @@ const trackers: Record<FlarmID, Tracker> = {};
 const channels: Record<ChannelName, BroadcastChannel> = {};
 
 // Our persistence
-import {appendPoint, closeLog, loadPoints, openLog} from './pointlog';
+import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
 import {competitionStartTs} from '../datecode';
 import {inorderAdditionalDelay} from '../constants';
 
@@ -452,14 +452,14 @@ function applyFilter(filter: string) {
     if (loggedIn && connection) {
         try {
             connection.send(`#filter ${filter}\r\n`);
-            console.log(`aprs filter updated: ${filter.length} bytes: ${filter}`);
+            console.log(`${connection.host}: aprs filter updated: ${filter.length} bytes: ${filter}`);
         } catch (e) {
             // Socket can drop between the loggedIn check and send (e.g.
             // after an error that hasn't yet flipped loggedIn). Stash
             // the filter so the next connect handler re-applies it.
             loggedIn = false;
             pendingFilter = filter;
-            console.log(`aprs filter send failed, deferring until reconnect: ${filter.length} bytes: ${filter}: ${e}`);
+            console.log(`${connection.host}: aprs filter send failed, deferring until reconnect: ${filter.length} bytes: ${filter}: ${e}`);
         }
     } else {
         pendingFilter = filter;
@@ -513,11 +513,11 @@ function startAprsListener(config: AprsListenerConfig) {
             connection.sendLogin();
             connection.send(`# www.onglide.com airfields=${airfields?.length ?? 0}`);
         } catch (e) {
-            console.log(`aprs sendLogin failed on ${APRSSERVER}, will retry: ${e}`);
+            console.log(`${connection.host}: aprs sendLogin failed, will retry: ${e}`);
             return;
         }
         loggedIn = true;
-        console.log(`aprs connected and logged in to ${APRSSERVER}`);
+        console.log(`${APRSSERVER}: aprs connected and logged in to ${connection.host}`);
         // Re-apply the active filter: either a pending one (set while
         // disconnected) or the last applied filter (on reconnect).
         const filterToApply = pendingFilter ?? currentFilter;
@@ -633,16 +633,16 @@ function startAprsListener(config: AprsListenerConfig) {
 
             try {
                 // Send APRS keep alive or we will get dumped
-                connection.send(`# www.onglide.com airfields=${airfields?.length ?? 0}`);
+                connection.send(`# www.onglide.com airfields ${airfields?.length ?? 0}`);
             } catch (x) {
-                console.log('unable to send keepalive', x);
+                console.log(`${connection.host}: unable to send keepalive : ${x}`);
                 connection.valid = false;
                 loggedIn = false;
             }
 
             // Re-establish the APRS connection if we haven't had anything in
             if (!connection.valid && !restarting) {
-                console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
+                console.log(`${connection.host}: failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
                 loggedIn = false;
                 connection.disconnect(() => {
                     if (restarting) {
@@ -755,22 +755,15 @@ function startGliderInterval(glider: Aircraft, className: ClassName, compno: Com
 async function loadHistorical(glider: Aircraft, flarmIds: string[], since: number) {
     const startMs = Date.now();
     let loaded = 0;
+    const idSet = new Set(flarmIds);
     try {
-        for (const id of flarmIds) {
-            for await (const raw of loadPoints({flarmId: id as FlarmID, since})) {
-                const baseMessage = raw as InterimPositionMessage & {d?: number};
-                if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
-                const j = point([baseMessage.lat, baseMessage.lng]);
-                const msg: InterimPositionMessage = {...baseMessage, c: glider.compno, j};
-                const queue = glider.messages;
-                if ((queue.at(-1)?.t ?? 0) > msg.t) {
-                    const insertIndex = _sortedLastIndexBy(queue, msg, messageSortKey);
-                    queue.splice(insertIndex, 0, msg);
-                } else {
-                    queue.push(msg);
-                }
-                loaded++;
-            }
+        for await (const raw of loadPointsForIds({flarmIds: idSet, since})) {
+            const baseMessage = raw as InterimPositionMessage & {d?: number};
+            if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
+            const j = point([baseMessage.lat, baseMessage.lng]);
+            const msg: InterimPositionMessage = {...baseMessage, c: glider.compno, j};
+            glider.messages.push(msg);
+            loaded++;
         }
     } catch (err) {
         console.log(`loadHistorical ${glider.className}/${glider.compno}: ${err}`);

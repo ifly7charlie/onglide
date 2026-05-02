@@ -98,9 +98,6 @@ export async function openLog(): Promise<void> {
         return;
     }
 
-    // Hourly purge with random offset so concurrent ogn instances on a host
-    // don't stack their checkpoint passes at the top of the hour.
-    const initial = Math.random() * 60 * 60 * 1000;
     const tick = () => {
         try {
             purge();
@@ -109,9 +106,9 @@ export async function openLog(): Promise<void> {
         }
         // Keep ticking even if a purge throws — transient locks during
         // a checkpoint mustn't disable retention.
-        purgeTimer = setTimeout(tick, 60 * 60 * 1000);
+        purgeTimer = setTimeout(tick, PURGE_TICK_MS);
     };
-    purgeTimer = setTimeout(tick, initial);
+    purgeTimer = setTimeout(tick, PURGE_TICK_MS);
 
     console.log(`pointlog: opened ${dbPath()} (WAL, retain ${retainMs / 3600000}h)`);
 }
@@ -279,26 +276,60 @@ export function bulkAppend(messages: LoggedMessage[]): {inserted: number; duplic
     return {inserted, duplicates, skipped};
 }
 
+// Per-flarmId rotating purge. Each tick deletes one flarmId's expired rows
+// (`WHERE f = ? AND t < ?` — leading-key range delete via idx_points_f_t)
+// rather than one big bulk DELETE. A pass = one full sweep through every
+// flarmId currently in the table; pass-level totals are logged when the
+// queue refills, along with the size of the next pass.
+const PURGE_TICK_MS = 10 * 1000;
+let purgeQueue: string[] = [];
+let purgePassChanges = 0;
+let purgePassFlarms = 0;
+let purgePassStartMs = 0;
+
 function purge(): void {
     const conn = ensureDb();
     if (!conn) return;
+    if (purgeQueue.length === 0) {
+        let nextQueue: string[];
+        try {
+            const rows = conn.prepare('SELECT DISTINCT f FROM points').all() as {f: string}[];
+            nextQueue = rows.map((r) => r.f);
+        } catch (e) {
+            console.log(`pointlog: purge enumeration failed: ${e}`);
+            return;
+        }
+        if (purgePassStartMs > 0) {
+            // Opportunistic passive checkpoint — only if we actually deleted
+            // something this pass, and only PASSIVE so readers aren't blocked.
+            if (purgePassChanges > 0) {
+                try {
+                    conn.pragma('wal_checkpoint(PASSIVE)');
+                } catch (e) {
+                    console.log(`pointlog: passive checkpoint failed: ${e}`);
+                }
+            }
+            console.log(
+                `pointlog: pass purged ${purgePassChanges} rows across ${purgePassFlarms} flarmIds in ${Date.now() - purgePassStartMs}ms; next pass ${nextQueue.length} flarmIds`
+            );
+        }
+        purgeQueue = nextQueue;
+        purgePassChanges = 0;
+        purgePassFlarms = 0;
+        purgePassStartMs = Date.now();
+        if (purgeQueue.length === 0) return;
+    }
+    const f = purgeQueue.shift()!;
     const cutoff = Math.floor((Date.now() - retainMs) / 1000);
-    const start = Date.now();
-    let changes = 0;
     try {
-        changes = (conn.prepare(`DELETE FROM points WHERE t < ?`).run(cutoff).changes ?? 0) as number;
+        const changes = (conn.prepare(`DELETE FROM points WHERE f = ? AND t < ?`).run(f, cutoff).changes ?? 0) as number;
+        if (changes > 0) {
+            purgePassChanges += changes;
+            purgePassFlarms++;
+        }
     } catch (e) {
-        console.log(`pointlog: purge DELETE failed (cutoff ${cutoff}): ${e}`);
-        return;
+        console.log(`pointlog: purge DELETE failed (${f}, cutoff ${cutoff}): ${e}`);
     }
-    try {
-        conn.pragma('wal_checkpoint(TRUNCATE)');
-    } catch (e) {
-        // Checkpoint can fail under reader contention — the WAL just stays
-        // a bit larger until the next purge. Not fatal.
-        console.log(`pointlog: wal_checkpoint failed: ${e}`);
-    }
-    console.log(`pointlog: purged ${changes} rows < ${cutoff} (${Date.now() - start}ms)`);
 }
 
 // Row → LoggedMessage. `c` is set from `f` (callers like loadHistorical
