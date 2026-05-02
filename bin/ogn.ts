@@ -232,6 +232,19 @@ interface Channel {
 
 let channels: Record<ChannelName, Channel> = {};
 
+// Last-emitted channels-summary string per compid so updateClasses only logs
+// the inventory line when it actually changes.
+const lastChannelsLog = new Map<string, string>();
+
+// Compids that have emitted their full trackers-loaded roster at least once.
+// Subsequent updateTrackers cycles only dump the full list on real growth
+// (loadedGliderCount > 0); pure rescore/removal churn stays summary-only.
+const trackersLoadedEmitted = new Set<string>();
+
+// Last-emitted "Channels not yet scored" string so we only log when the pending
+// set changes, instead of on every score arrival.
+let lastPendingChannelsLog: string | null = null;
+
 // Clients connected to the reserved /all channel — landing-page globe.
 // Kept separate from the per-class channels[] so iteration over per-class
 // state (position broadcasts, keepalive, stats) stays untouched.
@@ -559,7 +572,9 @@ async function main() {
 
             channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
-            console.log(`${channelName}: active gliders: `, [...channel.activeGliders].join(','));
+            if (channel.activeGliders.size > 0) {
+                console.log(`${channelName}: active gliders: `, [...channel.activeGliders].join(','));
+            }
 
             // Remove invalid
             const notValid = _remove(channel.clients, (client: OgnWebSocket) => {
@@ -605,16 +620,25 @@ async function main() {
             // We need to accumulate how much time we have had
             const viewTime = channel.clients.reduce((total, client) => total + (now - client.connectedAt), 0);
 
-            console.log(
-                `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
-            );
-            console.log(
-                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, interacting: ${(
-                    channel.statistics.interactingListeners / channel.statistics.statsCycles
-                ).toFixed(1)}, visible: ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round(
-                    (channel.statistics.totalViewingTime + viewTime) / 60
-                )}m total viewing time, peak avg ${channel.statistics.peakListeners.toFixed(0)}`
-            );
+            if (channel.statistics.totalPackets > 0) {
+                console.log(
+                    `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
+                );
+            }
+            const hasListenerActivity =
+                channel.statistics.activeListeners > 0 ||
+                channel.statistics.peakListeners > 0 ||
+                channel.statistics.totalViewingTime > 0 ||
+                viewTime > 0;
+            if (hasListenerActivity) {
+                console.log(
+                    `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, interacting: ${(
+                        channel.statistics.interactingListeners / channel.statistics.statsCycles
+                    ).toFixed(1)}, visible: ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round(
+                        (channel.statistics.totalViewingTime + viewTime) / 60
+                    )}m total viewing time, peak avg ${channel.statistics.peakListeners.toFixed(0)}`
+                );
+            }
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
@@ -1083,7 +1107,6 @@ async function getDCode(competition: CompetitionContext): Promise<Datecode> {
         local10am.setDate(local10am.getDate() - 1);
     }
     const utcTime = local10am.getTime() - tzoffset * 1000;
-    console.log(`${compShort(competition.compid)} datecode at 10am local:`, utcTime, new Date(utcTime).toISOString());
     return toDateCode(new Date(utcTime));
 }
 
@@ -1095,8 +1118,6 @@ let scoreDb: ClassicLevel<Compno, string> | undefined = undefined;
 //
 // Fetch the trackers from the database
 async function updateClasses(competition: CompetitionContext, datecode: Datecode) {
-    console.log(`updateClasses(${competition.internalName}, ${datecode})`);
-
     if (!scoreDb) {
         const path = `${process.env.DB_PATH ?? './db/'}/scores-${competition.internalName}.db`;
         console.log(`opening scoreDB ${path}`);
@@ -1119,7 +1140,10 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     );
 
     const afterSunset = getNow() > location.sunset;
-    console.log(`updateClasses: ${afterSunset ? 'after sunset' : 'before sunset'} ${d(getNow())} > ${d(location.sunset)}`);
+    const secsFromSunset = Math.abs(getNow() - location.sunset);
+    if (secsFromSunset <= 5 * 60) {
+        console.log(`${compShort(competition.compid)} updateClasses: ${afterSunset ? 'after sunset' : 'before sunset'} ${d(getNow())} > ${d(location.sunset)}`);
+    }
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
@@ -1278,7 +1302,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // and added to newchannels. Only touch channels belonging to this competition.
     const stale = Object.values(channels).filter((c) => c.compid === competition.compid && !newchannels[channelName(c.className, c.datecode)]);
     if (stale.length) {
-        console.log('closing channels: ', stale.map((c) => c.displayName).join(','));
+        console.log(`${compShort(competition.compid)} closing channels: ${stale.map((c) => c.displayName).join(',')}`);
         stale.forEach((channel) => {
             channel.broadcastChannel?.close();
             channel.scoring?.shutdown();
@@ -1304,7 +1328,11 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     for (const [cname, channel] of Object.entries(newchannels)) {
         channels[cname as ChannelName] = channel;
     }
-    console.log(`${compShort(competition.compid)} channels: ${_map(newchannels, (c) => `${c.displayName}${c.datecode}`).join(',')}`);
+    const channelsLine = _map(newchannels, (c) => `${c.displayName}${c.datecode}`).join(',');
+    if (lastChannelsLog.get(competition.compid) !== channelsLine) {
+        console.log(`${compShort(competition.compid)} channels: ${channelsLine}`);
+        lastChannelsLog.set(competition.compid, channelsLine);
+    }
 
     if (!Object.keys(newchannels).length && scoreDb) {
         console.log('closing scoredb, no channels');
@@ -1627,7 +1655,7 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
         if (g.compid !== compid) return false;
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
-            console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
+            console.log(`${g.displayName}:${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
             return true; // removed or it has changed id
         }
         return g.datecode != datecode;
@@ -1827,14 +1855,17 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             return filtered.length == success.length ? 'all' : filtered.length == 0 ? 'none' : `${filtered.map((c) => c.compno).join(',')} (${filtered.length}/${results.length})`;
         };
 
-        console.log(
-            `${datecode}: startChanged: ${fr((s) => s.startUtcChanged)} handicapChanged: ${fr((s) => s.handicapChanged)} scoreStatusChanged: ${fr((s) => s.scoreStatusChanged)}, hadTracker: ${fr(
-                (s) => s.hadTracker
-            )} scoring: ${fr((s) => s.scoringConfigured)} listening: ${fr((s) => s.listening)}`
-        );
+        const anyChanged = success.some((s) => s.startUtcChanged || s.handicapChanged || s.scoredStatusChanged);
+        if (anyChanged) {
+            console.log(
+                `${compShort(competition.compid)}/${datecode}: startChanged: ${fr((s) => s.startUtcChanged)} handicapChanged: ${fr((s) => s.handicapChanged)} scoredStatusChanged: ${fr((s) => s.scoredStatusChanged)}, hadTracker: ${fr(
+                    (s) => s.hadTracker
+                )} scoring: ${fr((s) => s.scoringConfigured)} listening: ${fr((s) => s.listening)}`
+            );
+        }
 
         if (success.length != results.length) {
-            console.log('updateTrackers: exceptions thrown');
+            console.log(`${compShort(competition.compid)}/${datecode}: updateTrackers: exceptions thrown`);
             console.table(results.filter((r) => r.status != 'fulfilled'));
         }
     } catch (e) {
@@ -1843,8 +1874,14 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
 
     const newGlidersCount = Object.keys(gliders).length;
     if (removedGlidersCount || updatedGliderCount || newGlidersCount != initialGliderCount) {
-        console.log(`updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
-        console.log(`${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
+        const tag = `${compShort(competition.compid)}/${datecode}`;
+        console.log(`${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
+        // Full key dump only on first emit per comp or when new gliders were loaded —
+        // routine churn (rescore/remove) doesn't need to repeat the whole roster.
+        if (loadedGliderCount > 0 || !trackersLoadedEmitted.has(competition.compid)) {
+            console.log(`${tag}: ${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
+            trackersLoadedEmitted.add(competition.compid);
+        }
     }
 
     // Refresh per-class pilotCount from the configured glider set. This is
@@ -2067,7 +2104,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
     const firstPointTime = Math.min(channel.earliestStart ?? channel.earliestScore ?? Infinity, now - 120);
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
-        console.log(`generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
+        console.log(`${channel.displayName}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
         const toStream = reduce(
             gliders,
             (result, glider, compno) => {
@@ -2228,8 +2265,13 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
         const pendingChannels = Object.values(channels).filter((c) => !c.liveScoreId);
         if (pendingChannels.length) {
-            console.log(`Channels not yet scored: ${pendingChannels.map((c) => `${c.className} (${c.datecode})`).join(', ')}`);
+            const pendingLine = pendingChannels.map((c) => `${c.className} (${c.datecode})`).join(', ');
+            if (lastPendingChannelsLog !== pendingLine) {
+                console.log(`Channels not yet scored: ${pendingLine}`);
+                lastPendingChannelsLog = pendingLine;
+            }
         } else {
+            lastPendingChannelsLog = null;
             console.log('all channels scored');
             if (process?.send) {
                 console.log('*** sent process ready');
@@ -2664,10 +2706,7 @@ async function sendKeepalive(channel: Channel) {
 
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 
-    // If we have nothing then do nothing...
-    if (!channel.clients.length) {
-        console.log(`${channel.displayName}: no clients subscribed`);
-    } else {
+    if (channel.clients.length) {
         console.log(`${channel.displayName}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
     }
 
