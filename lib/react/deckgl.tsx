@@ -455,6 +455,24 @@ export default function MApp(props: {
         }
     }, [setFollow, follow]);
 
+    // Competition site coordinates for the X marker. CompetitionSummary
+    // exposes lat/lng at the top level (see summaryToCompetition / protobuf),
+    // not nested under .competition. (0,0) is the protobuf default for
+    // unset, so treat that as no-location too.
+    const homeLat = props.comp?.lat;
+    const homeLng = props.comp?.lng;
+    const hasHome = typeof homeLat === 'number' && typeof homeLng === 'number' && Number.isFinite(homeLat) && Number.isFinite(homeLng) && (homeLat !== 0 || homeLng !== 0);
+    useEffect(() => {
+        if (props.comp && !hasHome) {
+            console.warn('[homeLocation] competition has no usable lat/lng — X marker hidden', {
+                name: props.comp?.name,
+                compid: props.comp?.compid,
+                lat: homeLat,
+                lng: homeLng
+            });
+        }
+    }, [props.comp, hasHome, homeLat, homeLng]);
+
     // Debounce the selected score for Mapbox source updates to avoid worker queue buildup
     // when scrubbing the replay slider. Position/scores update instantly via Redux; only
     // the GeoJSON line layers are debounced.
@@ -491,7 +509,7 @@ export default function MApp(props: {
     // airfield itself is visible on the basemap, so the marker only adds
     // value when the user has zoomed in to look at the site.
     const HOME_MARKER_MIN_ZOOM = 8;
-    const homeMarker = (props.viewport?.zoom ?? 0) >= HOME_MARKER_MIN_ZOOM ? homeLocationLayer(props.comp?.competition?.lt, props.comp?.competition?.lg) : null;
+    const homeMarker = (props.viewport?.zoom ?? 0) >= HOME_MARKER_MIN_ZOOM && hasHome ? homeLocationLayer(homeLat, homeLng) : null;
 
     return (
         <ErrorBoundary fallback={<p style={{marginTop: 100}}>Please reload me!</p>}>
