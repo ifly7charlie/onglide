@@ -444,25 +444,29 @@ async function main() {
         console.log('PM2/DOCKER: starting http(s) listener');
     }
 
-    if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
-        try {
-            const options = {
-                key: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem`),
-                cert: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.cert.pem`)
-            };
+    if (process.env.WEBSOCKET_PORT && ('NEXT_PUBLIC_WEBSOCKET_HOST' in process.env || 'NEXT_PUBLIC_SITEURL' in process.env)) {
+        if (
+            ![process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].some((host) => {
+                try {
+                    const options = {
+                        key: readFileSync(`keys/${host}.key.pem`),
+                        cert: readFileSync(`keys/${host}.cert.pem`)
+                    };
 
-            if (options.key && options.cert) {
-                console.log('initialising SSL');
-                const server = https.createServer(options, setupOgnWebServer);
-                server.listen(parseInt(process.env.WEBSOCKET_PORT) + 1000);
-                setupWebSocketServer(server);
-                console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT) + 1000}`);
-            }
-        } catch (e) {
-            console.log(`Unable to initialise SSL "keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem"`, e);
+                    if (options.key && options.cert) {
+                        console.log('initialising SSL');
+                        const server = https.createServer(options, setupOgnWebServer);
+                        server.listen(parseInt(process.env.WEBSOCKET_PORT!) + 1000);
+                        setupWebSocketServer(server);
+                        console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT!) + 1000} ssh key for ${host}`);
+                    }
+                } catch (e) {
+                    console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
+                }
+            })
+        ) {
+            console.log(`Not initialising SSL: port: ${process.env.WEBSOCKET_PORT}, url: ${process.env.NEXT_PUBLIC_SITEURL}`);
         }
-    } else {
-        console.log(`Not initialising SSL: port: ${process.env.WEBSOCKET_PORT}, url: ${process.env.NEXT_PUBLIC_SITEURL}`);
     }
 
     // We always open an non-ssl one
