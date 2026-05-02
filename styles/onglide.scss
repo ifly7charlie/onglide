@@ -1178,14 +1178,30 @@ ul.status {
 }
 
 .sponsor {
-    padding: 5px;
+    padding: 0 2px;
     text-align: center;
 
     img {
+        display: block;
+        margin: 0 auto;
         max-height: 130px;
         max-width: 80%;
         height: auto;
         width: auto;
+    }
+
+    // On short viewports the sidepanel-footer eats too much vertical space
+    // for the sponsor image; cap it so the pilot list above stays usable.
+    @media (max-height: 760px) {
+        img {
+            max-height: 80px;
+        }
+    }
+
+    @media (max-height: 600px) {
+        img {
+            max-height: 56px;
+        }
     }
 }
 

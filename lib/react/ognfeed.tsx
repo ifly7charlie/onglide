@@ -66,7 +66,7 @@ const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     loading: () => (
         <div style={{width: '100vw', marginTop: '20vh', position: 'absolute'}}>
             <div style={{display: 'block', margin: 'auto', width: '100px'}}>
-                <img width="100" height="100" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />
+                <img width="100" height="100" src="/ognlogo.png" alt="OGN Network" title="OGN Network" />
             </div>
         </div>
     )
