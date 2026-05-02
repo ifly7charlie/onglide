@@ -2399,8 +2399,11 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 .sort((a, b) => mcs[a] - mcs[b])
                 .filter((a) => mcs[a] > channelGliders.length / 2)?.[0];
 
-            console.log(`${channel.displayName} likely GP start ${d(Number(likely))}`);
-            console.table(mcs);
+            const buckets = Object.keys(mcs)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((t) => `${d(Number(t))}=${mcs[t]}`)
+                .join(', ');
+            console.log(`${channel.displayName} likely GP start ${likely ? d(Number(likely)) : 'none'}; buckets: ${buckets}`);
         }
     }
 
