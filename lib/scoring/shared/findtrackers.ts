@@ -15,10 +15,7 @@ import type {Task, Compno, Epoch, BasePositionMessage, AltitudeAMSL, FlarmID} fr
 import {PreparedTurnpoint} from '../../flightprocessing/preparedTurnpoint';
 import {loadPointsForIds} from '../../webworkers/pointlog';
 
-const MAX_FLARM_DIST_KM = 50; // first sighting >50 km from the relevant TP → skip
-const DEFAULT_MAX_GAP_SEC = 60; // don't run hasCrossed across a coverage gap (override via opts.maxGapSec)
-const DEFAULT_REORDER_WINDOW_SEC = 20; // per-flarmid sliding reorder buffer (override via opts.reorderWindowSec)
-const DEFAULT_TOLERANCE_SEC = 5;
+import {MAX_FLARM_DIST_KM, DEFAULT_MAX_GAP_SEC, DEFAULT_REORDER_WINDOW_SEC, DEFAULT_TOLERANCE_SEC} from '../../constants';
 
 export interface OfficialResult {
     compno: Compno;
@@ -337,7 +334,9 @@ async function scanLine(
         drain(f, st, Infinity);
     }
 
-    log(`  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`);
+    log(
+        `  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`
+    );
 
     // Emit the per-debug-flarmid trace as a tidy block per id per scan.
     if (debugFlarmids.size && debugWatchTimes.length) {
@@ -351,7 +350,12 @@ async function scanLine(
         let key = f;
         let d = dbg.get(key);
         if (!d) {
-            for (const [k, v] of dbg) if (k.toUpperCase() === f.toUpperCase()) { key = k; d = v; break; }
+            for (const [k, v] of dbg)
+                if (k.toUpperCase() === f.toUpperCase()) {
+                    key = k;
+                    d = v;
+                    break;
+                }
         }
         log(`  [debug ${kind} ${f}] ` + (d ? formatDebugStats(d) : 'never seen in this window'));
         if (d?.pairTraces.length) {
@@ -377,7 +381,17 @@ async function scanLine(
     return {crossings, skipped};
 }
 
-function formatDebugStats(d: {firstArrivalT?: number; firstArrivalDistKm?: number; skipped: boolean; accepted: number; late: number; stale: number; duplicates: number; drainedPairs: number; crossingsRecorded: number}): string {
+function formatDebugStats(d: {
+    firstArrivalT?: number;
+    firstArrivalDistKm?: number;
+    skipped: boolean;
+    accepted: number;
+    late: number;
+    stale: number;
+    duplicates: number;
+    drainedPairs: number;
+    crossingsRecorded: number;
+}): string {
     const arr = d.firstArrivalT !== undefined ? `first arrival t=${d.firstArrivalT} dist=${d.firstArrivalDistKm?.toFixed(1)}km` : 'no arrivals';
     const skip = d.skipped ? ` SKIPPED (>${MAX_FLARM_DIST_KM}km)` : '';
     return `${arr}${skip}; accepted=${d.accepted}, stale=${d.stale}, late=${d.late}, dup=${d.duplicates}, pairs=${d.drainedPairs}, recorded=${d.crossingsRecorded}`;

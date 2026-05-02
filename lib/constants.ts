@@ -58,3 +58,8 @@ export const GRID = {
     NEXT_LNG: 5,
     NEXT_LAT: 6
 } as const;
+
+export const MAX_FLARM_DIST_KM = 150; // first sighting >150 km from the relevant TP → skip
+export const DEFAULT_MAX_GAP_SEC = 60; // don't run hasCrossed across a coverage gap (override via opts.maxGapSec)
+export const DEFAULT_REORDER_WINDOW_SEC = 20; // per-flarmid sliding reorder buffer (override via opts.reorderWindowSec)
+export const DEFAULT_TOLERANCE_SEC = 5;

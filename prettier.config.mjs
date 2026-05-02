@@ -1,6 +1,6 @@
 /** @type {import("prettier").Config} */
 export default {
-  plugins: ["prettier-plugin-embed", "prettier-plugin-sql"],
+  plugins: ["prettier-plugin-embed"],
 
   // your core options
   printWidth: 225,
@@ -13,10 +13,5 @@ export default {
 
   // prettier-plugin-embed (CSS + SQL-in-tags etc.)
   // Use at least one of these if you embed CSS:
-  embeddedCssTags: ["style"], // or set the tags that contain CSS (adjust as needed)
-  embeddedSqlTags: ["sql", "escape"], // your SQL template tag(s)
-
-  // prettier-plugin-sql
-  language: "postgresql",
-  keywordCase: "upper",
+  embeddedCssTags: ["style"] // or set the tags that contain CSS (adjust as needed)
 };

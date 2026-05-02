@@ -26,9 +26,7 @@ async function run() {
             newest: number;
         }
         const stats = new Map<string, Stat>();
-        const iter = args.tracker
-            ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until})
-            : scanAll({since: args.since, until: args.until});
+        const iter = args.tracker ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until}) : scanAll({since: args.since, until: args.until});
 
         for await (const msg of iter) {
             const id = (msg.f ?? '??????') as string;
@@ -54,12 +52,10 @@ async function run() {
             }
         }
     } else {
-        const iter = args.tracker
-            ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until})
-            : scanAll({since: args.since, until: args.until});
+        const iter = args.tracker ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until}) : scanAll({since: args.since, until: args.until});
         for await (const msg of iter) {
             const m = msg as any;
-            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.g}m  ${m.c ?? '??????'} (${m.f})`);
+            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.g}m  ${m.c ?? '??????'} (${m.f})  ${m.lat},${m.lng}`);
         }
     }
 
