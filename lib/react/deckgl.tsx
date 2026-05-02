@@ -346,6 +346,48 @@ export default function MApp(props: {
         }
     }, [options.zoomTask, taskGeoJSONtp, vc, mapRef.current]);
 
+    // ===== ZOOM TO TURNPOINT EFFECT =====
+    // Triggered when the user clicks a row in the task leg list. We build a
+    // bbox around the sector (radius in km converted to degrees, accounting
+    // for latitude on the longitude axis) and let cameraForBounds pick a
+    // zoom — that way a 20km AAT area frames just like a 0.5km cylinder.
+    useEffect(() => {
+        if (!options.zoomTurnpoint || !mapRef?.current) return;
+        const {lat, lng, radius} = options.zoomTurnpoint;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            setOptions({...options, zoomTurnpoint: null});
+            return;
+        }
+        try {
+            const map = mapRef.current.getMap();
+            const r = Math.max(0.3, radius || 0.3); // km — minimum so a tiny line still has a frame
+            const dLat = r / 111;
+            const dLng = r / (111 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+            const padding = {top: 40, bottom: 40, left: 40, right: 40};
+            const camera = map.cameraForBounds(
+                [
+                    [lng - dLng, lat - dLat],
+                    [lng + dLng, lat + dLat]
+                ],
+                {padding, bearing: 0}
+            );
+            if (follow) setFollow(false);
+            setOptions({...options, zoomTurnpoint: null});
+            if (camera) {
+                map.easeTo({
+                    center: camera.center,
+                    zoom: camera.zoom,
+                    pitch: map2d ? 0 : 60,
+                    bearing: 0,
+                    duration: 800
+                });
+            }
+        } catch (e) {
+            console.error(e);
+            setOptions({...options, zoomTurnpoint: null});
+        }
+    }, [options.zoomTurnpoint, mapRef.current]);
+
     // ====== LOCK NORTH UP ===========
     // If we are north up then reset north on bearing change.
     // Debounced + larger dead-zone so MapLibre's 3D terrain-aware pan, which can

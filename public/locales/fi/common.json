@@ -43,7 +43,7 @@
         "turnpoint": "Käännepiste",
         "bearing": "Suunta",
         "leg_length": "Osuuden pituus",
-        "tp_radius": "KP-säde",
+        "tp_radius": "Säde",
         "leg": "Osuus {{n}}"
     },
     "task_status": {

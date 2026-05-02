@@ -43,7 +43,7 @@
         "turnpoint": "Point de virage",
         "bearing": "Cap",
         "leg_length": "Longueur de la branche",
-        "tp_radius": "Rayon du PV",
+        "tp_radius": "Rayon",
         "leg": "Branche {{n}}"
     },
     "task_status": {

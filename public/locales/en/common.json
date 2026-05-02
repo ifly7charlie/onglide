@@ -43,7 +43,7 @@
         "turnpoint": "Turnpoint",
         "bearing": "Bearing",
         "leg_length": "Leg Length",
-        "tp_radius": "TP Radius",
+        "tp_radius": "Radius",
         "leg": "Leg {{n}}"
     },
     "task_status": {

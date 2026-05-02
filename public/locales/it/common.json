@@ -43,7 +43,7 @@
         "turnpoint": "Punto di virata",
         "bearing": "Rotta",
         "leg_length": "Lunghezza tratta",
-        "tp_radius": "Raggio PV",
+        "tp_radius": "Raggio",
         "leg": "Tratta {{n}}"
     },
     "task_status": {

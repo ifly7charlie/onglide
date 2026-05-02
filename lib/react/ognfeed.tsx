@@ -232,6 +232,14 @@ export const OgnFeed = memo(
             setOptions({...options, zoomTask: true});
         }, [vc, options]);
 
+        // Zoom to a specific turnpoint (clicked from the task leg list).
+        const zoomToTurnpoint = useCallback(
+            (lat: number, lng: number, radius?: number) => {
+                setOptions({...options, zoomTurnpoint: {lat, lng, radius}});
+            },
+            [options]
+        );
+
         // Send the options to the server so we can keep an eye on what settings are
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
@@ -360,7 +368,7 @@ export const OgnFeed = memo(
                             */}
                             <div className="drawer-group">
                                 <div className="sidepanel-section">
-                                    <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} defaultOpen />
+                                    <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} zoomToTurnpoint={zoomToTurnpoint} tz={tz} replayTime={replayTime} defaultOpen />
                                     {connectionStatus}
                                 </div>
                             </div>
@@ -395,7 +403,7 @@ export const OgnFeed = memo(
                             )}
                             */}
                             <div className="sidepanel-section">
-                                <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
+                                <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} zoomToTurnpoint={zoomToTurnpoint} tz={tz} replayTime={replayTime} />
                                 {connectionStatus}
                             </div>
                         </>

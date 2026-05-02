@@ -43,7 +43,7 @@
         "turnpoint": "Vmesna točka",
         "bearing": "Smer",
         "leg_length": "Dolžina kraka",
-        "tp_radius": "Polmer VT",
+        "tp_radius": "Polmer",
         "leg": "Krak {{n}}"
     },
     "task_status": {

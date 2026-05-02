@@ -21,7 +21,23 @@ import {fromDateCode} from '../datecode';
 import {getNow} from '../now';
 
 //
-export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz, replayTime, defaultOpen}: {compid: string; vc: ClassName; fitBounds: Function; tz: TZ; replayTime: Epoch; defaultOpen?: boolean}) {
+export const TaskDetails = memo(function TaskDetails({
+    compid,
+    vc,
+    fitBounds,
+    zoomToTurnpoint,
+    tz,
+    replayTime,
+    defaultOpen
+}: {
+    compid: string;
+    vc: ClassName;
+    fitBounds: Function;
+    zoomToTurnpoint?: (lat: number, lng: number, radius?: number) => void;
+    tz: TZ;
+    replayTime: Epoch;
+    defaultOpen?: boolean;
+}) {
     const {t} = useTranslation('common');
     const task = useSelector((state) => selectTask(state, vc));
     const hasTask = useSelector((state) => selectHasTask(state, vc));
@@ -98,7 +114,7 @@ export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz,
             {open ? (
                 <div id="task-collapse">
                     <p>{task?.details?.nostart != '00:00:00' ? t('task.start_open', {time: task.details.nostart.substring(0, 5)}) : ''}</p>
-                    <Tasklegs legs={task.legs} />
+                    <Tasklegs legs={task.legs} onSelect={zoomToTurnpoint} />
 
                     {task.details.info && (
                         <>
@@ -113,31 +129,39 @@ export const TaskDetails = memo(function TaskDetails({compid, vc, fitBounds, tz,
 });
 
 // Internal: details on the leg
-function Tasklegs(props: {legs: TaskLeg[]}) {
+function Tasklegs({legs, onSelect}: {legs: TaskLeg[]; onSelect?: (lat: number, lng: number, radius?: number) => void}) {
     const {t} = useTranslation('common');
     return (
-        <table className="legs-mini" style={{marginBottom: '0px'}}>
-            <thead>
-                <tr>
-                    <td colSpan={2}>{t('task.turnpoint')}</td>
-                    <td>{t('task.bearing')}</td>
-                    <td>{t('task.leg_length')}</td>
-                    <td>{t('task.tp_radius')}</td>
-                </tr>
-            </thead>
-            <tbody>
-                {props.legs.map((leg) => (
-                    <tr key={leg.legno}>
-                        <td>
-                            {leg.legno}:{leg.ntrigraph}
-                        </td>
-                        <td>{leg.name}</td>
-                        <td>{leg.legno !== 0 ? leg.bearing + '° ' : ''}</td>
-                        <td>{leg.legno !== 0 ? Math.round(leg.length * 10) / 10 + ' km' : ''}</td>
-                        <td>{leg.r1 !== 0 ? Math.round(leg.r1 * 10) / 10 + ' km' : ''}</td>
-                    </tr>
-                ))}
-            </tbody>
-        </table>
+        <ul className="task-legs">
+            <li className="task-legs-head" aria-hidden="true">
+                <span className="task-leg-num">#</span>
+                <span className="task-leg-tp-header">{t('task.turnpoint')}</span>
+                <span className="task-leg-bearing">{t('task.bearing')}</span>
+                <span className="task-leg-length">{t('task.leg_length')}</span>
+                <span className="task-leg-radius">{t('task.tp_radius')}</span>
+            </li>
+            {legs.map((leg) => {
+                const onClick = onSelect ? () => onSelect(leg.nlat, leg.nlng, leg.r1) : undefined;
+                return (
+                    <li key={leg.legno} className="task-leg-row">
+                        <a
+                            href="#"
+                            title={`${leg.legno}: ${leg.ntrigraph} — ${leg.name}`}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                onClick?.();
+                            }}
+                        >
+                            <span className="task-leg-num">{leg.legno}.</span>
+                            <span className="task-leg-tri">{leg.ntrigraph}</span>
+                            <span className="task-leg-name">{leg.name}</span>
+                            <span className="task-leg-bearing">{leg.legno !== 0 ? `${leg.bearing}°` : ''}</span>
+                            <span className="task-leg-length">{leg.legno !== 0 ? `${Math.round(leg.length * 10) / 10} km` : ''}</span>
+                            <span className="task-leg-radius">{leg.r1 !== 0 ? `${Math.round(leg.r1 * 10) / 10} km` : ''}</span>
+                        </a>
+                    </li>
+                );
+            })}
+        </ul>
     );
 }

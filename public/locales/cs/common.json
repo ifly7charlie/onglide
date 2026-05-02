@@ -43,7 +43,7 @@
         "turnpoint": "Otočný bod",
         "bearing": "Kurz",
         "leg_length": "Délka úseku",
-        "tp_radius": "Poloměr OB",
+        "tp_radius": "Poloměr",
         "leg": "Úsek {{n}}"
     },
     "task_status": {
