@@ -4,6 +4,7 @@ import {query} from './lib/react/db';
 import escape from 'sql-template-strings';
 
 export const config = {
+    runtime: 'nodejs',
     matcher: ['/((?!_next/|api/|.*\\.).*)']
 };
 
