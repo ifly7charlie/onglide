@@ -1423,6 +1423,11 @@
   resolved "https://registry.yarnpkg.com/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-16.2.1.tgz#607b03c3a5bade2368beb4f5b4cac9c243333638"
   integrity sha512-aV2iUaC/5HGEpbBkE+4B8aHIudoOy5DYekAKOMSHoIYQ66y/wIVeaRx8MS2ZMdxe/HIXlMho4ubdZs/J8441Tg==
 
+"@next/swc-wasm-nodejs@^16.2.4":
+  version "16.2.4"
+  resolved "https://registry.yarnpkg.com/@next/swc-wasm-nodejs/-/swc-wasm-nodejs-16.2.4.tgz#02126bc0661bb3697e6e20927892e64786e45a16"
+  integrity sha512-AUUfFLja9v63pvixfPGDYtgJSoZ0EdgffQS9hlXMoOwRUXDeZO6UnKWKrOWltMRFX+HdYPdujGhvzER1HgvhqQ==
+
 "@next/swc-win32-arm64-msvc@16.2.1":
   version "16.2.1"
   resolved "https://registry.yarnpkg.com/@next/swc-win32-arm64-msvc/-/swc-win32-arm64-msvc-16.2.1.tgz#a96e776f37287b39e309e0850a8d8e2c6c749070"

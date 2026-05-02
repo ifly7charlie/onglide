@@ -43,7 +43,7 @@
         "turnpoint": "Punkt zwrotny",
         "bearing": "Kurs",
         "leg_length": "Długość odcinka",
-        "tp_radius": "Promień PZ",
+        "tp_radius": "Promień",
         "leg": "Odcinek {{n}}"
     },
     "task_status": {

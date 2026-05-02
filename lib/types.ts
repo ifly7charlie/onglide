@@ -479,6 +479,9 @@ export interface Options {
     taskUp: TaskUp;
     follow: boolean;
     zoomTask: boolean;
+    // Per-turnpoint zoom request — set by the task leg list, consumed and
+    // cleared by deckgl's easeTo effect. Same one-shot pattern as zoomTask.
+    zoomTurnpoint?: {lat: number; lng: number; radius?: number} | null;
     sortKey: SortKey;
     showOthers: boolean;
     constructionLines?: boolean;

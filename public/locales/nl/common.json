@@ -43,7 +43,7 @@
         "turnpoint": "Keerpunt",
         "bearing": "Koers",
         "leg_length": "Beenlengte",
-        "tp_radius": "KP-radius",
+        "tp_radius": "Radius",
         "leg": "Been {{n}}"
     },
     "task_status": {

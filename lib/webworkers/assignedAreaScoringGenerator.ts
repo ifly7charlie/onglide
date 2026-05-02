@@ -525,6 +525,10 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             log(JSON.stringify(scoredStatus, stripPoints, 4));
             log('-------------');
             yield scoredStatus;
+            // Grid changes only on leg entry — clear so subsequent yields don't carry it forward
+            // via the Object.assign at the top of the loop. The yielded reference above is
+            // already captured by the downstream generator.
+            scoredStatus.optimalGrid = [];
         } catch (e) {
             console.log('Exception in AAT Generator');
             console.log(e);

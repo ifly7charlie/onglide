@@ -43,7 +43,7 @@
         "turnpoint": "Vändpunkt",
         "bearing": "Bäring",
         "leg_length": "Benlängd",
-        "tp_radius": "VP-radie",
+        "tp_radius": "Radie",
         "leg": "Ben {{n}}"
     },
     "task_status": {

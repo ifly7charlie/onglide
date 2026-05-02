@@ -392,7 +392,10 @@ export const Details = ({
 
     const hasHandicappedResults = !!score?.handicapped;
 
-    const speed = score ? ( //
+    // Blocked pilots get a synthesised score with flightStatus only — no actual/
+    // handicapped sub-messages — so gate these on score?.actual rather than just
+    // score, otherwise score.actual.taskSpeed throws during render.
+    const speed = score?.actual ? ( //
         hasHandicappedResults ? (
             <HandicappedSpeedComponent utcFinish={score.utcFinish as Epoch} handicappedTaskSpeed={score.handicapped.taskSpeed} actualTaskSpeed={score.actual.taskSpeed} />
         ) : (
@@ -400,8 +403,8 @@ export const Details = ({
         )
     ) : null;
 
-    const distance = score ? hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} /> : null;
-    const gr = score ? ( //
+    const distance = score?.actual ? (hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} />) : null;
+    const gr = score?.actual ? ( //
         hasHandicappedResults ? (
             <HandicappedGRComponent handicappedGrRemaining={score.handicapped.grRemaining} actualGrRemaining={score.actual.grRemaining} />
         ) : (

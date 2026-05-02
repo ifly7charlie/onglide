@@ -9,7 +9,7 @@ export default async function taskHandler(req, res) {
     } = req;
 
     if (!className) {
-        console.log('api/pilots no class');
+        console.log('api/pilots no class', className);
         res.status(404);
         return;
     }

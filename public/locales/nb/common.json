@@ -43,7 +43,7 @@
         "turnpoint": "Vendepunkt",
         "bearing": "Peiling",
         "leg_length": "Etappelengde",
-        "tp_radius": "VP-radius",
+        "tp_radius": "Radius",
         "leg": "Etappe {{n}}"
     },
     "task_status": {

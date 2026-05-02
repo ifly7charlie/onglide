@@ -85,7 +85,7 @@ export function statusIconDataUrl(status: CompetitionDisplayStatus, colour: stri
     const def = STATUS_ICONS[status];
     const [width, height] = def.icon;
     const path = iconPathString(def);
-    let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">`;
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
     svg += `<path fill="${colour}" d="${path}"/>`;
 
     const overlay = STATUS_ICON_OVERLAYS[status];

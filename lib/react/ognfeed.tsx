@@ -34,6 +34,7 @@ import {getValidSortOrder} from './pilot-sorting';
 import Sponsors from './sponsors';
 
 import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {LanguageSwitcher} from './language-switcher';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 function useIsMobile() {
@@ -65,7 +66,7 @@ const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     loading: () => (
         <div style={{width: '100vw', marginTop: '20vh', position: 'absolute'}}>
             <div style={{display: 'block', margin: 'auto', width: '100px'}}>
-                <img width="100" height="100" src="https://ognproject.wdfiles.com/local--files/logos/ogn-logo-150x150.png" alt="OGN Network" title="OGN Network" />
+                <img width="100" height="68" src="/ognlogo.png" alt="OGN Network" title="OGN Network" />
             </div>
         </div>
     )
@@ -231,6 +232,14 @@ export const OgnFeed = memo(
             setOptions({...options, zoomTask: true});
         }, [vc, options]);
 
+        // Zoom to a specific turnpoint (clicked from the task leg list).
+        const zoomToTurnpoint = useCallback(
+            (lat: number, lng: number, radius?: number) => {
+                setOptions({...options, zoomTurnpoint: {lat, lng, radius}});
+            },
+            [options]
+        );
+
         // Send the options to the server so we can keep an eye on what settings are
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
@@ -339,8 +348,9 @@ export const OgnFeed = memo(
                             ) : null}
                             <div className="drawer-group">
                                 <div className="drawer-label">{t('drawer.display')}</div>
-                                <div className="sidepanel-tools">
+                                <div className="sidepanel-tools sidepanel-tools-row">
                                     <OptionsPanel options={options} setOptions={setOptions} multipleClasses={(comp?.classes?.length ?? 0) > 1} />
+                                    <LanguageSwitcher className="drawer-lang" />
                                 </div>
                             </div>
                             <div className="drawer-group">
@@ -358,7 +368,7 @@ export const OgnFeed = memo(
                             */}
                             <div className="drawer-group">
                                 <div className="sidepanel-section">
-                                    <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} defaultOpen />
+                                    <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} zoomToTurnpoint={zoomToTurnpoint} tz={tz} replayTime={replayTime} defaultOpen />
                                     {connectionStatus}
                                 </div>
                             </div>
@@ -393,7 +403,7 @@ export const OgnFeed = memo(
                             )}
                             */}
                             <div className="sidepanel-section">
-                                <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} tz={tz} replayTime={replayTime} />
+                                <TaskDetails compid={compid} vc={vc} fitBounds={fitBounds} zoomToTurnpoint={zoomToTurnpoint} tz={tz} replayTime={replayTime} />
                                 {connectionStatus}
                             </div>
                         </>

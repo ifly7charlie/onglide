@@ -43,7 +43,7 @@
         "turnpoint": "Punto de viraje",
         "bearing": "Rumbo",
         "leg_length": "Longitud del tramo",
-        "tp_radius": "Radio PV",
+        "tp_radius": "Radio",
         "leg": "Tramo {{n}}"
     },
     "task_status": {

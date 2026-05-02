@@ -131,3 +131,108 @@ export function bboxContainsCircle(b: Bbox, lat: number, lng: number, km: number
     const {dLat, dLng} = kmToDegrees(km, lat);
     return lat - dLat >= minLat && lat + dLat <= maxLat && lng - dLng >= minLng && lng + dLng <= maxLng;
 }
+
+// aprsc enforces a 500-byte limit on each protocol line. The login line
+// is `user OG pass -1 vers onglide/<version> filter <filter>\r\n`, ~44
+// bytes of fixed overhead at the current config. 450 leaves ~6 bytes of
+// headroom for version bumps without re-tuning the cap.
+export const APRS_MAX_FILTER_BYTES = 450;
+
+export interface AirfieldFilterInput {
+    lt: number;
+    lg: number;
+    radiusKm: number;
+}
+
+// Bbox containing a single airfield's coverage circle.
+function circleBbox(lt: number, lg: number, radiusKm: number): Bbox {
+    const {dLat, dLng} = kmToDegrees(radiusKm, lt);
+    return [lt - dLat, lg - dLng, lt + dLat, lg + dLng];
+}
+
+function bboxArea(b: Bbox): number {
+    return (b[2] - b[0]) * (b[3] - b[1]);
+}
+
+function assembleFilter(taskClause: string | null, otherClauses: string[]): string {
+    const clauses = taskClause ? [taskClause, ...otherClauses] : [...otherClauses];
+    clauses.sort();
+    return clauses.join(' ');
+}
+
+//
+// Build an aprsc filter string covering the supplied (already-expanded)
+// task bbox and per-airfield coverage circles, never exceeding
+// APRS_MAX_FILTER_BYTES. Phase 1 emits a `r/lat/lng/km` clause per
+// airfield (current behaviour). If that overflows, Phase 2 agglomerates
+// nearby airfields into `a/N/W/S/E` cluster boxes — broader than ideal,
+// but coverage is never dropped.
+//
+export function buildAprsFilter(expandedTaskBbox: Bbox | null, airfields: AirfieldFilterInput[]): string {
+    // Phase 1: natural construction, matches the pre-cap behaviour.
+    const taskClause = expandedTaskBbox ? bboxToAprsArea(expandedTaskBbox) : null;
+    // Dedupe airfields by clause-equivalent identity. Multiple comps sharing
+    // a site (or rounding to the same coords) produce identical r/lat/lng/km
+    // clauses, wasting bytes against the 450-cap and forcing premature
+    // clustering.
+    const seenAirfield = new Set<string>();
+    const surviving: AirfieldFilterInput[] = [];
+    for (const af of airfields) {
+        if (expandedTaskBbox && bboxContainsCircle(expandedTaskBbox, af.lt, af.lg, af.radiusKm)) continue;
+        const key = `${af.lt}|${af.lg}|${af.radiusKm}`;
+        if (seenAirfield.has(key)) continue;
+        seenAirfield.add(key);
+        surviving.push(af);
+    }
+
+    if (!taskClause && surviving.length === 0) {
+        return 'r/0/0/1';
+    }
+
+    const naturalRadiusClauses = surviving.map((a) => `r/${a.lt}/${a.lg}/${a.radiusKm}`);
+    const naturalFilter = assembleFilter(taskClause, naturalRadiusClauses);
+    if (naturalFilter.length <= APRS_MAX_FILTER_BYTES) {
+        return naturalFilter;
+    }
+
+    // Phase 2: agglomerative clustering. Each surviving airfield starts as
+    // its own circle-bbox; greedily merge the pair with the smallest union
+    // area until the joined filter fits or we collapse to one cluster.
+    let clusters: Bbox[] = surviving.map((a) => circleBbox(a.lt, a.lg, a.radiusKm));
+
+    while (clusters.length > 1) {
+        const candidate = assembleFilter(taskClause, clusters.map(bboxToAprsArea));
+        if (candidate.length <= APRS_MAX_FILTER_BYTES) {
+            return candidate;
+        }
+
+        let bestI = 0;
+        let bestJ = 1;
+        let bestArea = Infinity;
+        for (let i = 0; i < clusters.length; i++) {
+            for (let j = i + 1; j < clusters.length; j++) {
+                const merged = unionBboxes([clusters[i], clusters[j]])!;
+                const area = bboxArea(merged);
+                if (area < bestArea) {
+                    bestArea = area;
+                    bestI = i;
+                    bestJ = j;
+                }
+            }
+        }
+        const merged = unionBboxes([clusters[bestI], clusters[bestJ]])!;
+        // Splice out j first (higher index) to keep i valid.
+        const next = clusters.slice();
+        next.splice(bestJ, 1);
+        next.splice(bestI, 1);
+        next.push(merged);
+        clusters = next;
+    }
+
+    // Final fallback: union task bbox + remaining cluster into one bbox.
+    const all: Bbox[] = [];
+    if (expandedTaskBbox) all.push(expandedTaskBbox);
+    all.push(...clusters);
+    const union = unionBboxes(all)!;
+    return bboxToAprsArea(union);
+}

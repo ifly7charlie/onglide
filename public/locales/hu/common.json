@@ -43,7 +43,7 @@
         "turnpoint": "Fordulópont",
         "bearing": "Irány",
         "leg_length": "Szakasz hossza",
-        "tp_radius": "FP-sugár",
+        "tp_radius": "Sugár",
         "leg": "{{n}}. szakasz"
     },
     "task_status": {

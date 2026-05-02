@@ -43,7 +43,7 @@
         "turnpoint": "Wendepunkt",
         "bearing": "Kurs",
         "leg_length": "Schenkellänge",
-        "tp_radius": "Wendepunktradius",
+        "tp_radius": "Radius",
         "leg": "Schenkel {{n}}"
     },
     "task_status": {

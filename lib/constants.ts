@@ -41,6 +41,12 @@ export const HOME_OGN_COVERAGE = 0.5;
 
 export const inorderAdditionalDelay = 6;
 
+// trackGlider coalescing window: each new glider registration arms (or
+// re-arms) a setTimeout. After this many ms of quiet, flushLoads runs a
+// single loadPointsForIds across the union of every queued glider's
+// flarmIds and dispatches the yielded records to per-glider queues.
+export const PENDING_LOAD_DEBOUNCE_MS = 250;
+
 // How far beyond the finite extent of a start line a near-miss is accepted (metres)
 export const RELAXED_START_TOLERANCE_M = 1500;
 
@@ -58,3 +64,8 @@ export const GRID = {
     NEXT_LNG: 5,
     NEXT_LAT: 6
 } as const;
+
+export const MAX_FLARM_DIST_KM = 150; // first sighting >150 km from the relevant TP → skip
+export const DEFAULT_MAX_GAP_SEC = 60; // don't run hasCrossed across a coverage gap (override via opts.maxGapSec)
+export const DEFAULT_REORDER_WINDOW_SEC = 20; // per-flarmid sliding reorder buffer (override via opts.reorderWindowSec)
+export const DEFAULT_TOLERANCE_SEC = 5;

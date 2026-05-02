@@ -34,7 +34,7 @@ import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
-import {taskBbox, unionBboxes, expandBbox, bboxToAprsArea, bboxContainsCircle, Bbox} from '../lib/flightprocessing/taskBbox';
+import {taskBbox, unionBboxes, expandBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
 import {fromDateCode, toDateCode} from '../lib/datecode';
@@ -232,6 +232,19 @@ interface Channel {
 
 let channels: Record<ChannelName, Channel> = {};
 
+// Last-emitted channels-summary string per compid so updateClasses only logs
+// the inventory line when it actually changes.
+const lastChannelsLog = new Map<string, string>();
+
+// Compids that have emitted their full trackers-loaded roster at least once.
+// Subsequent updateTrackers cycles only dump the full list on real growth
+// (loadedGliderCount > 0); pure rescore/removal churn stays summary-only.
+const trackersLoadedEmitted = new Set<string>();
+
+// Last-emitted "Channels not yet scored" string so we only log when the pending
+// set changes, instead of on every score arrival.
+let lastPendingChannelsLog: string | null = null;
+
 // Clients connected to the reserved /all channel — landing-page globe.
 // Kept separate from the per-class channels[] so iteration over per-class
 // state (position broadcasts, keepalive, stats) stays untouched.
@@ -270,6 +283,10 @@ interface Glider {
     scoredFinish: Epoch;
     scoredStatus: 'S' | 'F' | 'H'; // from scoring
     scoringConfigured?: boolean;
+    // True if dbTrackerId === 'blocked' on the last tick. We never send blocked
+    // pilots to the scoring worker, so flipping back to unblocked has to reset
+    // scoringConfigured so setInitialTrack runs on the next tick.
+    blocked?: boolean;
 
     deck: DeckData;
     webPathEndPosition: number;
@@ -427,25 +444,29 @@ async function main() {
         console.log('PM2/DOCKER: starting http(s) listener');
     }
 
-    if (process.env.WEBSOCKET_PORT && 'NEXT_PUBLIC_SITEURL' in process.env) {
-        try {
-            const options = {
-                key: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem`),
-                cert: readFileSync(`keys/${process.env.NEXT_PUBLIC_SITEURL}.cert.pem`)
-            };
+    if (process.env.WEBSOCKET_PORT && ('NEXT_PUBLIC_WEBSOCKET_HOST' in process.env || 'NEXT_PUBLIC_SITEURL' in process.env)) {
+        if (
+            ![process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].some((host) => {
+                try {
+                    const options = {
+                        key: readFileSync(`keys/${host}.key.pem`),
+                        cert: readFileSync(`keys/${host}.cert.pem`)
+                    };
 
-            if (options.key && options.cert) {
-                console.log('initialising SSL');
-                const server = https.createServer(options, setupOgnWebServer);
-                server.listen(parseInt(process.env.WEBSOCKET_PORT) + 1000);
-                setupWebSocketServer(server);
-                console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT) + 1000}`);
-            }
-        } catch (e) {
-            console.log(`Unable to initialise SSL "keys/${process.env.NEXT_PUBLIC_SITEURL}.key.pem"`, e);
+                    if (options.key && options.cert) {
+                        console.log('initialising SSL');
+                        const server = https.createServer(options, setupOgnWebServer);
+                        server.listen(parseInt(process.env.WEBSOCKET_PORT!) + 1000);
+                        setupWebSocketServer(server);
+                        console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT!) + 1000} ssh key for ${host}`);
+                    }
+                } catch (e) {
+                    console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
+                }
+            })
+        ) {
+            console.log(`Not initialising SSL: port: ${process.env.WEBSOCKET_PORT}, url: ${process.env.NEXT_PUBLIC_SITEURL}`);
         }
-    } else {
-        console.log(`Not initialising SSL: port: ${process.env.WEBSOCKET_PORT}, url: ${process.env.NEXT_PUBLIC_SITEURL}`);
     }
 
     // We always open an non-ssl one
@@ -493,11 +514,6 @@ async function main() {
                 },
                 {} as Record<string, Positions>
             );
-
-            // No class in this comp had any fresh positions — skip the
-            // broadcast entirely. Per-channel keepalive runs on its own
-            // timer (lastKeepAliveMsg), so socket liveness is unaffected.
-            if (!Object.keys(positions).length) continue;
 
             const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
 
@@ -560,7 +576,6 @@ async function main() {
 
             channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
-            console.log(`${channelName}: active gliders: `, [...channel.activeGliders].join(','));
 
             // Remove invalid
             const notValid = _remove(channel.clients, (client: OgnWebSocket) => {
@@ -606,16 +621,20 @@ async function main() {
             // We need to accumulate how much time we have had
             const viewTime = channel.clients.reduce((total, client) => total + (now - client.connectedAt), 0);
 
-            console.log(
-                `${channelName}: ${channel.statistics.positionsSent} positions sent, ${channel.statistics.insertedPackets} inserted, ${channel.statistics.outOfOrderPackets} ooo, ${channel.statistics.totalPackets} total`
-            );
-            console.log(
-                `${channelName}: ${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners, interacting: ${(
-                    channel.statistics.interactingListeners / channel.statistics.statsCycles
-                ).toFixed(1)}, visible: ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round(
-                    (channel.statistics.totalViewingTime + viewTime) / 60
-                )}m total viewing time, peak avg ${channel.statistics.peakListeners.toFixed(0)}`
-            );
+            const activeGliderCount = channel.activeGliders.size;
+            const hasPackets = channel.statistics.totalPackets > 0;
+            const hasListenerActivity = channel.statistics.activeListeners > 0 || channel.statistics.peakListeners > 0 || channel.statistics.totalViewingTime > 0 || viewTime > 0;
+            if (activeGliderCount > 0 || hasPackets || hasListenerActivity) {
+                const parts: string[] = [`${activeGliderCount} active gliders`, `${channel.statistics.positionsSent}/${channel.statistics.totalPackets} positions sent`];
+                if (hasListenerActivity) {
+                    parts.push(
+                        `${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
+                            channel.statistics.interactingListeners / channel.statistics.statsCycles
+                        ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing)`
+                    );
+                }
+                console.log(`${channelName}: ${parts.join(', ')}`);
+            }
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
@@ -654,7 +673,7 @@ async function main() {
             }
         }
         rebuildAprsFilter();
-    }, 60 * 1000);
+    }, 240 * 1000);
 }
 
 process.on('SIGINT', handleExit);
@@ -1017,8 +1036,16 @@ async function tickCompetitionClasses(competition: CompetitionContext): Promise<
 // before the slow tracker/task DB work runs.
 async function tickCompetitionTrackersAndTasks(competition: CompetitionContext, datecode: Datecode) {
     if (competition.state === 'stopping' || competition.state === 'stopped') return;
-    await updateTrackers(competition, datecode);
+    // Phase A: pull the pilot list, reconcile the gliders dict (no
+    // scoring/APRS IPC). updateTasks then sees fully-populated gliders and
+    // reads the correct maxHandicap; rebuildAprsFilter narrows the APRS
+    // filter to 30km + task bbox immediately. Phase C issues the per-glider
+    // setInitialTrack / trackGlider IPC, so loadHistorical fires AFTER the
+    // task is set on the scoring worker and the filter has narrowed.
+    const pilotData = await updatePilots(competition, datecode);
     await updateTasks(competition);
+    rebuildAprsFilter();
+    await updateTrackers(competition, datecode, pilotData);
     await finaliseScoreId(competition);
     if (competition.state === 'starting') competition.state = 'running';
     // Push any change picked up by this tick (new class, new pilot count,
@@ -1049,7 +1076,11 @@ function channelName(className: ClassName, datecode: Datecode): ChannelName {
 // Falls back to a 6-char truncation when no alphabetic run is present.
 function compShort(compid: string): string {
     const m = compid.match(/[a-z]+/i);
-    return (m ? m[0] : compid.substring(0, 6)).toLowerCase();
+    const base = m ? m[0] : compid;
+    // Never shorter than 8 chars (when the compid has enough material) so log
+    // identifiers stay unambiguous — a short letter run like "az" gets padded
+    // out from the raw compid (e.g. "az23region" -> "az23regi").
+    return (base.length >= 8 ? base : compid.substring(0, 8)).toLowerCase();
 }
 
 //
@@ -1076,7 +1107,6 @@ async function getDCode(competition: CompetitionContext): Promise<Datecode> {
         local10am.setDate(local10am.getDate() - 1);
     }
     const utcTime = local10am.getTime() - tzoffset * 1000;
-    console.log(`${compShort(competition.compid)} datecode at 10am local:`, utcTime, new Date(utcTime).toISOString());
     return toDateCode(new Date(utcTime));
 }
 
@@ -1088,10 +1118,8 @@ let scoreDb: ClassicLevel<Compno, string> | undefined = undefined;
 //
 // Fetch the trackers from the database
 async function updateClasses(competition: CompetitionContext, datecode: Datecode) {
-    console.log(`updateClasses(${competition.internalName}, ${datecode})`);
-
     if (!scoreDb) {
-        const path = `${process.env.DB_PATH ?? './db/'}/scores-${competition.internalName}.db`;
+        const path = `${process.env.DB_PATH ?? './db/'}/scores.db`;
         console.log(`opening scoreDB ${path}`);
         scoreDb = new ClassicLevel(path);
         await scoreDb.open().catch((e) => console.log(e));
@@ -1110,6 +1138,12 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
          WHERE cl.compid = ?`,
         [competition.compid]
     );
+
+    const afterSunset = getNow() > location.sunset;
+    const secsFromSunset = Math.abs(getNow() - location.sunset);
+    if (secsFromSunset <= 5 * 60) {
+        console.log(`${compShort(competition.compid)} updateClasses: ${afterSunset ? 'after sunset' : 'before sunset'} ${d(getNow())} > ${d(location.sunset)}`);
+    }
 
     // Make sure the class structure is correct, this won't touch existing connections
     let newchannels: Record<string, Channel> = {};
@@ -1243,6 +1277,9 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
 
         newchannels[cname] = channel;
 
+        // Sticky once true — once the day has crossed sunset stay there even if replay rewinds time
+        channel.afterSunset = channel.afterSunset || afterSunset;
+
         // Make sure we have a broadcast channel for the class
         if (!channel.broadcastChannel) {
             channel.broadcastChannel = new BroadcastChannel(cname);
@@ -1265,7 +1302,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // and added to newchannels. Only touch channels belonging to this competition.
     const stale = Object.values(channels).filter((c) => c.compid === competition.compid && !newchannels[channelName(c.className, c.datecode)]);
     if (stale.length) {
-        console.log('closing channels: ', stale.map((c) => c.displayName).join(','));
+        console.log(`${compShort(competition.compid)} closing channels: ${stale.map((c) => c.displayName).join(',')}`);
         stale.forEach((channel) => {
             channel.broadcastChannel?.close();
             channel.scoring?.shutdown();
@@ -1281,7 +1318,6 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // nearest airfield, so we listen on the per-compid channel.
     if (!competition.unknownChannel) {
         const unknownChannelName = 'Unknown_' + competition.compid;
-        console.log(`[UNKTRACE] subscribing to ${unknownChannelName} (${competition.internalName})`);
         competition.unknownChannel = new BroadcastChannel(unknownChannelName);
         competition.unknownChannel.onmessage = ((ev: MessageEvent<PositionMessage>) => identifyUnknownGlider(competition, ev.data, datecode)) as any;
     }
@@ -1291,7 +1327,11 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     for (const [cname, channel] of Object.entries(newchannels)) {
         channels[cname as ChannelName] = channel;
     }
-    console.log(`${compShort(competition.compid)} channels: ${_map(newchannels, (c) => `${c.displayName}${c.datecode}`).join(',')}`);
+    const channelsLine = _map(newchannels, (c) => `${c.displayName}${c.datecode}`).join(',');
+    if (lastChannelsLog.get(competition.compid) !== channelsLine) {
+        console.log(`${compShort(competition.compid)} channels: ${channelsLine}`);
+        lastChannelsLog.set(competition.compid, channelsLine);
+    }
 
     if (!Object.keys(newchannels).length && scoreDb) {
         console.log('closing scoredb, no channels');
@@ -1435,30 +1475,37 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
 
 // Walks the active channels for task bboxes and the currentAirfields list
 // for airfield-radius fallbacks so pre-task ground traffic is still heard.
-// Airfields whose 30km radius is already fully inside the (10km-expanded)
-// task bbox are dropped as redundant. When there is neither task nor
-// airfield we emit r/0/0/1 — a 1km null-island placeholder that matches
-// nothing, to keep the worker idle rather than open the filter up.
+// Per-airfield radius: 30 km once the comp has at least one channel with a
+// task (the task bbox covers the air work), 250 km otherwise (so we capture
+// regional traffic during startup / before the task is published).
+// Airfields whose radius is already fully inside the (10km-expanded) task
+// bbox are dropped as redundant. When there is neither task nor airfield we
+// emit r/0/0/1 — a 1km null-island placeholder that matches nothing.
+const AIRFIELD_RADIUS_PRETASK_KM = 250;
+const AIRFIELD_RADIUS_INTASK_KM = 30;
 let lastAprsFilter: string | null = null;
 function rebuildAprsFilter() {
-    const AIRFIELD_RADIUS_KM = 30;
-    const withTasks = Object.values(channels).filter((c) => c.task);
+    // A channel is "live" for APRS purposes if it can still produce traffic
+    // worth filtering for: not past sunset for the day, and not in 'home'
+    // status (everyone landed). Sunset is sticky per channel and home is
+    // a class-level compstatus value.
+    const isLive = (c: Channel) => !c.afterSunset && c.compStatus !== 'H';
+    const liveChannels = Object.values(channels).filter(isLive);
+
+    const withTasks = liveChannels.filter((c) => c.task);
+    const compsWithTask = new Set(withTasks.map((c) => c.compid));
+    const liveComps = new Set(liveChannels.map((c) => c.compid));
     const boxes = withTasks.map((c) => taskBbox(c.task!)).filter((b): b is Bbox => b !== null);
     const union = unionBboxes(boxes);
     const expanded = union ? expandBbox(union, 10) : null;
-    const clauses: string[] = [];
-    if (expanded) clauses.push(bboxToAprsArea(expanded));
-    for (const af of currentAirfields) {
-        if (expanded && bboxContainsCircle(expanded, af.lt, af.lg, AIRFIELD_RADIUS_KM)) continue;
-        clauses.push(`r/${af.lt}/${af.lg}/${AIRFIELD_RADIUS_KM}`);
-    }
-    if (clauses.length === 0) clauses.push('r/0/0/1');
-    // Sort so the memo key is stable across insertion-order churn in
-    // channels / currentAirfields (e.g. a comp removed and re-added
-    // lands at the end of the contexts map and would otherwise produce
-    // a different filter string for the same logical filter set).
-    clauses.sort();
-    const filter = clauses.join(' ');
+    const airfields = currentAirfields
+        .filter((af) => liveComps.has(af.compid))
+        .map((af) => ({
+            lt: af.lt,
+            lg: af.lg,
+            radiusKm: compsWithTask.has(af.compid) ? AIRFIELD_RADIUS_INTASK_KM : AIRFIELD_RADIUS_PRETASK_KM
+        }));
+    const filter = buildAprsFilter(expanded, airfields);
     if (filter === lastAprsFilter) return;
     lastAprsFilter = filter;
     console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
@@ -1505,19 +1552,30 @@ function forgetCompno(channel: Channel, compno: Compno) {
     channel.scoreDb?.del(compno).catch((e) => console.log(`scoreDb del ${compno}:`, e));
 }
 
-async function updateTrackers(competition: CompetitionContext, datecode: Datecode) {
+interface PilotData {
+    cTrackers: CTrackerRow[];
+    keyedDb: Record<string, CTrackerRow>;
+    // Snapshot of each glider's pre-update state, keyed by ClassName_Compno.
+    // updateTrackers consults this for change detection (startUtcChanged etc)
+    // since the live `gliders` dict has already been overwritten by updatePilots.
+    prevGliders: Map<string, {utcStart?: Epoch; handicap?: number; scoredStatus?: string; flarmIdRegex?: RegExp}>;
+    initialGliderCount: number;
+    removedGlidersCount: number;
+}
+
+// Phase A: load pilots from the DB, reconcile the in-memory `gliders` dict.
+// No scoring/APRS IPC happens here so the gliders dict is fully populated by
+// the time updateTasks reads handicaps for its maxHandicap calc.
+async function updatePilots(competition: CompetitionContext, datecode: Datecode): Promise<PilotData> {
     const {compid} = competition;
-    const location = competition.location;
-    // Now get the trackers
     // Scoped to this OGN process's compid so we don't pick up pilots from
     // other competitions sharing the same database. updateClasses applies
     // the same filter when building channels, so without this join the
     // tracker query returned pilots whose classes we never allocated
-    // channels for — resulting in "no channel" exceptions in the map()
-    // at the bottom of updateTrackers.
+    // channels for — resulting in "no channel" exceptions in updateTrackers.
     // Competition.tzoffset also needs to be pinned to this compid, otherwise
     // the scalar subquery would error on a multi-competition DB.
-    let cTrackers = await db.query<CTrackerRow[]>(escape`
+    const cTrackers = await db.query<CTrackerRow[]>(escape`
         SELECT
             p.compno,
             p.greg,
@@ -1585,26 +1643,23 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     `);
 
     const initialGliderCount = Object.keys(gliders).length;
-    let updatedGliderCount = 0;
-    let loadedGliderCount = 0;
 
-    // Filter out anything that doesn't match the input set, doesn't matter if it matches
-    // unknowns as they won't be in the trackers pick. Scope to this comp's own gliders —
-    // cTrackers only contains rows for this compid, so without the compid guard we'd
-    // treat every other comp's gliders as "removed" and wipe them from the global map,
-    // leaving the APRS worker still ticking for compnos main-thread no longer knows about.
+    // Reconcile removals. Scope to this comp's own gliders — cTrackers only
+    // contains rows for this compid, so without the compid guard we'd treat
+    // every other comp's gliders as "removed" and wipe them from the global
+    // map, leaving the APRS worker still ticking for compnos main-thread no
+    // longer knows about.
     const keyedDb = keyBy<CTrackerRow>(cTrackers, makeClassname_Compno);
     const removedGliders = _filter(gliders, (g) => {
         if (g.compid !== compid) return false;
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
-            console.log(`${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
+            console.log(`${g.displayName}:${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
             return true; // removed or it has changed id
         }
         return g.datecode != datecode;
     });
 
-    // Now unsubsribe from each of them
     removedGliders.forEach((g) => {
         console.log(`${g.displayName}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
         if (g.dbTrackerId && g.dbTrackerId != 'unknown' && g.dbTrackerId != 'blocked') {
@@ -1613,19 +1668,19 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         const channel = channels[g.channelName];
         if (channel) {
             channel.scoring?.clearGlider(g.compno);
-            channel.scoreIdUpdateRequired = true; // ensure we change id even if nothing else changes - this should remove the glider from history
+            channel.scoreIdUpdateRequired = true; // ensure we change id even if nothing else changes
             forgetCompno(channel, g.compno);
         }
     });
 
-    // Timing issue as this is potentially async
+    // Timing issue as untrackGlider is async
     removedGliders.forEach((g) => {
         delete gliders[makeClassname_Compno(g)];
     });
 
     // Catch scores left over from pilots removed while ogn.ts wasn't running:
-    // they load from leveldb into allScores at startup but were never in `gliders`,
-    // so the removedGliders filter above doesn't see them.
+    // they load from leveldb into allScores at startup but were never in
+    // `gliders`, so the removedGliders filter above doesn't see them.
     for (const channel of Object.values(channels)) {
         if (channel.compid !== compid || channel.datecode !== datecode) continue;
         for (const compno of Object.keys(channel.allScores) as Compno[]) {
@@ -1645,40 +1700,118 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         }
     }
 
-    // Now go through all the desired gliders and make sure we have linked them
+    // Snapshot the previous state of each tracked glider, then overwrite the
+    // dict with fresh DB values. updateTrackers consults the snapshot for
+    // change detection (start/handicap/status/hadTracker) since the dict has
+    // moved on.
+    const prevGliders = new Map<string, {utcStart?: Epoch; handicap?: number; scoredStatus?: string; flarmIdRegex?: RegExp}>();
+    for (const t of cTrackers) {
+        if (!t.dbTrackerId) continue;
+        const gliderKey = makeClassname_Compno(t);
+        const existing = gliders[gliderKey];
+        prevGliders.set(gliderKey, {
+            utcStart: existing?.utcStart,
+            handicap: existing?.handicap,
+            scoredStatus: existing?.scoredStatus,
+            flarmIdRegex: existing?.flarmIdRegex
+        });
+        gliders[gliderKey] = Object.assign(existing || {}, {
+            ...t,
+            compid: t.compid,
+            displayName: `${compShort(t.compid)}/${t.classname}`,
+            channelName: channelName(t.className, datecode),
+            greg: t?.greg?.replace(/[^A-Z0-9]/i, ''),
+            datecode
+        } as any as Glider);
+    }
+
+    // Identify any competition numbers that may be duplicates and mark them.
+    // This affects how we match from the DDB.
+    const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
+    duplicates.forEach((d: {compno: string; count: number; classes: string}) => {
+        d.classes.split(',').forEach((c) => {
+            if (gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)]) {
+                gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)].duplicate = 1;
+            }
+        });
+    });
+
+    return {cTrackers, keyedDb, prevGliders, initialGliderCount, removedGlidersCount: removedGliders.length};
+}
+
+// Phase C: issue per-glider IPC (setInitialTrack/rescoreGlider/finishGlider/
+// trackGlider). Runs after updateTasks + rebuildAprsFilter so that
+// setInitialTrack carries channel.task, the scoring worker has already
+// received setTask, and the APRS filter has narrowed to 30km + task bbox
+// before any trackGlider commands fire.
+async function updateTrackers(competition: CompetitionContext, datecode: Datecode, pilotData: PilotData) {
+    const location = competition.location;
+    const {cTrackers, prevGliders, initialGliderCount, removedGlidersCount} = pilotData;
+
+    let updatedGliderCount = 0;
+    let loadedGliderCount = 0;
+
     const results = await Promise.allSettled(
         cTrackers
             .filter((t) => t.dbTrackerId)
             .map(async (t) => {
                 const gliderKey = makeClassname_Compno(t);
+                const prev = prevGliders.get(gliderKey);
 
-                const startUtcChanged = gliders[gliderKey]?.utcStart != t.utcStart;
-                const handicapChanged = gliders[gliderKey]?.handicap != t.handicap;
-                const scoredStatusChanged = gliders[gliderKey]?.scoredStatus != t.scoredStatus;
-                const hadTracker = !!gliders[gliderKey]?.flarmIdRegex;
+                const startUtcChanged = prev?.utcStart != t.utcStart;
+                const handicapChanged = prev?.handicap != t.handicap;
+                const scoredStatusChanged = prev?.scoredStatus != t.scoredStatus;
+                const hadTracker = !!prev?.flarmIdRegex;
 
-                // glider key not enough to check for datecode changes (force ignore of
-                // typescript types as we don't want the rest set yet because we need
-                // to see if it's changed on existing object)
-                const glider: Glider = (gliders[gliderKey] = Object.assign(
-                    gliders[gliderKey] || {}, //
-                    {...t, compid: t.compid, displayName: `${compShort(t.compid)}/${t.classname}`, channelName: channelName(t.className, datecode), greg: t?.greg?.replace(/[^A-Z0-9]/i, ''), datecode} as any as Glider
-                ));
+                const glider = gliders[gliderKey];
                 const channel = channels[glider.channelName];
                 if (!channel) {
                     throw new Error('no channel' + glider.channelName);
                 }
                 const listening = !channel.afterSunset && t.scoredStatus == 'S';
 
+                // Blocked pilots: aprs.ts validateGlider rejects 'blocked', so
+                // they have no track points. We synthesize a Blocked PilotScore
+                // for the frontend and keep them out of the scoring worker
+                // entirely — otherwise the worker emits empty (flightStatus=0)
+                // scores that overwrite the synth, causing scoreId churn.
+                if (t.dbTrackerId === 'blocked') {
+                    // Pilot just transitioned from tracked to blocked: drop them
+                    // from the worker so it stops scoring them.
+                    if (glider.scoringConfigured && !glider.blocked) {
+                        console.log(`${channel.displayName}:${t.compno} now blocked, clearing from worker`);
+                        channel.scoring?.clearGlider(t.compno);
+                    }
+                    glider.blocked = true;
+                    glider.scoringConfigured = true; // skip setInitialTrack on subsequent ticks
+
+                    if (channel.allScores[t.compno]?.flightStatus !== PositionStatus.Blocked) {
+                        channel.allScores[t.compno] = PilotScore.fromPartial({
+                            compno: t.compno,
+                            flightStatus: PositionStatus.Blocked,
+                            t: getNow()
+                        });
+                        channel.scoreIdUpdateRequired = true;
+                    }
+                    return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: true, listening: false};
+                }
+
+                // Pilot transitioned from blocked back to tracked: force
+                // setInitialTrack to run by clearing scoringConfigured, and
+                // drop the synthesised Blocked score so the sendScore guard
+                // doesn't keep refusing to overwrite it.
+                if (glider.blocked) {
+                    console.log(`${channel.displayName}:${t.compno} no longer blocked, restoring scoring`);
+                    glider.blocked = false;
+                    glider.scoringConfigured = false;
+                    delete channel.allScores[t.compno];
+                }
+
                 if (glider.scoringConfigured) {
                     if (scoredStatusChanged && t.scoredStatus != 'S') {
-                        //                        console.log(`${glider.compno}: stopping scoring as status is ${t.scoredStatus} [channel ${glider.channelName}]`);
-                        //                        channel?.scoring?.clearGlider(glider.compno);
                         console.log(`Finishing APRS Listener for glider ${t.className}:${t.compno} => ${t.dbTrackerId}`);
                         aprsController?.finishGlider(t.compno, t.className, glider.channelName);
-                    }
-                    //
-                    else if (startUtcChanged || handicapChanged) {
+                    } else if (startUtcChanged || handicapChanged) {
                         console.log(`${glider.className}:${glider.compno}: rescoring [${channel.proposedScoreId}] => startUtcChanged:${startUtcChanged} handicapChanged:${handicapChanged}`);
                         channel?.scoring?.rescoreGlider(glider.compno, glider.handicap, glider.utcStart, channel.proposedScoreId);
                         channel.scoreIdUpdateRequired = true;
@@ -1686,21 +1819,19 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                     }
                 } else {
                     try {
-                        loadedGliderCount++; // change to flarm id
+                        loadedGliderCount++;
                         channel.scoring?.setInitialTrack(glider.compno, glider.handicap, glider.utcStart, [], channel.proposedScoreId, channel.task);
                         initialiseDeck(glider.compno, glider, randomBytes(4).readUInt32BE(0));
                         glider.webPathEndPosition = 0;
                         glider.scoringConfigured = true;
-                        channel.webPathBaseTime = 0 as Epoch; // new track inbound so reset things
+                        channel.webPathBaseTime = 0 as Epoch;
                         channel.scoreIdUpdateRequired = true;
                     } catch (e) {
                         console.error(e);
                     }
                 }
 
-                // If we have a tracker for it then we need to link that as well
                 if (!hadTracker) {
-                    // && t.dbTrackerId && t.dbTrackerId != 'unknown') {
                     aprsController?.trackGlider(t.compno, t.className, datecode, location.tzoffset, glider.channelName, t.dbTrackerId, listening);
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
@@ -1709,22 +1840,6 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                             .join('|')})`,
                         'i'
                     );
-                }
-
-                // Surface blocked pilots to the front end. They never receive
-                // points (aprs.ts validateGlider rejects 'blocked'), so the
-                // scoring pipeline won't emit a status for them — synthesize
-                // a PilotScore with flightStatus=Blocked. Overwrite any prior
-                // score (could be a stale leveldb load from before the block
-                // was applied) but only when the status isn't already Blocked
-                // so we don't churn scoreIdUpdateRequired on every cycle.
-                if (t.dbTrackerId === 'blocked' && channel.allScores[t.compno]?.flightStatus !== PositionStatus.Blocked) {
-                    channel.allScores[t.compno] = PilotScore.fromPartial({
-                        compno: t.compno,
-                        flightStatus: PositionStatus.Blocked,
-                        t: getNow()
-                    });
-                    channel.scoreIdUpdateRequired = true;
                 }
 
                 return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: glider.scoringConfigured, listening};
@@ -1739,14 +1854,17 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             return filtered.length == success.length ? 'all' : filtered.length == 0 ? 'none' : `${filtered.map((c) => c.compno).join(',')} (${filtered.length}/${results.length})`;
         };
 
-        console.log(
-            `${datecode}: startChanged: ${fr((s) => s.startUtcChanged)} handicapChanged: ${fr((s) => s.handicapChanged)} scoreStatusChanged: ${fr((s) => s.scoreStatusChanged)}, hadTracker: ${fr(
-                (s) => s.hadTracker
-            )} scoring: ${fr((s) => s.scoringConfigured)} listening: ${fr((s) => s.listening)}`
-        );
+        const anyChanged = success.some((s) => s.startUtcChanged || s.handicapChanged || s.scoredStatusChanged);
+        if (anyChanged) {
+            console.log(
+                `${compShort(competition.compid)}/${datecode}: startChanged: ${fr((s) => s.startUtcChanged)} handicapChanged: ${fr((s) => s.handicapChanged)} scoredStatusChanged: ${fr((s) => s.scoredStatusChanged)}, hadTracker: ${fr(
+                    (s) => s.hadTracker
+                )} scoring: ${fr((s) => s.scoringConfigured)} listening: ${fr((s) => s.listening)}`
+            );
+        }
 
         if (success.length != results.length) {
-            console.log('updateTrackers: exceptions thrown');
+            console.log(`${compShort(competition.compid)}/${datecode}: updateTrackers: exceptions thrown`);
             console.table(results.filter((r) => r.status != 'fulfilled'));
         }
     } catch (e) {
@@ -1754,9 +1872,15 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     }
 
     const newGlidersCount = Object.keys(gliders).length;
-    if (removedGliders.length || updatedGliderCount || newGlidersCount != initialGliderCount) {
-        console.log(`updatedTrackers: ${removedGliders.length} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
-        console.log(`${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
+    if (removedGlidersCount || updatedGliderCount || newGlidersCount != initialGliderCount) {
+        const tag = `${compShort(competition.compid)}/${datecode}`;
+        console.log(`${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
+        // Full key dump only on first emit per comp or when new gliders were loaded —
+        // routine churn (rescore/remove) doesn't need to repeat the whole roster.
+        if (loadedGliderCount > 0 || !trackersLoadedEmitted.has(competition.compid)) {
+            console.log(`${tag}: ${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
+            trackersLoadedEmitted.add(competition.compid);
+        }
     }
 
     // Refresh per-class pilotCount from the configured glider set. This is
@@ -1830,7 +1954,9 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             }).length;
             const griddedCount = scored.filter((p) => channel?.allScores[p.compno]?.flightStatus === PositionStatus.Grid).length;
             // 'finishing' = at least one still-flying, started pilot whose
-            // distanceRemaining / taskSpeed puts them within FINISHING_ETA_MINUTES of home.
+            // distanceRemaining / taskSpeed puts them within FINISHING_ETA_MINUTES of home,
+            // AND who is past the halfway point of the task — otherwise a pilot near home
+            // on the first leg (or a short out-and-back AAT sample) would flip the class to F.
             const finishingCount = scored.filter((p) => {
                 const score = channel?.allScores[p.compno];
                 if (!score) return false;
@@ -1838,8 +1964,10 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 if (fs === PositionStatus.Finished || fs === PositionStatus.Home || fs === PositionStatus.Landed) return false;
                 if ((score.utcStart ?? 0) === 0) return false;
                 const distRemaining = score.actual?.distanceRemaining ?? 0;
+                const distFlown = score.actual?.taskDistance ?? 0;
                 const speed = score.actual?.taskSpeed ?? 0;
                 if (distRemaining <= 0 || speed <= 0) return false;
+                if (distFlown <= distRemaining) return false;
                 return (distRemaining / speed) * 60 < FINISHING_ETA_MINUTES;
             }).length;
 
@@ -1910,17 +2038,6 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             }
         }
     }
-
-    // identify any competition numbers that may be duplicates and mark them.  This
-    // will affect how we match from the DDB
-    const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
-    duplicates.forEach((d: {compno: string; count: number; classes: string}) => {
-        d.classes.split(',').forEach((c) => {
-            if (gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)]) {
-                gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)].duplicate = 1;
-            }
-        });
-    });
 }
 
 async function finaliseScoreId(competition: CompetitionContext) {
@@ -1990,7 +2107,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
     const firstPointTime = Math.min(channel.earliestStart ?? channel.earliestScore ?? Infinity, now - 120);
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
-        console.log(`generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
+        console.log(`${channel.displayName}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
         const toStream = reduce(
             gliders,
             (result, glider, compno) => {
@@ -2151,8 +2268,13 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
         const pendingChannels = Object.values(channels).filter((c) => !c.liveScoreId);
         if (pendingChannels.length) {
-            console.log(`Channels not yet scored: ${pendingChannels.map((c) => `${c.className} (${c.datecode})`).join(', ')}`);
+            const pendingLine = pendingChannels.map((c) => `${c.className} (${c.datecode})`).join(', ');
+            if (lastPendingChannelsLog !== pendingLine) {
+                console.log(`Channels not yet scored: ${pendingLine}`);
+                lastPendingChannelsLog = pendingLine;
+            }
         } else {
+            lastPendingChannelsLog = null;
             console.log('all channels scored');
             if (process?.send) {
                 console.log('*** sent process ready');
@@ -2228,8 +2350,23 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             // We record this as the latest we are aware of - it's possible it will be wrong as
             // we don't differentiate between the two scoreIds but it's not a history so will
             // be fixed after a rescore. It could jump between two scores as the old scoring is terminated
-            channel.allScores[compno] = score;
-            channel.scoreDb?.put(compno, JSON.stringify(score)).catch((e) => {
+            // Carry the prior optimalGrid forward when this tick didn't emit one (the worker only
+            // populates it on leg entry) so sendAllScores / sendIdentifiersToAll / scoreDb restore
+            // still ship a grid for the pilot's current leg.
+            const prior = channel.allScores[compno];
+            // Don't let a stale worker score overwrite the synthesised Blocked
+            // entry — the worker may still have track points cached from before
+            // the pilot was blocked, and migrating them on every updateScoreId
+            // would otherwise resurrect a non-Blocked status.
+            if (prior?.flightStatus === PositionStatus.Blocked) {
+                return;
+            }
+            const stored =
+                !score.optimalGrid?.length && prior?.optimalGrid?.length && prior.currentLeg === score.currentLeg //
+                    ? {...score, optimalGrid: prior.optimalGrid}
+                    : score;
+            channel.allScores[compno] = stored;
+            channel.scoreDb?.put(compno, JSON.stringify(stored)).catch((e) => {
                 console.log(`error saving score ${compno}, ${e}`);
             });
         }
@@ -2266,8 +2403,11 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 .sort((a, b) => mcs[a] - mcs[b])
                 .filter((a) => mcs[a] > channelGliders.length / 2)?.[0];
 
-            console.log(`${channel.displayName} likely GP start ${d(Number(likely))}`);
-            console.table(mcs);
+            const buckets = Object.keys(mcs)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((t) => `${d(Number(t))}=${mcs[t]}`)
+                .join(', ');
+            console.log(`${channel.displayName} likely GP start ${likely ? d(Number(likely)) : 'none'}; buckets: ${buckets}`);
         }
     }
 
@@ -2572,10 +2712,7 @@ async function sendKeepalive(channel: Channel) {
 
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 
-    // If we have nothing then do nothing...
-    if (!channel.clients.length) {
-        console.log(`${channel.displayName}: no clients subscribed`);
-    } else {
+    if (channel.clients.length) {
         console.log(`${channel.displayName}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
     }
 
@@ -2684,7 +2821,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     if (firstSighting) {
         const ddbf = ddb[flarmId];
         const ddbInfo = ddbf ? `ddb: ${ddbf.cn || '-'}/${ddbf.registration || '-'} ${ddbf.aircraft_model || ''}` : 'not in ddb';
-        console.log(`[UNKTRACE] unknown glider ${flarmId} first seen in ${competition.compid} @ ${data.lat.toFixed(4)},${data.lng.toFixed(4)} (${ddbInfo})`);
+        console.log(`${compShort(competition.compid)}: unknown glider ${flarmId} first seen @ ${data.lat.toFixed(4)},${data.lng.toFixed(4)} (${ddbInfo})`);
     }
 
     // Do we have it in the DDB?
@@ -3051,6 +3188,15 @@ function setupOgnWebServer(req, res) {
                                 ...scores.filter((score) => score.t >= chunkStart && score.t <= chunkEnd)
                             ]
                         };
+                        // Most ticks no longer carry the optimalGrid — backfill the active one onto the
+                        // first record so the AAT heatmap renders for chunks that span no leg transition
+                        const first = history[compno].history[0];
+                        if (first && !first.optimalGrid?.length) {
+                            const carrier = scores.findLast((s) => s.t <= first.t && s.currentLeg === first.currentLeg && s.optimalGrid?.length);
+                            if (carrier) {
+                                history[compno].history[0] = {...first, optimalGrid: carrier.optimalGrid};
+                            }
+                        }
                         scoreCount += history[compno].history.length;
                         glidersWithScores += history[compno].history.length ? 1 : 0;
                     }

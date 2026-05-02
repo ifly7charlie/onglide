@@ -90,7 +90,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     // object structure and flag that it's there
     function updateScore(compno: Compno, score: PilotScore, scoreId: string) {
         const c = getScoreIdDetails(scoreId);
-        if (scoreChanged(c.allScores[compno], score)) {
+        if (scoreChanged(c.allScores[compno], score, className)) {
             const recentStart = score.utcStart && c.mostRecentStart[compno] != score.utcStart ? score.utcStart : undefined;
             c.mostRecentStart[compno] = score.utcStart as Epoch;
 
@@ -215,7 +215,7 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
     console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
 }
 
-function scoreChanged(oldScore?: PilotScore, newScore?: PilotScore): boolean {
+function scoreChanged(oldScore?: PilotScore, newScore?: PilotScore, className?: ClassName): boolean {
     //    console.log('CHANGED', oldScore, newScore);
     if (!oldScore || !newScore) {
         return !oldScore !== !newScore; // both undefined or defined
@@ -237,7 +237,7 @@ function scoreChanged(oldScore?: PilotScore, newScore?: PilotScore): boolean {
 
     // Now we know that duration or flight status must change for it to count
     if (oldScore.flightStatus != newScore.flightStatus) {
-        console.log(`${newScore.compno}: ${PositionStatusText[oldScore.flightStatus ?? 0]} => ${PositionStatusText[newScore.flightStatus ?? 0]} @ ${d(newScore.t)}`);
+        console.log(`${className ?? '?'}:${newScore.compno}: ${PositionStatusText[oldScore.flightStatus ?? 0]} => ${PositionStatusText[newScore.flightStatus ?? 0]} @ ${d(newScore.t)}`);
         return true;
     }
 

@@ -20,7 +20,7 @@ module.exports = (phase, {defaultConfig}) => {
             defaultLocale: 'en-GB',
         },
 		sassOptions: {
-			silenceDeprecations: ['import', 'global-builtin', 'color-functions', 'mixed-decls'],
+			silenceDeprecations: ['import', 'global-builtin', 'color-functions'],
 		},
     };
     return nextConfig;

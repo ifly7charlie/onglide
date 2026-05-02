@@ -41,9 +41,10 @@ interface InterimPositionMessage extends PositionMessage {
 }
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
+import {APRS_MAX_FILTER_BYTES} from '../flightprocessing/taskBbox';
 
 // APRS connection
-let connection: ISSocket & {valid: boolean; aprsc: string};
+let connection: ISSocket & {aprsc: string; lastPacketTime: number};
 const possibleServers = ['glidern1.glidernet.org', 'glidern2.glidernet.org', 'glidern3.glidernet.org', 'glidern5.glidernet.org'];
 
 // Pending filter string, set if setFilter is called before we're connected
@@ -56,18 +57,24 @@ let currentFilter: string | null = null;
 
 // True from the moment the connect handler has fired and sendLogin() has
 // been called. This gates #filter — aprsc only accepts in-band filter
-// updates after login. Note: connection.valid is set in the packet
-// handler on first received line, so we can't use it here — with a
-// minimal initial filter (r/0/0/1) no packets arrive until the filter
-// is updated, so valid stays false and applyFilter would loop deferring
-// itself forever.
+// updates after login.
 let loggedIn = false;
+
+// Liveness window: the keepalive tick declares the connection dead if no
+// APRS line — flarm packet or aprsc server line — has arrived within this
+// many ms. aprsc emits its server line every ~20s when idle, so 61s
+// tolerates two missed heartbeats before reconnecting.
+const KA_GRACE_MS = 61_000;
+
+// The currently-live keepalive timer. Tracked at module scope so a fresh
+// startAprsListener can tear down the prior generation's timer even when
+// the restart was triggered by a path that didn't capture a local handle.
+let kaInterval: NodeJS.Timeout | null = null;
 
 // Guard against concurrent restarts. The error handler and kaInterval
 // can both trip the "too unstable" threshold in the same tick; without
-// this guard they'd each spin up a fresh listener (with its own
-// interval/socket), leaking the previous one's kaInterval since each
-// closure clears only the interval it captured.
+// this guard a deferred close/error event on the old socket would race
+// with the new listener and trigger a cascading second restart.
 let restarting = false;
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
@@ -232,7 +239,6 @@ function nearestAirfield(jPoint: Coord): {field: Airfield; distance: number} | n
 function getUnknownChannel(compid: string): BroadcastChannel {
     if (!unknownChannels[compid]) {
         const name = 'Unknown_' + compid;
-        console.log(`[UNKTRACE] aprs: opening dispatch channel ${name}`);
         unknownChannels[compid] = new BroadcastChannel(name);
     }
     return unknownChannels[compid];
@@ -272,17 +278,32 @@ const allAircraft: Record<ClassName_Compno, Aircraft> = {};
 // Mapping by trackerid to aircraft record
 const trackers: Record<FlarmID, Tracker> = {};
 
-// ID for each receiver
-let highestReceiverId: number = 0;
-const receivers: Record<string, number> = {};
-
 // And for sending message onwards - all we do here is fetch and enrich
 const channels: Record<ChannelName, BroadcastChannel> = {};
+
+// Loads are debounced and scanned in one pass over the pointlog files
+// regardless of how many gliders need points loaded. Each glider gets its
+// own queue and per-glider since trim; the actual file scan uses min(since)
+// across the batch. This collapses (n_gliders × n_files × scan) — which
+// pinned the APRS worker thread at 100% on restart while scoring workers
+// sat idle — down to (n_files × scan).
+interface PendingLoad {
+    key: ClassName_Compno;
+    glider: Aircraft;
+    queue: InterimPositionMessage[];
+    flarmIds: string[];
+    since: number;
+    label: string;
+    channelName: string;
+    trackerIdForLog: any;
+}
+let pendingLoads: PendingLoad[] = [];
+let loadTimer: NodeJS.Timeout | null = null;
 
 // Our persistence
 import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
 import {competitionStartTs} from '../datecode';
-import {inorderAdditionalDelay} from '../constants';
+import {inorderAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
 
 //
 // Start a listener
@@ -435,7 +456,6 @@ if (!isMainThread && parentPort) {
     openLog().then(() => startAprsListener(<AprsListenerConfig>workerData));
 }
 
-
 //
 // Apply a new aprsc filter string in-band. aprsc supports `#filter <string>`
 // on an authenticated connection with no reconnect required.
@@ -445,21 +465,26 @@ if (!isMainThread && parentPort) {
 // re-emit it once sendLogin() completes.
 //
 function applyFilter(filter: string) {
-    if (filter.length > 900) {
-        console.log(`aprs filter length warning: ${filter.length} bytes (aprsc practical cap ~1KB)`);
+    if (filter.length > APRS_MAX_FILTER_BYTES) {
+        // The builder in taskBbox.ts is supposed to keep us under cap;
+        // an over-cap filter here means a regression. Refuse rather than
+        // send a line aprsc rejects (which would kick the connection on
+        // login or silently truncate in-band).
+        console.error(`aprs filter ${filter.length} bytes exceeds cap ${APRS_MAX_FILTER_BYTES}; dropping update: ${filter}`);
+        return;
     }
     currentFilter = filter;
     if (loggedIn && connection) {
         try {
             connection.send(`#filter ${filter}\r\n`);
-            console.log(`aprs filter updated: ${filter.length} bytes: ${filter}`);
+            console.log(`${connection.host}: aprs filter updated: ${filter.length} bytes: ${filter}`);
         } catch (e) {
             // Socket can drop between the loggedIn check and send (e.g.
             // after an error that hasn't yet flipped loggedIn). Stash
             // the filter so the next connect handler re-applies it.
             loggedIn = false;
             pendingFilter = filter;
-            console.log(`aprs filter send failed, deferring until reconnect: ${filter.length} bytes: ${filter}: ${e}`);
+            console.log(`${connection.host}: aprs filter send failed, deferring until reconnect: ${filter.length} bytes: ${filter}: ${e}`);
         }
     } else {
         pendingFilter = filter;
@@ -474,8 +499,29 @@ function startAprsListener(config: AprsListenerConfig) {
         return;
     }
 
-    // Clear the restart guard so this fresh listener can itself trigger
-    // a restart later if it becomes unstable.
+    // Tear down the prior listener generation: stop its keepalive timer
+    // and detach event handlers from its socket. Without removeAllListeners
+    // a deferred close/error event on the old socket would race in below
+    // (after restarting=false) and trigger a cascading second restart.
+    if (kaInterval) {
+        clearInterval(kaInterval);
+        kaInterval = null;
+    }
+    if (connection) {
+        try {
+            connection.removeAllListeners();
+        } catch {
+            /**/
+        }
+        try {
+            connection.disconnect();
+        } catch {
+            /**/
+        }
+    }
+
+    // With the prior generation isolated, this fresh listener can itself
+    // trigger a restart later if it becomes unstable.
     restarting = false;
 
     // Settings for connecting to the APRS server
@@ -501,6 +547,10 @@ function startAprsListener(config: AprsListenerConfig) {
     // Connect to the APRS server
     connection = new ISSocket(`onglide/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
     let parser = new aprsParser();
+    // Seed liveness: the first kaInterval fires up to a full grace period
+    // after this point. Without seeding, an early tick before any packet
+    // arrives would falsely declare the connection dead.
+    connection.lastPacketTime = Date.now();
 
     // Handle a connect
     connection.on('connect', () => {
@@ -511,13 +561,13 @@ function startAprsListener(config: AprsListenerConfig) {
         // swallow it and let the normal retry loop reconnect.
         try {
             connection.sendLogin();
-            connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+            connection.send(`# www.onglide.com airfields=${airfields?.length ?? 0}`);
         } catch (e) {
-            console.log(`aprs sendLogin failed on ${APRSSERVER}, will retry: ${e}`);
+            console.log(`${connection.host}: aprs sendLogin failed, will retry: ${e}`);
             return;
         }
         loggedIn = true;
-        console.log(`aprs connected and logged in to ${APRSSERVER}`);
+        console.log(`${APRSSERVER}: aprs connected and logged in to ${connection.host}`);
         // Re-apply the active filter: either a pending one (set while
         // disconnected) or the last applied filter (on reconnect).
         const filterToApply = pendingFilter ?? currentFilter;
@@ -529,7 +579,7 @@ function startAprsListener(config: AprsListenerConfig) {
 
     // Handle a data packet
     connection.on('packet', (data: string) => {
-        connection.valid = true;
+        connection.lastPacketTime = Date.now();
         if (data.charAt(0) != '#' && !data.startsWith('user')) {
             const packet = parser.parseaprs(data);
             if (packet && 'latitude' in packet && 'longitude' in packet && 'comment' in packet && packet.comment?.startsWith('id')) {
@@ -566,7 +616,9 @@ function startAprsListener(config: AprsListenerConfig) {
         if (unstableCount > 5) {
             console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
             restarting = true;
-            clearInterval(kaInterval);
+            // Don't clearInterval here — startAprsListener tears down the
+            // current kaInterval at its top. Clearing with our local closure
+            // ref would race if a newer generation has already taken over.
             startAprsListener(config);
             return;
         }
@@ -577,8 +629,10 @@ function startAprsListener(config: AprsListenerConfig) {
     connection.connect();
 
     // And every minute we need to confirm the APRS
-    // connection has had some traffic
-    const kaInterval = setInterval(
+    // connection has had some traffic. Assign to the module-level handle
+    // so a future startAprsListener can tear this generation down even if
+    // the trigger came from a path that didn't capture a local reference.
+    kaInterval = setInterval(
         function () {
             // Log and reset statistics
             const period = (Date.now() - statistics.periodStart) / 1000;
@@ -633,16 +687,20 @@ function startAprsListener(config: AprsListenerConfig) {
 
             try {
                 // Send APRS keep alive or we will get dumped
-                connection.send(`# onglide airfields=${airfields.map((a) => a.compid).join(',') || 'none'}`);
+                connection.send(`# www.onglide.com airfields ${airfields?.length ?? 0}`);
             } catch (x) {
-                console.log('unable to send keepalive', x);
-                connection.valid = false;
+                console.log(`${connection.host}: unable to send keepalive : ${x}`);
+                // Force the next liveness check to fail so we reconnect.
+                connection.lastPacketTime = 0;
                 loggedIn = false;
             }
 
-            // Re-establish the APRS connection if we haven't had anything in
-            if (!connection.valid && !restarting) {
-                console.log(`failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
+            // Reconnect if we've heard nothing in the grace window. aprsc
+            // sends a server line every ~20s when idle, so silence beyond
+            // KA_GRACE_MS means at least two missed heartbeats — the
+            // connection really is dead.
+            if (Date.now() - connection.lastPacketTime > KA_GRACE_MS && !restarting) {
+                console.log(`${connection.host}: failed APRS connection to ${APRSSERVER}, retrying usc:${unstableCount} `);
                 loggedIn = false;
                 connection.disconnect(() => {
                     if (restarting) {
@@ -652,7 +710,8 @@ function startAprsListener(config: AprsListenerConfig) {
                     if (unstableCount > 5) {
                         console.log(`${APRSSERVER} too unstable, restarting APRS listener with different server`);
                         restarting = true;
-                        clearInterval(kaInterval);
+                        // startAprsListener tears down the current kaInterval
+                        // at its top — don't clear here, see error handler.
                         startAprsListener(config);
                         trackMetric('aprs.restart', 1);
                         return;
@@ -660,42 +719,25 @@ function startAprsListener(config: AprsListenerConfig) {
                     connection.connect();
                 });
             }
-            connection.valid = false;
         },
         1 * 60 * 1000
     );
 }
 
-// Backfills are debounced and scanned in one pass over the pointlog files
-// regardless of how many gliders need points loaded. Each glider gets its
-// own queue and per-glider since trim; the actual file scan uses min(since)
-// across the batch. This collapses (n_gliders × n_files × scan) — which
-// pinned the APRS worker thread at 100% on restart while scoring workers
-// sat idle — down to (n_files × scan).
-interface PendingBackfill {
-    key: ClassName_Compno;
-    glider: Aircraft;
-    queue: InterimPositionMessage[];
-    flarmIds: string[];
-    since: number;
-    label: string;
-    channelName: string;
-    trackerIdForLog: any;
-}
-let pendingBackfills: PendingBackfill[] = [];
-let backfillTimer: NodeJS.Timeout | null = null;
-const BACKFILL_DEBOUNCE_MS = 250;
-
+// Track a glider: register the tracker(s) and per-glider channel synchronously
+// so live processPacket calls start landing in glider.messages immediately,
+// then fire-and-forget a per-flarmid SQL load that pushes any historical points
+// (since competition start) into the same queue with the same sorted-insert
+// path the live writer uses. One write path (live appendPoint), one read path
+// (SQL scan on track-glider) — no debounced batch, no interim queue.
 function trackGlider(task: AprsCommandTrack) {
     console.log('*** trackGlider ***', task.compno, task.trackerId);
 
     const key = makeClassname_Compno(task);
 
-    // Check if already tracking...
     const existingTracker = allAircraft[key];
     if (existingTracker) {
         console.log(`${task.compno}: closing existing tracker entry ${existingTracker.trackers.join(',')}`);
-        // remove the trackers
         existingTracker.trackers.forEach((t) => {
             const tracker = trackers[t];
             tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != existingTracker.channel || a.compno != existingTracker.compno);
@@ -704,10 +746,10 @@ function trackGlider(task: AprsCommandTrack) {
             }
         });
         clearInterval(existingTracker.interval);
-        // Drop any pending backfill for the previous glider object so it
+        // Drop any pending load for the previous glider object so it
         // doesn't dispatch points into an orphaned queue when the next
         // flush fires.
-        pendingBackfills = pendingBackfills.filter((b) => b.key !== key);
+        pendingLoads = pendingLoads.filter((b) => b.key !== key);
     }
 
     const glider: Aircraft = {
@@ -718,13 +760,11 @@ function trackGlider(task: AprsCommandTrack) {
         datecode: task.datecode,
         tzoffset: task.tzoffset,
 
-        // Not had a message
         stationary: 0,
         ground: false,
         lastTick: 0 as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
-        // Setup logging
         log:
             process.env.NEXT_PUBLIC_COMPNO && task.compno == process.env.NEXT_PUBLIC_COMPNO
                 ? function log() {
@@ -735,14 +775,11 @@ function trackGlider(task: AprsCommandTrack) {
         messages: []
     };
 
-    // Link the glider in
     allAircraft[key] = glider;
 
     const interimQueue: InterimPositionMessage[] = [];
     const since = competitionStartTs(task.tzoffset);
 
-    // Link the tracker(s) in (synchronous — no point-log scan here, that
-    // happens in the debounced batch).
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
     const dedupedIds = [...new Set(trackerList)];
     let index = 0;
@@ -762,9 +799,9 @@ function trackGlider(task: AprsCommandTrack) {
     }
 
     // Wire up the channel and the queue immediately so live packets arriving
-    // during the backfill window land on this glider (the final sort fixes
+    // during the load window land on this glider (the final sort fixes
     // any interleaving). The per-glider interval starts only after the
-    // batch flush — same ordering as the previous synchronous design.
+    // batch flush.
     if (!channels[task.channelName]) {
         channels[task.channelName] = new BroadcastChannel(task.channelName);
     }
@@ -772,13 +809,13 @@ function trackGlider(task: AprsCommandTrack) {
     glider.messages = interimQueue;
 
     if (dedupedIds.length === 0) {
-        // No backfill possible (e.g. unknown tracker) — start the interval
+        // No load possible (e.g. unknown tracker) — start the interval
         // straight away so live packets, if any ever arrive, get processed.
         startGliderInterval(glider, task.className, task.compno, task.trackerId, task.channelName);
         return;
     }
 
-    pendingBackfills.push({
+    pendingLoads.push({
         key,
         glider,
         queue: interimQueue,
@@ -788,8 +825,8 @@ function trackGlider(task: AprsCommandTrack) {
         channelName: task.channelName,
         trackerIdForLog: task.trackerId
     });
-    if (backfillTimer) clearTimeout(backfillTimer);
-    backfillTimer = setTimeout(flushBackfills, BACKFILL_DEBOUNCE_MS);
+    if (loadTimer) clearTimeout(loadTimer);
+    loadTimer = setTimeout(flushLoads, PENDING_LOAD_DEBOUNCE_MS);
 }
 
 function startGliderInterval(glider: Aircraft, className: ClassName, compno: Compno, trackerId: any, channelName: string) {
@@ -800,26 +837,26 @@ function startGliderInterval(glider: Aircraft, className: ClassName, compno: Com
     }, Math.random() * 1000);
 }
 
-interface BackfillTarget {
+interface LoadTarget {
     queue: InterimPositionMessage[];
     compno: Compno;
     since: number;
 }
 
-async function flushBackfills() {
-    backfillTimer = null;
-    const batch = pendingBackfills;
-    pendingBackfills = [];
+async function flushLoads() {
+    loadTimer = null;
+    const batch = pendingLoads;
+    pendingLoads = [];
     if (batch.length === 0) return;
 
     // Build flarmId → [target] map. One flarm ID can map to multiple
     // gliders if two pilots share a tracker (rare but supported by the
     // existing trackers[id].aircraftList structure).
-    const idToTargets = new Map<string, BackfillTarget[]>();
+    const idToTargets = new Map<string, LoadTarget[]>();
     let minSince = Infinity;
     for (const b of batch) {
         if (b.since < minSince) minSince = b.since;
-        const target: BackfillTarget = {queue: b.queue, compno: b.glider.compno, since: b.since};
+        const target: LoadTarget = {queue: b.queue, compno: b.glider.compno, since: b.since};
         for (const id of b.flarmIds) {
             const existing = idToTargets.get(id);
             if (existing) existing.push(target);
@@ -851,7 +888,7 @@ async function flushBackfills() {
             }
         }
     } catch (err) {
-        console.error(`flushBackfills: ${err}`);
+        console.error(`flushLoads: ${err}`);
     }
 
     // Sort each glider's queue once and start its interval.
@@ -862,7 +899,7 @@ async function flushBackfills() {
         }
         startGliderInterval(b.glider, b.glider.className, b.glider.compno, b.trackerIdForLog, b.channelName);
     }
-    console.log(`flushBackfills: ${batch.length} gliders, ${allIds.size} flarmIds, ${yielded} read / ${dispatched} dispatched, ${Date.now() - startMs}ms`);
+    console.log(`flushLoads: ${batch.length} gliders, ${allIds.size} flarmIds, ${yielded} read / ${dispatched} dispatched, ${Date.now() - startMs}ms`);
 }
 
 function finishGlider(task: AprsCommandFinish) {
@@ -912,13 +949,8 @@ function untrackGlider(task: AprsCommandUntrack) {
     console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers}`);
 }
 
-function sortKey(sender: string, tracker: Tracker | undefined): number {
-    const rid = (receivers[sender] ??= highestReceiverId++);
-    return (tracker?.index ?? 0) << (16 + (rid & 0xffff));
-}
-
 function messageSortKey(m: InterimPositionMessage): number {
-    return m.t; //sortKey(m.o, trackers[m.f]);
+    return m.t;
 }
 
 function messageSortKeyCompare(a: InterimPositionMessage, b: InterimPositionMessage): number {

@@ -46,8 +46,8 @@ function DeckGLOverlay(
 }
 
 // For displaying rain radar
-import {AttributionControl} from 'react-map-gl/maplibre';
 import {RadarOverlay} from './rainradar';
+import {AttributionInfo} from './attributionInfo';
 
 import {MeasureLayers, useMeasure} from './measure';
 
@@ -346,6 +346,48 @@ export default function MApp(props: {
         }
     }, [options.zoomTask, taskGeoJSONtp, vc, mapRef.current]);
 
+    // ===== ZOOM TO TURNPOINT EFFECT =====
+    // Triggered when the user clicks a row in the task leg list. We build a
+    // bbox around the sector (radius in km converted to degrees, accounting
+    // for latitude on the longitude axis) and let cameraForBounds pick a
+    // zoom — that way a 20km AAT area frames just like a 0.5km cylinder.
+    useEffect(() => {
+        if (!options.zoomTurnpoint || !mapRef?.current) return;
+        const {lat, lng, radius} = options.zoomTurnpoint;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            setOptions({...options, zoomTurnpoint: null});
+            return;
+        }
+        try {
+            const map = mapRef.current.getMap();
+            const r = Math.max(0.3, radius || 0.3); // km — minimum so a tiny line still has a frame
+            const dLat = r / 111;
+            const dLng = r / (111 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+            const padding = {top: 40, bottom: 40, left: 40, right: 40};
+            const camera = map.cameraForBounds(
+                [
+                    [lng - dLng, lat - dLat],
+                    [lng + dLng, lat + dLat]
+                ],
+                {padding, bearing: 0}
+            );
+            if (follow) setFollow(false);
+            setOptions({...options, zoomTurnpoint: null});
+            if (camera) {
+                map.easeTo({
+                    center: camera.center,
+                    zoom: camera.zoom,
+                    pitch: map2d ? 0 : 60,
+                    bearing: 0,
+                    duration: 800
+                });
+            }
+        } catch (e) {
+            console.error(e);
+            setOptions({...options, zoomTurnpoint: null});
+        }
+    }, [options.zoomTurnpoint, mapRef.current]);
+
     // ====== LOCK NORTH UP ===========
     // If we are north up then reset north on bearing change.
     // Debounced + larger dead-zone so MapLibre's 3D terrain-aware pan, which can
@@ -365,13 +407,14 @@ export default function MApp(props: {
     }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving]);
 
     // Runtime-generated icon images for map symbols (track arrows, peaks,
-    // airports). Registered once per map instance; MapLibre preserves them
-    // across style mutations unless you call setStyle, which we don't.
-    useEffect(() => {
-        const map = mapRef?.current?.getMap();
+    // airports). Registered via the Map's onLoad below — running it via a
+    // post-paint useEffect was too late and produced "Image 'airport' could
+    // not be loaded" warnings as the airport symbol layer painted first.
+    const onMapLoad = useCallback((e: any) => {
+        const map = e.target;
         if (!map) return;
         registerMapIcons(map);
-    }, [mapRef.current]);
+    }, []);
 
     //
     // Colour and style the task based on the selected pilot and their destination
@@ -403,16 +446,7 @@ export default function MApp(props: {
         [vc, props.options.units, props.tz, mapRef?.current, pilotScores, t, lang]
     );
 
-    const attribution = useMemo(
-        () => (
-            <AttributionControl //
-                key={radarOverlay.key + (props.status?.replaceAll(/[^0-9]/g, '') || 'no')}
-                customAttribution={[radarOverlay.attribution, props.status].filter(Boolean).join(' | ')}
-                style={attributionStyle}
-            />
-        ),
-        [radarOverlay.key, props.status]
-    );
+    const attribution = useMemo(() => <AttributionInfo customParts={[radarOverlay.attribution, props.status]} />, [radarOverlay.key, radarOverlay.attribution, props.status]);
 
     // Initial options depending on if we are on 2d or 3d
     const viewOptions = map2d ? {minPitch: 0, maxPitch: 80, pitch: 0} : {minPitch: 0, maxPitch: 80, pitch: 70};
@@ -463,6 +497,24 @@ export default function MApp(props: {
         }
     }, [setFollow, follow]);
 
+    // Competition site coordinates for the X marker. CompetitionSummary
+    // exposes lat/lng at the top level (see summaryToCompetition / protobuf),
+    // not nested under .competition. (0,0) is the protobuf default for
+    // unset, so treat that as no-location too.
+    const homeLat = props.comp?.lat;
+    const homeLng = props.comp?.lng;
+    const hasHome = typeof homeLat === 'number' && typeof homeLng === 'number' && Number.isFinite(homeLat) && Number.isFinite(homeLng) && (homeLat !== 0 || homeLng !== 0);
+    useEffect(() => {
+        if (props.comp && !hasHome) {
+            console.warn('[homeLocation] competition has no usable lat/lng — X marker hidden', {
+                name: props.comp?.name,
+                compid: props.comp?.compid,
+                lat: homeLat,
+                lng: homeLng
+            });
+        }
+    }, [props.comp, hasHome, homeLat, homeLng]);
+
     // Debounce the selected score for Mapbox source updates to avoid worker queue buildup
     // when scrubbing the replay slider. Position/scores update instantly via Redux; only
     // the GeoJSON line layers are debounced.
@@ -499,13 +551,14 @@ export default function MApp(props: {
     // airfield itself is visible on the basemap, so the marker only adds
     // value when the user has zoomed in to look at the site.
     const HOME_MARKER_MIN_ZOOM = 8;
-    const homeMarker = (props.viewport?.zoom ?? 0) >= HOME_MARKER_MIN_ZOOM ? homeLocationLayer(props.comp?.competition?.lt, props.comp?.competition?.lg) : null;
+    const homeMarker = (props.viewport?.zoom ?? 0) >= HOME_MARKER_MIN_ZOOM && hasHome ? homeLocationLayer(homeLat, homeLng) : null;
 
     return (
         <ErrorBoundary fallback={<p style={{marginTop: 100}}>Please reload me!</p>}>
             <Map //
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}
+                onLoad={onMapLoad}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
                 mapStyle={ONGLIDE_MAP_STYLE}
                 ref={mapRef}
@@ -587,8 +640,3 @@ export default function MApp(props: {
     );
 }
 
-const attributionStyle = {
-    right: 0,
-    bottom: 0,
-    fontSize: '13px'
-};

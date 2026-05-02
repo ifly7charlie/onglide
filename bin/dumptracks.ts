@@ -26,9 +26,7 @@ async function run() {
             newest: number;
         }
         const stats = new Map<string, Stat>();
-        const iter = args.tracker
-            ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until})
-            : scanAll({since: args.since, until: args.until});
+        const iter = args.tracker ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until}) : scanAll({since: args.since, until: args.until});
 
         for await (const msg of iter) {
             const id = (msg.f ?? '??????') as string;
@@ -46,18 +44,18 @@ async function run() {
             console.log('no tracker data in this range');
         } else {
             const sorted = [...stats.values()].sort((a, b) => (a.flarmId < b.flarmId ? -1 : 1));
-            console.log('flarm   oldest                   newest                   count');
+            console.log('flarm   oldest                   newest                   count       rate');
             for (const s of sorted) {
-                console.log(`${s.flarmId}  ${d(s.oldest as Epoch).padEnd(22)}  ${d(s.newest as Epoch).padEnd(22)}  ${String(s.count).padStart(6)}`);
+                const span = s.newest - s.oldest;
+                const rate = span > 0 ? `${(s.count / span).toFixed(2)} msg/s` : '-';
+                console.log(`${s.flarmId}  ${d(s.oldest as Epoch).padEnd(22)}  ${d(s.newest as Epoch).padEnd(22)}  ${String(s.count).padStart(6)}  ${rate.padStart(9)}`);
             }
         }
     } else {
-        const iter = args.tracker
-            ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until})
-            : scanAll({since: args.since, until: args.until});
+        const iter = args.tracker ? loadPoints({flarmId: args.tracker.toUpperCase() as FlarmID, since: args.since, until: args.until}) : scanAll({since: args.since, until: args.until});
         for await (const msg of iter) {
             const m = msg as any;
-            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.g}m  ${m.c ?? '??????'} (${m.f})`);
+            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.g}m  ${m.c ?? '??????'} (${m.f})  ${m.lat},${m.lng}`);
         }
     }
 
