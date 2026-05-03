@@ -5,7 +5,10 @@
 // flown task's start and finish lines and report flarm IDs whose crossing
 // times match a pilot's pilotresult.start/finish to within `--tolerance`.
 //
-// Read-only: never writes to the DB.
+// After reporting, prompts the operator to associate / disassociate
+// trackers for any pilot whose assigned tracker is out of tolerance, or
+// who has an unambiguous within-tolerance alternative — same y/n/a/q
+// flow as bin/matchtrackers. Pass `--dry-run` to skip prompts entirely.
 //
 
 import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/types';
@@ -13,6 +16,7 @@ import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch} from '../lib/scoring/shared/findtrackers';
 
+import prompts from 'prompts';
 import escape from 'sql-template-strings';
 import Mysql from 'serverless-mysql';
 import * as dotenv from 'dotenv';
@@ -24,7 +28,7 @@ dotenv.config({path: '.env.local'});
 
 const argv = yargs(hideBin(process.argv))
     .scriptName('findtrackers')
-    .usage('$0 [--compid <id> | --all] [--datecode <dc>] [--class <cls>] [--tolerance <sec>]')
+    .usage('$0 [--compid <id> | --all] [--datecode <dc>] [--class <cls>] [--tolerance <sec>] [--dry-run | --yes]')
     .option('compid', {type: 'string', describe: 'single competition id'})
     .option('all', {type: 'boolean', describe: 'every active competition (start ≤ today ≤ end)'})
     .option('datecode', {type: 'string', describe: 'limit to one datecode'})
@@ -34,6 +38,8 @@ const argv = yargs(hideBin(process.argv))
     .option('reorder-window', {type: 'number', describe: 'override per-flarmid reorder-buffer / stale-drop window (s) (default 20)'})
     .option('debug-flarmid', {type: 'string', array: true, default: [], describe: 'trace one or more flarmids through the scan (repeatable)'})
     .option('debug-compno', {type: 'string', array: true, default: [], describe: 'trace the assigned trackerid(s) of one or more compnos (repeatable)'})
+    .option('dry-run', {type: 'boolean', default: false, describe: 'report only — never prompt or write to the DB'})
+    .option('yes', {type: 'boolean', default: false, describe: 'apply every proposed change without prompting'})
     .check((a) => {
         if (!a.compid && !a.all) throw new Error('specify --compid <id> or --all');
         if (a.compid && a.all) throw new Error('--compid and --all are mutually exclusive');
@@ -100,9 +106,15 @@ async function main() {
         process.exit(1);
     }
 
+    const interactive = !argv['dry-run'] && !argv.yes;
+    if (argv['dry-run']) console.log('(--dry-run: no prompts, no DB writes)');
+    else if (argv.yes) console.log('(--yes: every proposed change will be applied without prompting)');
+
     let totalPilots = 0,
         totalMatched = 0,
-        totalAmbiguous = 0;
+        totalAmbiguous = 0,
+        totalProposed = 0,
+        totalApplied = 0;
 
     for (const job of jobs) {
         const {compid, className, datecode} = job;
@@ -150,9 +162,23 @@ async function main() {
         totalMatched += matchedCompnos.size;
         totalAmbiguous += ambiguousCompnos.size;
         console.log(`  Summary: ${results.length} pilots, ${matchedCompnos.size} matched, ${ambiguousCompnos.size} ambiguous`);
+
+        if (argv['dry-run']) continue;
+
+        const proposals = computeProposals(matches);
+        if (!proposals.length) continue;
+        totalProposed += proposals.length;
+
+        const accepted = interactive //
+            ? await reviewProposals(proposals)
+            : proposals;
+        if (!accepted.length) continue;
+
+        const applied = await applyProposals(className, accepted);
+        totalApplied += applied;
     }
 
-    console.log(`\n=== Total: ${totalPilots} pilots, ${totalMatched} matched, ${totalAmbiguous} ambiguous ===`);
+    console.log(`\n=== Total: ${totalPilots} pilots, ${totalMatched} matched, ${totalAmbiguous} ambiguous, ${totalProposed} change${totalProposed === 1 ? '' : 's'} proposed, ${totalApplied} applied ===`);
     await mysql.end();
     process.exit(0);
 }
@@ -359,4 +385,158 @@ function bestConfidence(rows: TrackerMatch[]): number {
     let best = Infinity;
     for (const m of rows) if (m.confidence !== null && m.confidence < best) best = m.confidence;
     return best;
+}
+
+interface Proposal {
+    compno: Compno;
+    name: string;
+    currentTrackerid: string;
+    newTrackerid: string;
+    addedIds: FlarmID[];
+    removedIds: FlarmID[];
+    reason: string;
+}
+
+function parseCurrentIds(raw: string): FlarmID[] {
+    const out: FlarmID[] = [];
+    if (!raw) return out;
+    for (const part of raw.split(',')) {
+        const t = part.trim();
+        if (!t) continue;
+        const lc = t.toLowerCase();
+        if (lc === 'unknown' || lc === 'blocked') continue;
+        out.push(t as FlarmID);
+    }
+    return out;
+}
+
+function computeProposals(matches: TrackerMatch[]): Proposal[] {
+    const byPilot = new Map<Compno, TrackerMatch[]>();
+    for (const m of matches) {
+        const arr = byPilot.get(m.compno) ?? [];
+        arr.push(m);
+        byPilot.set(m.compno, arr);
+    }
+
+    const out: Proposal[] = [];
+    for (const [compno, rows] of byPilot) {
+        // Already-good assignment: leave alone even if alternatives exist.
+        if (rows.some((m) => m.assigned && m.withinTolerance)) continue;
+
+        const altMatches = rows.filter((m) => !m.assigned && m.withinTolerance && !m.ambiguous);
+        const assignedBad = rows.filter((m) => m.assigned && !m.withinTolerance);
+        if (!altMatches.length && !assignedBad.length) continue;
+        // Multiple non-assigned candidates within tolerance — can't pick one safely.
+        if (altMatches.length > 1) continue;
+
+        const first = rows[0];
+        const currentIds = parseCurrentIds(first.currentTrackerid);
+        const removeIds = new Set<FlarmID>(assignedBad.map((m) => m.flarmid));
+        const addId: FlarmID | null = altMatches[0]?.flarmid ?? null;
+
+        const newIds: FlarmID[] = [];
+        for (const id of currentIds) if (!removeIds.has(id)) newIds.push(id);
+        if (addId && !newIds.includes(addId)) newIds.push(addId);
+
+        const newTrackerid = newIds.length ? newIds.join(',') : 'unknown';
+        if (newTrackerid === first.currentTrackerid) continue;
+
+        const reason = addId //
+            ? assignedBad.length
+                ? 'switch to within-tolerance alternative'
+                : 'associate within-tolerance match'
+            : 'assigned tracker outside tolerance, no alternative match';
+
+        out.push({
+            compno,
+            name: first.name,
+            currentTrackerid: first.currentTrackerid,
+            newTrackerid,
+            addedIds: addId ? [addId] : [],
+            removedIds: Array.from(removeIds),
+            reason
+        });
+    }
+    out.sort((a, b) => a.compno.localeCompare(b.compno));
+    return out;
+}
+
+function summariseProposal(p: Proposal): string {
+    const cur = p.currentTrackerid || '(none)';
+    const parts = [`${p.compno} ${p.name}`.trim(), `trackerid: ${cur} → ${p.newTrackerid}`];
+    if (p.addedIds.length) parts.push(`+${p.addedIds.join(',')}`);
+    if (p.removedIds.length) parts.push(`−${p.removedIds.join(',')}`);
+    parts.push(`(${p.reason})`);
+    return parts.join('  |  ');
+}
+
+async function reviewProposals(proposals: Proposal[]): Promise<Proposal[]> {
+    if (!proposals.length) return [];
+    console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
+
+    const accepted: Proposal[] = [];
+    let acceptAll = false;
+    for (let i = 0; i < proposals.length; i++) {
+        const p = proposals[i];
+        console.log(`\n  [${i + 1}/${proposals.length}] ${summariseProposal(p)}`);
+
+        if (acceptAll) {
+            accepted.push(p);
+            console.log('    → accepted (all)');
+            continue;
+        }
+
+        const {choice} = await prompts(
+            {
+                type: 'select',
+                name: 'choice',
+                message: 'Apply?',
+                choices: [
+                    {title: 'yes — apply this', value: 'y'},
+                    {title: 'no — skip this', value: 'n'},
+                    {title: 'accept all remaining', value: 'a'},
+                    {title: 'quit review', value: 'q'}
+                ],
+                initial: 0
+            },
+            {
+                onCancel: () => {
+                    console.log('  *** cancelled');
+                    process.exit(0);
+                }
+            }
+        );
+
+        if (choice === 'q') break;
+        if (choice === 'a') {
+            acceptAll = true;
+            accepted.push(p);
+        } else if (choice === 'y') {
+            accepted.push(p);
+        }
+    }
+    return accepted;
+}
+
+async function applyProposals(className: ClassName, proposals: Proposal[]): Promise<number> {
+    if (!proposals.length) return 0;
+    const t = mysql.transaction();
+    for (const p of proposals) {
+        t.query(escape`
+            INSERT IGNORE INTO tracker (class, compno, type, trackerid)
+            VALUES (${className}, ${p.compno}, 'flarm', 'unknown')
+        `);
+        t.query(escape`
+            UPDATE tracker
+               SET trackerid = ${p.newTrackerid}
+             WHERE class = ${className} AND compno = ${p.compno}
+        `);
+        t.query(escape`
+            INSERT INTO trackerhistory (compno, changed, flarmid, method)
+            VALUES (${p.compno}, now(), ${p.newTrackerid}, 'logmatch')
+        `);
+    }
+    await t.commit();
+    console.log(`  Wrote ${proposals.length} change${proposals.length === 1 ? '' : 's'}.`);
+    return proposals.length;
 }
