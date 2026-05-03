@@ -626,9 +626,13 @@ function startAprsListener(config: AprsListenerConfig) {
     const APRSSERVER = (statistics.server = process.env.APRS_SERVER || possibleServers[Math.trunc(possibleServers.length * Math.random())]);
     const PORTNUMBER = 14580;
 
-    // Seed the airfield list. The main thread follows up with setAirfields
-    // whenever the set of active competitions changes.
-    setAirfields(config.airfields);
+    // No airfield seed: airfields[] starts empty at module init and is
+    // owned by main via setAirfields/updateAirfieldBboxes IPC. Re-seeding
+    // here on a restart (config.airfields is the original `[]` workerData)
+    // would evict everything main has already pushed and silently strand
+    // every comp until the next reconcileContexts tick — which manifested
+    // as boot-time `trackGlider refused` for any comp registered before
+    // an early APRS reconnect.
 
     // Initial FILTER: minimise bandwidth until the main thread pushes the
     // real filter after updateTasks. aprsc requires a filter in the login
