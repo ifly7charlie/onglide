@@ -1521,11 +1521,14 @@ function rebuildAprsFilter() {
     const filter = buildAprsFilter(expanded, airfields);
 
     // Push per-comp bboxes to the worker so processPacket can prefilter and
-    // disambiguate multi-comp shared FLARM IDs. setAirfields mutates Airfield
-    // records in place, so this lands without disturbing existing channels
-    // even if `filter` itself didn't change.
-    aprsController?.setAirfields(
-        currentAirfields.filter((af) => liveComps.has(af.compid)).map((af) => ({...af, bbox: perCompExpanded.get(af.compid)}))
+    // disambiguate multi-comp shared FLARM IDs. updateAirfieldBboxes only
+    // touches the bbox field on existing airfield records — membership is
+    // owned by setAirfields (called from reconcileContexts). Sending only
+    // the live subset is fine: non-live comps keep whatever bbox they had,
+    // and the aprsc filter at line 1521 already narrows packet reception to
+    // the live set.
+    aprsController?.updateAirfieldBboxes(
+        currentAirfields.filter((af) => liveComps.has(af.compid)).map((af) => ({compid: af.compid, bbox: perCompExpanded.get(af.compid)}))
     );
 
     if (filter === lastAprsFilter) return;

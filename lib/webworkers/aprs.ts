@@ -91,10 +91,11 @@ export enum AprsCommandEnum {
     finish,
     untrack,
     setFilter,
-    setAirfields
+    setAirfields,
+    updateAirfieldBboxes
 }
 
-export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandSetFilter | AprsCommandSetAirfields;
+export type AprsCommand = AprsCommandShutdown | AprsCommandTrack | AprsCommandUntrack | AprsCommandFinish | AprsCommandSetFilter | AprsCommandSetAirfields | AprsCommandUpdateAirfieldBboxes;
 
 // Request a glider to be tracked
 export interface AprsCommandTrack {
@@ -141,15 +142,25 @@ export interface AirfieldSpec {
     compid: string;
     lt: number;
     lg: number;
-    // Expanded task bbox for the comp at this airfield. Absent when the
-    // comp has no task yet (pre-task) or when the worker should fall back
-    // to broadcasting to every aircraft entry.
-    bbox?: Bbox;
 }
 
 export interface AprsCommandSetAirfields {
     action: AprsCommandEnum.setAirfields;
     airfields: AirfieldSpec[];
+}
+
+// Bbox upsert spec for updateAirfieldBboxes. The spec is keyed by compid; an
+// absent bbox clears any previous bbox for that comp (returning it to
+// pre-task / broadcast-fallback semantics). Comps not in the spec list keep
+// whatever bbox they had — this command never touches membership.
+export interface AirfieldBboxSpec {
+    compid: string;
+    bbox?: Bbox;
+}
+
+export interface AprsCommandUpdateAirfieldBboxes {
+    action: AprsCommandEnum.updateAirfieldBboxes;
+    airfields: AirfieldBboxSpec[];
 }
 
 export interface AprsListenerConfig {
@@ -259,7 +270,9 @@ function getUnknownChannel(compid: string): BroadcastChannel {
     return unknownChannels[compid];
 }
 
-function setAirfields(specs: AirfieldSpec[]) {
+// Exported for unit testing — these mutate worker-process state, so production
+// callers always go through the parentPort message dispatch.
+export function setAirfields(specs: AirfieldSpec[]) {
     const keep = new Set(specs.map((s) => s.compid));
 
     // Drop airfields that are no longer configured, closing their unknown channel
@@ -272,20 +285,52 @@ function setAirfields(specs: AirfieldSpec[]) {
         }
     }
 
-    // Add or update each spec
+    // Add or update each spec. Bbox is intentionally untouched here —
+    // updateAirfieldBboxes is the sole writer for that field, so this
+    // canonical-membership sync (driven by reconcileContexts in main) doesn't
+    // clobber a bbox that rebuildAprsFilter has already pushed.
     for (const s of specs) {
         const existing = airfields.find((a) => a.compid === s.compid);
         const p = point([s.lt, s.lg]);
         if (existing) {
             existing.point = p;
-            existing.bbox = s.bbox;
         } else {
-            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl, bbox: s.bbox};
+            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl};
             airfields.push(a);
             getElevationOffset(s.lt, s.lg, (e: any) => (a.elevation = e));
         }
     }
     console.log(`aprs airfields: ${airfields.map((a) => `${a.compid}${a.bbox ? '*' : ''}`).join(',') || 'none'}`);
+}
+
+// Bbox-only upsert. Membership is owned by setAirfields; this path looks up
+// each compid in the existing airfield list and writes its bbox in place.
+// Unknown compids are skipped with a warning — the wiring expectation is
+// that setAirfields registers every comp before rebuildAprsFilter ever runs.
+// Logs only when at least one bbox actually changed, to keep steady-state
+// quiet (rebuildAprsFilter fires on every tick).
+export function updateAirfieldBboxes(specs: AirfieldBboxSpec[]) {
+    const changed: string[] = [];
+    for (const s of specs) {
+        const existing = airfields.find((a) => a.compid === s.compid);
+        if (!existing) {
+            console.log(`aprs updateAirfieldBboxes: skipping unknown compid ${s.compid}`);
+            continue;
+        }
+        if (!bboxesEqual(existing.bbox, s.bbox)) {
+            existing.bbox = s.bbox;
+            changed.push(s.compid);
+        }
+    }
+    if (changed.length) {
+        console.log(`aprs bboxes updated: ${changed.join(',')}`);
+    }
+}
+
+function bboxesEqual(a: Bbox | undefined, b: Bbox | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
 }
 
 // Look up an Airfield by compid. Returns undefined if no setAirfields call
@@ -435,6 +480,13 @@ export class AprsController {
         };
         this.worker.postMessage?.(command);
     }
+    updateAirfieldBboxes(airfields: AirfieldBboxSpec[]) {
+        const command: AprsCommandUpdateAirfieldBboxes = {
+            action: AprsCommandEnum.updateAirfieldBboxes,
+            airfields
+        };
+        this.worker.postMessage?.(command);
+    }
     // Send the shutdown command to the worker and return a promise that
     // resolves when the worker process has actually exited, or after a
     // 5-second timeout (so teardown doesn't hang if the worker is stuck).
@@ -491,6 +543,9 @@ if (!isMainThread && parentPort) {
                 break;
             case AprsCommandEnum.setAirfields:
                 setAirfields(task.airfields);
+                break;
+            case AprsCommandEnum.updateAirfieldBboxes:
+                updateAirfieldBboxes(task.airfields);
                 break;
         }
     });
