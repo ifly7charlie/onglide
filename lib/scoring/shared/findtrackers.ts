@@ -14,6 +14,7 @@
 import type {Task, Compno, Epoch, BasePositionMessage, AltitudeAMSL, FlarmID} from '../../types';
 import {PreparedTurnpoint} from '../../flightprocessing/preparedTurnpoint';
 import {loadPointsForIds} from '../../webworkers/pointlog';
+import {Bbox, taskBbox, expandBbox, pointInBbox} from '../../flightprocessing/taskBbox';
 
 import {MAX_FLARM_DIST_KM, DEFAULT_MAX_GAP_SEC, DEFAULT_REORDER_WINDOW_SEC, DEFAULT_TOLERANCE_SEC} from '../../constants';
 
@@ -87,6 +88,14 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     const startTP = task.preparedLegs[0];
     const finishTP = task.preparedLegs[task.preparedLegs.length - 1];
 
+    // Same expansion margin we use for the live aprsc filter and the worker
+    // prefilter — keeps log points from neighbouring comps out of this scan
+    // entirely, so they don't clutter the per-flarmid `state` map or the
+    // pair-drain trace. taskBbox unions every leg's sector so AAT-style
+    // tasks aren't clipped. Null bbox (degenerate task) → no filter.
+    const rawBbox = taskBbox(task);
+    const expandedBbox: Bbox | null = rawBbox ? expandBbox(rawBbox, 10) : null;
+
     const slack = Math.max(60, tolerance + 5);
     let minStart = Infinity,
         maxStart = -Infinity,
@@ -115,11 +124,11 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     const startWatch: WatchTime[] = results.map((r) => ({t: r.startUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
     const finishWatch: WatchTime[] = results.map((r) => ({t: r.finishUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
 
-    log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots, maxGap=${maxGapSec}s, reorderWindow=${reorderWindowSec}s`);
-    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch, maxGapSec, reorderWindowSec);
+    log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots, maxGap=${maxGapSec}s, reorderWindow=${reorderWindowSec}s${expandedBbox ? ', bbox prefilter on' : ''}`);
+    const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch, maxGapSec, reorderWindowSec, expandedBbox);
 
     log(`finish scan: window ${Math.round((maxFinish - minFinish) / 60 + (2 * slack) / 60)} min`);
-    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids, finishWatch, maxGapSec, reorderWindowSec);
+    const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids, finishWatch, maxGapSec, reorderWindowSec, expandedBbox);
 
     return matchCrossings(results, startScan, finishScan, tolerance);
 }
@@ -157,13 +166,15 @@ async function scanLine(
     debugFlarmids: Set<FlarmID>,
     debugWatchTimes: WatchTime[],
     maxGapSec: number,
-    reorderWindowSec: number
+    reorderWindowSec: number,
+    bbox: Bbox | null
 ): Promise<ScanResult> {
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
     const state = new Map<FlarmID, FlarmState>();
     const crossings: CrossingMap = new Map();
     let lateDropped = 0;
     let staleDropped = 0;
+    let bboxDropped = 0;
 
     // Per-debug-flarmid stats and trace storage. We aggregate inline and
     // only print at end-of-scan to keep the trace one tidy block per id.
@@ -265,6 +276,17 @@ async function scanLine(
             if (d) d.stale++;
             continue;
         }
+        // Per-comp bbox prefilter. Drops points from flarmids that happen to
+        // be in the time window but flying a different comp's task in the
+        // same region. Applied before any per-flarmid state is created so
+        // a flarmid that's entirely outside the bbox never enters `state`.
+        // The 10 km expansion is the same margin used by the live aprsc
+        // filter and the worker prefilter — wide enough that genuine
+        // approach paths from outside the strict bbox still survive.
+        if (bbox && !pointInBbox(bbox, msg.lat, msg.lng)) {
+            bboxDropped++;
+            continue;
+        }
         const pos: BasePositionMessage = {lat: msg.lat, lng: msg.lng, a: msg.a, t: msg.t};
         let st = state.get(f);
         if (!st) {
@@ -335,7 +357,7 @@ async function scanLine(
     }
 
     log(
-        `  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`
+        `  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${bboxDropped} out-of-bbox, ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`
     );
 
     // Emit the per-debug-flarmid trace as a tidy block per id per scan.
