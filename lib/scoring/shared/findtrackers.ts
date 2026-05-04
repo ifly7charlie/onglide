@@ -40,7 +40,16 @@ export interface TrackerMatch {
     assigned: boolean;
     /** confidence ≤ tolerance. False on assigned-only rows that fall outside, or when no crossings. */
     withinTolerance: boolean;
-    /** >1 within-tolerance candidate per pilot, OR >1 within-tolerance pilot per flarmid */
+    /**
+     * True when:
+     *   (a) >1 within-tolerance candidate flarmid for this pilot, OR
+     *   (b) this flarmid is within tolerance of >1 pilot, OR
+     *   (c) the pilot is in a "concurrent" group — ≥2 pilots whose start
+     *       AND finish times are pairwise within ±2×tolerance, so any match
+     *       is structurally indistinguishable from another pilot's.
+     * Pilots with any ambiguous row should be skipped from automatic
+     * proposals — the diagnosis is unsafe.
+     */
     ambiguous: boolean;
     /**
      * For assigned-tracker rows only: the flarmid was geographically gated
@@ -49,6 +58,13 @@ export interface TrackerMatch {
      * id is wrong, or the pilot wasn't actually flying this comp.
      */
     skipped: boolean;
+    /**
+     * For assigned-tracker rows only: the flarmid was active during the
+     * scan window but every packet was rejected by the task bbox prefilter
+     * — i.e. the tracker was flying somewhere else entirely. Stronger
+     * "wrong tracker" signal than `skipped`.
+     */
+    bboxOnly: boolean;
 }
 
 export interface FindTrackersOptions {
@@ -113,9 +129,12 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     // one will match the others within tolerance. Surface those groups up
     // front so the operator knows the ambiguity flags downstream are
     // structural, not a tracker-quality issue.
-    for (const group of findConcurrentPilots(results, tolerance)) {
+    const concurrentGroups = findConcurrentPilots(results, tolerance);
+    const concurrentCompnos = new Set<Compno>();
+    for (const group of concurrentGroups) {
         const labels = group.map((r) => `${r.compno} ${r.name}`.trim()).join(', ');
         log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on start and finish) — matches will be ambiguous: ${labels}`);
+        for (const r of group) concurrentCompnos.add(r.compno);
     }
 
     // Watch times for the debug trace: each pilot's official start (resp.
@@ -130,7 +149,7 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     log(`finish scan: window ${Math.round((maxFinish - minFinish) / 60 + (2 * slack) / 60)} min`);
     const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids, finishWatch, maxGapSec, reorderWindowSec, expandedBbox);
 
-    return matchCrossings(results, startScan, finishScan, tolerance);
+    return matchCrossings(results, startScan, finishScan, tolerance, concurrentCompnos);
 }
 
 interface FlarmState {
@@ -143,6 +162,7 @@ interface FlarmState {
 interface ScanResult {
     crossings: CrossingMap;
     skipped: Set<FlarmID>; // failed the geographic gate
+    bboxOnly: Set<FlarmID>; // had bbox-rejected packets and never made it past the bbox
 }
 
 interface WatchTime {
@@ -172,6 +192,7 @@ async function scanLine(
     const center: BasePositionMessage = {lat: tp.leg.nlat, lng: tp.leg.nlng, a: 0 as AltitudeAMSL, t: 0 as Epoch};
     const state = new Map<FlarmID, FlarmState>();
     const crossings: CrossingMap = new Map();
+    const bboxRejectedFor = new Set<FlarmID>(); // flarmids that had ≥1 bbox-rejected packet
     let lateDropped = 0;
     let staleDropped = 0;
     let bboxDropped = 0;
@@ -285,6 +306,7 @@ async function scanLine(
         // approach paths from outside the strict bbox still survive.
         if (bbox && !pointInBbox(bbox, msg.lat, msg.lng)) {
             bboxDropped++;
+            bboxRejectedFor.add(f);
             continue;
         }
         const pos: BasePositionMessage = {lat: msg.lat, lng: msg.lng, a: msg.a, t: msg.t};
@@ -356,8 +378,15 @@ async function scanLine(
         drain(f, st, Infinity);
     }
 
+    // bboxOnly = had bbox-rejected packets and never made it past the bbox
+    // (i.e. the flarmid was active in this time window but every packet was
+    // outside the task area). state.has(f) is true for any flarmid with at
+    // least one bbox-passing packet, including geo-gated (skipped) ones.
+    const bboxOnly = new Set<FlarmID>();
+    for (const f of bboxRejectedFor) if (!state.has(f)) bboxOnly.add(f);
+
     log(
-        `  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${bboxDropped} out-of-bbox, ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`
+        `  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${bboxDropped} out-of-bbox (${bboxOnly.size} flarmids never in-area), ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`
     );
 
     // Emit the per-debug-flarmid trace as a tidy block per id per scan.
@@ -400,7 +429,7 @@ async function scanLine(
         const recorded = crossings.get(key);
         if (recorded?.length) log(`    [debug ${kind} ${f}] recorded crossings: ${recorded.map((t) => `${fmtUtcHms(t)} (${t})`).join(', ')}`);
     }
-    return {crossings, skipped};
+    return {crossings, skipped, bboxOnly};
 }
 
 function formatDebugStats(d: {
@@ -469,7 +498,7 @@ function bestPair(sList: Epoch[], fList: Epoch[], startUtc: Epoch, finishUtc: Ep
     return {ds: bestDS, df: bestDF, score: bestScore};
 }
 
-function matchCrossings(results: OfficialResult[], startScan: ScanResult, finishScan: ScanResult, tolerance: number): TrackerMatch[] {
+function matchCrossings(results: OfficialResult[], startScan: ScanResult, finishScan: ScanResult, tolerance: number, concurrentCompnos: Set<Compno>): TrackerMatch[] {
     const startCrossings = startScan.crossings;
     const finishCrossings = finishScan.crossings;
     const flarmidsWithBoth: FlarmID[] = [];
@@ -499,7 +528,8 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     assigned: assignedIds.has(f),
                     withinTolerance: true,
                     ambiguous: false,
-                    skipped: false
+                    skipped: false,
+                    bboxOnly: false
                 };
                 listAppend(perPilot, r.compno, m);
                 listAppend(perFlarm, f, m);
@@ -525,6 +555,7 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
             const sList = startCrossings.get(id);
             const fList = finishCrossings.get(id);
             const wasSkipped = startScan.skipped.has(id) || finishScan.skipped.has(id);
+            const wasBboxOnly = startScan.bboxOnly.has(id) || finishScan.bboxOnly.has(id);
             let row: TrackerMatch;
             if (sList?.length && fList?.length) {
                 const {ds, df, score} = bestPair(sList, fList, r.startUtc, r.finishUtc);
@@ -539,12 +570,18 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     assigned: true,
                     withinTolerance: false,
                     ambiguous: false,
-                    skipped: false
+                    skipped: false,
+                    bboxOnly: false
                 };
             } else {
-                // No usable crossings for the assigned id — could be skipped
-                // by the geographic gate (id was active but never near the
-                // task), tracker off, or out of coverage.
+                // No usable crossings for the assigned id. Three causes,
+                // ranked by how strongly they say "wrong tracker":
+                //   bboxOnly: had packets but every one was outside the
+                //             task area — definitely the wrong glider.
+                //   skipped:  packets in-area but first sighting >
+                //             MAX_FLARM_DIST_KM from the start/finish TP.
+                //   neither:  no APRS packets at all in the time window —
+                //             tracker off, out of coverage, or wrong id.
                 row = {
                     compno: r.compno,
                     name: r.name,
@@ -556,11 +593,21 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     assigned: true,
                     withinTolerance: false,
                     ambiguous: false,
-                    skipped: wasSkipped
+                    skipped: wasSkipped,
+                    bboxOnly: wasBboxOnly
                 };
             }
             listAppend(perPilot, r.compno, row);
         }
+    }
+
+    // Structural ambiguity: every row of any pilot in a concurrent-times
+    // group is unsafe to act on, even if the row itself looks unique. The
+    // pilots can't be told apart on times alone, so a single matching
+    // flarmid might really belong to either of them.
+    for (const c of concurrentCompnos) {
+        const arr = perPilot.get(c);
+        if (arr) for (const m of arr) m.ambiguous = true;
     }
 
     // Flatten. perFlarm only held phase-1 rows, but every row also lives in

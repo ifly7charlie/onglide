@@ -74,6 +74,44 @@ interface Job {
     datecode: Datecode;
 }
 
+type JobGroup = Job[]; // all classes for one (compid, datecode)
+
+interface ClassMatches {
+    job: Job;
+    results: OfficialResult[];
+    matches: TrackerMatch[];
+}
+
+// A flarmid → pilots that produced a clean (within-tolerance, non-ambiguous)
+// phase-1 match in any class of the same (compid, datecode). Used to surface
+// "this assigned tracker actually matches a pilot in another class" — the
+// case where a flarm unit was moved between gliders during a comp.
+interface CrossClassHit {
+    className: ClassName;
+    compno: Compno;
+    name: string;
+}
+type CrossClassMap = Map<FlarmID, CrossClassHit[]>;
+
+interface GroupSummary {
+    pilots: number;
+    matched: number;
+    ambiguous: number;
+    proposed: number;
+    applied: number;
+}
+
+function groupJobs(jobs: Job[]): JobGroup[] {
+    const map = new Map<string, JobGroup>();
+    for (const j of jobs) {
+        const key = `${j.compid}|${j.datecode}`;
+        const arr = map.get(key) ?? [];
+        arr.push(j);
+        map.set(key, arr);
+    }
+    return Array.from(map.values());
+}
+
 async function main() {
     const tolerance = Number(argv.tolerance) || 5;
     const debugFlarmidsArg = new Set<string>();
@@ -116,7 +154,28 @@ async function main() {
         totalProposed = 0,
         totalApplied = 0;
 
-    for (const job of jobs) {
+    for (const group of groupJobs(jobs)) {
+        const s = await processGroup(group, debugFlarmidsArg, debugCompnosArg, tolerance, interactive);
+        totalPilots += s.pilots;
+        totalMatched += s.matched;
+        totalAmbiguous += s.ambiguous;
+        totalProposed += s.proposed;
+        totalApplied += s.applied;
+    }
+
+    console.log(`\n=== Total: ${totalPilots} pilots, ${totalMatched} matched, ${totalAmbiguous} ambiguous, ${totalProposed} change${totalProposed === 1 ? '' : 's'} proposed, ${totalApplied} applied ===`);
+    await mysql.end();
+    process.exit(0);
+}
+
+// Run scans for every class in a (compid, datecode) group, then build the
+// cross-class flarmid map and do per-class print/proposal in a second pass.
+// Two-pass is required: a flarmid that's been moved from class A to class B
+// only gets flagged as cross-class once both classes have been scanned.
+async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debugCompnosArg: Set<string>, tolerance: number, interactive: boolean): Promise<GroupSummary> {
+    // Pass 1 — scan each class.
+    const classMatches: ClassMatches[] = [];
+    for (const job of group) {
         const {compid, className, datecode} = job;
         console.log(`\n=== ${className} / ${datecode}   (compid ${compid}, ${fromDateCode(datecode)}) ===`);
 
@@ -154,33 +213,53 @@ async function main() {
             debugFlarmids: debugFlarmids.size ? debugFlarmids : undefined
         });
 
-        if (!interactive) printMatches(results, matches);
+        classMatches.push({job, results, matches});
+    }
+
+    // Pass 2 — flarmid → unambiguous within-tolerance hits across the group.
+    const crossClass: CrossClassMap = new Map();
+    for (const cm of classMatches) {
+        for (const m of cm.matches) {
+            if (!m.withinTolerance || m.ambiguous) continue;
+            const arr = crossClass.get(m.flarmid) ?? [];
+            arr.push({className: cm.job.className, compno: m.compno, name: m.name});
+            crossClass.set(m.flarmid, arr);
+        }
+    }
+
+    // Pass 3 — per-class results and proposals.
+    const summary: GroupSummary = {pilots: 0, matched: 0, ambiguous: 0, proposed: 0, applied: 0};
+    const multi = classMatches.length > 1;
+    for (const cm of classMatches) {
+        const {job, results, matches} = cm;
+        const {className, datecode} = job;
+
+        if (multi) console.log(`\n--- ${className} / ${datecode} — results ---`);
+
+        if (!interactive) printMatches(results, matches, crossClass, className);
 
         const matchedCompnos = new Set(matches.filter((m) => m.withinTolerance && !m.ambiguous).map((m) => m.compno));
         const ambiguousCompnos = new Set(matches.filter((m) => m.ambiguous).map((m) => m.compno));
-        totalPilots += results.length;
-        totalMatched += matchedCompnos.size;
-        totalAmbiguous += ambiguousCompnos.size;
+        summary.pilots += results.length;
+        summary.matched += matchedCompnos.size;
+        summary.ambiguous += ambiguousCompnos.size;
         console.log(`  Summary: ${results.length} pilots, ${matchedCompnos.size} matched, ${ambiguousCompnos.size} ambiguous`);
 
         if (argv['dry-run']) continue;
 
-        const proposals = computeProposals(matches);
+        const proposals = computeProposals(matches, crossClass, className);
         if (!proposals.length) continue;
-        totalProposed += proposals.length;
+        summary.proposed += proposals.length;
 
         const accepted = interactive //
-            ? await reviewProposals(proposals, matches, results)
+            ? await reviewProposals(proposals, matches, results, crossClass, className)
             : proposals;
         if (!accepted.length) continue;
 
         const applied = await applyProposals(className, accepted);
-        totalApplied += applied;
+        summary.applied += applied;
     }
-
-    console.log(`\n=== Total: ${totalPilots} pilots, ${totalMatched} matched, ${totalAmbiguous} ambiguous, ${totalProposed} change${totalProposed === 1 ? '' : 's'} proposed, ${totalApplied} applied ===`);
-    await mysql.end();
-    process.exit(0);
+    return summary;
 }
 
 async function pickCompetitions(): Promise<string[]> {
@@ -315,7 +394,11 @@ function fmtConfidence(c: number | null): string {
 }
 
 function rowTag(m: TrackerMatch): string {
-    if (m.confidence === null) return m.skipped ? '[assigned, skipped: out-of-area]' : '[assigned, no crossings]';
+    if (m.confidence === null) {
+        if (m.bboxOnly) return '[assigned, all packets outside task area — wrong tracker]';
+        if (m.skipped) return '[assigned, skipped: out-of-area]';
+        return '[assigned, no crossings]';
+    }
     if (m.assigned && m.withinTolerance) return '[assigned ✓]';
     if (m.assigned) return '[assigned, outside tolerance]';
     if (m.withinTolerance) return '[match]';
@@ -326,7 +409,8 @@ function pilotHeaderTag(rows: TrackerMatch[]): string {
     const flags: string[] = [];
     const assignedRow = rows.find((m) => m.assigned);
     if (assignedRow && !assignedRow.withinTolerance) {
-        if (assignedRow.skipped) flags.push('assigned ID skipped (first sighting out of task area)');
+        if (assignedRow.bboxOnly) flags.push('assigned ID flying outside task area (wrong tracker)');
+        else if (assignedRow.skipped) flags.push('assigned ID skipped (first sighting out of task area)');
         else if (assignedRow.confidence === null) flags.push('assigned ID has no crossings');
         else flags.push('assigned ID outside tolerance');
     }
@@ -336,7 +420,16 @@ function pilotHeaderTag(rows: TrackerMatch[]): string {
     return flags.length ? `   ⚠ ${flags.join('; ')}` : '';
 }
 
-function printMatches(results: OfficialResult[], matches: TrackerMatch[]): void {
+function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined): string[] {
+    if (!crossClass) return [];
+    const all = crossClass.get(flarmid);
+    if (!all) return [];
+    return all
+        .filter((h) => h.className !== thisClass)
+        .map((h) => `also matches ${String(h.compno).trim()} ${h.name}`.trim() + ` in class ${h.className}`);
+}
+
+function printMatches(results: OfficialResult[], matches: TrackerMatch[], crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!matches.length) {
         console.log(`  (no matches, no assigned-tracker reports)`);
         return;
@@ -362,11 +455,11 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[]): void 
     });
 
     for (const compno of compnos) {
-        printPilotMatches(compno, byPilot.get(compno)!, results);
+        printPilotMatches(compno, byPilot.get(compno)!, results, crossClass, thisClass);
     }
 }
 
-function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[]): void {
+function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!arr.length) return;
     const r = results.find((x) => x.compno === compno);
     const name = arr[0].name || (r?.name ?? '');
@@ -375,6 +468,11 @@ function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: Officia
         const tag = rowTag(m);
         const tagPart = tag ? `   ${tag}` : '';
         console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
+        if (thisClass) {
+            for (const line of describeCrossClass(m.flarmid, thisClass, crossClass)) {
+                console.log(`         ↳ ${line}`);
+            }
+        }
     }
 }
 
@@ -419,7 +517,7 @@ function parseCurrentIds(raw: string): FlarmID[] {
     return out;
 }
 
-function computeProposals(matches: TrackerMatch[]): Proposal[] {
+function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, thisClass: ClassName): Proposal[] {
     const byPilot = new Map<Compno, TrackerMatch[]>();
     for (const m of matches) {
         const arr = byPilot.get(m.compno) ?? [];
@@ -431,6 +529,11 @@ function computeProposals(matches: TrackerMatch[]): Proposal[] {
     for (const [compno, rows] of byPilot) {
         // Already-good assignment: leave alone even if alternatives exist.
         if (rows.some((m) => m.assigned && m.withinTolerance)) continue;
+
+        // Pilot is structurally ambiguous (concurrent-times group, multi
+        // candidate, or multi pilot per flarmid) — every diagnosis is
+        // unsafe, including "remove the assigned tracker". Skip entirely.
+        if (rows.some((m) => m.ambiguous)) continue;
 
         const altMatches = rows.filter((m) => !m.assigned && m.withinTolerance && !m.ambiguous);
         const assignedBad = rows.filter((m) => m.assigned && !m.withinTolerance);
@@ -450,11 +553,22 @@ function computeProposals(matches: TrackerMatch[]): Proposal[] {
         const newTrackerid = newIds.length ? newIds.join(',') : 'unknown';
         if (newTrackerid === first.currentTrackerid) continue;
 
-        const reason = addId //
+        const baseReason = addId //
             ? assignedBad.length
                 ? 'switch to within-tolerance alternative'
                 : 'associate within-tolerance match'
             : 'assigned tracker outside tolerance, no alternative match';
+
+        // Annotate the reason with any cross-class hits for the flarmids
+        // we're removing — strong evidence the tracker is now flying with
+        // a pilot in another class.
+        const crossInfo: string[] = [];
+        for (const id of removeIds) {
+            for (const line of describeCrossClass(id, thisClass, crossClass)) {
+                crossInfo.push(`${id} ${line}`);
+            }
+        }
+        const reason = crossInfo.length ? `${baseReason}; ${crossInfo.join('; ')}` : baseReason;
 
         out.push({
             compno,
@@ -479,7 +593,7 @@ function summariseProposal(p: Proposal): string {
     return parts.join('  |  ');
 }
 
-async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[]): Promise<Proposal[]> {
+async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[], crossClass: CrossClassMap, thisClass: ClassName): Promise<Proposal[]> {
     if (!proposals.length) return [];
     console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
 
@@ -491,7 +605,9 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
         printPilotMatches(
             p.compno,
             matches.filter((m) => m.compno === p.compno),
-            results
+            results,
+            crossClass,
+            thisClass
         );
 
         if (acceptAll) {
