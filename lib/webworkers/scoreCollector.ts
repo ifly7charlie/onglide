@@ -31,6 +31,7 @@ type ScoreIdDetails = {
     optionsForCompno: Record<Compno, {restartCount: number; scoreId: string}>;
     live: Record<Compno, boolean>;
     state: 'starting' | 'aborted' | 'live';
+    startedAt: Epoch;
 };
 
 //
@@ -55,7 +56,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     const getScoreIdDetails = (scoreId: string): ScoreIdDetails =>
         scoreIdDetails.has(scoreId) //
             ? scoreIdDetails.get(scoreId)!
-            : scoreIdDetails.set(scoreId, {allScores: {}, mostRecentStart: {}, optionsForCompno: {}, live: {}, state: 'starting'}).get(scoreId)!;
+            : scoreIdDetails.set(scoreId, {allScores: {}, mostRecentStart: {}, optionsForCompno: {}, live: {}, state: 'starting', startedAt: getNow()}).get(scoreId)!;
 
     //  let oldestUpdate = Infinity;
     //    let newestUpdate = 0;
@@ -65,14 +66,13 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
         const numLive = Object.keys(c.live).length;
         const numRunning = Object.keys(c.optionsForCompno).length;
         const numCompnos = allGliders.size;
-        const missing = [...allGliders].filter((compno) => !c.live[compno]);
-        console.log(`[${id}] ${className}: ${c.state} - ${numLive} live, ${numRunning} running, ${numCompnos} compnos [${scoreId}], missing ${missing.join(',')}`);
         // if all are live
         if (numLive == numRunning && numLive == numCompnos) {
-            if (c.state === 'aborted' || Object.values(c.optionsForCompno).some((o) => o.restartCount != 1)) {
-                console.log(`[${id}] ${className}: received live for old scoring task ${scoreId} (all tasks ${[...scoreIdDetails.keys()].join(',')})`);
+            const elapsed = getNow() - c.startedAt;
+            if (c.state === 'aborted') {
+                console.log(`[${id}] ${className}: received live for old scoring task ${scoreId} after ${elapsed}s (all tasks ${[...scoreIdDetails.keys()].join(',')})`);
             } else {
-                console.log(`[${id}] ${className}: received live for ${scoreId} closing old scoring tasks ${[...scoreIdDetails.keys()].join(',')}`);
+                console.log(`[${id}] ${className}: received live for ${scoreId} after ${elapsed}s closing old scoring tasks ${[...scoreIdDetails.keys()].join(',')}`);
                 for (const [closeId, old] of scoreIdDetails.entries()) {
                     if (closeId != scoreId) {
                         console.log(`[${id}] ${className}: closing ${closeId}`);

@@ -215,7 +215,15 @@ enum ScoringCommandEnum {
     setAirfield
 }
 
-export type ScoringCommand = ScoringCommandShutdown | ScoringCommandNewTask | ScoringCommandTrack | ScoringCommandRescoreGlider | ScoringCommandUpdateScoreId | ScoringCommandClearGlider | ScoringCommandClearTask | ScoringCommandSetAirfield;
+export type ScoringCommand =
+    | ScoringCommandShutdown
+    | ScoringCommandNewTask
+    | ScoringCommandTrack
+    | ScoringCommandRescoreGlider
+    | ScoringCommandUpdateScoreId
+    | ScoringCommandClearGlider
+    | ScoringCommandClearTask
+    | ScoringCommandSetAirfield;
 
 interface ScoringCommandBase {
     className: ClassName;
@@ -316,7 +324,7 @@ if (!isMainThread) {
             case ScoringCommandEnum.initialTrack: {
                 const itTask: ScoringCommandTrack = task;
                 console.log(`${task.className}/${task.compno}: ${itTask.handicap} hcap, ${itTask.utcStart} utcStart [${itTask.scoreId}]`);
-                const alreadyScoring = !!scoreCollector;
+                const alreadyScoring = !!scoreUpdater;
 
                 // Structured cloning across the worker boundary strips class
                 // prototypes, so any preparedLegs in the incoming task are

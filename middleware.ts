@@ -1,6 +1,10 @@
 import {NextResponse} from 'next/server';
 import type {NextRequest} from 'next/server';
 
+export const config = {
+    matcher: ['/((?!_next/|api/|.*\\.).*)']
+};
+
 const domains = {
     'viewer.onglide.com': 'viewer',
     // list the competition urls to compids mapping here and then rebuild nextjs
