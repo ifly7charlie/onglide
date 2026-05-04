@@ -67,7 +67,7 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 // Launch our listener
 import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
 
-import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_SLACK_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_SLACK_FRACTION, HOME_STALE_SECONDS, HOME_OGN_COVERAGE} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -1962,16 +1962,23 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 return fs !== undefined && fs !== PositionStatus.Unknown;
             });
             // Pilots in withStatus that haven't officially finalised AND
-            // whose live flightStatus isn't Landed/Home/Finished. We allow
-            // a small fraction of these (e.g. one glider stuck on grid or
-            // landed-out and not yet trickled through) before we lock the
-            // verdict in.
+            // whose live flightStatus isn't Landed/Home/Finished/Grid, and
+            // whose last score isn't more than HOME_STALE_SECONDS old. Grid
+            // counts as home — a glider sat on the grid hours after task
+            // start clearly didn't fly. Stale tracking counts as home too —
+            // if we haven't heard anything for 3h they're on the ground.
+            const nowSec = Math.floor(Date.now() / 1000);
             const notHomeCount = withStatus.filter((p) => {
                 if (isTerminalScored(p)) return false;
-                const fs = channel!.allScores[p.compno]!.flightStatus;
-                return !(fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished);
+                const score = channel!.allScores[p.compno]!;
+                const fs = score.flightStatus;
+                if (fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished || fs === PositionStatus.Grid) return false;
+                if (score.t && nowSec - score.t > HOME_STALE_SECONDS) return false;
+                return true;
             }).length;
-            const allLanded = withStatus.length > 0 && notHomeCount / scored.length < HOME_SLACK_FRACTION;
+            // 10% rounded up — gives a 9-pilot class room for one stuck glider
+            // without losing the verdict, while still tightening as the field grows.
+            const allLanded = withStatus.length > 0 && notHomeCount <= Math.ceil(scored.length * HOME_SLACK_FRACTION);
             const startedCount = scored.filter((p) => (channel?.allScores[p.compno]?.utcStart ?? 0) > 0).length;
             const airborneCount = scored.filter((p) => {
                 const fs = channel?.allScores[p.compno]?.flightStatus;
