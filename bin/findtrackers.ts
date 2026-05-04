@@ -14,7 +14,7 @@
 import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/types';
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
-import {findTrackerMatches, type OfficialResult, type TrackerMatch} from '../lib/scoring/shared/findtrackers';
+import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
 
 import prompts from 'prompts';
 import escape from 'sql-template-strings';
@@ -393,6 +393,35 @@ function fmtConfidence(c: number | null): string {
     return c === null ? 'n/a' : `${c.toFixed(1)}s`;
 }
 
+function fmtUtcHms(ts: number): string {
+    return new Date(ts * 1000).toISOString().slice(11, 19);
+}
+
+function fmtDiag(diag: TrackerDiag): string {
+    if (diag.inBboxPackets === 0 && diag.bboxRejectedPackets === 0) {
+        return 'not seen in scan window';
+    }
+    const parts: string[] = [];
+    if (diag.inBboxPackets === 0) {
+        parts.push(`${diag.bboxRejectedPackets} packets all outside task area`);
+    } else if (diag.bboxRejectedPackets > 0) {
+        parts.push(`${diag.inBboxPackets} in-area + ${diag.bboxRejectedPackets} outside`);
+    } else {
+        parts.push(`${diag.inBboxPackets} packets in-area`);
+    }
+    if (diag.minDistanceKm !== null) parts.push(`closest ${diag.minDistanceKm.toFixed(1)} km from TP`);
+    if (diag.avgGapSec !== null) {
+        const max = diag.maxGapSec !== null ? `, max ${diag.maxGapSec}s` : '';
+        parts.push(`avg gap ${diag.avgGapSec.toFixed(0)}s${max}`);
+    }
+    if (diag.firstSeenT !== null && diag.lastSeenT !== null) {
+        parts.push(`span ${fmtUtcHms(diag.firstSeenT)}-${fmtUtcHms(diag.lastSeenT)}`);
+    }
+    if (diag.gapAroundStartSec !== null) parts.push(`gap @ start: ${diag.gapAroundStartSec}s`);
+    if (diag.gapAroundFinishSec !== null) parts.push(`gap @ finish: ${diag.gapAroundFinishSec}s`);
+    return parts.join('  |  ');
+}
+
 function rowTag(m: TrackerMatch): string {
     if (m.confidence === null) {
         if (m.bboxOnly) return '[assigned, all packets outside task area — wrong tracker]';
@@ -468,6 +497,7 @@ function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: Officia
         const tag = rowTag(m);
         const tagPart = tag ? `   ${tag}` : '';
         console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
+        if (m.diag) console.log(`         · ${fmtDiag(m.diag)}`);
         if (thisClass) {
             for (const line of describeCrossClass(m.flarmid, thisClass, crossClass)) {
                 console.log(`         ↳ ${line}`);

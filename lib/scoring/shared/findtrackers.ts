@@ -65,6 +65,39 @@ export interface TrackerMatch {
      * "wrong tracker" signal than `skipped`.
      */
     bboxOnly: boolean;
+    /**
+     * Per-row diagnostic info populated for assigned-tracker rows that the
+     * caller may decide to remove (assigned=true, withinTolerance=false).
+     * Tells the operator whether the tracker was seen at all, how good
+     * the track was, and how close it got to the task.
+     */
+    diag?: TrackerDiag;
+}
+
+/**
+ * Combined stats for one flarmid across both the start and finish scans,
+ * plus per-pilot context computed from the pilot's official times. Times
+ * and gaps are unsigned seconds.
+ */
+export interface TrackerDiag {
+    /** Packets that passed the task-bbox prefilter, summed across scans. */
+    inBboxPackets: number;
+    /** Packets dropped by the bbox prefilter, summed across scans. */
+    bboxRejectedPackets: number;
+    /** Min geodesic distance (km) from any in-bbox packet to that scan's TP, across both scans. null if no in-bbox packets. */
+    minDistanceKm: number | null;
+    /** Mean interval (s) between consecutive in-bbox packets, across both scans. null if <2 in-bbox packets total. */
+    avgGapSec: number | null;
+    /** Largest interval (s) between consecutive in-bbox packets. null if <2 in-bbox packets total. */
+    maxGapSec: number | null;
+    /** Earliest packet observed (any source: bbox-rejected or accepted). null if never seen. */
+    firstSeenT: Epoch | null;
+    /** Latest packet observed (any source). null if never seen. */
+    lastSeenT: Epoch | null;
+    /** Gap (s) between the in-bbox packets bracketing the pilot's official start time. null if start time is outside the in-bbox packet range, or <2 in-bbox start-scan packets. */
+    gapAroundStartSec: number | null;
+    /** Same, around the pilot's official finish time, using finish-scan packets. */
+    gapAroundFinishSec: number | null;
 }
 
 export interface FindTrackersOptions {
@@ -163,6 +196,19 @@ interface ScanResult {
     crossings: CrossingMap;
     skipped: Set<FlarmID>; // failed the geographic gate
     bboxOnly: Set<FlarmID>; // had bbox-rejected packets and never made it past the bbox
+    stats: Map<FlarmID, FlarmStatsAcc>;
+}
+
+interface FlarmStatsAcc {
+    bboxRejected: number;
+    inBbox: number;
+    minDistanceKm: number; // Infinity until first in-bbox packet
+    firstSeenT: number; // -1 until any packet seen
+    lastSeenT: number;
+    timestamps: number[]; // in-bbox packets, sorted ascending (insertion-sort during scan)
+    sumGapSec: number;
+    countGap: number;
+    maxGapSec: number;
 }
 
 interface WatchTime {
@@ -193,6 +239,15 @@ async function scanLine(
     const state = new Map<FlarmID, FlarmState>();
     const crossings: CrossingMap = new Map();
     const bboxRejectedFor = new Set<FlarmID>(); // flarmids that had ≥1 bbox-rejected packet
+    const stats = new Map<FlarmID, FlarmStatsAcc>();
+    const getStats = (f: FlarmID): FlarmStatsAcc => {
+        let s = stats.get(f);
+        if (!s) {
+            s = {bboxRejected: 0, inBbox: 0, minDistanceKm: Infinity, firstSeenT: -1, lastSeenT: -1, timestamps: [], sumGapSec: 0, countGap: 0, maxGapSec: 0};
+            stats.set(f, s);
+        }
+        return s;
+    };
     let lateDropped = 0;
     let staleDropped = 0;
     let bboxDropped = 0;
@@ -285,6 +340,9 @@ async function scanLine(
     for await (const msg of loadPointsForIds({since, until})) {
         const f = msg.f;
         if (excludeFlarmids.has(f)) continue;
+        const sStats = getStats(f);
+        if (sStats.firstSeenT < 0 || msg.t < sStats.firstSeenT) sStats.firstSeenT = msg.t;
+        if (msg.t > sStats.lastSeenT) sStats.lastSeenT = msg.t;
         // The packet itself records the latency at write time as `d` (now − fix
         // time). A packet declaring d > reorderWindowSec is by definition
         // older than our reorder buffer can absorb when its real-time peers
@@ -307,19 +365,25 @@ async function scanLine(
         if (bbox && !pointInBbox(bbox, msg.lat, msg.lng)) {
             bboxDropped++;
             bboxRejectedFor.add(f);
+            sStats.bboxRejected++;
             continue;
         }
         const pos: BasePositionMessage = {lat: msg.lat, lng: msg.lng, a: msg.a, t: msg.t};
+        // Distance to TP — used for the geo gate on first sighting and for
+        // the per-flarmid minDistance stat across all in-bbox packets.
+        const distKm = PreparedTurnpoint.geodesicDistance(center, pos);
+        if (distKm < sStats.minDistanceKm) sStats.minDistanceKm = distKm;
+        sStats.inBbox++;
+        sStats.timestamps.push(msg.t);
         let st = state.get(f);
         if (!st) {
             // First sighting in this scan: geographic gate.
-            const dist = PreparedTurnpoint.geodesicDistance(center, pos);
             const d = dbgFor(f);
             if (d) {
                 d.firstArrivalT = pos.t;
-                d.firstArrivalDistKm = dist;
+                d.firstArrivalDistKm = distKm;
             }
-            if (dist > MAX_FLARM_DIST_KM) {
+            if (distKm > MAX_FLARM_DIST_KM) {
                 state.set(f, {buf: [], latestSeen: pos.t, skipped: true});
                 if (d) d.skipped = true;
                 continue;
@@ -385,6 +449,21 @@ async function scanLine(
     const bboxOnly = new Set<FlarmID>();
     for (const f of bboxRejectedFor) if (!state.has(f)) bboxOnly.add(f);
 
+    // Finalize per-flarmid gap stats. Packets are pushed in observation
+    // order during scan, which is mostly time-ascending modulo the small
+    // reorder window — sort once here so consumers can binary-search.
+    for (const s of stats.values()) {
+        if (s.timestamps.length < 2) continue;
+        s.timestamps.sort((a, b) => a - b);
+        for (let i = 1; i < s.timestamps.length; i++) {
+            const gap = s.timestamps[i] - s.timestamps[i - 1];
+            if (gap <= 0) continue; // duplicates from out-of-order writes
+            s.sumGapSec += gap;
+            s.countGap++;
+            if (gap > s.maxGapSec) s.maxGapSec = gap;
+        }
+    }
+
     log(
         `  → ${tracked} tracked, ${skipped.size} skipped (>${MAX_FLARM_DIST_KM} km), ${bboxDropped} out-of-bbox (${bboxOnly.size} flarmids never in-area), ${staleDropped} stale (self-reported d>${reorderWindowSec}s), ${lateDropped} late (>${reorderWindowSec}s out of order), ${crossings.size} with ${kind} crossings`
     );
@@ -429,7 +508,7 @@ async function scanLine(
         const recorded = crossings.get(key);
         if (recorded?.length) log(`    [debug ${kind} ${f}] recorded crossings: ${recorded.map((t) => `${fmtUtcHms(t)} (${t})`).join(', ')}`);
     }
-    return {crossings, skipped, bboxOnly};
+    return {crossings, skipped, bboxOnly, stats};
 }
 
 function formatDebugStats(d: {
@@ -477,6 +556,70 @@ function parseAssignedIds(raw: string): Set<FlarmID> {
         out.add(id as FlarmID);
     }
     return out;
+}
+
+function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResult, startUtc: Epoch, finishUtc: Epoch): TrackerDiag {
+    const sStart = startScan.stats.get(flarmid);
+    const sFinish = finishScan.stats.get(flarmid);
+
+    const inBboxPackets = (sStart?.inBbox ?? 0) + (sFinish?.inBbox ?? 0);
+    const bboxRejectedPackets = (sStart?.bboxRejected ?? 0) + (sFinish?.bboxRejected ?? 0);
+
+    let minDistanceKm: number | null = null;
+    for (const s of [sStart, sFinish]) {
+        if (s && Number.isFinite(s.minDistanceKm)) {
+            minDistanceKm = minDistanceKm === null ? s.minDistanceKm : Math.min(minDistanceKm, s.minDistanceKm);
+        }
+    }
+
+    let firstSeenT: Epoch | null = null;
+    let lastSeenT: Epoch | null = null;
+    for (const s of [sStart, sFinish]) {
+        if (s && s.firstSeenT >= 0) {
+            firstSeenT = firstSeenT === null ? (s.firstSeenT as Epoch) : ((Math.min(firstSeenT as number, s.firstSeenT) as number) as Epoch);
+            lastSeenT = lastSeenT === null ? (s.lastSeenT as Epoch) : ((Math.max(lastSeenT as number, s.lastSeenT) as number) as Epoch);
+        }
+    }
+
+    let totalSumGap = 0;
+    let totalCountGap = 0;
+    let totalMaxGap = 0;
+    for (const s of [sStart, sFinish]) {
+        if (!s) continue;
+        totalSumGap += s.sumGapSec;
+        totalCountGap += s.countGap;
+        if (s.maxGapSec > totalMaxGap) totalMaxGap = s.maxGapSec;
+    }
+    const avgGapSec = totalCountGap > 0 ? totalSumGap / totalCountGap : null;
+    const maxGapSec = totalCountGap > 0 ? totalMaxGap : null;
+
+    return {
+        inBboxPackets,
+        bboxRejectedPackets,
+        minDistanceKm,
+        avgGapSec,
+        maxGapSec,
+        firstSeenT,
+        lastSeenT,
+        gapAroundStartSec: bracketGap(sStart?.timestamps ?? [], startUtc),
+        gapAroundFinishSec: bracketGap(sFinish?.timestamps ?? [], finishUtc)
+    };
+}
+
+// Largest interval (s) between consecutive timestamps that brackets `target`.
+// null if target is outside [first, last] or fewer than two timestamps exist.
+function bracketGap(timestamps: number[], target: number): number | null {
+    if (timestamps.length < 2) return null;
+    if (target < timestamps[0] || target > timestamps[timestamps.length - 1]) return null;
+    let lo = 0;
+    let hi = timestamps.length - 1;
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >>> 1;
+        if (timestamps[mid] <= target) lo = mid;
+        else hi = mid - 1;
+    }
+    if (lo + 1 < timestamps.length) return timestamps[lo + 1] - timestamps[lo];
+    return null;
 }
 
 function bestPair(sList: Epoch[], fList: Epoch[], startUtc: Epoch, finishUtc: Epoch): {ds: number; df: number; score: number} {
@@ -597,6 +740,7 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     bboxOnly: wasBboxOnly
                 };
             }
+            row.diag = buildDiag(id, startScan, finishScan, r.startUtc, r.finishUtc);
             listAppend(perPilot, r.compno, row);
         }
     }
