@@ -154,7 +154,7 @@ async function main() {
             debugFlarmids: debugFlarmids.size ? debugFlarmids : undefined
         });
 
-        printMatches(results, matches);
+        if (!interactive) printMatches(results, matches);
 
         const matchedCompnos = new Set(matches.filter((m) => m.withinTolerance && !m.ambiguous).map((m) => m.compno));
         const ambiguousCompnos = new Set(matches.filter((m) => m.ambiguous).map((m) => m.compno));
@@ -170,7 +170,7 @@ async function main() {
         totalProposed += proposals.length;
 
         const accepted = interactive //
-            ? await reviewProposals(proposals)
+            ? await reviewProposals(proposals, matches, results)
             : proposals;
         if (!accepted.length) continue;
 
@@ -197,7 +197,8 @@ async function pickCompetitions(): Promise<string[]> {
 async function listJobs(compid: string): Promise<Job[]> {
     const filterClass = argv.class ? escape` AND cl.class = ${argv.class}` : escape``;
     const filterDc = argv.datecode ? escape` AND t.datecode = ${argv.datecode}` : escape``;
-    const rows = await mysql.query<{class: ClassName; datecode: Datecode}[]>(escape`
+    const rows = await mysql.query<{class: ClassName; datecode: Datecode}[]>(
+        escape`
         SELECT DISTINCT cl.class AS class, t.datecode AS datecode
           FROM tasks t
           JOIN classes cl ON cl.class = t.class
@@ -210,7 +211,11 @@ async function listJobs(compid: string): Promise<Job[]> {
                   AND pr.start  IS NOT NULL AND pr.start  <> '00:00:00'
                   AND pr.finish IS NOT NULL AND pr.finish <> '00:00:00'
            )
-    `.append(filterClass).append(filterDc).append(escape` ORDER BY t.datecode DESC, cl.class ASC`));
+    `
+            .append(filterClass)
+            .append(filterDc)
+            .append(escape` ORDER BY t.datecode DESC, cl.class ASC`)
+    );
     return rows.map((r) => ({compid, className: r.class, datecode: r.datecode}));
 }
 
@@ -357,15 +362,19 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[]): void 
     });
 
     for (const compno of compnos) {
-        const arr = byPilot.get(compno)!;
-        const r = results.find((x) => x.compno === compno);
-        const name = arr[0].name || (r?.name ?? '');
-        console.log(`  ${String(compno).padEnd(4)} ${name}${pilotHeaderTag(arr)}`);
-        for (const m of arr) {
-            const tag = rowTag(m);
-            const tagPart = tag ? `   ${tag}` : '';
-            console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
-        }
+        printPilotMatches(compno, byPilot.get(compno)!, results);
+    }
+}
+
+function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[]): void {
+    if (!arr.length) return;
+    const r = results.find((x) => x.compno === compno);
+    const name = arr[0].name || (r?.name ?? '');
+    console.log(`  ${String(compno).padEnd(4)} ${name}${pilotHeaderTag(arr)}`);
+    for (const m of arr) {
+        const tag = rowTag(m);
+        const tagPart = tag ? `   ${tag}` : '';
+        console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
     }
 }
 
@@ -470,7 +479,7 @@ function summariseProposal(p: Proposal): string {
     return parts.join('  |  ');
 }
 
-async function reviewProposals(proposals: Proposal[]): Promise<Proposal[]> {
+async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[]): Promise<Proposal[]> {
     if (!proposals.length) return [];
     console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
 
@@ -479,6 +488,11 @@ async function reviewProposals(proposals: Proposal[]): Promise<Proposal[]> {
     for (let i = 0; i < proposals.length; i++) {
         const p = proposals[i];
         console.log(`\n  [${i + 1}/${proposals.length}] ${summariseProposal(p)}`);
+        printPilotMatches(
+            p.compno,
+            matches.filter((m) => m.compno === p.compno),
+            results
+        );
 
         if (acceptAll) {
             accepted.push(p);
@@ -533,7 +547,7 @@ async function applyProposals(className: ClassName, proposals: Proposal[]): Prom
         `);
         t.query(escape`
             INSERT INTO trackerhistory (compno, changed, flarmid, method)
-            VALUES (${p.compno}, now(), ${p.newTrackerid}, 'logmatch')
+            VALUES (${p.compno}, now(), ${p.newTrackerid}, 'startmatch')
         `);
     }
     await t.commit();

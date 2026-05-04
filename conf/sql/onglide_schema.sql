@@ -354,7 +354,7 @@ CREATE TABLE `trackerhistory` (
   `flarmid` text DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked') DEFAULT 'none'
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch') DEFAULT 'none'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 
