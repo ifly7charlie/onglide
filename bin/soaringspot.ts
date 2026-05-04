@@ -777,11 +777,17 @@ async function process_day_task(day, classid, classname, keys) {
     await mysql_db
         .transaction()
 
-        // Set the datecode
+        // Advance the datecode and clear the status on day rollover.
+        // Yesterday's L/S/R/F/H is meaningless to today's state machine,
+        // and the status='B' update further down (or the 'Z' cancelled
+        // path) will set the correct value if there's a task — ':' isn't
+        // in its preserve list so it'll be overwritten cleanly. If no task
+        // exists yet, ':' is the right "no task" state.
         .query(escape`
             UPDATE compstatus
             SET
-                datecode = ${toDateCode(date)}
+                datecode = ${toDateCode(date)},
+                status = ':'
             WHERE
                 (
                     datecode < ${toDateCode(date)}
