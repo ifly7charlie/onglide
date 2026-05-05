@@ -1,4 +1,4 @@
-import {createWriteStream, WriteStream, promises as fsp, openSync, closeSync, readSync, fstatSync, statSync} from 'fs';
+import {createWriteStream, WriteStream, promises as fsp, openSync, closeSync, readSync, statSync} from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -28,10 +28,26 @@ function reloadConfig(): void {
 let activeStream: WriteStream | undefined;
 let activePath: string = '';
 let activeFirstTs: number = 0;
-let activeLastTs: number = 0;
 let activeBytes: number = 0;
 let rotating = false;
 const pendingWrites: string[] = [];
+
+// Silent-failure diagnostics. The WriteStream has no error path of its own;
+// if writes start going nowhere we want one log line per failure mode rather
+// than total silence. Throttle so a sustained fault doesn't flood syslog.
+let writesSinceOpen = 0;
+let lastWriteTs = 0;
+let lastNoStreamLog = 0;
+let lastQueueLog = 0;
+let lastWriteFailLog = 0;
+let pendingHighWater = 0;
+
+function logThrottled(lastTsRef: () => number, setLastTs: (t: number) => void, intervalMs: number, msg: string): void {
+    const now = Date.now();
+    if (now - lastTsRef() < intervalMs) return;
+    setLastTs(now);
+    console.log(msg);
+}
 
 // ---------- filename helpers ----------
 // Active:   aprs-<host>-<pid>-<firstTs>.log        (3 segments)
@@ -94,6 +110,26 @@ async function ensureDir(): Promise<void> {
     await fsp.mkdir(basePath(), {recursive: true});
 }
 
+// Wire up stream error / close logging. The default behaviour for an unhandled
+// 'error' on a WriteStream is to crash the process; without listeners the
+// emit happens before any write callback fires, so writes silently disappear.
+function attachStreamHandlers(stream: WriteStream, p: string): void {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+        console.log(`pointlog: STREAM ERROR ${p}: ${err.message} (code=${err.code ?? 'unknown'}) — appendPoint will drop until reopen`);
+        if (activeStream === stream) {
+            // Force the next appendPoint into the no-stream branch so we
+            // notice rather than writing into a dead descriptor.
+            activeStream = undefined;
+        }
+    });
+    stream.on('close', () => {
+        if (activeStream === stream && !rotating) {
+            console.log(`pointlog: stream closed unexpectedly ${p} (writes=${writesSinceOpen}, bytes=${activeBytes})`);
+            activeStream = undefined;
+        }
+    });
+}
+
 async function listAprsFiles(): Promise<ParsedName[]> {
     let entries: string[];
     try {
@@ -121,35 +157,6 @@ function isPidAlive(p: number): boolean {
     }
 }
 
-// Return the timestamp of the last parseable line in a file, or undefined if
-// there are none. Reads a small tail buffer.
-function readLastTs(filePath: string): number | undefined {
-    const fd = openSync(filePath, 'r');
-    try {
-        const size = fstatSync(fd).size;
-        if (size === 0) return undefined;
-        const tailSize = Math.min(size, 64 * 1024);
-        const buf = Buffer.alloc(tailSize);
-        readSync(fd, buf, 0, tailSize, size - tailSize);
-        const text = buf.toString('utf8');
-        // Find last complete line (preceded by \n).
-        const lines = text.split('\n');
-        for (let i = lines.length - 1; i >= 0; i--) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            try {
-                const msg = JSON.parse(line);
-                if (typeof msg.t === 'number') return msg.t;
-            } catch {
-                // malformed; keep searching backward
-            }
-        }
-        return undefined;
-    } finally {
-        closeSync(fd);
-    }
-}
-
 // ---------- public API ----------
 
 export async function openLog(): Promise<void> {
@@ -159,11 +166,13 @@ export async function openLog(): Promise<void> {
     await purgeStale();
 
     activeFirstTs = Math.floor(Date.now() / 1000);
-    activeLastTs = activeFirstTs;
     activePath = path.join(basePath(), activeFilename(activeFirstTs));
     activeStream = createWriteStream(activePath, {flags: 'a'});
+    attachStreamHandlers(activeStream, activePath);
     activeBytes = 0;
-    console.log(`pointlog: opened ${activePath}`);
+    writesSinceOpen = 0;
+    lastWriteTs = Date.now();
+    console.log(`pointlog: opened ${activePath} (pid=${pid}, host=${hostname})`);
 }
 
 export async function closeLog(): Promise<void> {
@@ -173,46 +182,102 @@ export async function closeLog(): Promise<void> {
 }
 
 export function appendPoint(message: LoggedMessage): void {
-    if (!activeStream) return; // not open yet (shouldn't happen in practice)
+    if (!activeStream) {
+        logThrottled(
+            () => lastNoStreamLog,
+            (t) => (lastNoStreamLog = t),
+            5000,
+            `pointlog: appendPoint dropped — no active stream (rotating=${rotating}, lastPath=${activePath || '<none>'})`
+        );
+        return;
+    }
     const line = JSON.stringify(message) + '\n';
     if (rotating) {
         pendingWrites.push(line);
+        if (pendingWrites.length > pendingHighWater) pendingHighWater = pendingWrites.length;
+        // 5 000 ≈ a couple of seconds of nominal traffic; if rotate() has
+        // wedged we want to see the queue climbing rather than silently
+        // ballooning until OOM.
+        if (pendingWrites.length >= 5000) {
+            logThrottled(
+                () => lastQueueLog,
+                (t) => (lastQueueLog = t),
+                10000,
+                `pointlog: pendingWrites=${pendingWrites.length} (rotate stuck? activePath=${activePath})`
+            );
+        }
         return;
     }
-    activeStream.write(line);
+    const ok = activeStream.write(line);
+    if (!ok) {
+        // Backpressure isn't fatal but if it pins for long the kernel buffer
+        // is full or the disk is choking — worth one line per 30s.
+        logThrottled(
+            () => lastWriteFailLog,
+            (t) => (lastWriteFailLog = t),
+            30000,
+            `pointlog: write returned false (backpressure) on ${activePath}, bytes=${activeBytes}`
+        );
+    }
     activeBytes += Buffer.byteLength(line, 'utf8');
-    if (typeof message.t === 'number' && message.t > activeLastTs) activeLastTs = message.t;
+    writesSinceOpen++;
+    lastWriteTs = Date.now();
     if (activeBytes >= rotateThreshold) {
-        // Fire and forget — rotation handles its own errors.
-        void rotate();
+        // Fire and forget — rotation handles its own errors, but log if the
+        // promise still rejects so we don't lose the failure.
+        rotate().catch((e: any) => {
+            console.log(`pointlog: rotate() rejected: ${e?.message ?? e} (stack=${e?.stack ?? 'none'})`);
+            rotating = false; // unstick so future writes aren't permanently queued
+        });
     }
 }
 
 async function rotate(): Promise<void> {
     if (rotating || !activeStream) return;
     rotating = true;
+    const queuedAtStart = pendingWrites.length;
     try {
         const oldStream = activeStream;
         const oldPath = activePath;
         const oldFirstTs = activeFirstTs;
-        const oldLastTs = activeLastTs;
+        // Encode the writer's wall-clock at close into the filename. This
+        // is an upper bound on every record's t in the file — every record
+        // was written before this moment, and d ≥ 0 means t ≤ write_time.
+        // Using max(t in records) here would underestimate the bound when
+        // the file ends with a backfilled chunk whose t lags wall clock.
+        const oldLastTs = Math.floor(Date.now() / 1000);
 
-        await new Promise<void>((resolve) => oldStream.end(() => resolve()));
+        await new Promise<void>((resolve) => {
+            oldStream.end((err?: Error | null) => {
+                if (err) console.log(`pointlog: end() on ${oldPath} reported error: ${err.message}`);
+                resolve();
+            });
+        });
 
         const rotatedPath = path.join(basePath(), rotatedFilename(hostname, pid, oldFirstTs, oldLastTs));
         try {
             await fsp.rename(oldPath, rotatedPath);
         } catch (e: any) {
-            console.log(`pointlog: rename failed ${oldPath} → ${rotatedPath}: ${e.message}`);
+            console.log(`pointlog: rename failed ${oldPath} → ${rotatedPath}: ${e.message} (code=${e.code})`);
         }
 
         activeFirstTs = Math.floor(Date.now() / 1000);
         if (activeFirstTs <= oldLastTs) activeFirstTs = oldLastTs + 1;
-        activeLastTs = activeFirstTs;
         activePath = path.join(basePath(), activeFilename(activeFirstTs));
-        activeStream = createWriteStream(activePath, {flags: 'a'});
+        try {
+            activeStream = createWriteStream(activePath, {flags: 'a'});
+            attachStreamHandlers(activeStream, activePath);
+        } catch (e: any) {
+            console.log(`pointlog: createWriteStream failed for ${activePath}: ${e?.message ?? e} — discarding ${pendingWrites.length} queued lines`);
+            activeStream = undefined;
+            pendingWrites.length = 0;
+            return;
+        }
         activeBytes = 0;
-        console.log(`pointlog: rotated → ${rotatedPath}; new active ${activePath}`);
+        writesSinceOpen = 0;
+        lastWriteTs = Date.now();
+        console.log(`pointlog: rotated → ${rotatedPath}; new active ${activePath} (queued=${queuedAtStart}, highWater=${pendingHighWater})`);
+        pendingHighWater = 0;
 
         // Flush any writes that queued during rotation.
         while (pendingWrites.length > 0) {
@@ -234,15 +299,21 @@ async function adoptOrphans(): Promise<void> {
         if (f.host !== hostname) continue;
         if (f.pid === pid) continue; // our own (shouldn't exist yet, but be safe)
         if (isPidAlive(f.pid)) continue;
-        // Orphan — adopt it.
+        // Orphan — adopt it. The dead process never got to encode a close
+        // time into its filename, so use the file's mtime as the proxy.
+        // mtime is the OS's record of the last write, which is exactly the
+        // wall-clock semantic we want for `lastTs` going forward.
         const fullPath = path.join(basePath(), f.file);
         let lastTs: number | undefined;
+        let fileSize = 0;
         try {
-            lastTs = readLastTs(fullPath);
+            const st = await fsp.stat(fullPath);
+            fileSize = st.size;
+            if (fileSize > 0) lastTs = Math.floor(st.mtimeMs / 1000);
         } catch (e: any) {
-            console.log(`pointlog: cannot read ${f.file}: ${e.message}`);
+            console.log(`pointlog: cannot stat ${f.file}: ${e.message}`);
         }
-        if (lastTs == null) {
+        if (fileSize === 0 || lastTs == null) {
             // Empty / unreadable — delete.
             try {
                 await fsp.unlink(fullPath);
@@ -459,11 +530,13 @@ async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): Asyn
 
 export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
     const files = await listAprsFiles();
-    // Filename timestamps reflect writer wall-clock (open / close). In live
-    // operation message-t ≈ wall time, so `lastTs < since` is a valid
-    // "this file is too old" prefilter for rotated files. We never prefilter
-    // by `firstTs` against `until` — firstTs is writer-open time, not a
-    // lower bound on message-t (historical-t writes would break that).
+    // Filename timestamps are writer wall-clock at open (firstTs) and
+    // close (lastTs). With every record carrying d ≥ 0, lastTs is a hard
+    // upper bound on every record's t in the file — so `lastTs < since`
+    // is a safe "this file has nothing in our window" prefilter for
+    // rotated files. We never prefilter by `firstTs` against `until`:
+    // firstTs is open time, not a lower bound on t (a backfill replay can
+    // append old-t records to a freshly opened file).
     const candidates = files
         .filter((f) => {
             if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
