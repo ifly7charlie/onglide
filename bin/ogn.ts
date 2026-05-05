@@ -67,7 +67,7 @@ import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 
 // Launch our listener
 import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
 
-import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_SLACK_FRACTION, HOME_STALE_SECONDS, HOME_OGN_COVERAGE} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -1486,10 +1486,11 @@ const AIRFIELD_RADIUS_INTASK_KM = 30;
 let lastAprsFilter: string | null = null;
 function rebuildAprsFilter() {
     // A channel is "live" for APRS purposes if it can still produce traffic
-    // worth filtering for: not past sunset for the day, and not in 'home'
-    // status (everyone landed). Sunset is sticky per channel and home is
-    // a class-level compstatus value.
-    const isLive = (c: Channel) => !c.afterSunset && c.compStatus !== 'H';
+    // worth filtering for: not past sunset for the day. compStatus isn't
+    // consulted — APRS-derived "home" verdicts have proven unreliable, and
+    // late arrivals / unknown traffic around the airfield are still worth
+    // catching after the live loop calls the day done.
+    const isLive = (c: Channel) => !c.afterSunset;
     const liveChannels = Object.values(channels).filter(isLive);
 
     const withTasks = liveChannels.filter((c) => c.task);
@@ -1527,9 +1528,7 @@ function rebuildAprsFilter() {
     // the live subset is fine: non-live comps keep whatever bbox they had,
     // and the aprsc filter at line 1521 already narrows packet reception to
     // the live set.
-    aprsController?.updateAirfieldBboxes(
-        currentAirfields.filter((af) => liveComps.has(af.compid)).map((af) => ({compid: af.compid, bbox: perCompExpanded.get(af.compid)}))
-    );
+    aprsController?.updateAirfieldBboxes(currentAirfields.filter((af) => liveComps.has(af.compid)).map((af) => ({compid: af.compid, bbox: perCompExpanded.get(af.compid)})));
 
     if (filter === lastAprsFilter) return;
     lastAprsFilter = filter;
@@ -1933,7 +1932,6 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             // as those still being scored ('S'). Excluding F/H meant that a
             // class where every tracked pilot was already finalised dropped
             // out of the per-class loop entirely, leaving compstatus stuck.
-            if (t.scoredStatus !== 'S' && t.scoredStatus !== 'F' && t.scoredStatus !== 'H') continue;
             totalScoredByClass.set(t.className, (totalScoredByClass.get(t.className) || 0) + 1);
             if (t.dbTrackerId && t.dbTrackerId !== 'unknown' && t.dbTrackerId !== 'blocked') {
                 const list = trackedByClass.get(t.className) || [];
@@ -1950,35 +1948,25 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             const totalScored = totalScoredByClass.get(className) || 0;
             const trackerCoverage = totalScored > 0 ? scored.length / totalScored : 0;
 
-            // A pilot counts toward the H decision if either the live scorer
-            // has produced a meaningful flightStatus, or the official scorer
-            // has finalised them (scoredStatus F/H). A tracker with neither
-            // (flightStatus Unknown and scoredStatus 'S') shouldn't block H
-            // and shouldn't trigger it either.
+            // Strict per-pilot home check. Every tracked pilot must satisfy
+            // one of:
+            //   - officially finalised by the scorer (scoredStatus F or H), OR
+            //   - has utcStart populated AND live flightStatus is
+            //     Landed / Home / Finished.
+            // APRS evidence on its own (Grid, Stationary, stale tracking) no
+            // longer counts — those heuristics produced false positives, so
+            // we'd rather lag reality than declare H prematurely.
             const isTerminalScored = (p: CTrackerRow) => p.scoredStatus === 'F' || p.scoredStatus === 'H';
-            const withStatus = scored.filter((p) => {
+            const isHome = (p: CTrackerRow) => {
                 if (isTerminalScored(p)) return true;
-                const fs = channel?.allScores[p.compno]?.flightStatus;
-                return fs !== undefined && fs !== PositionStatus.Unknown;
-            });
-            // Pilots in withStatus that haven't officially finalised AND
-            // whose live flightStatus isn't Landed/Home/Finished/Grid, and
-            // whose last score isn't more than HOME_STALE_SECONDS old. Grid
-            // counts as home — a glider sat on the grid hours after task
-            // start clearly didn't fly. Stale tracking counts as home too —
-            // if we haven't heard anything for 3h they're on the ground.
-            const nowSec = Math.floor(Date.now() / 1000);
-            const notHomeCount = withStatus.filter((p) => {
-                if (isTerminalScored(p)) return false;
-                const score = channel!.allScores[p.compno]!;
+                const score = channel?.allScores[p.compno];
+                if (!score) return false;
+                if ((score.utcStart ?? 0) === 0) return false;
                 const fs = score.flightStatus;
-                if (fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished || fs === PositionStatus.Grid) return false;
-                if (score.t && nowSec - score.t > HOME_STALE_SECONDS) return false;
-                return true;
-            }).length;
-            // 10% rounded up — gives a 9-pilot class room for one stuck glider
-            // without losing the verdict, while still tightening as the field grows.
-            const allLanded = withStatus.length > 0 && notHomeCount <= Math.ceil(scored.length * HOME_SLACK_FRACTION);
+                return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
+            };
+            const homeCount = scored.filter(isHome).length;
+            const allLanded = scored.length > 0 && homeCount === scored.length;
             const startedCount = scored.filter((p) => (channel?.allScores[p.compno]?.utcStart ?? 0) > 0).length;
             const airborneCount = scored.filter((p) => {
                 const fs = channel?.allScores[p.compno]?.flightStatus;
@@ -2024,7 +2012,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 nextStatus = 'H';
                 allowFrom = allOfficiallyFinalised || ognDeterminedHome ? ['B', 'G', 'L', 'S', 'F'] : ['L', 'S', 'F'];
                 const homeBy = allOfficiallyFinalised ? ' (officially finalised)' : ognDeterminedHome ? ' (OGN coverage)' : '';
-                reason = `${withStatus.length - notHomeCount}/${withStatus.length} of ${totalScored} reporting gliders landed${notHomeCount > 0 ? ` (${notHomeCount} within slack)` : ''}${homeBy}`;
+                reason = `${homeCount}/${scored.length} of ${totalScored} tracked gliders home${homeBy}`;
             } else if (finishingCount > 0) {
                 nextStatus = 'F';
                 allowFrom = ['L', 'S'];
@@ -2895,7 +2883,8 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                 console.log(unknownTrackers[flarmId].message);
                 if (!readOnly) {
                     db.transaction()
-                        .query(escape`
+                        .query(
+                            escape`
                             UPDATE tracker
                             SET
                                 trackerid = 'blocked'
@@ -2905,8 +2894,10 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                                 AND trackerid IN ('unknown', '')
                             LIMIT
                                 1
-                        `)
-                        .query(escape`
+                        `
+                        )
+                        .query(
+                            escape`
                             INSERT INTO
                                 trackerhistory (compno, changed, flarmid, greg, method)
                             VALUES
@@ -2917,7 +2908,8 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                                     ${ddbf.registration || null},
                                     ${method}
                                 )
-                        `)
+                        `
+                        )
                         .commit();
                 }
             }
@@ -2954,7 +2946,8 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {
             db.transaction()
-                .query(escape`
+                .query(
+                    escape`
                     UPDATE tracker
                     SET
                         trackerid = ${flarmId}
@@ -2964,8 +2957,10 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                         AND trackerid IN ('unknown', 'blocked', '')
                     LIMIT
                         1
-                `)
-                .query(escape`
+                `
+                )
+                .query(
+                    escape`
                     INSERT INTO
                         trackerhistory (compno, changed, flarmid, launchtime, method)
                     VALUES
@@ -2976,7 +2971,8 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                             now(),
                             "ognddb"
                         )
-                `)
+                `
+                )
                 .commit();
         }
     }

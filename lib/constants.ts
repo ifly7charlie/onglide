@@ -28,16 +28,6 @@ export const FINISHING_ETA_MINUTES = 5;
 export const LAUNCHING_TRACKED_FRACTION = 0.2; // 20% of tracked gliders
 export const LAUNCHING_TOTAL_FRACTION = 0.1; // 10% of all gliders in the class
 
-// Slack on the all-landed verdict for promoting a class to 'H' (home). One
-// glider stuck on grid or landed-out shouldn't keep the whole class flagged
-// as still flying — allow up to ceil(scored * HOME_SLACK_FRACTION) tracked
-// pilots to be in non-landed states and still call it home.
-export const HOME_SLACK_FRACTION = 0.1;
-
-// A pilot whose last score is older than this is presumed home for the
-// purposes of the H verdict — if we've heard nothing for three hours
-// they're either landed-out off-network or back on the ground.
-export const HOME_STALE_SECONDS = 3 * 3600;
 // Minimum tracker coverage (fraction of pilots in the class with a real,
 // non-'unknown'/'blocked' tracker) before OGN evidence alone — without the
 // official scorer finalising everyone — is allowed to widen allowFrom and
