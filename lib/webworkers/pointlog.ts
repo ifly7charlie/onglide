@@ -42,6 +42,14 @@ let lastQueueLog = 0;
 let lastWriteFailLog = 0;
 let pendingHighWater = 0;
 
+// Auto-reopen state. After a stream error / unexpected close / failed rotate
+// we'd otherwise sit with activeStream === undefined and silently drop every
+// packet. scheduleReopen() debounces a backoff'd reopen attempt so the writer
+// self-heals without a process restart.
+let reopenAttempt = 0;
+let reopenTimer: NodeJS.Timeout | undefined;
+let closing = false;
+
 function logThrottled(lastTsRef: () => number, setLastTs: (t: number) => void, intervalMs: number, msg: string): void {
     const now = Date.now();
     if (now - lastTsRef() < intervalMs) return;
@@ -115,19 +123,51 @@ async function ensureDir(): Promise<void> {
 // emit happens before any write callback fires, so writes silently disappear.
 function attachStreamHandlers(stream: WriteStream, p: string): void {
     stream.on('error', (err: NodeJS.ErrnoException) => {
-        console.log(`pointlog: STREAM ERROR ${p}: ${err.message} (code=${err.code ?? 'unknown'}) — appendPoint will drop until reopen`);
+        const ageMs = lastWriteTs ? Date.now() - lastWriteTs : -1;
+        console.log(`pointlog: STREAM ERROR ${p}: ${err.message} (code=${err.code ?? 'unknown'}, lastWriteAgeMs=${ageMs}) — scheduling reopen`);
         if (activeStream === stream) {
             // Force the next appendPoint into the no-stream branch so we
             // notice rather than writing into a dead descriptor.
             activeStream = undefined;
+            scheduleReopen();
         }
     });
     stream.on('close', () => {
         if (activeStream === stream && !rotating) {
-            console.log(`pointlog: stream closed unexpectedly ${p} (writes=${writesSinceOpen}, bytes=${activeBytes})`);
+            const ageMs = lastWriteTs ? Date.now() - lastWriteTs : -1;
+            console.log(`pointlog: stream closed unexpectedly ${p} (writes=${writesSinceOpen}, bytes=${activeBytes}, lastWriteAgeMs=${ageMs})`);
             activeStream = undefined;
+            scheduleReopen();
         }
     });
+}
+
+// Open a fresh fd against the existing activePath. Used after a stream-level
+// failure: filename / firstTs stay the same so readers don't see a phantom
+// new session, and writes resume in append mode into the same file.
+function reopenStream(): void {
+    if (closing || activeStream || !activePath) return;
+    try {
+        const s = createWriteStream(activePath, {flags: 'a'});
+        attachStreamHandlers(s, activePath);
+        activeStream = s;
+        reopenAttempt = 0;
+        lastWriteTs = Date.now();
+        console.log(`pointlog: reopened ${activePath} after failure`);
+    } catch (e: any) {
+        console.log(`pointlog: reopen failed ${activePath}: ${e?.message ?? e} (code=${e?.code ?? 'unknown'})`);
+        scheduleReopen();
+    }
+}
+
+function scheduleReopen(): void {
+    if (closing || activeStream || reopenTimer) return;
+    const delay = Math.min(60_000, 1000 * Math.pow(2, reopenAttempt));
+    reopenAttempt++;
+    reopenTimer = setTimeout(() => {
+        reopenTimer = undefined;
+        reopenStream();
+    }, delay);
 }
 
 async function listAprsFiles(): Promise<ParsedName[]> {
@@ -160,6 +200,12 @@ function isPidAlive(p: number): boolean {
 // ---------- public API ----------
 
 export async function openLog(): Promise<void> {
+    closing = false;
+    reopenAttempt = 0;
+    if (reopenTimer) {
+        clearTimeout(reopenTimer);
+        reopenTimer = undefined;
+    }
     reloadConfig();
     await ensureDir();
     await adoptOrphans();
@@ -176,9 +222,20 @@ export async function openLog(): Promise<void> {
 }
 
 export async function closeLog(): Promise<void> {
+    closing = true;
+    if (reopenTimer) {
+        clearTimeout(reopenTimer);
+        reopenTimer = undefined;
+    }
     if (!activeStream) return;
     await new Promise<void>((resolve) => activeStream!.end(() => resolve()));
     activeStream = undefined;
+}
+
+// Test hook: exposes the singleton stream so unit tests can drive the
+// auto-reopen path with synthetic 'error' events. Not for production use.
+export function __testGetActiveStream(): WriteStream | undefined {
+    return activeStream;
 }
 
 export function appendPoint(message: LoggedMessage): void {
@@ -187,8 +244,9 @@ export function appendPoint(message: LoggedMessage): void {
             () => lastNoStreamLog,
             (t) => (lastNoStreamLog = t),
             5000,
-            `pointlog: appendPoint dropped — no active stream (rotating=${rotating}, lastPath=${activePath || '<none>'})`
+            `pointlog: appendPoint dropped — no active stream (rotating=${rotating}, closing=${closing}, lastPath=${activePath || '<none>'})`
         );
+        if (!rotating) scheduleReopen();
         return;
     }
     const line = JSON.stringify(message) + '\n';
@@ -228,6 +286,7 @@ export function appendPoint(message: LoggedMessage): void {
         rotate().catch((e: any) => {
             console.log(`pointlog: rotate() rejected: ${e?.message ?? e} (stack=${e?.stack ?? 'none'})`);
             rotating = false; // unstick so future writes aren't permanently queued
+            if (!activeStream) scheduleReopen();
         });
     }
 }
@@ -268,9 +327,10 @@ async function rotate(): Promise<void> {
             activeStream = createWriteStream(activePath, {flags: 'a'});
             attachStreamHandlers(activeStream, activePath);
         } catch (e: any) {
-            console.log(`pointlog: createWriteStream failed for ${activePath}: ${e?.message ?? e} — discarding ${pendingWrites.length} queued lines`);
+            console.log(`pointlog: createWriteStream failed for ${activePath}: ${e?.message ?? e} (code=${e?.code ?? 'unknown'}) — discarding ${pendingWrites.length} queued lines, scheduling reopen`);
             activeStream = undefined;
             pendingWrites.length = 0;
+            scheduleReopen();
             return;
         }
         activeBytes = 0;

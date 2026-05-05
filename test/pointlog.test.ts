@@ -1,9 +1,9 @@
-import {describe, test, expect, afterEach} from 'vitest';
+import {describe, test, expect, afterEach, vi} from 'vitest';
 import {promises as fsp, readdirSync} from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import {openLog, appendPoint, closeLog, loadPoints} from '../lib/webworkers/pointlog';
+import {openLog, appendPoint, closeLog, loadPoints, __testGetActiveStream} from '../lib/webworkers/pointlog';
 
 async function freshEnv(sub: string, rotateMb = 100, retainHours = 24): Promise<string> {
     const dir = path.join(os.tmpdir(), `onglide-pointlog-${sub}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -124,5 +124,90 @@ describe('pointlog', () => {
         const got: any[] = [];
         for await (const m of loadPoints({flarmId: 'NOPE' as any, since: 0})) got.push(m);
         expect(got.length).toBe(0);
+    });
+
+    test('auto-reopen: stream error clears activeStream and reopens after backoff', async () => {
+        dir = await freshEnv('reopen');
+        await openLog();
+
+        const baseT = 1700000000;
+        const stream = __testGetActiveStream();
+        expect(stream).toBeDefined();
+
+        vi.useFakeTimers();
+        try {
+            stream!.emit('error', Object.assign(new Error('synthetic EIO'), {code: 'EIO'}));
+            // Error handler runs synchronously — activeStream cleared, reopen
+            // scheduled at delay 1000ms (Math.min(60_000, 1000 * 2^0)).
+            expect(__testGetActiveStream()).toBeUndefined();
+
+            await vi.advanceTimersByTimeAsync(1100);
+        } finally {
+            vi.useRealTimers();
+        }
+
+        const reopened = __testGetActiveStream();
+        expect(reopened).toBeDefined();
+        expect(reopened).not.toBe(stream);
+
+        // Post-reopen writes go into the same activePath (append mode); a
+        // single `loadPoints` query covers them.
+        for (let i = 0; i < 10; i++) appendPoint(makeMsg(baseT + 100 + i, 'TARGET'));
+
+        await closeLog();
+
+        const got: any[] = [];
+        for await (const m of loadPoints({flarmId: 'TARGET' as any, since: baseT + 100})) got.push(m);
+        expect(got.length).toBe(10);
+    });
+
+    test('auto-reopen: closeLog cancels a pending reopen', async () => {
+        dir = await freshEnv('cancelreopen');
+        await openLog();
+
+        const stream = __testGetActiveStream();
+        expect(stream).toBeDefined();
+
+        vi.useFakeTimers();
+        try {
+            stream!.emit('error', Object.assign(new Error('synthetic EIO'), {code: 'EIO'}));
+            expect(__testGetActiveStream()).toBeUndefined();
+
+            // closeLog should clear the pending reopen timer.
+            vi.useRealTimers();
+            await closeLog();
+
+            vi.useFakeTimers();
+            await vi.advanceTimersByTimeAsync(2000);
+        } finally {
+            vi.useRealTimers();
+        }
+
+        // Without cancellation we'd see a fresh stream here; with it, none.
+        expect(__testGetActiveStream()).toBeUndefined();
+    });
+
+    test('auto-reopen: appendPoint with no active stream schedules a reopen', async () => {
+        dir = await freshEnv('reopenfromappend');
+        await openLog();
+
+        const stream = __testGetActiveStream();
+
+        vi.useFakeTimers();
+        try {
+            // Fake timers must be active BEFORE the error so the reopen timer
+            // is registered with vitest's scheduler.
+            stream!.emit('error', Object.assign(new Error('synthetic EIO'), {code: 'EIO'}));
+            expect(__testGetActiveStream()).toBeUndefined();
+
+            // appendPoint into the no-stream branch should be idempotent —
+            // existing scheduled reopen still fires.
+            appendPoint(makeMsg(1700000000, 'X'));
+            await vi.advanceTimersByTimeAsync(1100);
+        } finally {
+            vi.useRealTimers();
+        }
+
+        expect(__testGetActiveStream()).toBeDefined();
     });
 });
