@@ -307,9 +307,7 @@ const OUT_OF_ORDER_SLACK_SEC = 30;
 export async function* scanAll(opts: {since?: number; until?: number} = {}): AsyncGenerator<LoggedMessage> {
     const files = await listAprsFiles();
     const since = opts.since ?? 0;
-    const candidates = files
-        .filter((f) => (f.rotated && (f.lastTs as number) < since - OUT_OF_ORDER_SLACK_SEC ? false : true))
-        .sort((a, b) => a.firstTs - b.firstTs);
+    const candidates = files.filter((f) => (f.rotated && (f.lastTs as number) < since - OUT_OF_ORDER_SLACK_SEC ? false : true)).sort((a, b) => a.firstTs - b.firstTs);
     for (const f of candidates) {
         const fullPath = path.join(basePath(), f.file);
         try {
@@ -548,8 +546,14 @@ async function* scanFile(fullPath: string, q: LoadPointsQuery): AsyncGenerator<L
 }
 
 // Return a byte offset at which to start scanning. The offset points to the
-// start of a line whose t is roughly <= target. Caller is responsible for
-// final filtering (t >= since) during scan.
+// start of a line whose t+d (writer wall-clock at the moment that line was
+// serialized) is roughly <= target. We compare on t+d, not t alone: the
+// file is monotonic in t+d (each line is appended at its writer-now), but
+// NOT in t — backfill replays from APRS-IS history can inject very-old-t
+// packets in the middle of an otherwise live-ordered file (d up to ~17 min
+// observed), and a probed t there is wildly out of step with the file's
+// ambient write-time at that offset. The caller is responsible for final
+// filtering (t >= since) during scan.
 function binarySearchForTs(fullPath: string, size: number, target: number): number {
     const fd = openSync(fullPath, 'r');
     try {
@@ -559,13 +563,15 @@ function binarySearchForTs(fullPath: string, size: number, target: number): numb
 
         while (hi - lo > 4096) {
             const mid = Math.floor((lo + hi) / 2);
-            const {offset, t} = readLineAt(fd, size, mid, probeBuf);
+            const {offset, t, d} = readLineAt(fd, size, mid, probeBuf);
             if (offset == null || t == null) {
                 // Couldn't parse — widen toward lo.
                 hi = mid;
                 continue;
             }
-            if (t < target) lo = offset + 1; // skip past this line start
+            const writeTime = t + d;
+            if (writeTime < target)
+                lo = offset + 1; // skip past this line start
             else hi = offset;
         }
         // Align lo to a line start: scan backward from lo to the previous \n (or BOF).
@@ -577,24 +583,27 @@ function binarySearchForTs(fullPath: string, size: number, target: number): numb
 
 // Read the line that contains byte `pos`: seek to pos, back up to the
 // previous '\n', read forward to the next '\n', parse. Returns the start
-// offset of that line and its parsed t.
-function readLineAt(fd: number, size: number, pos: number, _scratch: Buffer): {offset: number | null; t: number | null} {
+// offset of that line, its parsed t, and its parsed d (defaults to 0 when
+// absent — older log format, or live packets that didn't record a latency).
+function readLineAt(fd: number, size: number, pos: number, _scratch: Buffer): {offset: number | null; t: number | null; d: number} {
     const start = alignToLineStart(fd, pos);
     // Read up to 8 KB from start to find next newline and parse.
     const maxLine = 8 * 1024;
     const buf = Buffer.alloc(Math.min(maxLine, size - start));
     const n = readSync(fd, buf, 0, buf.length, start);
-    if (n <= 0) return {offset: null, t: null};
+    if (n <= 0) return {offset: null, t: null, d: 0};
     const text = buf.subarray(0, n).toString('utf8');
     const nl = text.indexOf('\n');
     const line = nl >= 0 ? text.slice(0, nl) : text;
     try {
         const msg = JSON.parse(line);
-        if (typeof msg.t === 'number') return {offset: start, t: msg.t};
+        if (typeof msg.t === 'number') {
+            return {offset: start, t: msg.t, d: typeof msg.d === 'number' ? msg.d : 0};
+        }
     } catch {
         // fall through
     }
-    return {offset: start, t: null};
+    return {offset: start, t: null, d: 0};
 }
 
 function alignToLineStart(fd: number, pos: number): number {
