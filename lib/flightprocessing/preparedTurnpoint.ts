@@ -271,7 +271,7 @@ export class PreparedTurnpoint {
         const from = norm2pi(centerRad - a1rad);
         const to = norm2pi(centerRad + a1rad);
 
-        const steps = 25;
+        const steps = 64;
 
         // addArc using WGS84, with the same termination behavior as taskhelper (fixed step count, no while-loops)
         const addArc = (
