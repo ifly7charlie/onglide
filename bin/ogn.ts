@@ -1763,6 +1763,53 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
     return {cTrackers, keyedDb, prevGliders, initialGliderCount, removedGlidersCount: removedGliders.length};
 }
 
+// First-load DDB block gate. Mirrors the unknown→matched APRS path in
+// processFlarmIdMatch for trackerids set out-of-band (manual entry,
+// matchtrackers.ts, etc.) that never went through that flow. If any
+// comma-separated device_id in `trackerRow.dbTrackerId` has tracked!=Y
+// in the merged DDB and the comp hasn't opted into trackingconsent,
+// mutates trackerRow.dbTrackerId to 'blocked' and persists the tracker /
+// trackerhistory rows. The caller's existing 'blocked' branch then
+// handles worker-side cleanup. Skips silently when ddb is empty
+// (no fetch yet) — picked up on the next datecode rollover.
+function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, displayName: string, trackingconsent: string | undefined | null): void {
+    if (!trackerRow.dbTrackerId || trackerRow.dbTrackerId === 'unknown' || trackerRow.dbTrackerId === 'blocked') return;
+    if (Object.keys(ddb).length === 0) return;
+    let blockedEntry: SharedDDBEntry | undefined;
+    for (const raw of trackerRow.dbTrackerId.split(',')) {
+        const id = raw.trim();
+        if (!id) continue;
+        const entry = ddb[id];
+        if (isBlocked(entry, trackingconsent)) {
+            blockedEntry = entry;
+            break;
+        }
+    }
+    if (!blockedEntry) return;
+    const sources = blockedEntry.sources?.join('+') ?? '?';
+    const method = blockedMethod(blockedEntry);
+    console.log(`${displayName}:${trackerRow.compno} first-load blocked via DDB (${blockedEntry.device_id}, sources: ${sources})`);
+    trackerRow.dbTrackerId = 'blocked';
+    if (!readOnly) {
+        db.transaction()
+            .query(
+                escape`
+                UPDATE tracker
+                SET trackerid = 'blocked'
+                WHERE compno = ${trackerRow.compno} AND class = ${trackerRow.className}
+                LIMIT 1
+            `
+            )
+            .query(
+                escape`
+                INSERT INTO trackerhistory (compno, changed, flarmid, greg, method)
+                VALUES (${trackerRow.compno}, now(), 'blocked', ${blockedEntry.registration || null}, ${method})
+            `
+            )
+            .commit();
+    }
+}
+
 // Phase C: issue per-glider IPC (setInitialTrack/rescoreGlider/finishGlider/
 // trackGlider). Runs after updateTasks + rebuildAprsFilter so that
 // setInitialTrack carries channel.task, the scoring worker has already
@@ -1793,6 +1840,10 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                     throw new Error('no channel' + glider.channelName);
                 }
                 const listening = !channel.afterSunset && t.scoredStatus == 'S';
+
+                if (!hadTracker) {
+                    applyDDBFirstLoadBlock(t, channel.displayName, competition.trackingconsent);
+                }
 
                 // Blocked pilots: aprs.ts validateGlider rejects 'blocked', so
                 // they have no track points. We synthesize a Blocked PilotScore
