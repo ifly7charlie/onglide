@@ -944,7 +944,6 @@ function trackGlider(task: AprsCommandTrack) {
 function startGliderInterval(glider: Aircraft, className: ClassName, compno: Compno, trackerId: any, channelName: string) {
     setTimeout(() => {
         console.log(`APRS: tracking ${className}/${compno} with ${trackerId} on channel ${channelName}`);
-        glider.channel!.postMessage({c: glider.compno, t: 0, _: false, tick: true} as any);
         glider.interval = setInterval(() => processMessageQueue(glider), 1000);
     }, Math.random() * 1000);
 }
