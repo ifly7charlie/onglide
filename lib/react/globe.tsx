@@ -154,6 +154,27 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [hasData]);
 
+    // While the /all websocket hasn't yet delivered the snapshot, slowly
+    // rotate the globe so the page reads as loading rather than broken.
+    useEffect(() => {
+        if (hasData) return;
+        let raf = 0;
+        let last = performance.now();
+        const tick = (now: number) => {
+            const dt = now - last;
+            last = now;
+            setViewState((prev: any) => ({
+                ...prev,
+                longitude: ((prev.longitude ?? 0) + dt * 0.015 + 540) % 360 - 180,
+                transitionDuration: 0,
+                transitionInterpolator: undefined
+            }));
+            raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+    }, [hasData]);
+
     // Fly to a competition's coordinates on list hover. Wrapped in
     // useCallback so the list panel's hover handlers don't re-render the
     // whole component each time.
@@ -289,16 +310,33 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 
     return (
         <div style={{position: 'fixed', inset: 0, background: '#0b1a33'}}>
-            {hasData ? (
-                <DeckGL
-                    views={new GlobeView({id: 'globe', resolution: 10}) as any}
-                    viewState={viewState as any}
-                    onViewStateChange={({viewState: v}: any) => setViewState(v)}
-                    controller={true}
-                    effects={effects as any}
-                    parameters={{cull: true} as any}
-                    layers={layers}
-                />
+            <DeckGL
+                views={new GlobeView({id: 'globe', resolution: 10}) as any}
+                viewState={viewState as any}
+                onViewStateChange={({viewState: v}: any) => setViewState(v)}
+                controller={hasData}
+                effects={effects as any}
+                parameters={{cull: true} as any}
+                layers={layers}
+            />
+
+            {!hasData ? (
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        bottom: '12vh',
+                        textAlign: 'center',
+                        color: 'rgba(255,255,255,0.85)',
+                        fontSize: 16,
+                        letterSpacing: '0.02em',
+                        pointerEvents: 'none',
+                        textShadow: '0 1px 2px rgba(0,0,0,0.6)'
+                    }}
+                >
+                    {t('app.loading_competitions')}
+                </div>
             ) : null}
 
             {/* Right-side competition list panel */}

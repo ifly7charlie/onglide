@@ -271,7 +271,7 @@ export class PreparedTurnpoint {
         const from = norm2pi(centerRad - a1rad);
         const to = norm2pi(centerRad + a1rad);
 
-        const steps = 64;
+        const steps = 40;
 
         // addArc using WGS84, with the same termination behavior as taskhelper (fixed step count, no while-loops)
         const addArc = (
@@ -419,7 +419,9 @@ export class PreparedTurnpoint {
                 const u = u0 + t * (u1 - u0);
                 if (PreparedTurnpoint.debugLine) {
                     const beyond = Math.max(0, Math.abs(u) - this.lineHalfLenM);
-                    console.log(`  LINE-DBG leg${this.leg.legno} t=${pos.t}: v0=${v0.toFixed(0)} v1=${v1.toFixed(0)} u@cross=${u.toFixed(0)} halfLen=${this.lineHalfLenM} beyond=${beyond.toFixed(0)} finalInside=${finalInside}`);
+                    console.log(
+                        `  LINE-DBG leg${this.leg.legno} t=${pos.t}: v0=${v0.toFixed(0)} v1=${v1.toFixed(0)} u@cross=${u.toFixed(0)} halfLen=${this.lineHalfLenM} beyond=${beyond.toFixed(0)} finalInside=${finalInside}`
+                    );
                 }
                 if (Math.abs(u) <= this.lineHalfLenM + 1e-6) {
                     const at = this._interpOnGeodesic(prev, pos, t);
