@@ -45,7 +45,8 @@
         "bearing": "Irány",
         "leg_length": "Szakasz hossza",
         "tp_radius": "Sugár",
-        "leg": "{{n}}. szakasz"
+        "leg": "{{n}}. szakasz",
+        "previous_day_note": "10:00 előtt az előző napi követés látható"
     },
     "task_status": {
         "task_set": "Feladat beállítva",

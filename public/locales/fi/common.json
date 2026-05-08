@@ -45,7 +45,8 @@
         "bearing": "Suunta",
         "leg_length": "Osuuden pituus",
         "tp_radius": "Säde",
-        "leg": "Osuus {{n}}"
+        "leg": "Osuus {{n}}",
+        "previous_day_note": "Ennen klo 10.00 näytetään edellisen päivän seuranta"
     },
     "task_status": {
         "task_set": "Tehtävä asetettu",

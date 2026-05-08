@@ -45,7 +45,8 @@
         "bearing": "Rotta",
         "leg_length": "Lunghezza tratta",
         "tp_radius": "Raggio",
-        "leg": "Tratta {{n}}"
+        "leg": "Tratta {{n}}",
+        "previous_day_note": "Prima delle 10:00 viene mostrato il tracciamento del giorno precedente"
     },
     "task_status": {
         "task_set": "Prova impostata",

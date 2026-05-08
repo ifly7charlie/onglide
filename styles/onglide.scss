@@ -1036,6 +1036,13 @@ ul.task-legs {
     }
 }
 
+.task-previous-day-note {
+    margin: -4px 0 8px 0;
+    font-size: 13px;
+    font-style: italic;
+    opacity: 0.75;
+}
+
 .task-heading {
     display: flex;
     align-items: center;

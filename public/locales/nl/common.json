@@ -45,7 +45,8 @@
         "bearing": "Koers",
         "leg_length": "Beenlengte",
         "tp_radius": "Radius",
-        "leg": "Been {{n}}"
+        "leg": "Been {{n}}",
+        "previous_day_note": "Vóór 10:00 wordt de tracking van de vorige dag getoond"
     },
     "task_status": {
         "task_set": "Opdracht ingesteld",

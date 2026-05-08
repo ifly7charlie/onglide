@@ -45,7 +45,8 @@
         "bearing": "Kurz",
         "leg_length": "Dĺžka úseku",
         "tp_radius": "Polomer",
-        "leg": "Úsek {{n}}"
+        "leg": "Úsek {{n}}",
+        "previous_day_note": "Pred 10:00 sa zobrazuje sledovanie z predchádzajúceho dňa"
     },
     "task_status": {
         "task_set": "Úloha nastavená",

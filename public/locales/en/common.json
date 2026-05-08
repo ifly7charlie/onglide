@@ -45,7 +45,8 @@
         "bearing": "Bearing",
         "leg_length": "Leg Length",
         "tp_radius": "Radius",
-        "leg": "Leg {{n}}"
+        "leg": "Leg {{n}}",
+        "previous_day_note": "Prior to 10:00 the previous day's tracking will be displayed"
     },
     "task_status": {
         "task_set": "Task set",

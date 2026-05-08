@@ -45,7 +45,8 @@
         "bearing": "Pejling",
         "leg_length": "Benlængde",
         "tp_radius": "Radius",
-        "leg": "Ben {{n}}"
+        "leg": "Ben {{n}}",
+        "previous_day_note": "Før kl. 10:00 vises sporing fra dagen før"
     },
     "task_status": {
         "task_set": "Opgave sat",

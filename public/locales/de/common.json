@@ -45,7 +45,8 @@
         "bearing": "Kurs",
         "leg_length": "Schenkellänge",
         "tp_radius": "Radius",
-        "leg": "Schenkel {{n}}"
+        "leg": "Schenkel {{n}}",
+        "previous_day_note": "Vor 10:00 Uhr wird die Aufzeichnung des Vortags angezeigt"
     },
     "task_status": {
         "task_set": "Aufgabe gesetzt",

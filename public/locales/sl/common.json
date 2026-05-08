@@ -45,7 +45,8 @@
         "bearing": "Smer",
         "leg_length": "Dolžina kraka",
         "tp_radius": "Polmer",
-        "leg": "Krak {{n}}"
+        "leg": "Krak {{n}}",
+        "previous_day_note": "Pred 10.00 je prikazano sledenje prejšnjega dne"
     },
     "task_status": {
         "task_set": "Naloga postavljena",

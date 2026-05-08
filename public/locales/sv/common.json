@@ -45,7 +45,8 @@
         "bearing": "Bäring",
         "leg_length": "Benlängd",
         "tp_radius": "Radie",
-        "leg": "Ben {{n}}"
+        "leg": "Ben {{n}}",
+        "previous_day_note": "Före kl. 10:00 visas spårningen från föregående dag"
     },
     "task_status": {
         "task_set": "Uppgift satt",

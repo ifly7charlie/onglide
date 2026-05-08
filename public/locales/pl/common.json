@@ -45,7 +45,8 @@
         "bearing": "Kurs",
         "leg_length": "Długość odcinka",
         "tp_radius": "Promień",
-        "leg": "Odcinek {{n}}"
+        "leg": "Odcinek {{n}}",
+        "previous_day_note": "Przed 10:00 wyświetlane jest śledzenie z poprzedniego dnia"
     },
     "task_status": {
         "task_set": "Konkurencja ustawiona",

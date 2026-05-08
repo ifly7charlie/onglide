@@ -45,7 +45,8 @@
         "bearing": "Rumbo",
         "leg_length": "Longitud del tramo",
         "tp_radius": "Radio",
-        "leg": "Tramo {{n}}"
+        "leg": "Tramo {{n}}",
+        "previous_day_note": "Antes de las 10:00 se mostrará el seguimiento del día anterior"
     },
     "task_status": {
         "task_set": "Prueba definida",

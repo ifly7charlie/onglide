@@ -45,7 +45,8 @@
         "bearing": "Peiling",
         "leg_length": "Etappelengde",
         "tp_radius": "Radius",
-        "leg": "Etappe {{n}}"
+        "leg": "Etappe {{n}}",
+        "previous_day_note": "Før kl. 10:00 vises sporingen fra dagen før"
     },
     "task_status": {
         "task_set": "Oppgave satt",

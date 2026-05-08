@@ -45,7 +45,8 @@
         "bearing": "Cap",
         "leg_length": "Longueur de la branche",
         "tp_radius": "Rayon",
-        "leg": "Branche {{n}}"
+        "leg": "Branche {{n}}",
+        "previous_day_note": "Avant 10h00, le suivi de la veille est affiché"
     },
     "task_status": {
         "task_set": "Épreuve définie",

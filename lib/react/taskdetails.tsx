@@ -14,6 +14,7 @@ const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
 import {selectTask, selectHasTask} from '../redux/taskSlice';
 import {selectCompByCompid} from '../redux/competitionsSlice';
+import {selectNow} from '../redux/nowSlice';
 import {useSelector} from '../redux';
 
 import type {TaskLeg, ClassName, TZ, Epoch} from '../types';
@@ -58,6 +59,17 @@ export const TaskDetails = memo(function TaskDetails({
             ? t('task.start_opens_at', {time: new Date(task.rules.nostartutc * 1000).toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})})
             : '';
     }, [lang, tz, task?.rules?.nostartutc, t]);
+
+    // Before 10:00 local-comp-time the daemon is still serving yesterday's
+    // tracks (the daily flip happens at 10:00 local). Surface a note while
+    // viewing live so users don't think the date is wrong.
+    const liveNow = useSelector(selectNow);
+    const showPreviousDayNote = useMemo(() => {
+        if (replayTime) return false;
+        const ms = (liveNow ? liveNow * 1000 : Date.now());
+        const hourStr = new Intl.DateTimeFormat('en-GB', {timeZone: tz, hour: '2-digit', hourCycle: 'h23'}).format(new Date(ms));
+        return parseInt(hourStr, 10) < 10;
+    }, [tz, replayTime, liveNow]);
 
     if (!summary || !hasTask) {
         return <Spinner />;
@@ -110,6 +122,7 @@ export const TaskDetails = memo(function TaskDetails({
                     <FontAwesomeIcon icon={open ? faCaretUp : faCaretDown} />
                 </button>
             </h5>
+            {showPreviousDayNote ? <p className="task-previous-day-note">{t('task.previous_day_note')}</p> : null}
             {task?.rules?.nostartutc ? <>{noStart}</> : null}
             {open ? (
                 <div id="task-collapse">
