@@ -657,6 +657,12 @@ async function main() {
         }
     }, 60 * 1000);
 
+    // /all listeners get their own 15s keepalive. Per-class channels
+    // already piggyback on the housekeeping tick above; the /all feed
+    // is otherwise idle between deltas, so without this the client
+    // can't distinguish "no comps changed" from "connection is dead".
+    setInterval(broadcastCompetitionsKeepalive, 15 * 1000);
+
     //    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
 
     //
@@ -2776,6 +2782,22 @@ function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: st
 // surprises since ts-proto emits a fixed property order).
 function summaryFingerprint(s: CompetitionSummary): string {
     return JSON.stringify(s);
+}
+
+// Push a bare `ka` packet to every /all listener. Clients arm a 45s
+// watchdog on each frame, so this keeps NAT-timed-out / silently-dead
+// connections from sitting idle until the OS gives up.
+function broadcastCompetitionsKeepalive() {
+    competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
+    if (!competitionsListeners.length) return;
+
+    const now = getNow();
+    const msg = OnglideWebSocketMessage.encode({
+        t: now,
+        ka: {keepalive: true, at: Math.floor(now), listeners: competitionsListeners.length, airborne: 0}
+    }).finish();
+
+    competitionsListeners.forEach((client) => client.send(msg, {binary: true}));
 }
 
 async function sendKeepalive(channel: Channel) {

@@ -7,6 +7,7 @@ import {useState, useMemo} from 'react';
 
 // And connect to websockets...
 import {OgnFeed} from '../../lib/react/ognfeed';
+import {CompetitionGlobe} from '../../lib/react/globe';
 
 import {query} from '../../lib/react/db';
 import escape from 'sql-template-strings';
@@ -57,13 +58,11 @@ export default function CombinePage(props) {
     });
 
     //
-    // And display in progress until they are loaded
-    if (!summary || !props.options)
-        return (
-            <div className="loading">
-                <div className="loadinginner" />
-            </div>
-        );
+    // /all hasn't delivered the snapshot yet (or the websocket is down) —
+    // show the same rotating-globe placeholder the landing page uses
+    // instead of a blank screen, so the page reads as loading rather than
+    // broken when the connection is unavailable.
+    if (!summary || !props.options) return <CompetitionGlobe competitions={[]} countriesGeoJson={null} />;
 
     // Make sure we have the class object
     const selectedClass = summary.classes.find((c) => c.class === className);

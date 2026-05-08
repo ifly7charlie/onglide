@@ -11,6 +11,12 @@ import {competitionsConnected, competitionsSnapshot, competitionsDelta} from '..
 import {OnglideWebSocketMessage} from '../protobuf/onglide';
 import {competitionsWebsocketUrl} from './fixupUrls';
 
+// Server pushes a `ka` packet every 15s on /all. If we hear nothing for
+// longer than this we assume the connection has gone silent (NAT timeout,
+// network change without RST, etc.) and force a reconnect. 46s tolerates
+// up to two consecutive missed packets before tearing down.
+const KEEPALIVE_TIMEOUT_MS = 46_000;
+
 export function CompetitionsSocket() {
     const dispatch = useDispatch();
 
@@ -22,6 +28,27 @@ export function CompetitionsSocket() {
         let closed = false;
         let retry = 0;
         let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+        let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const armWatchdog = () => {
+            if (watchdogTimer) clearTimeout(watchdogTimer);
+            watchdogTimer = setTimeout(() => {
+                // No traffic from server within the keepalive window —
+                // tear down so onclose drives reconnect with backoff.
+                try {
+                    ws?.close();
+                } catch {
+                    /**/
+                }
+            }, KEEPALIVE_TIMEOUT_MS);
+        };
+
+        const clearWatchdog = () => {
+            if (watchdogTimer) {
+                clearTimeout(watchdogTimer);
+                watchdogTimer = null;
+            }
+        };
 
         const connect = () => {
             if (closed) return;
@@ -36,8 +63,10 @@ export function CompetitionsSocket() {
             ws.onopen = () => {
                 retry = 0;
                 dispatch(competitionsConnected(true));
+                armWatchdog();
             };
             ws.onclose = () => {
+                clearWatchdog();
                 dispatch(competitionsConnected(false));
                 if (!closed) scheduleReconnect();
             };
@@ -45,6 +74,9 @@ export function CompetitionsSocket() {
                 // close handler will trigger reconnect
             };
             ws.onmessage = (ev) => {
+                // Any frame counts as liveness — including the bare `ka`
+                // keepalive that carries no `competitions` payload.
+                armWatchdog();
                 if (typeof ev.data === 'string') {
                     // Server-sent 'reload' sentinel — only happens for unknown
                     // channels; we don't expect it on /all but tolerate it.
@@ -79,6 +111,7 @@ export function CompetitionsSocket() {
         return () => {
             closed = true;
             if (reconnectTimer) clearTimeout(reconnectTimer);
+            clearWatchdog();
             try {
                 ws?.close();
             } catch {
