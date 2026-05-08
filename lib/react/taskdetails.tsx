@@ -79,6 +79,7 @@ export const TaskDetails = memo(function TaskDetails({
         return (
             <>
                 <h5>{dateString}: {t('task.no_task_configured')}</h5>
+                {showPreviousDayNote ? <p className="task-previous-day-note">{t('task.previous_day_note')}</p> : null}
             </>
         );
     }
