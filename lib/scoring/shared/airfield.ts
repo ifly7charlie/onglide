@@ -34,23 +34,112 @@ const noopLogger: Logger = () => {};
 // NFD normalisation strips diacritics, so the German "ä" forms collapse
 // to "gelande" / "segelfluggelande" rather than the "ae" transliteration.
 const STOPWORDS = new Set([
+    // English
     'airfield',
     'airport',
     'aerodrome',
     'airstrip',
+    // German (de)
     'flugplatz',
     'flughafen',
+    'segelflugplatz',
     'segelfluggelande',
+    'verkehrslandeplatz',
+    'modellflugplatz',
     'fliegerhorst',
     'heeresflugplatz',
     'sonderlandeplatz',
     'sonderflugplatz',
     'gelande',
-    'aerodrom',
-    'aeropuerto',
+    // French (fr)
+    'aerodrome',
     'aeroport',
-    'aeroporto'
+    'altiport',
+    'altisurface',
+    'velisurface',
+    // Romance shared / es / it / pt
+    'aerodrom',
+    'aerodromo',
+    'aeropuerto',
+    'aeroporto',
+    'aviosuperficie',
+    // Dutch (nl)
+    'vliegveld',
+    'vliegbasis',
+    'luchthaven',
+    'zweefvliegterrein',
+    // Finnish (fi)
+    'lentokentta',
+    'lentopaikka',
+    'lentoasema',
+    'purjelentokentta',
+    // Estonian (et) — bonus
+    'lennujaam',
+    'lennuvali',
+    // Swedish (sv)
+    'flygplats',
+    'flygfalt',
+    'flygbas',
+    // Danish / Norwegian (da/nb)
+    'lufthavn',
+    'flyveplads',
+    'flyplass',
+    // Czech / Slovak (cs/sk)
+    'letiste',
+    'letisko',
+    // Polish (pl)
+    'lotnisko',
+    'ladowisko',
+    // Slovenian (sl)
+    'letalisce',
+    'vzletisce',
+    // Hungarian (hu)
+    'repuloter',
+    'repter',
+    // Baltic — bonus (lt/lv)
+    'aerodromas',
+    'lidosta',
+    // Turkish — bonus
+    'havalimani',
+    'havaalani'
 ]);
+
+// Non-decomposable letters that NFD leaves as-is. Without this map a
+// Polish "lądowisko" would never collapse to the stopword "ladowisko",
+// and Danish/Norwegian "Ærø" would never line up with site spellings
+// like "Aero". Applied symmetrically to both site and OSM tokens so the
+// match stays consistent regardless of which side spells it natively.
+// Applied AFTER toLowerCase, so we only need lowercase keys — uppercase
+// forms either decompose under NFD (e.g. İ → i + combining-dot-above,
+// stripped by the existing diacritic regex) or lowercase to a key in
+// this map (Æ → æ, Ø → ø, Ł → ł, ß has no uppercase, etc.).
+const NON_DECOMPOSABLE_MAP: Record<string, string> = {
+    æ: 'ae',
+    œ: 'oe',
+    ø: 'o',
+    ł: 'l',
+    ß: 'ss',
+    ı: 'i', // Turkish dotless i
+    þ: 'th', // Icelandic thorn
+    ð: 'd' // Icelandic eth
+};
+const NON_DECOMPOSABLE_RE = new RegExp(`[${Object.keys(NON_DECOMPOSABLE_MAP).join('')}]`, 'g');
+
+// Token-match minimum: two tokens with the same first N characters count
+// as a match even if the rest differs. Catches inflectional suffixes
+// like Finnish genitive ("Räyskälä" → "Räyskälän") that exact equality
+// misses. Set just high enough to keep coincidental short-prefix
+// collisions ("london"/"lonely") from registering as matches.
+const MIN_TOKEN_PREFIX_MATCH = 5;
+
+function tokenMatch(a: string, b: string): boolean {
+    if (a === b) return true;
+    const min = Math.min(a.length, b.length);
+    if (min < MIN_TOKEN_PREFIX_MATCH) return false;
+    let i = 0;
+    while (i < min && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+    return i >= MIN_TOKEN_PREFIX_MATCH;
+}
 
 export interface OsmAerodrome {
     name: string;
@@ -98,7 +187,8 @@ function tokenize(s: string): string[] {
     const normalized = s
         .normalize('NFD')
         .replace(/[̀-ͯ]/g, '')
-        .toLowerCase();
+        .toLowerCase()
+        .replace(NON_DECOMPOSABLE_RE, (c) => NON_DECOMPOSABLE_MAP[c]);
     const out: string[] = [];
     for (const t of normalized.split(/[\s\-,.()'"\/]+/)) {
         if (t.length < 3) continue;
@@ -255,11 +345,11 @@ out center tags;`;
 }
 
 export function rankAirfieldsBySite(sitename: string, aerodromes: OsmAerodrome[]): RankedAirfield[] {
-    const siteTokens = new Set(tokenize(sitename));
+    const siteTokens = tokenize(sitename);
     const ranked: RankedAirfield[] = aerodromes.map((a) => {
         const matched: string[] = [];
         for (const t of tokenize(a.name)) {
-            if (siteTokens.has(t)) matched.push(t);
+            if (siteTokens.some((s) => tokenMatch(s, t))) matched.push(t);
         }
         return {...a, nameOverlap: matched.length, matchedTokens: matched};
     });

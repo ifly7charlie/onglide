@@ -30,19 +30,6 @@ export function CompetitionsSocket() {
         let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
         let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
-        const armWatchdog = () => {
-            if (watchdogTimer) clearTimeout(watchdogTimer);
-            watchdogTimer = setTimeout(() => {
-                // No traffic from server within the keepalive window —
-                // tear down so onclose drives reconnect with backoff.
-                try {
-                    ws?.close();
-                } catch {
-                    /**/
-                }
-            }, KEEPALIVE_TIMEOUT_MS);
-        };
-
         const clearWatchdog = () => {
             if (watchdogTimer) {
                 clearTimeout(watchdogTimer);
@@ -50,33 +37,53 @@ export function CompetitionsSocket() {
             }
         };
 
+        // Bind the watchdog to a specific socket so a stale fire can't tear
+        // down a successor that's already replaced it.
+        const armWatchdog = (target: WebSocket) => {
+            clearWatchdog();
+            watchdogTimer = setTimeout(() => {
+                if (target !== ws) return;
+                console.log('CompetitionsSocket: keepalive watchdog fired, closing socket');
+                try {
+                    target.close();
+                } catch {
+                    /**/
+                }
+            }, KEEPALIVE_TIMEOUT_MS);
+        };
+
         const connect = () => {
             if (closed) return;
+            let socket: WebSocket;
             try {
-                ws = new WebSocket(url);
-            } catch (_e) {
+                socket = new WebSocket(url);
+            } catch (e) {
+                console.log('CompetitionsSocket: WebSocket ctor threw', e);
                 scheduleReconnect();
                 return;
             }
-            ws.binaryType = 'arraybuffer';
+            ws = socket;
+            socket.binaryType = 'arraybuffer';
 
-            ws.onopen = () => {
+            socket.onopen = () => {
+                console.log('CompetitionsSocket: open');
                 retry = 0;
                 dispatch(competitionsConnected(true));
-                armWatchdog();
+                armWatchdog(socket);
             };
-            ws.onclose = () => {
-                clearWatchdog();
+            socket.onclose = (ev) => {
+                console.log('CompetitionsSocket: close', {code: ev.code, reason: ev.reason, wasClean: ev.wasClean});
+                if (socket === ws) clearWatchdog();
                 dispatch(competitionsConnected(false));
-                if (!closed) scheduleReconnect();
+                if (!closed && socket === ws) scheduleReconnect();
             };
-            ws.onerror = () => {
-                // close handler will trigger reconnect
+            socket.onerror = () => {
+                console.log('CompetitionsSocket: error');
             };
-            ws.onmessage = (ev) => {
+            socket.onmessage = (ev) => {
                 // Any frame counts as liveness — including the bare `ka`
                 // keepalive that carries no `competitions` payload.
-                armWatchdog();
+                armWatchdog(socket);
                 if (typeof ev.data === 'string') {
                     // Server-sent 'reload' sentinel — only happens for unknown
                     // channels; we don't expect it on /all but tolerate it.
@@ -103,6 +110,7 @@ export function CompetitionsSocket() {
             if (closed) return;
             const delay = Math.min(30_000, 1000 * Math.pow(2, retry));
             retry++;
+            console.log(`CompetitionsSocket: reconnect in ${delay}ms (retry ${retry})`);
             reconnectTimer = setTimeout(connect, delay);
         };
 

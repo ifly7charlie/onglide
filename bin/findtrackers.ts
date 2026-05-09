@@ -417,8 +417,14 @@ function fmtDiag(diag: TrackerDiag): string {
     if (diag.firstSeenT !== null && diag.lastSeenT !== null) {
         parts.push(`span ${fmtUtcHms(diag.firstSeenT)}-${fmtUtcHms(diag.lastSeenT)}`);
     }
-    if (diag.gapAroundStartSec !== null) parts.push(`gap @ start: ${diag.gapAroundStartSec}s`);
-    if (diag.gapAroundFinishSec !== null) parts.push(`gap @ finish: ${diag.gapAroundFinishSec}s`);
+    if (diag.gapAroundStartSec !== null) {
+        const d = diag.distAtStartKm !== null ? `, ${diag.distAtStartKm.toFixed(2)} km from start` : '';
+        parts.push(`gap @ start: ${diag.gapAroundStartSec}s${d}`);
+    }
+    if (diag.gapAroundFinishSec !== null) {
+        const d = diag.distAtFinishKm !== null ? `, ${diag.distAtFinishKm.toFixed(2)} km from finish` : '';
+        parts.push(`gap @ finish: ${diag.gapAroundFinishSec}s${d}`);
+    }
     return parts.join('  |  ');
 }
 

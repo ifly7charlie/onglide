@@ -98,6 +98,10 @@ export interface TrackerDiag {
     gapAroundStartSec: number | null;
     /** Same, around the pilot's official finish time, using finish-scan packets. */
     gapAroundFinishSec: number | null;
+    /** Min distance-to-start-TP (km) of the two in-bbox packets bracketing the pilot's official start time. null when gapAroundStartSec is null. */
+    distAtStartKm: number | null;
+    /** Same, around the pilot's official finish time, using distance to finish-TP. */
+    distAtFinishKm: number | null;
 }
 
 export interface FindTrackersOptions {
@@ -205,7 +209,7 @@ interface FlarmStatsAcc {
     minDistanceKm: number; // Infinity until first in-bbox packet
     firstSeenT: number; // -1 until any packet seen
     lastSeenT: number;
-    timestamps: number[]; // in-bbox packets, sorted ascending (insertion-sort during scan)
+    samples: {t: number; distKm: number}[]; // in-bbox packets (t, dist-to-TP), sorted ascending by t at end-of-scan
     sumGapSec: number;
     countGap: number;
     maxGapSec: number;
@@ -243,7 +247,7 @@ async function scanLine(
     const getStats = (f: FlarmID): FlarmStatsAcc => {
         let s = stats.get(f);
         if (!s) {
-            s = {bboxRejected: 0, inBbox: 0, minDistanceKm: Infinity, firstSeenT: -1, lastSeenT: -1, timestamps: [], sumGapSec: 0, countGap: 0, maxGapSec: 0};
+            s = {bboxRejected: 0, inBbox: 0, minDistanceKm: Infinity, firstSeenT: -1, lastSeenT: -1, samples: [], sumGapSec: 0, countGap: 0, maxGapSec: 0};
             stats.set(f, s);
         }
         return s;
@@ -374,7 +378,7 @@ async function scanLine(
         const distKm = PreparedTurnpoint.geodesicDistance(center, pos);
         if (distKm < sStats.minDistanceKm) sStats.minDistanceKm = distKm;
         sStats.inBbox++;
-        sStats.timestamps.push(msg.t);
+        sStats.samples.push({t: msg.t, distKm});
         let st = state.get(f);
         if (!st) {
             // First sighting in this scan: geographic gate.
@@ -453,10 +457,10 @@ async function scanLine(
     // order during scan, which is mostly time-ascending modulo the small
     // reorder window — sort once here so consumers can binary-search.
     for (const s of stats.values()) {
-        if (s.timestamps.length < 2) continue;
-        s.timestamps.sort((a, b) => a - b);
-        for (let i = 1; i < s.timestamps.length; i++) {
-            const gap = s.timestamps[i] - s.timestamps[i - 1];
+        if (s.samples.length < 2) continue;
+        s.samples.sort((a, b) => a.t - b.t);
+        for (let i = 1; i < s.samples.length; i++) {
+            const gap = s.samples[i].t - s.samples[i - 1].t;
             if (gap <= 0) continue; // duplicates from out-of-order writes
             s.sumGapSec += gap;
             s.countGap++;
@@ -601,25 +605,44 @@ function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResu
         maxGapSec,
         firstSeenT,
         lastSeenT,
-        gapAroundStartSec: bracketGap(sStart?.timestamps ?? [], startUtc),
-        gapAroundFinishSec: bracketGap(sFinish?.timestamps ?? [], finishUtc)
+        gapAroundStartSec: bracketGap(sStart?.samples ?? [], startUtc),
+        gapAroundFinishSec: bracketGap(sFinish?.samples ?? [], finishUtc),
+        distAtStartKm: bracketDist(sStart?.samples ?? [], startUtc),
+        distAtFinishKm: bracketDist(sFinish?.samples ?? [], finishUtc)
     };
 }
 
-// Largest interval (s) between consecutive timestamps that brackets `target`.
-// null if target is outside [first, last] or fewer than two timestamps exist.
-function bracketGap(timestamps: number[], target: number): number | null {
-    if (timestamps.length < 2) return null;
-    if (target < timestamps[0] || target > timestamps[timestamps.length - 1]) return null;
+type Sample = {t: number; distKm: number};
+
+// Locate the consecutive sample pair [lo, lo+1] whose timestamps bracket
+// `target`. Returns null if target is outside [first, last] or fewer than
+// two samples exist. Shared by bracketGap / bracketDist so they agree on
+// which two packets count as "bracketing".
+function bracketIndex(samples: Sample[], target: number): number | null {
+    if (samples.length < 2) return null;
+    if (target < samples[0].t || target > samples[samples.length - 1].t) return null;
     let lo = 0;
-    let hi = timestamps.length - 1;
+    let hi = samples.length - 1;
     while (lo < hi) {
         const mid = (lo + hi + 1) >>> 1;
-        if (timestamps[mid] <= target) lo = mid;
+        if (samples[mid].t <= target) lo = mid;
         else hi = mid - 1;
     }
-    if (lo + 1 < timestamps.length) return timestamps[lo + 1] - timestamps[lo];
-    return null;
+    return lo + 1 < samples.length ? lo : null;
+}
+
+// Largest interval (s) between consecutive samples that brackets `target`.
+function bracketGap(samples: Sample[], target: number): number | null {
+    const i = bracketIndex(samples, target);
+    return i === null ? null : samples[i + 1].t - samples[i].t;
+}
+
+// Smaller of the two bracketing samples' distance-to-TP (km). Picks the
+// closer of the before/after points, since that's the tightest upper
+// bound on how far from the line the pilot was at `target`.
+function bracketDist(samples: Sample[], target: number): number | null {
+    const i = bracketIndex(samples, target);
+    return i === null ? null : Math.min(samples[i].distKm, samples[i + 1].distKm);
 }
 
 function bestPair(sList: Epoch[], fList: Epoch[], startUtc: Epoch, finishUtc: Epoch): {ds: number; df: number; score: number} {

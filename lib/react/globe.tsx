@@ -131,7 +131,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
     // layer — a null lat/lng will silently cause TextLayer to drop the whole
     // layer, and also skews the centroid used for the initial view.
     const visibleCompetitions = useMemo(
-        () => competitions.filter((c) => typeof c.lat === 'number' && typeof c.lng === 'number' && Number.isFinite(c.lat) && Number.isFinite(c.lng)),
+        () => competitions.filter((c) => typeof c.lat === 'number' && typeof c.lng === 'number' && Number.isFinite(c.lat) && Number.isFinite(c.lng) && !(c.lat === 0 && c.lng === 0)),
         [competitions]
     );
 
