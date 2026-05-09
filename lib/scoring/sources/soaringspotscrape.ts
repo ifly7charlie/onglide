@@ -642,6 +642,20 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     // try to chase the (usually-missing) results link.
                     if (cancelled) continue;
 
+                    // Skip the results fetch for any day that isn't local
+                    // today. The task often goes in before a real results
+                    // body is published (and SoaringSpot has been observed
+                    // serving stale/other-day content under the daily-results
+                    // URL), so writing those rows under this day's datecode
+                    // would corrupt pilotresult and let ogn.ts flip the class
+                    // to 'Home' off bogus scoredstatus values. The task fetch
+                    // above is unaffected — older days can still install
+                    // their tasks; we just don't trust their results page.
+                    if (dateCode !== todayDatecode) {
+                        ctx.log(`${classid}: ${date}/${dateCode} - skipping results fetch, not local today (${todayDatecode})`);
+                        continue;
+                    }
+
                     // Results fetch
                     const resultsAnchor = cells[3] ? findOne((x) => x.name == 'a', cells[3].children ?? []) : null;
                     const resultUrlAttr = resultsAnchor ? getAttributeValue(resultsAnchor as any, 'href') : null;
