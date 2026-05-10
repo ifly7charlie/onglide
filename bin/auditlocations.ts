@@ -26,7 +26,7 @@ import * as dotenv from 'dotenv';
 import distance from '@turf/distance';
 import {point} from '@turf/helpers';
 
-import {findApproximateContestLocation} from '../lib/scoring/shared/contestLocation';
+import {findApproximateContestLocation, type ApproximateContestLocation} from '../lib/scoring/shared/contestLocation';
 
 dotenv.config({path: '.env.local'});
 
@@ -82,13 +82,23 @@ function fmtCoord(lt: number | null, lg: number | null): string {
 async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
 
-    const where = args.compid ? escape`WHERE compid = ${args.compid}` : escape`WHERE sitename IS NOT NULL AND sitename != ''`;
-    const rows = await mysql.query<CompetitionRow[]>(escape`
+    // Only audit active or upcoming comps — finished competitions don't
+    // need fresh geocoding and we don't want to disturb their stored
+    // values. NULL end is kept so partially-scraped placeholder rows
+    // don't silently disappear.
+    const where = args.compid
+        ? escape`WHERE compid = ${args.compid}`
+        : escape`WHERE sitename IS NOT NULL AND sitename != '' AND (end IS NULL OR end >= CURDATE())`;
+    const rows = await mysql.query<CompetitionRow[]>(
+        escape`
         SELECT compid, sitename, lt, lg, tz, countrycode
         FROM competition
-        `.append(where).append(escape`
+        `
+            .append(where)
+            .append(escape`
         ORDER BY compid
-    `));
+    `)
+    );
 
     if (!rows.length) {
         console.log(args.compid ? `no row for compid=${args.compid}` : 'no competitions with a sitename');
@@ -115,7 +125,7 @@ async function main(): Promise<void> {
             // suppress per-row Nominatim/Overpass chatter; surface only
             // the audit summary line below
         };
-        let acl;
+        let acl: ApproximateContestLocation;
         try {
             acl = await findApproximateContestLocation(log, row.sitename);
         } catch (e) {

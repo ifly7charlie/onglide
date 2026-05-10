@@ -645,6 +645,17 @@ function bracketDist(samples: Sample[], target: number): number | null {
     return i === null ? null : Math.min(samples[i].distKm, samples[i + 1].distKm);
 }
 
+// Smallest signed delta (crossing − target) across `list`. Used for
+// single-sided phase-2 rows where only start or only finish fired.
+function closestDelta(list: Epoch[], target: Epoch): number {
+    let best = list[0] - target;
+    for (let i = 1; i < list.length; i++) {
+        const d = list[i] - target;
+        if (Math.abs(d) < Math.abs(best)) best = d;
+    }
+    return best;
+}
+
 function bestPair(sList: Epoch[], fList: Epoch[], startUtc: Epoch, finishUtc: Epoch): {ds: number; df: number; score: number} {
     let bestDS = 0,
         bestDF = 0,
@@ -732,6 +743,28 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     deltaStart: ds,
                     deltaFinish: df,
                     confidence: score,
+                    currentTrackerid: r.trackerid,
+                    assigned: true,
+                    withinTolerance: false,
+                    ambiguous: false,
+                    skipped: false,
+                    bboxOnly: false
+                };
+            } else if (sList?.length || fList?.length) {
+                // One side crossed but not the other — common for DNFs
+                // (start only) or pilots that never started. Surface the
+                // delta we do have so the operator can see the assigned
+                // id's behaviour on the line that did fire; confidence
+                // stays null because there's no paired score.
+                const ds = sList?.length ? closestDelta(sList, r.startUtc) : null;
+                const df = fList?.length ? closestDelta(fList, r.finishUtc) : null;
+                row = {
+                    compno: r.compno,
+                    name: r.name,
+                    flarmid: id,
+                    deltaStart: ds,
+                    deltaFinish: df,
+                    confidence: null,
                     currentTrackerid: r.trackerid,
                     assigned: true,
                     withinTolerance: false,

@@ -236,7 +236,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
 
         if (multi) console.log(`\n--- ${className} / ${datecode} — results ---`);
 
-        if (!interactive) printMatches(results, matches, crossClass, className);
+        if (!interactive) printMatches(results, matches, tolerance, crossClass, className);
 
         const matchedCompnos = new Set(matches.filter((m) => m.withinTolerance && !m.ambiguous).map((m) => m.compno));
         const ambiguousCompnos = new Set(matches.filter((m) => m.ambiguous).map((m) => m.compno));
@@ -252,7 +252,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         summary.proposed += proposals.length;
 
         const accepted = interactive //
-            ? await reviewProposals(proposals, matches, results, crossClass, className)
+            ? await reviewProposals(proposals, matches, results, tolerance, crossClass, className)
             : proposals;
         if (!accepted.length) continue;
 
@@ -432,6 +432,8 @@ function rowTag(m: TrackerMatch): string {
     if (m.confidence === null) {
         if (m.bboxOnly) return '[assigned, all packets outside task area — wrong tracker]';
         if (m.skipped) return '[assigned, skipped: out-of-area]';
+        if (m.deltaStart !== null && m.deltaFinish === null) return '[assigned, no finish crossing]';
+        if (m.deltaStart === null && m.deltaFinish !== null) return '[assigned, no start crossing]';
         return '[assigned, no crossings]';
     }
     if (m.assigned && m.withinTolerance) return '[assigned ✓]';
@@ -464,7 +466,7 @@ function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: 
         .map((h) => `also matches ${String(h.compno).trim()} ${h.name}`.trim() + ` in class ${h.className}`);
 }
 
-function printMatches(results: OfficialResult[], matches: TrackerMatch[], crossClass?: CrossClassMap, thisClass?: ClassName): void {
+function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolerance: number, crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!matches.length) {
         console.log(`  (no matches, no assigned-tracker reports)`);
         return;
@@ -490,15 +492,48 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], crossC
     });
 
     for (const compno of compnos) {
-        printPilotMatches(compno, byPilot.get(compno)!, results, crossClass, thisClass);
+        printPilotMatches(compno, byPilot.get(compno)!, results, tolerance, crossClass, thisClass);
     }
 }
 
-function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], crossClass?: CrossClassMap, thisClass?: ClassName): void {
+// For each pilot, peers (signed Δ in seconds, peer − me) on each axis whose
+// official time is within ±tolerance. A non-empty list on either axis means
+// times alone can't disambiguate that pilot from those peers — useful
+// alongside the [ambiguous] structural check, which only triggers when
+// BOTH axes are within 2× tolerance.
+function timePeers(me: OfficialResult, others: OfficialResult[], tolerance: number, axis: 'start' | 'finish'): {compno: Compno; name: string; dt: number}[] {
+    const myT = axis === 'start' ? me.startUtc : me.finishUtc;
+    const out: {compno: Compno; name: string; dt: number}[] = [];
+    for (const o of others) {
+        if (o.compno === me.compno) continue;
+        const oT = axis === 'start' ? o.startUtc : o.finishUtc;
+        const dt = oT - myT;
+        if (Math.abs(dt) <= tolerance) out.push({compno: o.compno, name: o.name, dt});
+    }
+    out.sort((a, b) => Math.abs(a.dt) - Math.abs(b.dt));
+    return out;
+}
+
+function fmtPeers(peers: {compno: Compno; name: string; dt: number}[]): string {
+    const max = 4;
+    const head = peers
+        .slice(0, max)
+        .map((p) => `${String(p.compno).trim()} (${p.dt >= 0 ? '+' : '−'}${Math.abs(p.dt)}s)`)
+        .join(', ');
+    return peers.length > max ? `${head}, +${peers.length - max} more` : head;
+}
+
+function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], tolerance: number, crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!arr.length) return;
     const r = results.find((x) => x.compno === compno);
     const name = arr[0].name || (r?.name ?? '');
     console.log(`  ${String(compno).padEnd(4)} ${name}${pilotHeaderTag(arr)}`);
+    if (r) {
+        const startPeers = timePeers(r, results, tolerance, 'start');
+        const finishPeers = timePeers(r, results, tolerance, 'finish');
+        if (startPeers.length) console.log(`       start time within ±${tolerance}s of: ${fmtPeers(startPeers)}`);
+        if (finishPeers.length) console.log(`       finish time within ±${tolerance}s of: ${fmtPeers(finishPeers)}`);
+    }
     for (const m of arr) {
         const tag = rowTag(m);
         const tagPart = tag ? `   ${tag}` : '';
@@ -629,7 +664,7 @@ function summariseProposal(p: Proposal): string {
     return parts.join('  |  ');
 }
 
-async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[], crossClass: CrossClassMap, thisClass: ClassName): Promise<Proposal[]> {
+async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[], tolerance: number, crossClass: CrossClassMap, thisClass: ClassName): Promise<Proposal[]> {
     if (!proposals.length) return [];
     console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
 
@@ -642,6 +677,7 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
             p.compno,
             matches.filter((m) => m.compno === p.compno),
             results,
+            tolerance,
             crossClass,
             thisClass
         );
