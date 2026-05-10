@@ -18,12 +18,20 @@ import {Bbox, taskBbox, expandBbox, pointInBbox} from '../../flightprocessing/ta
 
 import {MAX_FLARM_DIST_KM, DEFAULT_MAX_GAP_SEC, DEFAULT_REORDER_WINDOW_SEC, DEFAULT_TOLERANCE_SEC} from '../../constants';
 
+/**
+ * Pilot's official scoring entry for one (class, datecode). `finishUtc`
+ * is null for landout pilots (started but did not complete the task —
+ * scorer didn't record a finish time). They still participate in the
+ * scan so we can recognise their flarmid via the start crossing alone.
+ * Distinct from DNF / DNS in the codebase, which mean "did not fly" /
+ * "did not start" — those don't appear in OfficialResult at all.
+ */
 export interface OfficialResult {
     compno: Compno;
     name: string;
     trackerid: string; // current value in tracker.trackerid (or '')
     startUtc: Epoch;
-    finishUtc: Epoch;
+    finishUtc: Epoch | null; // null for landout pilots (no recorded finish time)
 }
 
 export interface TrackerMatch {
@@ -157,8 +165,17 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     for (const r of results) {
         if (r.startUtc < minStart) minStart = r.startUtc;
         if (r.startUtc > maxStart) maxStart = r.startUtc;
-        if (r.finishUtc < minFinish) minFinish = r.finishUtc;
-        if (r.finishUtc > maxFinish) maxFinish = r.finishUtc;
+        if (r.finishUtc !== null) {
+            if (r.finishUtc < minFinish) minFinish = r.finishUtc;
+            if (r.finishUtc > maxFinish) maxFinish = r.finishUtc;
+        }
+    }
+    // If no pilot finished, fall back to the start-window's outer edge so
+    // the finish scan still runs over a reasonable interval — most landout
+    // days still have some traffic worth surveying for ghost finishes.
+    if (!Number.isFinite(minFinish)) {
+        minFinish = maxStart;
+        maxFinish = maxStart;
     }
 
     // Pilots whose official start AND finish are both within 2×tolerance of
@@ -178,7 +195,10 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     // finish), labelled so the trace marker tells you which pilot.
     const labelOf = (r: OfficialResult) => `${r.compno}${r.name ? ' ' + r.name : ''}`;
     const startWatch: WatchTime[] = results.map((r) => ({t: r.startUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
-    const finishWatch: WatchTime[] = results.map((r) => ({t: r.finishUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
+    const finishWatch: WatchTime[] = results //
+        .filter((r): r is OfficialResult & {finishUtc: Epoch} => r.finishUtc !== null)
+        .map((r) => ({t: r.finishUtc, label: labelOf(r)}))
+        .sort((a, b) => a.t - b.t);
 
     log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots, maxGap=${maxGapSec}s, reorderWindow=${reorderWindowSec}s${expandedBbox ? ', bbox prefilter on' : ''}`);
     const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch, maxGapSec, reorderWindowSec, expandedBbox);
@@ -589,7 +609,7 @@ function parseAssignedIds(raw: string): Set<FlarmID> {
     return out;
 }
 
-function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResult, startUtc: Epoch, finishUtc: Epoch): TrackerDiag {
+function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResult, startUtc: Epoch, finishUtc: Epoch | null): TrackerDiag {
     const sStart = startScan.stats.get(flarmid);
     const sFinish = finishScan.stats.get(flarmid);
 
@@ -633,9 +653,9 @@ function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResu
         firstSeenT,
         lastSeenT,
         gapAroundStartSec: bracketGap(sStart?.samples ?? [], startUtc),
-        gapAroundFinishSec: bracketGap(sFinish?.samples ?? [], finishUtc),
+        gapAroundFinishSec: finishUtc === null ? null : bracketGap(sFinish?.samples ?? [], finishUtc),
         distAtStartKm: bracketDist(sStart?.samples ?? [], startUtc),
-        distAtFinishKm: bracketDist(sFinish?.samples ?? [], finishUtc)
+        distAtFinishKm: finishUtc === null ? null : bracketDist(sFinish?.samples ?? [], finishUtc)
     };
 }
 
@@ -720,8 +740,12 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
 
     for (const r of results) {
         const assignedIds = parseAssignedIds(r.trackerid);
+        // Landout pilots (no official finish time) can't produce a
+        // both-sided match — Phase 1.5 picks them up via start-only.
+        if (r.finishUtc === null) continue;
+        const finishUtc = r.finishUtc;
         for (const f of flarmidsWithBoth) {
-            const {ds, df, score} = bestPair(startCrossings.get(f)!, finishCrossings.get(f)!, r.startUtc, r.finishUtc);
+            const {ds, df, score} = bestPair(startCrossings.get(f)!, finishCrossings.get(f)!, r.startUtc, finishUtc);
             if (score <= tolerance) {
                 const m: TrackerMatch = {
                     compno: r.compno,
@@ -736,7 +760,7 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     ambiguous: false,
                     skipped: false,
                     bboxOnly: false,
-                    diag: buildDiag(f, startScan, finishScan, r.startUtc, r.finishUtc)
+                    diag: buildDiag(f, startScan, finishScan, r.startUtc, finishUtc)
                 };
                 listAppend(perPilot, r.compno, m);
                 listAppend(perFlarm, f, m);
@@ -790,9 +814,13 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
             listAppend(perPilot, r.compno, m);
             listAppend(perFlarm, f, m);
         }
+        // No finish-only candidates for landout pilots — there's no
+        // official finish to anchor against.
+        if (r.finishUtc === null) continue;
+        const finishUtc = r.finishUtc;
         for (const f of finishOnlyFlarmids) {
             if (existingIds.has(f)) continue;
-            const df = closestDelta(finishCrossings.get(f)!, r.finishUtc);
+            const df = closestDelta(finishCrossings.get(f)!, finishUtc);
             if (Math.abs(df) > tolerance) continue;
             const m: TrackerMatch = {
                 compno: r.compno,
@@ -830,7 +858,9 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
             const wasSkipped = startScan.skipped.has(id) || finishScan.skipped.has(id);
             const wasBboxOnly = startScan.bboxOnly.has(id) || finishScan.bboxOnly.has(id);
             let row: TrackerMatch;
-            if (sList?.length && fList?.length) {
+            // Landout pilots can never produce a both-sided pair — fall
+            // through to the single-sided branch with finish set to null.
+            if (sList?.length && fList?.length && r.finishUtc !== null) {
                 const {ds, df, score} = bestPair(sList, fList, r.startUtc, r.finishUtc);
                 row = {
                     compno: r.compno,
@@ -847,13 +877,13 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     bboxOnly: false
                 };
             } else if (sList?.length || fList?.length) {
-                // One side crossed but not the other — common for DNFs
-                // (start only) or pilots that never started. Surface the
-                // delta we do have so the operator can see the assigned
-                // id's behaviour on the line that did fire; confidence
-                // stays null because there's no paired score.
+                // One side crossed but not the other — common for landout
+                // pilots (start only) or pilots that never started.
+                // Surface the delta we do have so the operator can see the
+                // assigned id's behaviour on the line that did fire;
+                // confidence stays null because there's no paired score.
                 const ds = sList?.length ? closestDelta(sList, r.startUtc) : null;
-                const df = fList?.length ? closestDelta(fList, r.finishUtc) : null;
+                const df = fList?.length && r.finishUtc !== null ? closestDelta(fList, r.finishUtc) : null;
                 row = {
                     compno: r.compno,
                     name: r.name,
@@ -938,6 +968,9 @@ function findConcurrentPilots(results: OfficialResult[], tolerance: number): Off
         const a = results[i];
         for (let j = i + 1; j < n; j++) {
             const b = results[j];
+            // Landout pilots have null finishUtc — they can't be in a
+            // structurally-concurrent group (no finish time to compare).
+            if (a.finishUtc === null || b.finishUtc === null) continue;
             if (Math.abs(a.startUtc - b.startUtc) <= limit && Math.abs(a.finishUtc - b.finishUtc) <= limit) {
                 parent[find(i)] = find(j);
             }

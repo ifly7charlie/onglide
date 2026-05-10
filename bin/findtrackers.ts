@@ -359,13 +359,18 @@ async function getTask(className: ClassName, datecode: Datecode): Promise<Task |
 
 async function loadOfficialResults(className: ClassName, datecode: Datecode): Promise<OfficialResult[]> {
     const date = fromDateCode(datecode);
+    // We want every pilot with a real official start, including landout
+    // pilots (started but didn't complete the task → no finish time
+    // recorded). Without them the start-scan window is computed only
+    // over finishers, and the rest of the pipeline never sees the landout
+    // pilot's flarmid as a candidate.
     const rows = await mysql.query<
         {
             compno: Compno;
             firstname: string;
             lastname: string;
             startUtc: number;
-            finishUtc: number;
+            finishUtc: number | null;
             trackerid: string;
         }[]
     >(escape`
@@ -373,7 +378,9 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
                COALESCE(p.firstname, '')                                    AS firstname,
                COALESCE(p.lastname,  '')                                    AS lastname,
                UNIX_TIMESTAMP(CONCAT(${date}, ' ', pr.start))  - c.tzoffset AS startUtc,
-               UNIX_TIMESTAMP(CONCAT(${date}, ' ', pr.finish)) - c.tzoffset AS finishUtc,
+               CASE WHEN pr.finish IS NULL OR pr.finish = '00:00:00' THEN NULL
+                    ELSE UNIX_TIMESTAMP(CONCAT(${date}, ' ', pr.finish)) - c.tzoffset
+               END                                                          AS finishUtc,
                COALESCE(t.trackerid, '')                                    AS trackerid
           FROM pilotresult pr
           JOIN pilots      p  ON p.class   = pr.class AND p.compno = pr.compno
@@ -383,14 +390,13 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
          WHERE pr.class    = ${className}
            AND pr.datecode = ${datecode}
            AND pr.start    IS NOT NULL AND pr.start  <> '00:00:00'
-           AND pr.finish   IS NOT NULL AND pr.finish <> '00:00:00'
     `);
     return rows.map((r) => ({
         compno: r.compno,
         name: `${r.firstname} ${r.lastname}`.trim() || String(r.compno),
         trackerid: r.trackerid,
         startUtc: Number(r.startUtc) as Epoch,
-        finishUtc: Number(r.finishUtc) as Epoch
+        finishUtc: r.finishUtc === null ? null : (Number(r.finishUtc) as Epoch)
     }));
 }
 
@@ -445,13 +451,16 @@ function rowTag(m: TrackerMatch): string {
         if (m.deltaStart === null && m.deltaFinish !== null) return '[assigned, no start crossing]';
         return '[assigned, no crossings]';
     }
+    // Single-sided rows from Phase 1.5 — weaker than [match] (no second
+    // line to disambiguate from pair-flying neighbours) but stronger than
+    // nothing. Distinct from [assigned, outside tolerance] which means
+    // both lines fired but timing didn't align.
+    const oneSided = (m.deltaStart === null) !== (m.deltaFinish === null);
+    if (m.assigned && oneSided) return m.deltaStart !== null ? '[assigned, start-only match]' : '[assigned, finish-only match]';
+    if (oneSided) return m.deltaStart !== null ? '[start-only match]' : '[finish-only match]';
     if (m.assigned && m.withinTolerance) return '[assigned ✓]';
     if (m.assigned) return '[assigned, outside tolerance]';
     if (m.withinTolerance) return '[match]';
-    // Phase 1.5 single-sided: weaker than [match] (no second line to
-    // disambiguate from pair-flying neighbours) but stronger than nothing.
-    const oneSided = (m.deltaStart === null) !== (m.deltaFinish === null);
-    if (oneSided) return m.deltaStart !== null ? '[start-only match]' : '[finish-only match]';
     return '';
 }
 
@@ -604,10 +613,12 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolera
 // BOTH axes are within 2× tolerance.
 function timePeers(me: OfficialResult, others: OfficialResult[], tolerance: number, axis: 'start' | 'finish'): {compno: Compno; name: string; dt: number}[] {
     const myT = axis === 'start' ? me.startUtc : me.finishUtc;
+    if (myT === null) return []; // landout pilots have no finish-time peer set
     const out: {compno: Compno; name: string; dt: number}[] = [];
     for (const o of others) {
         if (o.compno === me.compno) continue;
         const oT = axis === 'start' ? o.startUtc : o.finishUtc;
+        if (oT === null) continue;
         const dt = oT - myT;
         if (Math.abs(dt) <= tolerance) out.push({compno: o.compno, name: o.name, dt});
     }
