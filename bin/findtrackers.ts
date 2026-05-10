@@ -191,6 +191,16 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
             continue;
         }
 
+        // Position data is only retained for the live (most recent) day. If
+        // the latest pilot start is older than 24h, the scan would chew
+        // through bbox-rejected packets and find nothing — skip outright.
+        const maxStartUtc = results.reduce((m, r) => Math.max(m, r.startUtc), 0);
+        const ageHours = (Date.now() / 1000 - maxStartUtc) / 3600;
+        if (ageHours > 24) {
+            console.log(`  (latest pilot start ${ageHours.toFixed(1)}h ago — older than 24h live-data window; skipped)`);
+            continue;
+        }
+
         const debugFlarmids = new Set<FlarmID>(debugFlarmidsArg as Set<FlarmID>);
         for (const r of results) {
             if (!debugCompnosArg.has(String(r.compno).toUpperCase())) continue;
