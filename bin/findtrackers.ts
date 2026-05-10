@@ -729,10 +729,14 @@ function parseCurrentIds(raw: string): FlarmID[] {
 
 function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, thisClass: ClassName): Proposal[] {
     const byPilot = new Map<Compno, TrackerMatch[]>();
+    const byFlarm = new Map<FlarmID, TrackerMatch[]>();
     for (const m of matches) {
-        const arr = byPilot.get(m.compno) ?? [];
-        arr.push(m);
-        byPilot.set(m.compno, arr);
+        const arrP = byPilot.get(m.compno) ?? [];
+        arrP.push(m);
+        byPilot.set(m.compno, arrP);
+        const arrF = byFlarm.get(m.flarmid) ?? [];
+        arrF.push(m);
+        byFlarm.set(m.flarmid, arrF);
     }
 
     const out: Proposal[] = [];
@@ -746,14 +750,36 @@ function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, th
         if (rows.some((m) => m.ambiguous)) continue;
 
         const altMatches = rows.filter((m) => !m.assigned && m.withinTolerance && !m.ambiguous);
+        // Phase 1.5 single-sided alts — landout pilots and any pilot whose
+        // tracker only crossed one of start/finish. Safe to propose only
+        // when the flarmid isn't claimed elsewhere and there's no
+        // competing single-sided candidate for the same flarmid or pilot.
+        const isOneSided = (m: TrackerMatch) => m.confidence !== null && (m.deltaStart === null) !== (m.deltaFinish === null);
+        const altSingleSided = rows.filter((m) => {
+            if (m.assigned) return false;
+            if (!isOneSided(m)) return false;
+            const peers = byFlarm.get(m.flarmid) ?? [];
+            // Phase 1 (both-sided) match for the same flarmid wins, regardless of pilot.
+            if (peers.some((p) => p.withinTolerance)) return false;
+            // Another pilot has a single-sided claim on this flarmid → ambiguous.
+            if (peers.some((p) => p.compno !== m.compno && isOneSided(p))) return false;
+            return true;
+        });
+
         const assignedBad = rows.filter((m) => m.assigned && !m.withinTolerance);
-        if (!altMatches.length && !assignedBad.length) continue;
+        if (!altMatches.length && !altSingleSided.length && !assignedBad.length) continue;
         // Multiple non-assigned candidates within tolerance — can't pick one safely.
         if (altMatches.length > 1) continue;
+        // Multiple safe single-sided candidates for the same pilot — ambiguous.
+        if (altMatches.length === 0 && altSingleSided.length > 1) continue;
 
         const first = rows[0];
         const currentIds = parseCurrentIds(first.currentTrackerid);
-        const addId: FlarmID | null = altMatches[0]?.flarmid ?? null;
+        // Prefer Phase 1 (both-sided) over Phase 1.5 (single-sided) when
+        // both exist for the same pilot — defensive: filter logic above
+        // already guards this, but keep the precedence explicit.
+        const addRow = altMatches[0] ?? altSingleSided[0] ?? null;
+        const addId: FlarmID | null = addRow?.flarmid ?? null;
 
         // Only propose removing an assigned tracker if we have *positive*
         // evidence it's wrong. "Outside tolerance" alone can be poor FLARM
@@ -789,10 +815,15 @@ function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, th
         const newTrackerid = newIds.length ? newIds.join(',') : 'unknown';
         if (newTrackerid === first.currentTrackerid) continue;
 
+        const oneSidedAdd = addRow ? isOneSided(addRow) : false;
         const baseReason = addId //
             ? removeIds.size
-                ? 'switch to within-tolerance alternative'
-                : 'associate within-tolerance match'
+                ? oneSidedAdd
+                    ? 'switch to single-sided match (start- or finish-only)'
+                    : 'switch to within-tolerance alternative'
+                : oneSidedAdd
+                  ? `associate single-sided match (${addRow!.deltaStart !== null ? 'start' : 'finish'}-only)`
+                  : 'associate within-tolerance match'
             : 'assigned tracker has strong negative signal (out-of-area or other-class match)';
 
         // Annotate the reason with any cross-class hits for the flarmids
