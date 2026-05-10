@@ -413,13 +413,11 @@ function fmtDiag(diag: TrackerDiag): string {
         return 'not seen in scan window';
     }
     const parts: string[] = [];
-    if (diag.inBboxPackets === 0) {
-        parts.push(`${diag.bboxRejectedPackets} packets all outside task area`);
-    } else if (diag.bboxRejectedPackets > 0) {
-        parts.push(`${diag.inBboxPackets} in-area + ${diag.bboxRejectedPackets} outside`);
-    } else {
-        parts.push(`${diag.inBboxPackets} packets in-area`);
-    }
+    // Always show both counts: it's the only way to distinguish "sparse but
+    // clean coverage" (9 in / 0 out) from "mostly elsewhere" (9 in / 800 out).
+    const total = diag.inBboxPackets + diag.bboxRejectedPackets;
+    const ratioPct = total > 0 ? Math.round((diag.inBboxPackets / total) * 100) : 0;
+    parts.push(`${diag.inBboxPackets} in-area + ${diag.bboxRejectedPackets} outside (${ratioPct}% in-area)`);
     if (diag.minDistanceKm !== null) parts.push(`closest ${diag.minDistanceKm.toFixed(2)} km to line`);
     if (diag.avgGapSec !== null) {
         const max = diag.maxGapSec !== null ? `, max ${diag.maxGapSec}s` : '';
