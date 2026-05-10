@@ -448,6 +448,10 @@ function rowTag(m: TrackerMatch): string {
     if (m.assigned && m.withinTolerance) return '[assigned ✓]';
     if (m.assigned) return '[assigned, outside tolerance]';
     if (m.withinTolerance) return '[match]';
+    // Phase 1.5 single-sided: weaker than [match] (no second line to
+    // disambiguate from pair-flying neighbours) but stronger than nothing.
+    const oneSided = (m.deltaStart === null) !== (m.deltaFinish === null);
+    if (oneSided) return m.deltaStart !== null ? '[start-only match]' : '[finish-only match]';
     return '';
 }
 
@@ -475,7 +479,7 @@ function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: 
         .map((h) => `also matches ${String(h.compno).trim()} ${h.name}`.trim() + ` in class ${h.className}`);
 }
 
-type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins}>;
+type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean}>;
 const scoreKey = (compno: Compno, flarmid: FlarmID) => `${compno}|${flarmid}`;
 
 // Build per-pair scores and two-sided margins from the matches we already
@@ -512,7 +516,16 @@ function computeScoreMap(matches: TrackerMatch[], results: OfficialResult[]): Sc
             bestOtherFlarmidForPilot: secondBest(peerPilot, breakdown.total),
             bestOtherPilotForFlarmid: secondBest(peerFlarmid, breakdown.total)
         });
-        out.set(scoreKey(m.compno, m.flarmid), {score: breakdown, margins});
+        // `contested` flags say whether there's actually a competing
+        // candidate on each side. Without competitors, the "margin" looks
+        // wide but really just means "uncontested" — useful to distinguish
+        // a confidently-ahead match from a single-candidate held row.
+        out.set(scoreKey(m.compno, m.flarmid), {
+            score: breakdown,
+            margins,
+            pilotContested: peerPilot.length > 1,
+            flarmidContested: peerFlarmid.length > 1
+        });
     }
     return out;
 }
@@ -628,7 +641,7 @@ function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: Officia
         console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
         if (m.diag) console.log(`         · ${fmtDiag(m.diag)}`);
         const scored = scoreMap?.get(scoreKey(m.compno, m.flarmid));
-        if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins)}`);
+        if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested)}`);
         if (thisClass) {
             for (const line of describeCrossClass(m.flarmid, thisClass, crossClass)) {
                 console.log(`         ↳ ${line}`);
@@ -637,10 +650,16 @@ function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: Officia
     }
 }
 
-function fmtScore(score: ScoreBreakdown, margins: Margins): string {
+function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boolean, flarmidContested: boolean): string {
     const parts: string[] = [];
     parts.push(`S=${score.total.toFixed(2)}`);
-    parts.push(`margin=${margins.margin.toFixed(2)} (p=${margins.pilotMargin.toFixed(2)}, f=${margins.flarmidMargin.toFixed(2)})`);
+    if (!pilotContested && !flarmidContested) {
+        parts.push(`uncontested (no competing candidate seen)`);
+    } else {
+        const p = pilotContested ? `p=${margins.pilotMargin.toFixed(2)}` : `p=— (no other f)`;
+        const f = flarmidContested ? `f=${margins.flarmidMargin.toFixed(2)}` : `f=— (no other p)`;
+        parts.push(`margin=${margins.margin.toFixed(2)} (${p}, ${f})`);
+    }
     const contribs: string[] = [];
     if (score.deltaStart > 0) contribs.push(`Δs=${score.deltaStart.toFixed(2)}`);
     if (score.deltaFinish > 0) contribs.push(`Δf=${score.deltaFinish.toFixed(2)}`);
@@ -723,8 +742,34 @@ function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, th
 
         const first = rows[0];
         const currentIds = parseCurrentIds(first.currentTrackerid);
-        const removeIds = new Set<FlarmID>(assignedBad.map((m) => m.flarmid));
         const addId: FlarmID | null = altMatches[0]?.flarmid ?? null;
+
+        // Only propose removing an assigned tracker if we have *positive*
+        // evidence it's wrong. "Outside tolerance" alone can be poor FLARM
+        // coverage, a DNF, or a no-finish landout — dropping the operator's
+        // existing assignment in those cases loses information.
+        //
+        // Strong-negative signals that warrant removal:
+        //   • a within-tolerance alternative exists for this pilot (`addId`)
+        //     — we'd be replacing, not just clearing.
+        //   • the assigned flarmid cleanly matches a pilot in another class
+        //     today (cross-class hit) — "moved glider" signal.
+        //   • `bboxOnly`: flarmid was active in the scan window but every
+        //     packet was outside the task area.
+        //   • `inBboxRatio` very low (≤0.1, some traffic): flarmid was
+        //     overwhelmingly elsewhere — almost certainly a different
+        //     comp's glider that briefly drifted into our bbox.
+        const STRONG_NEGATIVE_RATIO = 0.1;
+        const removeIds = new Set<FlarmID>();
+        for (const m of assignedBad) {
+            const crossClassHit = describeCrossClass(m.flarmid, thisClass, crossClass).length > 0;
+            const total = (m.diag?.inBboxPackets ?? 0) + (m.diag?.bboxRejectedPackets ?? 0);
+            const ratio = total > 0 ? (m.diag?.inBboxPackets ?? 0) / total : 0;
+            const lowRatio = total > 0 && ratio <= STRONG_NEGATIVE_RATIO;
+            if (addId || crossClassHit || m.bboxOnly || lowRatio) removeIds.add(m.flarmid);
+        }
+        // Nothing to do if we'd be neither adding nor removing.
+        if (!addId && removeIds.size === 0) continue;
 
         const newIds: FlarmID[] = [];
         for (const id of currentIds) if (!removeIds.has(id)) newIds.push(id);
@@ -734,10 +779,10 @@ function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, th
         if (newTrackerid === first.currentTrackerid) continue;
 
         const baseReason = addId //
-            ? assignedBad.length
+            ? removeIds.size
                 ? 'switch to within-tolerance alternative'
                 : 'associate within-tolerance match'
-            : 'assigned tracker outside tolerance, no alternative match';
+            : 'assigned tracker has strong negative signal (out-of-area or other-class match)';
 
         // Annotate the reason with any cross-class hits for the flarmids
         // we're removing — strong evidence the tracker is now flying with

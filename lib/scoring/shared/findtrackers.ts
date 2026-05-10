@@ -745,8 +745,74 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
     }
 
     // Ambiguity is only meaningful for within-tolerance candidates.
+    // Computed BEFORE Phase 1.5 / Phase 2 so single-sided/assigned-only rows
+    // don't artificially mark a clean two-sided match as ambiguous.
     for (const arr of perPilot.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
     for (const arr of perFlarm.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
+
+    // Phase 1.5 — single-sided matches: flarmids that crossed only start
+    // (or only finish) within tolerance of a pilot's official time. Surfaces
+    // landed-out pilots (start-only) and pilots whose start was missed by
+    // APRS coverage but who finished cleanly (finish-only).
+    //
+    // These rows carry withinTolerance=false: single-sided evidence is
+    // genuinely weaker, and pair-flying makes one-sided ambiguity common,
+    // so they're visible for operator review and scoring but don't bypass
+    // the within-tolerance auto-apply gate. Phase 2 below skips ids
+    // already present here, so assigned single-sided cases route through
+    // this phase rather than getting a confidence=null Phase 2 row.
+    const startOnlyFlarmids: FlarmID[] = [];
+    const finishOnlyFlarmids: FlarmID[] = [];
+    for (const f of startCrossings.keys()) if (!finishCrossings.has(f)) startOnlyFlarmids.push(f);
+    for (const f of finishCrossings.keys()) if (!startCrossings.has(f)) finishOnlyFlarmids.push(f);
+    for (const r of results) {
+        const assignedIds = parseAssignedIds(r.trackerid);
+        const existingIds = new Set((perPilot.get(r.compno) ?? []).map((m) => m.flarmid));
+        for (const f of startOnlyFlarmids) {
+            if (existingIds.has(f)) continue;
+            const ds = closestDelta(startCrossings.get(f)!, r.startUtc);
+            if (Math.abs(ds) > tolerance) continue;
+            const m: TrackerMatch = {
+                compno: r.compno,
+                name: r.name,
+                flarmid: f,
+                deltaStart: ds,
+                deltaFinish: null,
+                confidence: Math.abs(ds),
+                currentTrackerid: r.trackerid,
+                assigned: assignedIds.has(f),
+                withinTolerance: false,
+                ambiguous: false,
+                skipped: false,
+                bboxOnly: false,
+                diag: buildDiag(f, startScan, finishScan, r.startUtc, r.finishUtc)
+            };
+            listAppend(perPilot, r.compno, m);
+            listAppend(perFlarm, f, m);
+        }
+        for (const f of finishOnlyFlarmids) {
+            if (existingIds.has(f)) continue;
+            const df = closestDelta(finishCrossings.get(f)!, r.finishUtc);
+            if (Math.abs(df) > tolerance) continue;
+            const m: TrackerMatch = {
+                compno: r.compno,
+                name: r.name,
+                flarmid: f,
+                deltaStart: null,
+                deltaFinish: df,
+                confidence: Math.abs(df),
+                currentTrackerid: r.trackerid,
+                assigned: assignedIds.has(f),
+                withinTolerance: false,
+                ambiguous: false,
+                skipped: false,
+                bboxOnly: false,
+                diag: buildDiag(f, startScan, finishScan, r.startUtc, r.finishUtc)
+            };
+            listAppend(perPilot, r.compno, m);
+            listAppend(perFlarm, f, m);
+        }
+    }
 
     // Phase 2 — for every pilot with a recorded trackerid, ensure there's a
     // row for each assigned id even if it falls outside tolerance (or has no
