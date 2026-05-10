@@ -63,9 +63,9 @@ export interface Signals {
     firstSeenT: number | null;
     /** Earliest official pilot start across the comp (epoch seconds), reference for the pre-launch sighting signal. */
     earliestPilotStartUtc: number;
-    /** DDB match flags (computed by the caller from ddb.cn / pilots.compno / ddb.registration / pilots.greg). */
+    /** DDB match flags. CN: ddb.cn == pilot.compno. Glider: normalised ddb.aircraft_model == normalised pilot.glidertype (a weak corroborating signal that fires independently of CN). */
     ddbCnMatch: boolean;
-    ddbRegistrationMatch: boolean;
+    ddbGliderMatch: boolean;
     /** This flarmid is currently in the operator-set tracker.trackerid for the pilot. */
     baselineMatch: boolean;
     /** Sum of decayed prior-day pair_scores for this (compno, flarmid) within the same comp. Already in nats. */
@@ -80,7 +80,7 @@ export interface ScoreBreakdown {
     inBbox: number;
     preLaunch: number;
     ddbCn: number;
-    ddbRegistration: number;
+    ddbGlider: number;
     baseline: number;
     prior: number;
     total: number;
@@ -140,7 +140,7 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
     const sPreLaunch = s.firstSeenT !== null && s.firstSeenT <= s.earliestPilotStartUtc - 30 * 60 ? 1 : 0;
 
     const sDdbCn = s.ddbCnMatch ? 1 : 0;
-    const sDdbReg = s.ddbRegistrationMatch ? 1 : 0;
+    const sDdbGlider = s.ddbGliderMatch ? 1 : 0;
     const sBaseline = s.baselineMatch ? 1 : 0;
 
     const breakdown: ScoreBreakdown = {
@@ -151,7 +151,7 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         inBbox: weights.inBbox * sInBbox,
         preLaunch: weights.preLaunch * sPreLaunch,
         ddbCn: weights.ddbCn * sDdbCn,
-        ddbRegistration: weights.ddbRegistration * sDdbReg,
+        ddbGlider: weights.ddbGlider * sDdbGlider,
         baseline: weights.baseline * sBaseline,
         prior: weights.prior * s.priorNats,
         total: 0
@@ -164,7 +164,7 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         breakdown.inBbox +
         breakdown.preLaunch +
         breakdown.ddbCn +
-        breakdown.ddbRegistration +
+        breakdown.ddbGlider +
         breakdown.baseline +
         breakdown.prior;
     return breakdown;
@@ -174,6 +174,21 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
 export function decayPrior(scoreNats: number, ageDays: number, knees: ScoreKnees = DEFAULT_KNEES): number {
     if (ageDays <= 0) return scoreNats;
     return scoreNats * Math.exp(-ageDays / knees.priorDecayDays);
+}
+
+/** Sum of decayed prior contributions for one (compno, flarmid) pair. Each
+ *  row carries a score (use `null` to signal a legacy row that gets the
+ *  caller-supplied legacy weight) and an age expressed in task-days
+ *  (calendar days are *not* used — comp rest days shouldn't decay priors).
+ */
+export function summarisePrior(rows: {scoreNats: number | null; taskDaysAgo: number}[], legacyNats: number, knees: ScoreKnees = DEFAULT_KNEES): number {
+    let total = 0;
+    for (const r of rows) {
+        if (r.taskDaysAgo < 0) continue;
+        const base = r.scoreNats ?? legacyNats;
+        total += decayPrior(base, r.taskDaysAgo, knees);
+    }
+    return total;
 }
 
 /** Two-sided margins for a chosen pair (p*, f*) given its score and the score of every alternative on each side. Pure data — no assignment search. */

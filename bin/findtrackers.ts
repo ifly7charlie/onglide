@@ -15,7 +15,9 @@ import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/typ
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
-import {scoreSignals, computeMargins, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
+import {scoreSignals, computeMargins, summarisePrior, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
+import {loadMergedDDB, gliderEquivalent, type DDBEntry} from '../lib/ddb';
+import {LEGACY_PRIOR_NATS, DEFAULT_LEDGER_MIN_NATS} from '../lib/constants';
 
 import prompts from 'prompts';
 import escape from 'sql-template-strings';
@@ -115,6 +117,12 @@ function groupJobs(jobs: Job[]): JobGroup[] {
 
 async function main() {
     const tolerance = Number(argv.tolerance) || 5;
+    // DDB is fetched once at script start and reused across every comp/class.
+    // Returns null when both upstreams are unreachable AND no on-disk cache
+    // exists; in that case the score loses its ddbCN/ddbGlider contributions
+    // but everything else still works.
+    const ddb = await loadMergedDDB();
+    if (!ddb) console.warn('(DDB unavailable — ddbCN/ddbGlider signals will be 0 this run)');
     const debugFlarmidsArg = new Set<string>();
     for (const id of (argv['debug-flarmid'] as string[]) || []) {
         for (const part of String(id).split(',')) {
@@ -156,7 +164,7 @@ async function main() {
         totalApplied = 0;
 
     for (const group of groupJobs(jobs)) {
-        const s = await processGroup(group, debugFlarmidsArg, debugCompnosArg, tolerance, interactive);
+        const s = await processGroup(group, debugFlarmidsArg, debugCompnosArg, tolerance, interactive, ddb);
         totalPilots += s.pilots;
         totalMatched += s.matched;
         totalAmbiguous += s.ambiguous;
@@ -173,7 +181,7 @@ async function main() {
 // cross-class flarmid map and do per-class print/proposal in a second pass.
 // Two-pass is required: a flarmid that's been moved from class A to class B
 // only gets flagged as cross-class once both classes have been scanned.
-async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debugCompnosArg: Set<string>, tolerance: number, interactive: boolean): Promise<GroupSummary> {
+async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debugCompnosArg: Set<string>, tolerance: number, interactive: boolean, ddb: Record<string, DDBEntry> | null): Promise<GroupSummary> {
     // Pass 1 — scan each class.
     const classMatches: ClassMatches[] = [];
     for (const job of group) {
@@ -247,7 +255,12 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
 
         if (multi) console.log(`\n--- ${className} / ${datecode} — results ---`);
 
-        if (!interactive) printMatches(results, matches, tolerance, crossClass, className);
+        const priorMap = await loadPriorEvidence(job.compid, datecode, className);
+        if (priorMap.size) console.log(`  loaded ${priorMap.size} prior pair-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
+
+        const scoreMap = computeScoreMap(matches, results, ddb, priorMap);
+
+        if (!interactive) printMatches(results, matches, tolerance, scoreMap, crossClass, className);
 
         const matchedCompnos = new Set(matches.filter((m) => m.withinTolerance && !m.ambiguous).map((m) => m.compno));
         const ambiguousCompnos = new Set(matches.filter((m) => m.ambiguous).map((m) => m.compno));
@@ -256,19 +269,28 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         summary.ambiguous += ambiguousCompnos.size;
         console.log(`  Summary: ${results.length} pilots, ${matchedCompnos.size} matched, ${ambiguousCompnos.size} ambiguous`);
 
-        if (argv['dry-run']) continue;
+        if (argv['dry-run']) {
+            const evidenceCount = countEvidenceRows(scoreMap);
+            if (evidenceCount > 0) console.log(`  evidence-rows: ${evidenceCount} would be written`);
+            continue;
+        }
 
-        const proposals = computeProposals(matches, crossClass, className);
-        if (!proposals.length) continue;
+        const proposals = computeProposals(matches, scoreMap, crossClass, className);
         summary.proposed += proposals.length;
 
-        const accepted = interactive //
-            ? await reviewProposals(proposals, matches, results, tolerance, crossClass, className)
-            : proposals;
-        if (!accepted.length) continue;
+        const accepted = proposals.length //
+            ? interactive
+                ? await reviewProposals(proposals, matches, results, tolerance, scoreMap, crossClass, className)
+                : proposals
+            : [];
 
-        const applied = await applyProposals(className, accepted);
+        const applied = accepted.length ? await applyProposals(job.compid, className, datecode, accepted) : 0;
         summary.applied += applied;
+        // Persist evidence rows for every (compno, flarmid) above the
+        // ledger floor that wasn't covered by an applied startmatch row.
+        // This is the multi-day fuel — written every run, not just on
+        // proposal-driven changes.
+        await writeEvidence(job.compid, className, datecode, scoreMap, accepted);
     }
     return summary;
 }
@@ -372,6 +394,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
             startUtc: number;
             finishUtc: number | null;
             trackerid: string;
+            glidertype: string;
         }[]
     >(escape`
         SELECT pr.compno                                                    AS compno,
@@ -381,7 +404,8 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
                CASE WHEN pr.finish IS NULL OR pr.finish = '00:00:00' THEN NULL
                     ELSE UNIX_TIMESTAMP(CONCAT(${date}, ' ', pr.finish)) - c.tzoffset
                END                                                          AS finishUtc,
-               COALESCE(t.trackerid, '')                                    AS trackerid
+               COALESCE(t.trackerid, '')                                    AS trackerid,
+               COALESCE(p.glidertype, '')                                   AS glidertype
           FROM pilotresult pr
           JOIN pilots      p  ON p.class   = pr.class AND p.compno = pr.compno
           JOIN classes     cl ON cl.class  = pr.class
@@ -396,8 +420,67 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
         name: `${r.firstname} ${r.lastname}`.trim() || String(r.compno),
         trackerid: r.trackerid,
         startUtc: Number(r.startUtc) as Epoch,
-        finishUtc: r.finishUtc === null ? null : (Number(r.finishUtc) as Epoch)
+        finishUtc: r.finishUtc === null ? null : (Number(r.finishUtc) as Epoch),
+        glidertype: r.glidertype
     }));
+}
+
+// Load prior pair-score evidence for one (class, datecode), keyed by
+// `${compno}|${flarmid}`. Decay is on the *task-day* timeline (not
+// calendar days) so weather/rest days don't erode priors. Rows whose
+// pair_score is NULL — typically legacy 'ognddb' / 'pilot' / 'startline'
+// rows from before the score columns existed — get LEGACY_PRIOR_NATS as
+// a fixed positive prior, then decay normally. The task-day list comes
+// from the `tasks` table; rows whose datecode isn't in that list are
+// silently dropped (they're not part of the comp's task sequence).
+type PriorMap = Map<string, number>;
+async function loadPriorEvidence(compid: string, currentDatecode: Datecode, className: ClassName): Promise<PriorMap> {
+    const taskDayRows = await mysql.query<{datecode: Datecode}[]>(escape`
+        SELECT DISTINCT datecode FROM tasks
+        WHERE compid = ${compid} AND datecode IS NOT NULL
+        ORDER BY datecode
+    `);
+    const taskDayIndex = new Map<string, number>();
+    taskDayRows.forEach((r, i) => taskDayIndex.set(String(r.datecode), i));
+    const currentRank = taskDayIndex.get(String(currentDatecode));
+    if (currentRank === undefined) return new Map();
+
+    const priorRows = await mysql.query<
+        {
+            compno: Compno;
+            flarmid: string;
+            datecode: string;
+            pair_score: number | null;
+            method: string;
+        }[]
+    >(escape`
+        SELECT th.compno, th.flarmid, th.datecode, th.pair_score, th.method
+        FROM trackerhistory th
+        JOIN classes cl ON cl.class = th.class
+        WHERE cl.compid = ${compid}
+          AND th.class = ${className}
+          AND th.datecode IS NOT NULL
+          AND th.datecode <> ${String(currentDatecode)}
+          AND th.method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
+    `);
+
+    const grouped = new Map<string, {scoreNats: number | null; taskDaysAgo: number}[]>();
+    for (const r of priorRows) {
+        const rowRank = taskDayIndex.get(String(r.datecode));
+        if (rowRank === undefined) continue; // not a task day for this comp
+        const taskDaysAgo = currentRank - rowRank;
+        if (taskDaysAgo < 0) continue;
+        const key = `${String(r.compno)}|${r.flarmid}`;
+        const arr = grouped.get(key) ?? [];
+        arr.push({scoreNats: r.pair_score === null ? null : Number(r.pair_score), taskDaysAgo});
+        grouped.set(key, arr);
+    }
+
+    const out: PriorMap = new Map();
+    for (const [key, rows] of grouped) {
+        out.set(key, summarisePrior(rows, LEGACY_PRIOR_NATS));
+    }
+    return out;
 }
 
 function fmtDelta(d: number | null): string {
@@ -488,23 +571,29 @@ function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: 
         .map((h) => `also matches ${String(h.compno).trim()} ${h.name}`.trim() + ` in class ${h.className}`);
 }
 
-type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean}>;
+type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean; deltaStart: number | null; deltaFinish: number | null}>;
 const scoreKey = (compno: Compno, flarmid: FlarmID) => `${compno}|${flarmid}`;
 
 // Build per-pair scores and two-sided margins from the matches we already
 // have. Since the candidate set is bounded by what `findTrackerMatches`
 // returns (within-tolerance + assigned), margins here are best-vs-next-best
 // among reported candidates only — true joint optimisation comes later.
-function computeScoreMap(matches: TrackerMatch[], results: OfficialResult[]): ScoreMap {
+function computeScoreMap(matches: TrackerMatch[], results: OfficialResult[], ddb: Record<string, DDBEntry> | null, priorMap: PriorMap): ScoreMap {
     if (!matches.length) return new Map();
     const earliestPilotStartUtc = results.reduce((m, r) => Math.min(m, r.startUtc), Number.POSITIVE_INFINITY);
+    const resultByCompno = new Map<Compno, OfficialResult>();
+    for (const r of results) resultByCompno.set(r.compno, r);
 
     const breakdownByKey = new Map<string, ScoreBreakdown>();
     const scoreByPilot = new Map<Compno, number[]>();
     const scoreByFlarmid = new Map<FlarmID, number[]>();
 
     for (const m of matches) {
-        const sig = signalsFromMatch(m, earliestPilotStartUtc);
+        const r = resultByCompno.get(m.compno);
+        const ddbEntry = ddbLookup(ddb, m.flarmid);
+        const link = ddbLinkFor(ddbEntry, m.compno, r?.glidertype ?? '');
+        const priorNats = priorMap.get(scoreKey(m.compno, m.flarmid)) ?? 0;
+        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats);
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
         const arrP = scoreByPilot.get(m.compno) ?? [];
@@ -533,7 +622,9 @@ function computeScoreMap(matches: TrackerMatch[], results: OfficialResult[]): Sc
             score: breakdown,
             margins,
             pilotContested: peerPilot.length > 1,
-            flarmidContested: peerFlarmid.length > 1
+            flarmidContested: peerFlarmid.length > 1,
+            deltaStart: m.deltaStart,
+            deltaFinish: m.deltaFinish
         });
     }
     return out;
@@ -554,7 +645,35 @@ function secondBest(arr: number[], chosen: number): number {
     return best === -Infinity ? 0 : best;
 }
 
-function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number): Signals {
+// Per-pair DDB facets: CN match (strong) and aircraft-model/glider match
+// (weak). Reuses the same key-fallback chain matchtrackers.ts uses
+// (`bin/matchtrackers.ts:414`) since DDB key casing varies between
+// upstreams and the FlarmID type carries no guarantee of normalisation.
+type DdbLink = {cn: boolean; glider: boolean; tag: 'none' | 'cn' | 'glider' | 'both'};
+function ddbLookup(ddb: Record<string, DDBEntry> | null, f: FlarmID): DDBEntry | undefined {
+    if (!ddb) return undefined;
+    const s = String(f);
+    return ddb[s] ?? ddb[s.toLowerCase()] ?? ddb[s.toUpperCase()];
+}
+function ddbLinkFor(ddb: DDBEntry | undefined, compno: Compno, glidertype: string): DdbLink {
+    if (!ddb) return {cn: false, glider: false, tag: 'none'};
+    const cn = !!ddb.cn && ddb.cn.trim().toUpperCase() === String(compno).trim().toUpperCase();
+    const glider = !!ddb.aircraft_model && !!glidertype && gliderEquivalent(ddb.aircraft_model, glidertype);
+    return {cn, glider, tag: cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none'};
+}
+
+// Recover the ddb_link enum from the scored breakdown. The breakdown
+// stores weighted nats, not raw flags, so we infer from non-zero
+// contributions. A score of 0 on either side indicates the flag wasn't
+// set; this matches the schema enum exactly.
+function ddbLinkFromBreakdown(b: ScoreBreakdown | undefined): 'none' | 'cn' | 'glider' | 'both' {
+    if (!b) return 'none';
+    const cn = b.ddbCn > 0;
+    const glider = b.ddbGlider > 0;
+    return cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none';
+}
+
+function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number): Signals {
     const d = m.diag;
     return {
         deltaStart: m.deltaStart,
@@ -567,14 +686,14 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number): Signa
         bboxRejectedPackets: d?.bboxRejectedPackets ?? 0,
         firstSeenT: d?.firstSeenT ?? null,
         earliestPilotStartUtc,
-        ddbCnMatch: false, // wired in a later stage
-        ddbRegistrationMatch: false,
+        ddbCnMatch: link.cn,
+        ddbGliderMatch: link.glider,
         baselineMatch: m.assigned,
-        priorNats: 0 // wired when the ledger comes online
+        priorNats
     };
 }
 
-function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolerance: number, crossClass?: CrossClassMap, thisClass?: ClassName): void {
+function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolerance: number, scoreMap: ScoreMap, crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!matches.length) {
         console.log(`  (no matches, no assigned-tracker reports)`);
         return;
@@ -586,8 +705,6 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolera
         arr.push(m);
         byPilot.set(m.compno, arr);
     }
-
-    const scoreMap = computeScoreMap(matches, results);
 
     // Sort compnos: pilots needing attention (assigned-outside-tolerance,
     // ambiguous, no-crossings-for-assigned) first; within each bucket by
@@ -679,7 +796,7 @@ function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boole
     if (score.inBbox > 0) contribs.push(`presence=${score.inBbox.toFixed(2)}`);
     if (score.preLaunch > 0) contribs.push(`pre=${score.preLaunch.toFixed(2)}`);
     if (score.ddbCn > 0) contribs.push(`ddbCN=${score.ddbCn.toFixed(2)}`);
-    if (score.ddbRegistration > 0) contribs.push(`ddbReg=${score.ddbRegistration.toFixed(2)}`);
+    if (score.ddbGlider > 0) contribs.push(`ddbGlider=${score.ddbGlider.toFixed(2)}`);
     if (score.baseline > 0) contribs.push(`base=${score.baseline.toFixed(2)}`);
     if (score.prior !== 0) contribs.push(`prior=${score.prior.toFixed(2)}`);
     if (contribs.length) parts.push(`[${contribs.join(' ')}]`);
@@ -712,6 +829,14 @@ interface Proposal {
     addedIds: FlarmID[];
     removedIds: FlarmID[];
     reason: string;
+    // Score context for the chosen flarmid (the addedId, or the assigned
+    // flarmid being removed when there's no addedId). Persisted on the
+    // applied trackerhistory row so the next day's prior loader can see it.
+    pairScore: number | null;
+    margin: number | null;
+    deltaStart: number | null;
+    deltaFinish: number | null;
+    ddbLink: 'none' | 'cn' | 'glider' | 'both';
 }
 
 function parseCurrentIds(raw: string): FlarmID[] {
@@ -727,7 +852,7 @@ function parseCurrentIds(raw: string): FlarmID[] {
     return out;
 }
 
-function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, thisClass: ClassName): Proposal[] {
+function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName): Proposal[] {
     const byPilot = new Map<Compno, TrackerMatch[]>();
     const byFlarm = new Map<FlarmID, TrackerMatch[]>();
     for (const m of matches) {
@@ -837,6 +962,12 @@ function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, th
         }
         const reason = crossInfo.length ? `${baseReason}; ${crossInfo.join('; ')}` : baseReason;
 
+        // Pull score data for the flarmid we're acting on. Prefer the
+        // addedId (the new chosen flarmid). Fall back to the matchRow we
+        // were considering. Falls back to nulls if not in scoreMap.
+        const focusFlarmid = addId ?? Array.from(removeIds)[0];
+        const focusMatch = focusFlarmid ? rows.find((m) => m.flarmid === focusFlarmid) : undefined;
+        const scored = focusFlarmid ? scoreMap.get(scoreKey(compno, focusFlarmid)) : undefined;
         out.push({
             compno,
             name: first.name,
@@ -844,7 +975,12 @@ function computeProposals(matches: TrackerMatch[], crossClass: CrossClassMap, th
             newTrackerid,
             addedIds: addId ? [addId] : [],
             removedIds: Array.from(removeIds),
-            reason
+            reason,
+            pairScore: scored ? scored.score.total : null,
+            margin: scored ? scored.margins.margin : null,
+            deltaStart: focusMatch?.deltaStart ?? null,
+            deltaFinish: focusMatch?.deltaFinish ?? null,
+            ddbLink: ddbLinkFromBreakdown(scored?.score)
         });
     }
     out.sort((a, b) => a.compno.localeCompare(b.compno));
@@ -860,11 +996,10 @@ function summariseProposal(p: Proposal): string {
     return parts.join('  |  ');
 }
 
-async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[], tolerance: number, crossClass: CrossClassMap, thisClass: ClassName): Promise<Proposal[]> {
+async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[], tolerance: number, scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName): Promise<Proposal[]> {
     if (!proposals.length) return [];
     console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
 
-    const scoreMap = computeScoreMap(matches, results);
     const accepted: Proposal[] = [];
     let acceptAll = false;
     for (let i = 0; i < proposals.length; i++) {
@@ -918,7 +1053,7 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
     return accepted;
 }
 
-async function applyProposals(className: ClassName, proposals: Proposal[]): Promise<number> {
+async function applyProposals(_compid: string, className: ClassName, datecode: Datecode, proposals: Proposal[]): Promise<number> {
     if (!proposals.length) return 0;
     const t = mysql.transaction();
     for (const p of proposals) {
@@ -932,11 +1067,66 @@ async function applyProposals(className: ClassName, proposals: Proposal[]): Prom
              WHERE class = ${className} AND compno = ${p.compno}
         `);
         t.query(escape`
-            INSERT INTO trackerhistory (compno, changed, flarmid, method)
-            VALUES (${p.compno}, now(), ${p.newTrackerid}, 'startmatch')
+            INSERT INTO trackerhistory
+                (compno, changed, flarmid, method, class, datecode,
+                 delta_start, delta_finish, pair_score, margin, ddb_link)
+            VALUES
+                (${p.compno}, now(), ${p.newTrackerid}, 'startmatch', ${className}, ${String(datecode)},
+                 ${p.deltaStart}, ${p.deltaFinish}, ${p.pairScore}, ${p.margin}, ${p.ddbLink})
         `);
     }
     await t.commit();
     console.log(`  Wrote ${proposals.length} change${proposals.length === 1 ? '' : 's'}.`);
     return proposals.length;
+}
+
+// Count how many evidence rows we'd write for this scan — used by
+// --dry-run to surface the would-be ledger volume without touching the DB.
+function countEvidenceRows(scoreMap: ScoreMap): number {
+    let n = 0;
+    for (const v of scoreMap.values()) if (v.score.total >= DEFAULT_LEDGER_MIN_NATS) n++;
+    return n;
+}
+
+// Persist daily evidence rows for every (compno, flarmid) pair above the
+// ledger floor that didn't already get a 'startmatch' row from this run.
+// Idempotent per-day: deletes the previous day's evidence rows for this
+// (class, datecode) before inserting fresh ones, so re-runs don't
+// accumulate.
+async function writeEvidence(_compid: string, className: ClassName, datecode: Datecode, scoreMap: ScoreMap, applied: Proposal[]): Promise<number> {
+    const appliedKeys = new Set(applied.map((p) => `${p.compno}|${(p.addedIds[0] ?? '').toString()}`));
+    const writes: {compno: Compno; flarmid: FlarmID; deltaStart: number | null; deltaFinish: number | null; pairScore: number; margin: number; ddbLink: string}[] = [];
+    for (const [key, v] of scoreMap) {
+        if (v.score.total < DEFAULT_LEDGER_MIN_NATS) continue;
+        if (appliedKeys.has(key)) continue;
+        const [compno, flarmid] = key.split('|') as [Compno, FlarmID];
+        writes.push({
+            compno,
+            flarmid,
+            deltaStart: v.deltaStart,
+            deltaFinish: v.deltaFinish,
+            pairScore: v.score.total,
+            margin: v.margins.margin,
+            ddbLink: ddbLinkFromBreakdown(v.score)
+        });
+    }
+
+    const t = mysql.transaction();
+    t.query(escape`
+        DELETE FROM trackerhistory
+        WHERE class = ${className} AND datecode = ${String(datecode)} AND method = 'evidence'
+    `);
+    for (const w of writes) {
+        t.query(escape`
+            INSERT INTO trackerhistory
+                (compno, changed, flarmid, method, class, datecode,
+                 delta_start, delta_finish, pair_score, margin, ddb_link)
+            VALUES
+                (${w.compno}, now(), ${w.flarmid}, 'evidence', ${className}, ${String(datecode)},
+                 ${w.deltaStart}, ${w.deltaFinish}, ${w.pairScore}, ${w.margin}, ${w.ddbLink})
+        `);
+    }
+    await t.commit();
+    if (writes.length) console.log(`  Wrote ${writes.length} evidence row${writes.length === 1 ? '' : 's'}.`);
+    return writes.length;
 }

@@ -1,6 +1,6 @@
 import {describe, test, expect} from 'vitest';
-import {scoreSignals, computeMargins, decayPrior, inBboxRatio, passesCandidateFilter, type Signals} from '../lib/scoring/shared/trackerScore';
-import {DEFAULT_TOLERANCE_SEC, DEFAULT_DIST_TOLERANCE_KM, DEFAULT_INBBOX_FULL_COUNT} from '../lib/constants';
+import {scoreSignals, computeMargins, decayPrior, summarisePrior, inBboxRatio, passesCandidateFilter, type Signals} from '../lib/scoring/shared/trackerScore';
+import {DEFAULT_TOLERANCE_SEC, DEFAULT_DIST_TOLERANCE_KM, DEFAULT_INBBOX_FULL_COUNT, LEGACY_PRIOR_NATS, DEFAULT_PRIOR_DECAY_DAYS} from '../lib/constants';
 
 const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     deltaStart: null,
@@ -14,7 +14,7 @@ const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     firstSeenT: null,
     earliestPilotStartUtc: 1700000000,
     ddbCnMatch: false,
-    ddbRegistrationMatch: false,
+    ddbGliderMatch: false,
     baselineMatch: false,
     priorNats: 0,
     ...over
@@ -84,6 +84,19 @@ describe('scoreSignals', () => {
         const b = scoreSignals(baseSignals({ddbCnMatch: true}));
         expect(b.ddbCn).toBeGreaterThan(0);
         expect(b.total).toBe(b.ddbCn);
+    });
+
+    test('DDB glider match is a weak signal, lower than CN', () => {
+        const cn = scoreSignals(baseSignals({ddbCnMatch: true}));
+        const glider = scoreSignals(baseSignals({ddbGliderMatch: true}));
+        expect(glider.ddbGlider).toBeGreaterThan(0);
+        expect(glider.ddbGlider).toBeLessThan(cn.ddbCn);
+        expect(glider.total).toBe(glider.ddbGlider);
+    });
+
+    test('DDB CN and glider both fire and stack additively', () => {
+        const both = scoreSignals(baseSignals({ddbCnMatch: true, ddbGliderMatch: true}));
+        expect(both.total).toBeCloseTo(both.ddbCn + both.ddbGlider, 6);
     });
 
     test('clean both-side match with DDB and baseline produces a strong score', () => {
@@ -170,5 +183,70 @@ describe('inBboxRatio / passesCandidateFilter', () => {
     test('mostly-in-bbox flarmid passes the filter', () => {
         const s = {inBboxPackets: 800, bboxRejectedPackets: 50};
         expect(passesCandidateFilter(s)).toBe(true);
+    });
+});
+
+describe('summarisePrior', () => {
+    test('zero rows → zero prior', () => {
+        expect(summarisePrior([], LEGACY_PRIOR_NATS)).toBe(0);
+    });
+
+    test('single row at age 0 contributes its full score', () => {
+        expect(summarisePrior([{scoreNats: 2.5, taskDaysAgo: 0}], LEGACY_PRIOR_NATS)).toBeCloseTo(2.5, 6);
+    });
+
+    test('decay is exp(-ageDays / τ) with default τ', () => {
+        const decayed = summarisePrior([{scoreNats: 2.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}], LEGACY_PRIOR_NATS);
+        expect(decayed).toBeCloseTo(2.0 / Math.E, 4);
+    });
+
+    test('multiple rows for same pair sum (each independently decayed)', () => {
+        const total = summarisePrior(
+            [
+                {scoreNats: 2.0, taskDaysAgo: 0},
+                {scoreNats: 2.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS},
+                {scoreNats: 2.0, taskDaysAgo: 2 * DEFAULT_PRIOR_DECAY_DAYS}
+            ],
+            LEGACY_PRIOR_NATS
+        );
+        expect(total).toBeCloseTo(2.0 + 2.0 / Math.E + 2.0 / (Math.E * Math.E), 4);
+    });
+
+    test('NULL pair_score → uses LEGACY_PRIOR_NATS, then decays normally', () => {
+        const decayed = summarisePrior([{scoreNats: null, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}], LEGACY_PRIOR_NATS);
+        expect(decayed).toBeCloseTo(LEGACY_PRIOR_NATS / Math.E, 4);
+    });
+
+    test('legacy + scored rows mixed', () => {
+        const total = summarisePrior(
+            [
+                {scoreNats: 2.0, taskDaysAgo: 0},
+                {scoreNats: null, taskDaysAgo: 4} // legacy → 1.0 decayed by 1/e
+            ],
+            LEGACY_PRIOR_NATS
+        );
+        expect(total).toBeCloseTo(2.0 + LEGACY_PRIOR_NATS / Math.E, 4);
+    });
+
+    test('negative ages (future rows, shouldn\'t happen) are ignored', () => {
+        const total = summarisePrior(
+            [
+                {scoreNats: 2.0, taskDaysAgo: -1},
+                {scoreNats: 1.5, taskDaysAgo: 0}
+            ],
+            LEGACY_PRIOR_NATS
+        );
+        expect(total).toBeCloseTo(1.5, 4);
+    });
+
+    test('task-day decay ignores calendar gaps — a 4-task-day prior decays as 4 days regardless of intervening weather days', () => {
+        // The caller computes taskDaysAgo from task-day rank deltas, so by
+        // construction summarisePrior never sees the calendar gap. Verify
+        // that consuming the same taskDaysAgo regardless of context
+        // produces the expected value.
+        const a = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}], LEGACY_PRIOR_NATS);
+        const b = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}], LEGACY_PRIOR_NATS);
+        expect(a).toBeCloseTo(b, 6);
+        expect(a).toBeCloseTo(1.0 / Math.E, 4);
     });
 });

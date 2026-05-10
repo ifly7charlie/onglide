@@ -32,6 +32,7 @@ export interface OfficialResult {
     trackerid: string; // current value in tracker.trackerid (or '')
     startUtc: Epoch;
     finishUtc: Epoch | null; // null for landout pilots (no recorded finish time)
+    glidertype: string; // pilots.glidertype, '' when unset; used for the weak DDB aircraft_model match
 }
 
 export interface TrackerMatch {
