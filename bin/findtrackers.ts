@@ -15,6 +15,7 @@ import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/typ
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
+import {scoreSignals, computeMargins, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
 
 import prompts from 'prompts';
 import escape from 'sql-template-strings';
@@ -419,7 +420,7 @@ function fmtDiag(diag: TrackerDiag): string {
     } else {
         parts.push(`${diag.inBboxPackets} packets in-area`);
     }
-    if (diag.minDistanceKm !== null) parts.push(`closest ${diag.minDistanceKm.toFixed(1)} km from TP`);
+    if (diag.minDistanceKm !== null) parts.push(`closest ${diag.minDistanceKm.toFixed(2)} km to line`);
     if (diag.avgGapSec !== null) {
         const max = diag.maxGapSec !== null ? `, max ${diag.maxGapSec}s` : '';
         parts.push(`avg gap ${diag.avgGapSec.toFixed(0)}s${max}`);
@@ -476,6 +477,83 @@ function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: 
         .map((h) => `also matches ${String(h.compno).trim()} ${h.name}`.trim() + ` in class ${h.className}`);
 }
 
+type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins}>;
+const scoreKey = (compno: Compno, flarmid: FlarmID) => `${compno}|${flarmid}`;
+
+// Build per-pair scores and two-sided margins from the matches we already
+// have. Since the candidate set is bounded by what `findTrackerMatches`
+// returns (within-tolerance + assigned), margins here are best-vs-next-best
+// among reported candidates only — true joint optimisation comes later.
+function computeScoreMap(matches: TrackerMatch[], results: OfficialResult[]): ScoreMap {
+    if (!matches.length) return new Map();
+    const earliestPilotStartUtc = results.reduce((m, r) => Math.min(m, r.startUtc), Number.POSITIVE_INFINITY);
+
+    const breakdownByKey = new Map<string, ScoreBreakdown>();
+    const scoreByPilot = new Map<Compno, number[]>();
+    const scoreByFlarmid = new Map<FlarmID, number[]>();
+
+    for (const m of matches) {
+        const sig = signalsFromMatch(m, earliestPilotStartUtc);
+        const breakdown = scoreSignals(sig);
+        breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
+        const arrP = scoreByPilot.get(m.compno) ?? [];
+        arrP.push(breakdown.total);
+        scoreByPilot.set(m.compno, arrP);
+        const arrF = scoreByFlarmid.get(m.flarmid) ?? [];
+        arrF.push(breakdown.total);
+        scoreByFlarmid.set(m.flarmid, arrF);
+    }
+
+    const out: ScoreMap = new Map();
+    for (const m of matches) {
+        const breakdown = breakdownByKey.get(scoreKey(m.compno, m.flarmid))!;
+        const peerPilot = scoreByPilot.get(m.compno)!;
+        const peerFlarmid = scoreByFlarmid.get(m.flarmid)!;
+        const margins = computeMargins({
+            chosenScore: breakdown.total,
+            bestOtherFlarmidForPilot: secondBest(peerPilot, breakdown.total),
+            bestOtherPilotForFlarmid: secondBest(peerFlarmid, breakdown.total)
+        });
+        out.set(scoreKey(m.compno, m.flarmid), {score: breakdown, margins});
+    }
+    return out;
+}
+
+// Best score in `arr` other than `chosen`. If `chosen` is the only entry,
+// the next-best is treated as 0 (no competing candidate seen at all).
+function secondBest(arr: number[], chosen: number): number {
+    let best = -Infinity;
+    let chosenSeen = false;
+    for (const v of arr) {
+        if (!chosenSeen && v === chosen) {
+            chosenSeen = true; // skip the first occurrence of chosen
+            continue;
+        }
+        if (v > best) best = v;
+    }
+    return best === -Infinity ? 0 : best;
+}
+
+function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number): Signals {
+    const d = m.diag;
+    return {
+        deltaStart: m.deltaStart,
+        deltaFinish: m.deltaFinish,
+        distAtStartKm: d?.distAtStartKm ?? null,
+        gapAroundStartSec: d?.gapAroundStartSec ?? null,
+        distAtFinishKm: d?.distAtFinishKm ?? null,
+        gapAroundFinishSec: d?.gapAroundFinishSec ?? null,
+        inBboxPackets: d?.inBboxPackets ?? 0,
+        bboxRejectedPackets: d?.bboxRejectedPackets ?? 0,
+        firstSeenT: d?.firstSeenT ?? null,
+        earliestPilotStartUtc,
+        ddbCnMatch: false, // wired in a later stage
+        ddbRegistrationMatch: false,
+        baselineMatch: m.assigned,
+        priorNats: 0 // wired when the ledger comes online
+    };
+}
+
 function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolerance: number, crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!matches.length) {
         console.log(`  (no matches, no assigned-tracker reports)`);
@@ -488,6 +566,8 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolera
         arr.push(m);
         byPilot.set(m.compno, arr);
     }
+
+    const scoreMap = computeScoreMap(matches, results);
 
     // Sort compnos: pilots needing attention (assigned-outside-tolerance,
     // ambiguous, no-crossings-for-assigned) first; within each bucket by
@@ -502,7 +582,7 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolera
     });
 
     for (const compno of compnos) {
-        printPilotMatches(compno, byPilot.get(compno)!, results, tolerance, crossClass, thisClass);
+        printPilotMatches(compno, byPilot.get(compno)!, results, tolerance, scoreMap, crossClass, thisClass);
     }
 }
 
@@ -533,7 +613,7 @@ function fmtPeers(peers: {compno: Compno; name: string; dt: number}[]): string {
     return peers.length > max ? `${head}, +${peers.length - max} more` : head;
 }
 
-function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], tolerance: number, crossClass?: CrossClassMap, thisClass?: ClassName): void {
+function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], tolerance: number, scoreMap?: ScoreMap, crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!arr.length) return;
     const r = results.find((x) => x.compno === compno);
     const name = arr[0].name || (r?.name ?? '');
@@ -549,12 +629,33 @@ function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: Officia
         const tagPart = tag ? `   ${tag}` : '';
         console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
         if (m.diag) console.log(`         · ${fmtDiag(m.diag)}`);
+        const scored = scoreMap?.get(scoreKey(m.compno, m.flarmid));
+        if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins)}`);
         if (thisClass) {
             for (const line of describeCrossClass(m.flarmid, thisClass, crossClass)) {
                 console.log(`         ↳ ${line}`);
             }
         }
     }
+}
+
+function fmtScore(score: ScoreBreakdown, margins: Margins): string {
+    const parts: string[] = [];
+    parts.push(`S=${score.total.toFixed(2)}`);
+    parts.push(`margin=${margins.margin.toFixed(2)} (p=${margins.pilotMargin.toFixed(2)}, f=${margins.flarmidMargin.toFixed(2)})`);
+    const contribs: string[] = [];
+    if (score.deltaStart > 0) contribs.push(`Δs=${score.deltaStart.toFixed(2)}`);
+    if (score.deltaFinish > 0) contribs.push(`Δf=${score.deltaFinish.toFixed(2)}`);
+    if (score.distAtStart > 0) contribs.push(`distS=${score.distAtStart.toFixed(2)}`);
+    if (score.distAtFinish > 0) contribs.push(`distF=${score.distAtFinish.toFixed(2)}`);
+    if (score.inBbox > 0) contribs.push(`presence=${score.inBbox.toFixed(2)}`);
+    if (score.preLaunch > 0) contribs.push(`pre=${score.preLaunch.toFixed(2)}`);
+    if (score.ddbCn > 0) contribs.push(`ddbCN=${score.ddbCn.toFixed(2)}`);
+    if (score.ddbRegistration > 0) contribs.push(`ddbReg=${score.ddbRegistration.toFixed(2)}`);
+    if (score.baseline > 0) contribs.push(`base=${score.baseline.toFixed(2)}`);
+    if (score.prior !== 0) contribs.push(`prior=${score.prior.toFixed(2)}`);
+    if (contribs.length) parts.push(`[${contribs.join(' ')}]`);
+    return parts.join('  ');
 }
 
 function bucket(rows: TrackerMatch[]): number {
@@ -678,6 +779,7 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
     if (!proposals.length) return [];
     console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
 
+    const scoreMap = computeScoreMap(matches, results);
     const accepted: Proposal[] = [];
     let acceptAll = false;
     for (let i = 0; i < proposals.length; i++) {
@@ -688,6 +790,7 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
             matches.filter((m) => m.compno === p.compno),
             results,
             tolerance,
+            scoreMap,
             crossClass,
             thisClass
         );

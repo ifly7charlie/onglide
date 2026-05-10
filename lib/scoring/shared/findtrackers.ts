@@ -84,7 +84,7 @@ export interface TrackerDiag {
     inBboxPackets: number;
     /** Packets dropped by the bbox prefilter, summed across scans. */
     bboxRejectedPackets: number;
-    /** Min geodesic distance (km) from any in-bbox packet to that scan's TP, across both scans. null if no in-bbox packets. */
+    /** Min closest-approach (km) of any consecutive-pair segment to the start/finish line or sector boundary, across both scans. null if no in-bbox packets or no consecutive pair survived the gap filter. */
     minDistanceKm: number | null;
     /** Mean interval (s) between consecutive in-bbox packets, across both scans. null if <2 in-bbox packets total. */
     avgGapSec: number | null;
@@ -98,9 +98,9 @@ export interface TrackerDiag {
     gapAroundStartSec: number | null;
     /** Same, around the pilot's official finish time, using finish-scan packets. */
     gapAroundFinishSec: number | null;
-    /** Min distance-to-start-TP (km) of the two in-bbox packets bracketing the pilot's official start time. null when gapAroundStartSec is null. */
+    /** Closest approach (km) to the start line/sector among the segments touching the two in-bbox packets bracketing the pilot's official start time. null when gapAroundStartSec is null or both bracketing samples lack a segment-distance reading. */
     distAtStartKm: number | null;
-    /** Same, around the pilot's official finish time, using distance to finish-TP. */
+    /** Same, around the pilot's official finish time, against the finish geometry. */
     distAtFinishKm: number | null;
 }
 
@@ -203,13 +203,18 @@ interface ScanResult {
     stats: Map<FlarmID, FlarmStatsAcc>;
 }
 
+interface SampleRow extends BasePositionMessage {
+    /** Min boundary distance (km) over the consecutive-pair segments touching this fix; Infinity until the post-scan pass fills it in. */
+    lineKm: number;
+}
+
 interface FlarmStatsAcc {
     bboxRejected: number;
     inBbox: number;
-    minDistanceKm: number; // Infinity until first in-bbox packet
+    minDistanceKm: number; // closest approach (km) of any consecutive-pair segment to the line/sector boundary; Infinity until populated by the post-scan pass
     firstSeenT: number; // -1 until any packet seen
     lastSeenT: number;
-    samples: {t: number; distKm: number}[]; // in-bbox packets (t, dist-to-TP), sorted ascending by t at end-of-scan
+    samples: SampleRow[]; // in-bbox packets sorted ascending by t at end-of-scan; lineKm filled in by post-scan pass
     sumGapSec: number;
     countGap: number;
     maxGapSec: number;
@@ -373,21 +378,22 @@ async function scanLine(
             continue;
         }
         const pos: BasePositionMessage = {lat: msg.lat, lng: msg.lng, a: msg.a, t: msg.t};
-        // Distance to TP — used for the geo gate on first sighting and for
-        // the per-flarmid minDistance stat across all in-bbox packets.
-        const distKm = PreparedTurnpoint.geodesicDistance(center, pos);
-        if (distKm < sStats.minDistanceKm) sStats.minDistanceKm = distKm;
+        // Centroid distance is used only for the first-sighting 150 km gate
+        // (a sanity filter against far-away ghost packets). Line/sector-aware
+        // distance for diag and scoring is filled in by a post-scan pass that
+        // re-runs `hasCrossed` on consecutive pairs and reads its `distanceKm`.
+        const centroidKm = PreparedTurnpoint.geodesicDistance(center, pos);
         sStats.inBbox++;
-        sStats.samples.push({t: msg.t, distKm});
+        sStats.samples.push({t: msg.t as Epoch, lat: msg.lat, lng: msg.lng, a: msg.a, lineKm: Infinity});
         let st = state.get(f);
         if (!st) {
             // First sighting in this scan: geographic gate.
             const d = dbgFor(f);
             if (d) {
                 d.firstArrivalT = pos.t;
-                d.firstArrivalDistKm = distKm;
+                d.firstArrivalDistKm = centroidKm;
             }
-            if (distKm > MAX_FLARM_DIST_KM) {
+            if (centroidKm > MAX_FLARM_DIST_KM) {
                 state.set(f, {buf: [], latestSeen: pos.t, skipped: true});
                 if (d) d.skipped = true;
                 continue;
@@ -453,18 +459,34 @@ async function scanLine(
     const bboxOnly = new Set<FlarmID>();
     for (const f of bboxRejectedFor) if (!state.has(f)) bboxOnly.add(f);
 
-    // Finalize per-flarmid gap stats. Packets are pushed in observation
-    // order during scan, which is mostly time-ascending modulo the small
-    // reorder window — sort once here so consumers can binary-search.
+    // Finalize per-flarmid gap stats and line/sector distances. Packets are
+    // pushed in observation order during scan, which is mostly time-
+    // ascending modulo the small reorder window — sort once here so
+    // consumers can binary-search.
+    //
+    // For each consecutive in-bbox pair we run hasCrossed and harvest the
+    // no-cross distanceKm (line: perpendicular to the segment with endpoint
+    // clamping; sector: closest boundary point). That distance is folded
+    // into the per-flarmid running min (`minDistanceKm`) and into both
+    // endpoints of the sample, so bracketDist returns the closest approach
+    // in the neighbourhood of `target`.
     for (const s of stats.values()) {
         if (s.samples.length < 2) continue;
         s.samples.sort((a, b) => a.t - b.t);
         for (let i = 1; i < s.samples.length; i++) {
             const gap = s.samples[i].t - s.samples[i - 1].t;
-            if (gap <= 0) continue; // duplicates from out-of-order writes
-            s.sumGapSec += gap;
-            s.countGap++;
-            if (gap > s.maxGapSec) s.maxGapSec = gap;
+            if (gap > 0) {
+                s.sumGapSec += gap;
+                s.countGap++;
+                if (gap > s.maxGapSec) s.maxGapSec = gap;
+            }
+            if (gap > maxGapSec) continue; // matches drain's per-pair gate
+            const hc = tp.hasCrossed(s.samples[i - 1], s.samples[i]);
+            if (hc.crossings.length || hc.distanceKm === undefined) continue;
+            const d = hc.distanceKm as number;
+            if (d < s.samples[i].lineKm) s.samples[i].lineKm = d;
+            if (d < s.samples[i - 1].lineKm) s.samples[i - 1].lineKm = d;
+            if (d < s.minDistanceKm) s.minDistanceKm = d;
         }
     }
 
@@ -612,7 +634,7 @@ function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResu
     };
 }
 
-type Sample = {t: number; distKm: number};
+type Sample = {t: number; lineKm: number};
 
 // Locate the consecutive sample pair [lo, lo+1] whose timestamps bracket
 // `target`. Returns null if target is outside [first, last] or fewer than
@@ -637,12 +659,14 @@ function bracketGap(samples: Sample[], target: number): number | null {
     return i === null ? null : samples[i + 1].t - samples[i].t;
 }
 
-// Smaller of the two bracketing samples' distance-to-TP (km). Picks the
-// closer of the before/after points, since that's the tightest upper
-// bound on how far from the line the pilot was at `target`.
+// Smaller of the two bracketing samples' line/sector distance (km). Picks
+// the closer of the before/after points — tightest upper bound on how far
+// the pilot was from the start/finish geometry at `target`.
 function bracketDist(samples: Sample[], target: number): number | null {
     const i = bracketIndex(samples, target);
-    return i === null ? null : Math.min(samples[i].distKm, samples[i + 1].distKm);
+    if (i === null) return null;
+    const d = Math.min(samples[i].lineKm, samples[i + 1].lineKm);
+    return Number.isFinite(d) ? d : null;
 }
 
 // Smallest signed delta (crossing − target) across `list`. Used for
