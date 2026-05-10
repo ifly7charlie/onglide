@@ -48,7 +48,7 @@ import {classDisplayStatus, type CompetitionDisplayStatus} from '../lib/competit
 const COMPETITIONS_CHANNEL = 'all';
 
 // Shared device-database loader (OGN + FlarmNet)
-import {loadMergedDDB, isBlocked, blockedMethod, DDBEntry as SharedDDBEntry} from '../lib/ddb';
+import {loadMergedDDB, isBlocked, blockedMethod, gliderEquivalent, DDBEntry as SharedDDBEntry} from '../lib/ddb';
 
 // Message passed from the AprsContest Listener
 import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM} from '../lib/types';
@@ -274,10 +274,10 @@ interface Glider {
     flarmIdRegex: RegExp;
 
     greg: string;
+    glidertype: string;
     handicap: number;
     dbTrackerId: string;
     datecode: Datecode;
-    duplicate: number;
     utcStart: Epoch;
     scoredStart: Epoch;
     scoredFinish: Epoch;
@@ -1561,8 +1561,8 @@ function sendTask(sendTo: Channel | OgnWebSocket, channel: Channel) {
 interface CTrackerRow {
     compno: Compno;
     greg: string;
+    glidertype: string;
     dbTrackerId: string;
-    duplicate: number;
     handicap: number;
     className: ClassName;
     compid: string;
@@ -1609,8 +1609,8 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
         SELECT
             p.compno,
             p.greg,
+            COALESCE(p.glidertype, '') AS glidertype,
             trackerId AS dbTrackerId,
-            0 duplicate,
             p.handicap,
             p.class className,
             cl.compid,
@@ -1754,17 +1754,6 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
             datecode
         } as any as Glider);
     }
-
-    // Identify any competition numbers that may be duplicates and mark them.
-    // This affects how we match from the DDB.
-    const duplicates = await db.query<{compno: Compno; count: number; classes: string}[]>('SELECT compno,count(*) count,group_concat(class) classes FROM pilots GROUP BY compno HAVING count > 1');
-    duplicates.forEach((d: {compno: string; count: number; classes: string}) => {
-        d.classes.split(',').forEach((c) => {
-            if (gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)]) {
-                gliders[makeClassname_Compno(c as ClassName, d.compno as Compno)].duplicate = 1;
-            }
-        });
-    });
 
     return {cTrackers, keyedDb, prevGliders, initialGliderCount, removedGlidersCount: removedGliders.length};
 }
@@ -2931,10 +2920,19 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     // must match a pilot entered in this competition, not a sibling one.
     if (ddbf && (ddbf.cn != '' || ddbf.registration != '')) {
         // Find all our gliders that could match, may be 0, 1 or possibly 2
-        const matches = _filter(gliders, (x) => {
+        let matches = _filter(gliders, (x) => {
             if (x.compid !== competition.compid) return false;
-            return (!x.duplicate && ddbf.cn == x.compno) || (ddbf.registration == x.greg && (x.greg || '') != '');
+            return ddbf.cn == x.compno || (ddbf.registration == x.greg && (x.greg || '') != '');
         });
+
+        // If multiple pilots share the matching cn/greg (typically same compno
+        // across classes), prefer those whose stored glidertype is equivalent
+        // to the DDB's aircraft_model. Only narrow when at least one survives;
+        // a stale/wrong DDB type shouldn't lose us a real match.
+        if (matches.length > 1 && ddbf.aircraft_model) {
+            const typed = matches.filter((m) => gliderEquivalent(m.glidertype, ddbf.aircraft_model));
+            if (typed.length > 0) matches = typed;
+        }
 
         if (!Object.keys(matches).length) {
             unknownTrackers[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
@@ -3003,7 +3001,6 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         if (match.dbTrackerId != flarmId && match.dbTrackerId != 'unknown' && match.dbTrackerId != 'blocked') {
             unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
             console.log(unknownTrackers[flarmId].message);
-            match.duplicate = 1;
             return;
         }
 
