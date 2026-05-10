@@ -482,8 +482,13 @@ async function scanLine(
             }
             if (gap > maxGapSec) continue; // matches drain's per-pair gate
             const hc = tp.hasCrossed(s.samples[i - 1], s.samples[i]);
-            if (hc.crossings.length || hc.distanceKm === undefined) continue;
-            const d = hc.distanceKm as number;
+            // Real crossing → segment passed through the line. Distance to
+            // the line is 0 by definition. Near-miss (crossings empty +
+            // distanceKm set) and no-cross both fall through to the
+            // distanceKm path. Anything else (no distance reported) is
+            // skipped.
+            const d = hc.crossings.length > 0 && hc.distanceKm === undefined ? 0 : (hc.distanceKm as number | undefined);
+            if (d === undefined) continue;
             if (d < s.samples[i].lineKm) s.samples[i].lineKm = d;
             if (d < s.samples[i - 1].lineKm) s.samples[i - 1].lineKm = d;
             if (d < s.minDistanceKm) s.minDistanceKm = d;
@@ -730,7 +735,8 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     withinTolerance: true,
                     ambiguous: false,
                     skipped: false,
-                    bboxOnly: false
+                    bboxOnly: false,
+                    diag: buildDiag(f, startScan, finishScan, r.startUtc, r.finishUtc)
                 };
                 listAppend(perPilot, r.compno, m);
                 listAppend(perFlarm, f, m);
