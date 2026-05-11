@@ -58,6 +58,7 @@ console.log('dev mode', dev);
 let db: ReturnType<typeof mysql>;
 
 import {sortedIndexBy, sortedIndexNumber} from '../lib/util/binarySearch';
+import {roundedUint32, safeEncode} from '../lib/util/proto';
 import equal from 'fast-deep-equal';
 
 // Mutate arr in place by removing all elements matching pred, returning the removed elements
@@ -517,14 +518,26 @@ async function main() {
             const positions = compChannels.reduce(
                 (a, c: Channel) => {
                     if (c.toSend.length) {
-                        a[c.className] = {positions: c.toSend as unknown as PilotPosition[]};
+                        a[c.className] = {
+                            positions: c.toSend.map((p): PilotPosition => ({
+                                c: p.c,
+                                lat: p.lat,
+                                lng: p.lng,
+                                a: Math.trunc(p.a),
+                                g: Math.trunc(p.g),
+                                t: Math.trunc(p.t),
+                                b: Math.trunc(p.b ?? 0),
+                                s: Math.trunc(p.s ?? 0)
+                            }))
+                        };
                     }
                     return a;
                 },
                 {} as Record<string, Positions>
             );
 
-            const msg = OnglideWebSocketMessage.encode({positions: {class: positions}, t: Math.trunc(now)}).finish();
+            const compid = compChannels[0]?.compid;
+            const msg = safeEncode(OnglideWebSocketMessage, {positions: {class: positions}, t: Math.trunc(now)}, `positions ${compid}`);
 
             for (const channel of compChannels) {
                 channel.statistics.activeListeners += channel.clients.length;
@@ -550,7 +563,7 @@ async function main() {
                     channel.lastSentPositions = now;
 
                     // Send to each client and if they don't respond they will be cleaned up next time around
-                    channel.sendBinary(msg);
+                    if (msg) channel.sendBinary(msg);
                 } else {
                     channel.toSend = [];
                 }
@@ -1552,9 +1565,9 @@ function rebuildAprsFilter() {
 }
 
 function sendTask(sendTo: Channel | OgnWebSocket, channel: Channel) {
-    sendTo.sendBinary(
-        OnglideWebSocketMessage.encode({
-            //
+    const msg = safeEncode(
+        OnglideWebSocketMessage,
+        {
             task: channel.task
                 ? {
                       geoJSON: JSON.stringify(channel.geoTask),
@@ -1563,8 +1576,10 @@ function sendTask(sendTo: Channel | OgnWebSocket, channel: Channel) {
                       legs: channel.task.legs as any
                   }
                 : {legs: []}
-        }).finish()
+        },
+        `task ${channel.displayName}`
     );
+    if (msg) sendTo.sendBinary(msg);
 }
 
 interface CTrackerRow {
@@ -2210,8 +2225,11 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                 return result;
             }, {});
         // Send the client the current version of the tracks
-        channel.webPathData[now.toString()] = Buffer.from(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: 0}}).finish());
-        channel.webPathBaseTime = now;
+        const webPath = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: 0}}, `webPath ${channel.displayName}`);
+        if (webPath) {
+            channel.webPathData[now.toString()] = Buffer.from(webPath);
+            channel.webPathBaseTime = now;
+        }
     }
 }
 
@@ -2251,7 +2269,7 @@ async function generateRecentPilotTracks(channel: Channel) {
         return result;
     }, {});
     // Send the client the current version of the tracks
-    return OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish();
+    return safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.displayName}`) ?? new Uint8Array(0);
 }
 
 function getIdentifiers(channel: Channel) {
@@ -2271,9 +2289,9 @@ function getIdentifiers(channel: Channel) {
         earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
         latestScore: channel.latestScore,
         scoreId: channel.liveScoreId,
-        meanAgl: channel.heightStatistics.mean,
-        highestAgl: channel.heightStatistics.max,
-        deviationAgl: channel.heightStatistics.standard_deviation
+        meanAgl: roundedUint32(channel.heightStatistics.mean),
+        highestAgl: roundedUint32(channel.heightStatistics.max),
+        deviationAgl: roundedUint32(channel.heightStatistics.standard_deviation)
     };
 }
 
@@ -2283,7 +2301,8 @@ async function sendAllScores(client: OgnWebSocket) {
         return;
     }
 
-    const updatedIdentifiers = OnglideWebSocketMessage.encode(
+    const updatedIdentifiers = safeEncode(
+        OnglideWebSocketMessage,
         {
             identifiers: getIdentifiers(channel),
             scores: {
@@ -2291,15 +2310,17 @@ async function sendAllScores(client: OgnWebSocket) {
                 pilots: channel.allScores
             },
             t: getNow()
-        } //
-    ).finish();
+        },
+        `sendAllScores ${channel.displayName}`
+    );
 
     // If it's after a join then only send to the one client
-    client.sendBinary(updatedIdentifiers);
+    if (updatedIdentifiers) client.sendBinary(updatedIdentifiers);
 }
 
 async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = false) {
-    const updatedIdentifiers = OnglideWebSocketMessage.encode(
+    const updatedIdentifiers = safeEncode(
+        OnglideWebSocketMessage,
         {
             identifiers: getIdentifiers(channel),
             t: getNow(),
@@ -2311,11 +2332,12 @@ async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = fa
                       }
                   }
                 : {})
-        } //
-    ).finish();
+        },
+        `sendIdentifiersToAll ${channel.displayName}`
+    );
 
     // If it's after a join then only send to the one client
-    channel.sendBinary(updatedIdentifiers);
+    if (updatedIdentifiers) channel.sendBinary(updatedIdentifiers);
 }
 
 // We need to fetch and repeat the scores for each class, enriched with vario information
@@ -2409,10 +2431,12 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
         // Score from Live packets (either end of rescore or end of current score)
         if (score.live) {
-            const msg = OnglideWebSocketMessage.encode({scores: {scoreId, pilots: {[compno]: score}}}).finish();
-            channel.statistics.bytesSent += channel.clients.length * msg.byteLength;
-            trackMetric(channel.className + '.scoring.bytesSent', msg.byteLength * channel.clients.length);
-            channel.sendBinary(msg);
+            const msg = safeEncode(OnglideWebSocketMessage, {scores: {scoreId, pilots: {[compno]: score}}}, `live score ${channel.className}/${compno}`);
+            if (msg) {
+                channel.statistics.bytesSent += channel.clients.length * msg.byteLength;
+                trackMetric(channel.className + '.scoring.bytesSent', msg.byteLength * channel.clients.length);
+                channel.sendBinary(msg);
+            }
 
             // We record this as the latest we are aware of - it's possible it will be wrong as
             // we don't differentiate between the two scoreIds but it's not a history so will
@@ -2721,10 +2745,12 @@ function broadcastCompetitionsSnapshot(client: OgnWebSocket) {
             lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
         }
     }
-    const msg = OnglideWebSocketMessage.encode({
-        competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}
-    }).finish();
-    if (client.readyState === WebSocket.OPEN) {
+    const msg = safeEncode(
+        OnglideWebSocketMessage,
+        {competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}},
+        'competitions full snapshot'
+    );
+    if (msg && client.readyState === WebSocket.OPEN) {
         client.send(msg, {binary: true});
     }
 }
@@ -2759,9 +2785,12 @@ function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: st
 
     if (dirty.length === 0 && removedCompids.length === 0) return;
 
-    const msg = OnglideWebSocketMessage.encode({
-        competitions: {competitions: dirty, generatedAt: Math.floor(getNow()), full: false, removed: removedCompids}
-    }).finish();
+    const msg = safeEncode(
+        OnglideWebSocketMessage,
+        {competitions: {competitions: dirty, generatedAt: Math.floor(getNow()), full: false, removed: removedCompids}},
+        'competitions delta'
+    );
+    if (!msg) return;
 
     competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
     competitionsListeners.forEach((client) => client.send(msg, {binary: true}));
@@ -2782,10 +2811,12 @@ function broadcastCompetitionsKeepalive() {
     if (!competitionsListeners.length) return;
 
     const now = getNow();
-    const msg = OnglideWebSocketMessage.encode({
-        t: now,
-        ka: {keepalive: true, at: Math.floor(now), listeners: competitionsListeners.length, airborne: 0}
-    }).finish();
+    const msg = safeEncode(
+        OnglideWebSocketMessage,
+        {t: now, ka: {keepalive: true, at: Math.floor(now), listeners: competitionsListeners.length, airborne: 0}},
+        'competitions keepalive'
+    );
+    if (!msg) return;
 
     competitionsListeners.forEach((client) => client.send(msg, {binary: true}));
 }
@@ -2800,19 +2831,26 @@ async function sendKeepalive(channel: Channel) {
     }
 
     // For sending the keepalive
-    channel.lastKeepAliveMsg = OnglideWebSocketMessage.encode({
-        identifiers: getIdentifiers(channel),
-        t: now,
-        ka: {
-            keepalive: true,
-            at: Math.floor(now),
-            listeners: channel.clients.length,
-            airborne: channel.activeGliders.size
-        }
-    }).finish();
+    const keepaliveMsg = safeEncode(
+        OnglideWebSocketMessage,
+        {
+            identifiers: getIdentifiers(channel),
+            t: now,
+            ka: {
+                keepalive: true,
+                at: Math.floor(now),
+                listeners: channel.clients.length,
+                airborne: channel.activeGliders.size
+            }
+        },
+        `keepalive ${channel.displayName}`
+    );
 
-    // Reset for next iteration
+    // Reset for next iteration (independent of encode outcome — the snapshot was already taken)
     channel.activeGliders.clear();
+
+    if (!keepaliveMsg) return;
+    channel.lastKeepAliveMsg = keepaliveMsg;
 
     // Send to each client and if they don't respond they will be cleaned up next time around
     channel.clients.forEach((client: any) => {
@@ -3300,11 +3338,20 @@ function setupOgnWebServer(req, res) {
                         glidersWithScores += history[compno].history.length ? 1 : 0;
                     }
 
-                    const msg: any = ClassScoreHistory.encode({
-                        className: channel.className,
-                        datecode: '', // we need to use undefined otherwise it will die
-                        pilots: history
-                    }).finish();
+                    const msg = safeEncode(
+                        ClassScoreHistory,
+                        {
+                            className: channel.className,
+                            datecode: '', // we need to use undefined otherwise it will die
+                            pilots: history
+                        },
+                        `scorehistory ${channelName} ${timestamp}`
+                    );
+                    if (!msg) {
+                        res.writeHead(500, headers);
+                        res.end();
+                        return;
+                    }
 
                     const cacheTtl = chunkEnd == timestamp + 1 ? 24 * 60 * 60 : 60;
 

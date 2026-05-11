@@ -73,7 +73,7 @@ message TaskRules {
 	optional bool dh = 4;            // distance handicap
 	optional bool handicapped = 5;
 	optional double dm = 6;          // minimum distance for non-AAT speed tasks
-	uint32 maxHandicap = 7;          // highest handicap in the class
+	double maxHandicap = 7; // highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps
 }
 
 message TaskDetails {

@@ -107,7 +107,7 @@ export interface TaskRules {
   dm?:
     | number
     | undefined;
-  /** highest handicap in the class */
+  /** highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps */
   maxHandicap: number;
 }
 
@@ -1461,7 +1461,7 @@ export const TaskRules: MessageFns<TaskRules> = {
       writer.uint32(49).double(message.dm);
     }
     if (message.maxHandicap !== 0) {
-      writer.uint32(56).uint32(message.maxHandicap);
+      writer.uint32(57).double(message.maxHandicap);
     }
     return writer;
   },
@@ -1522,11 +1522,11 @@ export const TaskRules: MessageFns<TaskRules> = {
           continue;
         }
         case 7: {
-          if (tag !== 56) {
+          if (tag !== 57) {
             break;
           }
 
-          message.maxHandicap = reader.uint32();
+          message.maxHandicap = reader.double();
           continue;
         }
       }
@@ -1571,7 +1571,7 @@ export const TaskRules: MessageFns<TaskRules> = {
       obj.dm = message.dm;
     }
     if (message.maxHandicap !== 0) {
-      obj.maxHandicap = Math.round(message.maxHandicap);
+      obj.maxHandicap = message.maxHandicap;
     }
     return obj;
   },

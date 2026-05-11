@@ -113,7 +113,10 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // 1. AAT specific turnpoint time
             // 2. The entry to the TP
             // 3. the exit from the TP (ie startLine)
-            const legTime = (leg) => (leg.entryTimeStamp && (leg?.point?.t || 0) > 10000 ? leg?.point?.t : null) || leg.entryTimeStamp || leg.exitTimeStamp || 0;
+            // AAT min/max graphs use negative sentinel timestamps (e.g. -999999 for the synthetic
+            // start point in assignedAreaScoringGenerator); treat anything <= 10000 as not-a-real-time.
+            const validTime = (t: number | undefined | null) => (typeof t === 'number' && t > 10000 ? t : 0);
+            const legTime = (leg) => validTime(leg.entryTimeStamp && (leg?.point?.t || 0) > 10000 ? leg?.point?.t : null) || validTime(leg.entryTimeStamp) || validTime(leg.exitTimeStamp) || 0;
 
             leg.convexHull ??= [];
 
@@ -133,7 +136,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + Math.max(leg.distance, 0)) * 10) / 10
                 };
                 if (previousLeg?.point?.a) {
-                    sl.alt = previousLeg?.point?.a;
+                    sl.alt = Math.round(previousLeg.point.a);
                 }
                 if (!score.utcFinish) {
                     if (leg.minPossible) {
