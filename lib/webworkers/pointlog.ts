@@ -4,11 +4,12 @@ import * as os from 'os';
 
 import type {PositionMessage} from '../types';
 import type {FlarmID} from '../types';
+import {scanFileV8, scanFileForIdsV8, scanFileAllV8} from './pointlog-v8';
 
 // Line format: the serialized message itself, one JSON object per line.
 // The message carries t (epoch), f (flarmId), o (sender) already — no
 // wrapper needed.
-type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
+export type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
 
 // ---------- module state ----------
 // Strip non-alphanumerics so the hostname always occupies exactly one
@@ -62,8 +63,18 @@ function logThrottled(lastTsRef: () => number, setLastTs: (t: number) => void, i
 // ---------- filename helpers ----------
 // Active:   aprs-<host>-<pid>-<firstTs>.log        (3 segments)
 // Rotated:  aprs-<host>-<pid>-<firstTs>-<lastTs>.log (4 segments)
+// V8 variant uses the same scheme with .v8 suffix; produced by
+// bin/convert-pointlog.ts, never written by the live daemon.
 const FILE_PREFIX = 'aprs-';
-const FILE_SUFFIX = '.log';
+const FILE_SUFFIX_LOG = '.log';
+const FILE_SUFFIX_V8 = '.v8';
+
+export type PointlogFormat = 'log' | 'v8';
+
+function pointlogFormat(): PointlogFormat {
+    const v = process.env.POINTLOG_FORMAT;
+    return v === 'v8' ? 'v8' : 'log';
+}
 
 interface ParsedName {
     file: string;
@@ -72,11 +83,23 @@ interface ParsedName {
     firstTs: number;
     lastTs?: number; // defined iff rotated
     rotated: boolean;
+    format: PointlogFormat;
 }
 
 function parseFilename(file: string): ParsedName | undefined {
-    if (!file.startsWith(FILE_PREFIX) || !file.endsWith(FILE_SUFFIX)) return undefined;
-    const core = file.slice(FILE_PREFIX.length, -FILE_SUFFIX.length);
+    if (!file.startsWith(FILE_PREFIX)) return undefined;
+    let format: PointlogFormat;
+    let suffix: string;
+    if (file.endsWith(FILE_SUFFIX_LOG)) {
+        format = 'log';
+        suffix = FILE_SUFFIX_LOG;
+    } else if (file.endsWith(FILE_SUFFIX_V8)) {
+        format = 'v8';
+        suffix = FILE_SUFFIX_V8;
+    } else {
+        return undefined;
+    }
+    const core = file.slice(FILE_PREFIX.length, -suffix.length);
     const segments = core.split('-');
     // host segment itself may contain hyphens (hostnames can) — collapse to last 3 or 4.
     if (segments.length < 3) return undefined;
@@ -105,15 +128,15 @@ function parseFilename(file: string): ParsedName | undefined {
     if (!Number.isFinite(parsedPid) || !Number.isFinite(parsedFirst)) return undefined;
     const parsedLast = lastStr != null ? Number(lastStr) : undefined;
     if (lastStr != null && !Number.isFinite(parsedLast)) return undefined;
-    return {file, host, pid: parsedPid, firstTs: parsedFirst, lastTs: parsedLast, rotated: lastStr != null};
+    return {file, host, pid: parsedPid, firstTs: parsedFirst, lastTs: parsedLast, rotated: lastStr != null, format};
 }
 
 function activeFilename(firstTs: number): string {
-    return `${FILE_PREFIX}${hostname}-${pid}-${firstTs}${FILE_SUFFIX}`;
+    return `${FILE_PREFIX}${hostname}-${pid}-${firstTs}${FILE_SUFFIX_LOG}`;
 }
 
 function rotatedFilename(host: string, pidN: number, firstTs: number, lastTs: number): string {
-    return `${FILE_PREFIX}${host}-${pidN}-${firstTs}-${lastTs}${FILE_SUFFIX}`;
+    return `${FILE_PREFIX}${host}-${pidN}-${firstTs}-${lastTs}${FILE_SUFFIX_LOG}`;
 }
 
 async function ensureDir(): Promise<void> {
@@ -357,6 +380,8 @@ async function adoptOrphans(): Promise<void> {
     const files = await listAprsFiles();
     const now = Math.floor(Date.now() / 1000);
     for (const f of files) {
+        // .v8 files are derived/static — never an "active" stream to adopt.
+        if (f.format !== 'log') continue;
         if (f.rotated) continue;
         if (f.host !== hostname) continue;
         if (f.pid === pid) continue; // our own (shouldn't exist yet, but be safe)
@@ -404,10 +429,15 @@ async function purgeStale(): Promise<void> {
         const fullPath = path.join(basePath(), f.file);
         let shouldUnlink = false;
 
-        if (f.rotated) {
+        if (f.format === 'v8') {
+            // Derived files. Purge by lastTs if rotated, firstTs otherwise —
+            // they have no live writer to protect.
+            const refTs = f.rotated ? (f.lastTs as number) : f.firstTs;
+            if (nowMs - refTs * 1000 > retainMs) shouldUnlink = true;
+        } else if (f.rotated) {
             if (nowMs - (f.lastTs as number) * 1000 > retainMs) shouldUnlink = true;
         } else {
-            // Active file. Never purge our own or a live same-host peer.
+            // Active .log file. Never purge our own or a live same-host peer.
             if (f.host === hostname && f.pid === pid) continue;
             if (f.host === hostname && isPidAlive(f.pid)) continue;
             // Either cross-host, or same-host dead PID that adopt missed — purge by firstTs.
@@ -438,13 +468,21 @@ const OUT_OF_ORDER_SLACK_SEC = 30;
 // Iterate every message across every file — diagnostic use (CLI tools that
 // summarise across all flarmids). Slow (O(total bytes)) but simple.
 export async function* scanAll(opts: {since?: number; until?: number} = {}): AsyncGenerator<LoggedMessage> {
+    const fmt = pointlogFormat();
     const files = await listAprsFiles();
     const since = opts.since ?? 0;
-    const candidates = files.filter((f) => (f.rotated && (f.lastTs as number) < since - OUT_OF_ORDER_SLACK_SEC ? false : true)).sort((a, b) => a.firstTs - b.firstTs);
+    const candidates = files
+        .filter((f) => f.format === fmt)
+        .filter((f) => (f.rotated && (f.lastTs as number) < since - OUT_OF_ORDER_SLACK_SEC ? false : true))
+        .sort((a, b) => a.firstTs - b.firstTs);
     for (const f of candidates) {
         const fullPath = path.join(basePath(), f.file);
         try {
-            yield* scanFileAll(fullPath, since, opts.until);
+            if (f.format === 'v8') {
+                yield* scanFileAllV8(fullPath, since, opts.until);
+            } else {
+                yield* scanFileAll(fullPath, since, opts.until);
+            }
         } catch (e: any) {
             if (e.code === 'ENOENT') continue;
             console.log(`pointlog: scan ${f.file}: ${e.message}`);
@@ -512,8 +550,10 @@ export interface LoadPointsForIdsQuery {
 }
 
 export async function* loadPointsForIds(q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
+    const fmt = pointlogFormat();
     const files = await listAprsFiles();
     const candidates = files
+        .filter((f) => f.format === fmt)
         .filter((f) => {
             if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
             return true;
@@ -523,7 +563,11 @@ export async function* loadPointsForIds(q: LoadPointsForIdsQuery): AsyncGenerato
     for (const f of candidates) {
         const fullPath = path.join(basePath(), f.file);
         try {
-            yield* scanFileForIds(fullPath, q);
+            if (f.format === 'v8') {
+                yield* scanFileForIdsV8(fullPath, q);
+            } else {
+                yield* scanFileForIds(fullPath, q);
+            }
         } catch (e: any) {
             if (e.code === 'ENOENT') continue;
             console.log(`pointlog: scan ${f.file}: ${e.message}`);
@@ -591,6 +635,7 @@ async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): Asyn
 }
 
 export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
+    const fmt = pointlogFormat();
     const files = await listAprsFiles();
     // Filename timestamps are writer wall-clock at open (firstTs) and
     // close (lastTs). With every record carrying d ≥ 0, lastTs is a hard
@@ -600,6 +645,7 @@ export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMess
     // firstTs is open time, not a lower bound on t (a backfill replay can
     // append old-t records to a freshly opened file).
     const candidates = files
+        .filter((f) => f.format === fmt)
         .filter((f) => {
             if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
             return true;
@@ -609,7 +655,11 @@ export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMess
     for (const f of candidates) {
         const fullPath = path.join(basePath(), f.file);
         try {
-            yield* scanFile(fullPath, q);
+            if (f.format === 'v8') {
+                yield* scanFileV8(fullPath, q);
+            } else {
+                yield* scanFile(fullPath, q);
+            }
         } catch (e: any) {
             if (e.code === 'ENOENT') continue; // rotated/purged mid-scan
             console.log(`pointlog: scan ${f.file}: ${e.message}`);
