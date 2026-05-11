@@ -75,6 +75,12 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                         }
                     }
 
+                    // Persist the new status so a subsequent tick or low-altitude position doesn't
+                    // re-read the old Airborne value from previousPoint and flip the verdict back.
+                    if (ps != previousPoint.ps) {
+                        previousPoint = {...previousPoint, ps};
+                    }
+
                     // if (current.value.t - previousPoint.t > 120) {
                     // If we have had a point then we should report tick but with that status
                     nextArg = yield {ps, ...current.value};

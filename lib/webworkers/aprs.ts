@@ -1321,8 +1321,12 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         aircraft.lastSent = lastSent = point;
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
-        // all it does is stop it sending to the front end
-        const live = start != 0 || position == messages.length || (messages[position]?.t ?? Infinity) >= to;
+        // all it does is stop it sending to the front end.
+        // Don't promote the last point of an initial replay (start == 0) to live just because it's
+        // the end of the batch — that lets EPG's tick-based landout fire against the second-to-last
+        // point and then get reverted when the "live" final point lands. The heartbeat tick below
+        // (always _:true) is what signals the replay/live boundary to iog.
+        const live = start != 0 || (position < messages.length && messages[position].t >= to);
         aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
         log('sent->', point);
     }
