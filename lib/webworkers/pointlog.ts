@@ -11,7 +11,9 @@ import type {FlarmID} from '../types';
 type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
 
 // ---------- module state ----------
-const hostname = os.hostname();
+// Strip non-alphanumerics so the hostname always occupies exactly one
+// hyphen-delimited segment in filenames (parseFilename relies on this).
+const hostname = os.hostname().replace(/[^A-Za-z0-9]/g, '');
 const pid = process.pid;
 const basePath = (): string => (process.env.DB_PATH ?? './db/').replace(/\/$/, '') + '/';
 
