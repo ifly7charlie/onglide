@@ -2698,7 +2698,7 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
     else if (anyStarted) displayStatus = 'started';
     else if (anyLaunching) displayStatus = 'launching';
     else if (allHome) displayStatus = 'home';
-    else if (inWindow && anyTaskReady) displayStatus = 'task_set';
+    else if (anyTaskReady) displayStatus = 'task_set';
     else if (inWindow) displayStatus = 'notask';
     else displayStatus = 'upcoming';
     if (todaysStatuses.length === 0 && anyYesterday) displayStatus = 'yesterday';

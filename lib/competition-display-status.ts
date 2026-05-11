@@ -12,7 +12,7 @@ export function classDisplayStatus(status: string, inWindow: boolean): Competiti
     if (status === 'S') return 'started';
     if (status === 'L') return 'launching';
     if (status === 'H') return 'home';
-    if (inWindow && (status === 'B' || status === 'P' || status === 'G')) return 'task_set';
+    if (status === 'B' || status === 'P' || status === 'G') return 'task_set';
     if (inWindow) return 'notask';
     return 'upcoming';
 }
