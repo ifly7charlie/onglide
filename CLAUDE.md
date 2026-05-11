@@ -17,8 +17,7 @@ yarn build:protobuf     # only the .proto -> ts regen
 yarn dev                # next dev (webpack mode)
 yarn ogn                # OGN/APRS daemon (frontends connect via its websocket)
 yarn soaringspot        # data sync from SoaringSpot (OAuth API)
-yarn ssscrape           # data sync via HTML scrape (testing)
-yarn sgp                # SGP-flavoured scrape
+yarn ssscrape           # data sync via HTML scrape; also drives SGP sources
 yarn rst                # RST Online sync
 yarn ogn:dev            # tsc-watch + node --inspect (auto-restarts on rebuild)
 yarn soaringspot:dev    # same pattern for the scraper

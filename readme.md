@@ -345,9 +345,11 @@ pm2 will automatically restart the processes if they fail
     > yarn soaringspot
     or
     > yarn ssscrape
-    or
-    > yarn sgp
 ```
+
+`yarn ssscrape` is the scheduler-driven scraper and now handles SGP
+sources as well — set up the `scoringsource` row with `type='sgp'` and
+the existing SGP API URL and the same daemon picks it up.
 
 -   start the application
 

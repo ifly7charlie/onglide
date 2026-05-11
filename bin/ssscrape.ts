@@ -27,6 +27,7 @@ import escape from 'sql-template-strings';
 
 import {runScheduler, SourceRegistry} from '../lib/scoring/scheduler';
 import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape';
+import {SgpSource} from '../lib/scoring/sources/sgp';
 import type {SourceCtx} from '../lib/scoring/source';
 import {regeocodeMissingCompetitions} from '../lib/scoring/shared/contestLocation';
 
@@ -165,6 +166,7 @@ async function main(): Promise<void> {
 
     const registry = new SourceRegistry();
     registry.register(new SoaringSpotScrapeSource());
+    registry.register(new SgpSource());
     // Future: registry.register(new RstSource());
     // Future: registry.register(new SoaringSpotApiSource());
 
