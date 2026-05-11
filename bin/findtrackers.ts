@@ -260,7 +260,11 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
 
         const scoreMap = computeScoreMap(matches, results, ddb, priorMap);
 
-        if (!interactive) printMatches(results, matches, tolerance, scoreMap, crossClass, className);
+        // Always print the full report. The score breakdown is useful even
+        // for clean pilots (operator can see what's holding the assignment
+        // up). Per-proposal printPilotMatches in reviewProposals is the
+        // focused review view atop this.
+        printMatches(results, matches, tolerance, scoreMap, crossClass, className);
 
         const matchedCompnos = new Set(matches.filter((m) => m.withinTolerance && !m.ambiguous).map((m) => m.compno));
         const ambiguousCompnos = new Set(matches.filter((m) => m.ambiguous).map((m) => m.compno));
@@ -438,33 +442,50 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
 // `class` (compid is reached via the `classes` join elsewhere) so we
 // filter directly on class without joining classes here.
 type PriorMap = Map<string, number>;
+let priorEvidenceUnavailable = false; // latched after first schema failure so we don't spam the log
 async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName): Promise<PriorMap> {
-    const taskDayRows = await mysql.query<{datecode: Datecode}[]>(escape`
-        SELECT DISTINCT datecode FROM tasks
-        WHERE class = ${className} AND datecode IS NOT NULL
-        ORDER BY datecode
-    `);
+    if (priorEvidenceUnavailable) return new Map();
+    let taskDayRows: {datecode: Datecode}[] = [];
+    let priorRows: {compno: Compno; flarmid: string; datecode: string; pair_score: number | null; method: string}[] = [];
+    try {
+        taskDayRows = await mysql.query<{datecode: Datecode}[]>(escape`
+            SELECT DISTINCT datecode FROM tasks
+            WHERE class = ${className} AND datecode IS NOT NULL
+            ORDER BY datecode
+        `);
+        priorRows = await mysql.query<
+            {
+                compno: Compno;
+                flarmid: string;
+                datecode: string;
+                pair_score: number | null;
+                method: string;
+            }[]
+        >(escape`
+            SELECT compno, flarmid, datecode, pair_score, method
+            FROM trackerhistory
+            WHERE class = ${className}
+              AND datecode IS NOT NULL
+              AND datecode <> ${String(currentDatecode)}
+              AND method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
+        `);
+    } catch (e: any) {
+        // If the migration hasn't been applied yet, the `class` /
+        // `datecode` / `pair_score` columns on trackerhistory don't exist
+        // — give up on priors for this run and keep going so the scan
+        // still produces a useful report.
+        const msg = String(e?.code ?? e?.message ?? e);
+        if (/Unknown column|BAD_FIELD_ERROR|ER_BAD_FIELD/i.test(msg)) {
+            console.warn(`  (prior-evidence schema not applied yet — skipping multi-day priors this run. Apply conf/sql/migrations/20260510_*.sql to enable.)`);
+            priorEvidenceUnavailable = true;
+            return new Map();
+        }
+        throw e;
+    }
     const taskDayIndex = new Map<string, number>();
     taskDayRows.forEach((r, i) => taskDayIndex.set(String(r.datecode), i));
     const currentRank = taskDayIndex.get(String(currentDatecode));
     if (currentRank === undefined) return new Map();
-
-    const priorRows = await mysql.query<
-        {
-            compno: Compno;
-            flarmid: string;
-            datecode: string;
-            pair_score: number | null;
-            method: string;
-        }[]
-    >(escape`
-        SELECT compno, flarmid, datecode, pair_score, method
-        FROM trackerhistory
-        WHERE class = ${className}
-          AND datecode IS NOT NULL
-          AND datecode <> ${String(currentDatecode)}
-          AND method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
-    `);
 
     const grouped = new Map<string, {scoreNats: number | null; taskDaysAgo: number}[]>();
     for (const r of priorRows) {
@@ -1068,14 +1089,28 @@ async function applyProposals(className: ClassName, datecode: Datecode, proposal
                SET trackerid = ${p.newTrackerid}
              WHERE class = ${className} AND compno = ${p.compno}
         `);
-        t.query(escape`
-            INSERT INTO trackerhistory
-                (compno, changed, flarmid, method, class, datecode,
-                 delta_start, delta_finish, pair_score, margin, ddb_link)
-            VALUES
-                (${p.compno}, now(), ${p.newTrackerid}, 'startmatch', ${className}, ${String(datecode)},
-                 ${p.deltaStart}, ${p.deltaFinish}, ${p.pairScore}, ${p.margin}, ${p.ddbLink})
-        `);
+        // One trackerhistory row per ADDED flarmid (not per proposal). Multi-
+        // flarmid pilots (e.g. "A12,B34") would otherwise produce a single
+        // row with flarmid="A12,B34", which never re-attaches as a prior
+        // since the loader keys on a singular flarmid. The score/margin
+        // context applies to the chosen flarmid we already recorded on the
+        // Proposal — write it on the row for that flarmid, and on any other
+        // added flarmid the same row.
+        const addedIds = p.addedIds.length ? p.addedIds : [];
+        for (const flarmid of addedIds) {
+            t.query(escape`
+                INSERT INTO trackerhistory
+                    (compno, changed, flarmid, method, class, datecode,
+                     delta_start, delta_finish, pair_score, margin, ddb_link)
+                VALUES
+                    (${p.compno}, now(), ${String(flarmid)}, 'startmatch', ${className}, ${String(datecode)},
+                     ${p.deltaStart}, ${p.deltaFinish}, ${p.pairScore}, ${p.margin}, ${p.ddbLink})
+            `);
+        }
+        // Pure-removal proposals (e.g. bboxOnly forces a clear) leave no
+        // positive trackerhistory entry — that's intentional. The tracker
+        // table update is the record of the change; nothing to persist as
+        // a future prior.
     }
     await t.commit();
     console.log(`  Wrote ${proposals.length} change${proposals.length === 1 ? '' : 's'}.`);
@@ -1096,7 +1131,13 @@ function countEvidenceRows(scoreMap: ScoreMap): number {
 // (class, datecode) before inserting fresh ones, so re-runs don't
 // accumulate.
 async function writeEvidence(className: ClassName, datecode: Datecode, scoreMap: ScoreMap, applied: Proposal[]): Promise<number> {
-    const appliedKeys = new Set(applied.map((p) => `${p.compno}|${(p.addedIds[0] ?? '').toString()}`));
+    // Covers every flarmid an apply just wrote a startmatch row for — so a
+    // multi-add proposal doesn't get a duplicate evidence row for the same
+    // pair on the same day.
+    const appliedKeys = new Set<string>();
+    for (const p of applied) {
+        for (const id of p.addedIds) appliedKeys.add(`${String(p.compno)}|${String(id)}`);
+    }
     const writes: {compno: Compno; flarmid: FlarmID; deltaStart: number | null; deltaFinish: number | null; pairScore: number; margin: number; ddbLink: string}[] = [];
     for (const [key, v] of scoreMap) {
         if (v.score.total < DEFAULT_LEDGER_MIN_NATS) continue;
