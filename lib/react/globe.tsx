@@ -310,15 +310,17 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 
     return (
         <div style={{position: 'fixed', inset: 0, background: '#0b1a33'}}>
-            <DeckGL
-                views={new GlobeView({id: 'globe', resolution: 10}) as any}
-                viewState={viewState as any}
-                onViewStateChange={({viewState: v}: any) => setViewState(v)}
-                controller={hasData}
-                effects={effects as any}
-                parameters={{cull: true} as any}
-                layers={layers}
-            />
+            <div className="globe-canvas">
+                <DeckGL
+                    views={new GlobeView({id: 'globe', resolution: 10}) as any}
+                    viewState={viewState as any}
+                    onViewStateChange={({viewState: v}: any) => setViewState(v)}
+                    controller={hasData}
+                    effects={effects as any}
+                    parameters={{cull: true} as any}
+                    layers={layers}
+                />
+            </div>
 
             {!hasData ? (
                 <div

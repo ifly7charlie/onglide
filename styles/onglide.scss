@@ -525,6 +525,14 @@ button {
     border-bottom: 1px solid var(--panel-border);
 }
 
+.globe-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 390px;
+    bottom: 0;
+}
+
 // Chrome overlays floating over a full-viewport map or globe.
 .map-legend {
     position: fixed;
@@ -731,6 +739,11 @@ button {
         width: auto;
         height: 40vh;
         box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+    }
+
+    .globe-canvas {
+        right: 0;
+        bottom: 40vh;
     }
 
     .map-legend {
