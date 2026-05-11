@@ -1,6 +1,6 @@
 import type {Compno, Epoch, PositionMessage, InOrderGenerator, InOrderGeneratorFunction} from '../types';
 
-import {sortedIndexBy as _sortedIndexBy} from 'lodash';
+import {sortedIndexBy} from '../util/binarySearch';
 
 // How often to mark a point as "live" to trigger score emission (seconds)
 const SCORE_INTERVAL = 30;
@@ -27,7 +27,7 @@ export function bindClientInOrderGenerator(compno: Compno, fixes: PositionMessag
 
             // Support rewind protocol used by taskPositionGenerator for dogleg detection
             if (nextPoint) {
-                position = _sortedIndexBy(fixes, {t: nextPoint} as any, (o) => o.t) - 1;
+                position = sortedIndexBy(fixes, {t: nextPoint} as any, (o) => o.t) - 1;
                 if (position < 0) position = 0;
             }
         }

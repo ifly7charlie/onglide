@@ -12,8 +12,6 @@ import {updateClassAction} from '../redux/actions';
 
 import {OnglideWebSocketMessage} from '../protobuf/onglide';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
-
 export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {mergeWsStatus?: Function; className: ClassName; datecode: Datecode}) {
     const dispatch = useDispatch();
     const oldChecksums = useSelector(selectTrackVersion);

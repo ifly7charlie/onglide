@@ -20,8 +20,6 @@ import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:work
 
 import {bindChannelForInOrderPackets} from './inordergenerator';
 
-import {cloneDeep as _clonedeep} from 'lodash';
-
 export interface ReplayConfig {
     className: ClassName;
 }

@@ -22,8 +22,6 @@ import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchland
 import {toDateCode} from '../lib/datecode';
 import {makeClassId} from '../lib/classid';
 
-import {groupBy as _groupby, forEach as _forEach} from 'lodash';
-
 // DB access
 //const db = require('../db')
 import escape from 'sql-template-strings';

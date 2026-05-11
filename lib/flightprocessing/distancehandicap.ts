@@ -4,15 +4,13 @@
 import type {Task, TaskLeg, DistanceKM} from '../types';
 import {calculateTask} from './taskhelper';
 
-import {cloneDeep as _clonedeep} from 'lodash';
-
 // Make a copy of the task reduced for the specified handicap
 export function adjustDistanceHandicapTask(task: Task, handicap: number | undefined): Task {
     if (!handicap) {
         return task;
     }
     // Make a new array for it
-    var newTask = _clonedeep(task);
+    var newTask = structuredClone(task);
 
     const eligibletps = task.legs.filter((leg) => leg.type == 'sector' && leg.r2 >= 0.5 && leg.a1 == 90)?.length ?? 0;
     if (!eligibletps) {

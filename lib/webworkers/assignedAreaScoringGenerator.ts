@@ -3,7 +3,6 @@ import {type ShortestResult, DistanceOptimiser} from '../flightprocessing/distan
 import type {Epoch, DistanceKM, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
 import {isTick, PositionStatus} from '../types';
 
-import {cloneDeep as _clonedeep, keyBy as _keyby, sortBy as _sortby} from 'lodash';
 
 import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelper';
 
@@ -164,14 +163,14 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                     //
                     // Now we need to make sure the graph matches the hull
                     // first remove the links that shouldn't exist
-                    const nchKey = _keyby(newConvexHull, 't');
+                    const nchKey = Object.fromEntries(newConvexHull.map((p) => [p.t, p]));
                     maxGraph.filterGroup(legno, (a) => a.t in nchKey);
                     minGraph.filterGroup(legno, (a) => a.t in nchKey);
 
                     //
                     // Now add all of them back to previous turnpoint - this won't calculate distance
                     // unless the points are missing
-                    const ochKey = _keyby(aatLeg.convexHull, 't');
+                    const ochKey = Object.fromEntries(aatLeg.convexHull.map((p) => [p.t, p]));
                     const newAdditions = newConvexHull.filter((n) => !(n.t in ochKey));
                     maxGraph.addPointsToGroup(legno, newAdditions);
                     minGraph.addPointsToGroup(legno, newAdditions);

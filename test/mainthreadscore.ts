@@ -1,7 +1,5 @@
 import {PositionStatus, PositionStatusText, Compno, ClassName, Datecode, AirfieldLocation, Epoch, Task, PilotScore, FlarmID} from '../lib/types';
 
-import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 'lodash';
-
 import {bindChannelForInOrderPackets} from '../lib/webworkers/inordergenerator';
 
 import {point} from '@turf/helpers';

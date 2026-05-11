@@ -7,7 +7,6 @@
 
 import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, isEnrichedTick} from '../types';
 
-import {cloneDeep as _clonedeep} from 'lodash';
 
 import {stripPoints} from '../flightprocessing/taskhelper';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
@@ -133,7 +132,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     if (lastTickStatus && !startIsCloseOrPassed && !status._) {
                         continue;
                     }
-                    lastTickStatus = _clonedeep(status);
+                    lastTickStatus = structuredClone(status);
                     yield {...status, tick: true} as any;
                 }
                 continue;

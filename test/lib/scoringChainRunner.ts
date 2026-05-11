@@ -26,7 +26,7 @@ import {assignedAreaScoringGenerator} from '../../lib/webworkers/assignedAreaSco
 import {racingScoringGenerator} from '../../lib/webworkers/racingScoringGenerator';
 import {taskScoresGenerator} from '../../lib/webworkers/taskScoresGenerator';
 
-import {sortedIndexBy as _sortedIndexBy} from 'lodash';
+import {sortedIndexBy} from '../../lib/util/binarySearch';
 
 // ── types ─────────────────────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ function makeInOrderGenerator(compno: Compno, positions: PositionMessage[]): () 
 
                 // Handle rewind requests from the scoring chain
                 if (nextPoint) {
-                    position = _sortedIndexBy(positions, {t: nextPoint} as any, (o: any) => o.t);
+                    position = sortedIndexBy(positions, {t: nextPoint} as any, (o: any) => o.t);
                     continue;
                 }
 
@@ -77,7 +77,7 @@ function makeInOrderGenerator(compno: Compno, positions: PositionMessage[]): () 
                     hiccup = message.t;
                     const tickPoint: Epoch | void = yield {c: compno, _: false, tick: true, t: hiccup} as any;
                     if (tickPoint) {
-                        position = _sortedIndexBy(positions, {t: tickPoint} as any, (o: any) => o.t);
+                        position = sortedIndexBy(positions, {t: tickPoint} as any, (o: any) => o.t);
                     }
                 }
             }

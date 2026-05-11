@@ -1,5 +1,3 @@
-import {sumBy as _sumby} from 'lodash';
-
 import along from '@turf/along';
 import {buffer} from '@turf/buffer';
 
@@ -9,8 +7,6 @@ import type {Feature, LineString, Polygon, MultiPolygon, Position} from 'geojson
 import {lineString, point as turfPoint} from '@turf/helpers';
 import lineChunk from '@turf/line-chunk';
 import {coordReduce} from '@turf/meta';
-import {uniqWith as _uniqWith, reduce as _reduce, map as _map} from 'lodash';
-
 import {} from '@turf/helpers';
 
 import type {FeatureCollection} from 'geojson';
@@ -39,19 +35,22 @@ export function calculateTask(task: Task) {
         }
 
         leg.geoJSON = feature.geometry;
-        leg.coordinates = _uniqWith(
-            coordReduce(
-                leg.type === 'line' // logic is different line vs sector
-                    ? lineChunk(lineString(pl.toGeoJSON().geometry.coordinates as Position[]), 0.5) //
-                    : lineChunk(lineString(leg.geoJSON.coordinates[0] as Position[]), 2.5),
-                (prev, current) => {
-                    prev.push(current);
-                    return prev;
-                },
-                []
-            ),
-            (a, b) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000)
+        const coords: Position[] = coordReduce(
+            leg.type === 'line' // logic is different line vs sector
+                ? lineChunk(lineString(pl.toGeoJSON().geometry.coordinates as Position[]), 0.5) //
+                : lineChunk(lineString(leg.geoJSON.coordinates[0] as Position[]), 2.5),
+            (prev: Position[], current: Position) => {
+                prev.push(current);
+                return prev;
+            },
+            [] as Position[]
         );
+        const isSame = (a: Position, b: Position) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000);
+        const deduped: Position[] = [];
+        for (const c of coords) {
+            if (!deduped.some((d) => isSame(c, d))) deduped.push(c);
+        }
+        leg.coordinates = deduped;
     }
 
     task.details.distance = calculateTaskLength(task.legs);
@@ -76,29 +75,25 @@ export function taskGeoJSON(task: Task) {
 
     const trackLineGeoJSON: FeatureCollection = {
         type: 'FeatureCollection',
-        features: _reduce(
-            task.legs,
-            (accumulate, leg, index) => {
-                if (index + 1 < task.legs.length) {
-                    accumulate.push({
-                        type: 'Feature',
-                        properties: {leg: leg.legno + 1, length: leg.length},
-                        geometry: {
-                            type: 'LineString',
-                            coordinates: [
-                                [leg.nlng, leg.nlat],
-                                [task.legs[index + 1].nlng, task.legs[index + 1].nlat]
-                            ]
-                        }
-                    });
-                }
-                return accumulate;
-            },
-            []
-        )
+        features: task.legs.reduce<Feature[]>((accumulate, leg, index) => {
+            if (index + 1 < task.legs.length) {
+                accumulate.push({
+                    type: 'Feature',
+                    properties: {leg: leg.legno + 1, length: leg.length},
+                    geometry: {
+                        type: 'LineString',
+                        coordinates: [
+                            [leg.nlng, leg.nlat],
+                            [task.legs[index + 1].nlng, task.legs[index + 1].nlat]
+                        ]
+                    }
+                });
+            }
+            return accumulate;
+        }, [])
     };
 
-    const taskPath = lineString(_map(task.legs, (leg) => [leg.nlng, leg.nlat]));
+    const taskPath = lineString(task.legs.map((leg) => [leg.nlng, leg.nlat]));
     const Dm = task.rules.dm && !task.rules.aat ? {Dm: along(taskPath, task.rules.dm)} : {};
 
     return {tp: geoJSON, track: trackLineGeoJSON, ...Dm};
@@ -121,7 +116,7 @@ export function calculateTaskLength(legs: TaskLeg[]): DistanceKM {
     last.finish = true;
 
     // Return the length of the task
-    return (Math.round(_sumby(legs, 'length') * 10) / 10) as DistanceKM;
+    return (Math.round(legs.reduce((s, l) => s + (l.length ?? 0), 0) * 10) / 10) as DistanceKM;
 }
 
 export function preprocessSector(tp: TaskLeg) {

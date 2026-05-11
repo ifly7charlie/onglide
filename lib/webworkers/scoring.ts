@@ -39,8 +39,6 @@ import {scoreCollector} from './scoreCollector';
 // Optional flight statistics (thermals/straights/wind), per competition flag
 import {createFlightStatistics} from './flightStatistics';
 
-import {cloneDeep as _clonedeep} from 'lodash';
-
 import {getNow} from '../now';
 
 // FLOW:

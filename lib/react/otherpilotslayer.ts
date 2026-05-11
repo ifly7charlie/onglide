@@ -2,8 +2,6 @@ import type {Epoch, OtherPilotData, ClassName} from '../types';
 
 import {IconLayer} from '@deck.gl/layers';
 
-import {map as _map} from 'lodash';
-
 import {useSelector} from '../redux';
 import {selectAllPositions} from '../redux/otherPilotsSlice';
 

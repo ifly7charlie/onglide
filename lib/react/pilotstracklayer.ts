@@ -9,8 +9,6 @@ import {selectAllTracks} from '../redux/tracksSlice';
 import {selectAllTimes} from '../redux/scoresSlice';
 import {useSelector} from '../redux';
 
-import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
-
 import {d} from '../now';
 
 import {OgnTripsLayer} from './ogntripslayer';
@@ -49,7 +47,7 @@ export function pilotsTrackLayer(
     }
 
     // Add a layer for the recent points for each pilot
-    let layers = _map(trackData, (track, compno) => {
+    let layers = Object.entries(trackData).map(([compno, track]) => {
         // Don't include current pilot in list of all
         const selected = compno == props.selectedCompno;
 

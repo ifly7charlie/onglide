@@ -25,7 +25,6 @@ import {
     faTrophy
 } from '@fortawesome/free-solid-svg-icons';
 
-import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map} from 'lodash';
 
 export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: any; units: boolean; tz: TZ}) {
     const {t} = useTranslation('common');
@@ -104,7 +103,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
         return null;
     };
 
-    const actualLegs = _filter(score.legs, (f) => f.legno != 0);
+    const actualLegs = score.legs.filter((f) => f.legno != 0);
     const hasHandicappedResults = score?.handicapped;
 
     const taskRadios: {key: string; label: string}[] = [
@@ -148,7 +147,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                     <thead>
                         <tr>
                             <td>&nbsp;</td>
-                            {_map(actualLegs, (x) => (
+                            {actualLegs.map((x) => (
                                 <td key={x.legno.toString()}>
                                     {t('task.leg', {n: x.legno})} {legIcon(x)}
                                 </td>
@@ -158,34 +157,34 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                     <tbody>
                         <tr style={{fontSize: 'small'}}>
                             <td>{t('flight_legs.leg_start_altitude')}</td>
-                            {_map(actualLegs, (x) => (x?.alt > 0 ? <td key={x.legno.toString()}>{displayHeight(x?.alt, units)}</td> : null))}
+                            {actualLegs.map((x) => (x?.alt > 0 ? <td key={x.legno.toString()}>{displayHeight(x?.alt, units)}</td> : null))}
                         </tr>
                         <tr>
                             <td>{t('flight_legs.leg_start')}</td>
-                            {_map(actualLegs, (x) => (x.time ? <td key={x.legno.toString()}>{OptionalTimeHHMM('', x.time as Epoch, tz)}</td> : null))}
+                            {actualLegs.map((x) => (x.time ? <td key={x.legno.toString()}>{OptionalTimeHHMM('', x.time as Epoch, tz)}</td> : null))}
                         </tr>
                         <tr style={{fontSize: 'small'}}>
                             <td>{t('flight_legs.leg_duration')}</td>
-                            {_map(actualLegs, (x) => (x.duration ? <td key={x.legno.toString()}>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
+                            {actualLegs.map((x) => (x.duration ? <td key={x.legno.toString()}>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
                         </tr>
                         {!viewOptions.task ? (
                             <>
                                 <tr>
                                     <td>{t('flight_legs.leg_distance')}</td>
-                                    {_map(actualLegs, (x) => (
+                                    {actualLegs.map((x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.distance || ''}</td>
                                     ))}
                                 </tr>
                                 <tr>
                                     <td>{t('flight_legs.leg_speed')}</td>
-                                    {_map(actualLegs, (x) => (
+                                    {actualLegs.map((x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.legSpeed}</td>
                                     ))}
                                 </tr>
                                 {!score.utcFinish && (
                                     <tr>
                                         {distanceRemainingLegend(score)}
-                                        {_map(actualLegs, (x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td key={x.legno.toString()}></td>))}
+                                        {actualLegs.map((x) => (x.legno >= score.currentLeg ? distanceRemaining(x) : <td key={x.legno.toString()}></td>))}
                                     </tr>
                                 )}
                             </>
@@ -194,20 +193,20 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                             <>
                                 <tr>
                                     <td>{t('flight_legs.task_speed')}</td>
-                                    {_map(actualLegs, (x) => (
+                                    {actualLegs.map((x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.taskSpeed || ''}</td>
                                     ))}
                                 </tr>
                                 <tr>
                                     <td>{t('flight_legs.task_distance')}</td>
-                                    {_map(actualLegs, (x) => (
+                                    {actualLegs.map((x) => (
                                         <td key={x.legno.toString()}>{accessor(x)?.taskDistance || ''}</td>
                                     ))}
                                 </tr>
                                 {!score.utcFinish && (
                                     <tr>
                                         {distanceRemainingLegend(score)}
-                                        {_map(actualLegs, (x) => (x.legno == score.currentLeg ? distanceRemaining(score) : <td key={x.legno.toString()} />))}
+                                        {actualLegs.map((x) => (x.legno == score.currentLeg ? distanceRemaining(score) : <td key={x.legno.toString()} />))}
                                     </tr>
                                 )}
                             </>

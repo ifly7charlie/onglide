@@ -24,7 +24,6 @@ import {getElevationOffset} from '../lib/getelevationoffset';
 
 import getCountryISO2 from 'country-iso-3-to-2';
 
-import {groupBy as _groupby, forEach as _forEach} from 'lodash';
 
 // DB access
 //const db = require('../db')

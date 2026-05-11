@@ -11,8 +11,6 @@ import {updateClassAction} from './actions';
 import type {Datecode, Epoch, ClassName} from '../types';
 import type {Identifiers} from '../protobuf/onglide';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
-
 interface NowSliceState {
     className: ClassName;
     datecode: Datecode;

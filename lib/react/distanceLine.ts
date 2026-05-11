@@ -3,19 +3,18 @@ import {LayerProps} from 'react-map-gl/maplibre';
 import type {LineString, Point, Feature} from 'geojson';
 import {lineString, point, featureCollection} from '@turf/helpers';
 
-import {chunk as _chunk} from 'lodash';
-
 //
 // Convert a sequence of lng,lat points into a geojson geometry with properties
 // including their line length. Optionally includes a scoring closest point marker.
 export function assembleLabeledLine(points: number[], scoringClosestPoint?: {lat: number; lng: number} | null) {
-    const chunked: number[][] = _chunk(points, 4);
     const features: Feature<LineString | Point>[] = [];
 
-    for (let i = 0; i < chunked.length - 1; i++) {
-        const distance = Math.round(10 * chunked[i + 1][2]) / 10;
-        const handicappedDistance = Math.round(10 * chunked[i + 1][3]) / 10;
-        features.push(lineString([chunked[i].slice(0, 2), chunked[i + 1].slice(0, 2)], {distance: distance + ' km' + (handicappedDistance >= 0.1 ? ' (' + handicappedDistance + ' km h/cap)' : '')}));
+    // points laid out as flat groups of 4 (lng, lat, distance, handicappedDistance);
+    // connect each consecutive pair, labelling with the second pair's distances.
+    for (let i = 0; i + 7 < points.length; i += 4) {
+        const distance = Math.round(10 * points[i + 6]) / 10;
+        const handicappedDistance = Math.round(10 * points[i + 7]) / 10;
+        features.push(lineString([[points[i], points[i + 1]], [points[i + 4], points[i + 5]]], {distance: distance + ' km' + (handicappedDistance >= 0.1 ? ' (' + handicappedDistance + ' km h/cap)' : '')}));
     }
 
     if (scoringClosestPoint) {

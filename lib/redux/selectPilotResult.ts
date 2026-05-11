@@ -1,10 +1,6 @@
 import {lruMemoize, createSelector as cs, createSelectorCreator} from '@reduxjs/toolkit';
 
-import {map as _map, values} from 'lodash';
-
 import {Units, SortKey, Epoch, TZ, Compno, PilotScore, ScoreData, VarioData, AltitudeAgl, TrackData, PositionStatus} from '../types';
-
-import {sortBy as _sortBy, reduce as _reduce} from 'lodash';
 
 export type DisplayKeys = ConvertedDisplayKeys | NormalDisplayKeys;
 
@@ -71,7 +67,7 @@ export const selectAuto = createSelector(
         (state: RootState, t: Epoch | undefined) => selectAllAMSL(state, t)
     ],
     (t: Epoch | undefined, scores: ScoreData, altitudes): AllDisplayKeys => {
-        const nowIsh = t ? t : _reduce(scores, (m, v) => (v.t && v.t > m ? v.t : m), 0);
+        const nowIsh = t ? t : Object.values(scores).reduce((m, v) => (v.t && v.t > m ? v.t : m), 0);
         return Object.values(scores)
             .map((score) => {
                 if (!score.compno) {

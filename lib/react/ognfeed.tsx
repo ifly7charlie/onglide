@@ -17,7 +17,7 @@ import {Nbsp} from './htmlhelper';
 
 import useWebSocket from 'react-use-websocket';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
+import equal from 'fast-deep-equal';
 
 import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
@@ -261,7 +261,7 @@ export const OgnFeed = memo(
         const sortOrder = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
         const setSort = useCallback(
             (key: any) => {
-                setOptions(_cloneDeep({...options, sortKey: key}));
+                setOptions(structuredClone({...options, sortKey: key}));
             },
             [options, setOptions]
         );
@@ -443,8 +443,8 @@ export const OgnFeed = memo(
         o.selectedCompno === n.selectedCompno && //
         o.vc === n.vc &&
         o.datecode == n.datecode &&
-        _isEqual(o.viewport, n.viewport) &&
-        _isEqual(o.options, n.options) &&
+        equal(o.viewport, n.viewport) &&
+        equal(o.options, n.options) &&
         o.handicapped === n.handicapped
 );
 

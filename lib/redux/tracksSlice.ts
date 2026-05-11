@@ -34,7 +34,7 @@ import type {PilotTracks, PilotTrack} from '../protobuf/onglide';
 
 import {mergePoint, calculateVario, calculateAverage, generateIndices, getEmptyDeck} from '../flightprocessing/incremental';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
+import {sortedIndexNumber} from '../util/binarySearch';
 import {mergeVHPoint, initaliseVH} from '../react/deckvh';
 
 interface TracksSliceState {
@@ -137,7 +137,7 @@ function findDisplayIndex(deck: DeckData, t: Epoch | undefined) {
         return deck.posIndex - 1;
     }
 
-    const nextPoint = _sortedIndex(deck.t.subarray(0, deck.posIndex), t);
+    const nextPoint = sortedIndexNumber(deck.t.subarray(0, deck.posIndex), t);
     return deck.t[nextPoint] > t && nextPoint > 0 ? nextPoint - 1 : nextPoint;
 }
 
@@ -149,20 +149,19 @@ const _selectAllAverageClimb = createSelector(
         (state: TracksSliceState, _t: Epoch | undefined) => state.tracks,
         (state: TracksSliceState) => state.latestUpdate
     ],
-    (t: Epoch | undefined, tracks: TrackData | undefined, now: Epoch | undefined): Record<Compno, number | null> =>
-        _reduce(
-            tracks,
-            (result, track, compno) => {
-                if (!track.deck?.posIndex) {
-                    result[compno] = null;
-                } else {
-                    const posIndex = findDisplayIndex(track.deck, t);
-                    result[compno] = posIndex >= 0 && (t ?? now ?? 0) - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, t ?? now ?? (0 as Epoch), posIndex) : null;
-                }
-                return result;
-            },
-            {} as Record<Compno, number | null>
-        )
+    (t: Epoch | undefined, tracks: TrackData | undefined, now: Epoch | undefined): Record<Compno, number | null> => {
+        const result = {} as Record<Compno, number | null>;
+        for (const compno in tracks) {
+            const track = tracks[compno];
+            if (!track.deck?.posIndex) {
+                result[compno] = null;
+            } else {
+                const posIndex = findDisplayIndex(track.deck, t);
+                result[compno] = posIndex >= 0 && (t ?? now ?? 0) - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, t ?? now ?? (0 as Epoch), posIndex) : null;
+            }
+        }
+        return result;
+    }
 );
 
 // The current position of all pilots at specified time
@@ -173,7 +172,7 @@ const _selectAllPositions = createSelector(
         (state: TracksSliceState) => state.tracks
     ],
     (t: Epoch, tracks: TrackData) => {
-        return _map(tracks, (track) => {
+        return Object.values(tracks).map((track) => {
             const {deck, name, compno} = track;
             if (!deck) {
                 return {name, compno};
@@ -404,7 +403,7 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
             }
 
             const ts = track.posIndex > 0 ? new Uint32Array(track.t.slice().buffer) : [];
-            const indexOfOverlap = existing ? _sortedIndex(ts, existing.t[existing.posIndex - 1]) : 0;
+            const indexOfOverlap = existing ? sortedIndexNumber(ts, existing.t[existing.posIndex - 1]) : 0;
 
             let deck: DeckData =
                 track.posIndex > 0

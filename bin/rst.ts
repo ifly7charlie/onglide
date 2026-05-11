@@ -27,7 +27,6 @@ import {getElevationOffset} from '../lib/getelevationoffset.js';
 // handle unkownn gliders
 import {capturePossibleLaunchLanding, processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding.js';
 
-import {groupBy as _groupby, forEach as _forEach, reduce as _reduce} from 'lodash';
 
 // DB access
 import escape from 'sql-template-strings';
@@ -447,13 +446,7 @@ async function process_class_task(classid, className, date, day_number, day_info
     }
 
     if (task_info) {
-        const tps = _reduce(
-            task_info,
-            function (text, v) {
-                return [text, v.Label, v.Brytpunkt, v.Radie].join('_');
-            },
-            ''
-        );
+        const tps = task_info.reduce((text: string, v: any) => [text, v.Label, v.Brytpunkt, v.Radie].join('_'), '');
         const hash = createHash('sha256').update(info).update(tps).digest('base64');
         const dbhashrow = await mysql_db.query(escape`
             SELECT

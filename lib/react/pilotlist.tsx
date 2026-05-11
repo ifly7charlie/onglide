@@ -53,8 +53,6 @@ import {FlightLegs} from './flightLegs';
 // Helpers for loading contest information etc
 import {delayToText} from './timehelper.js';
 
-import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map, cloneDeep as _cloneDeep} from 'lodash';
-
 import {useSelector} from '../redux';
 import {selectPilotScore, selectAllStatus} from '../redux/scoresSlice';
 import {selectPilotVario} from '../redux/tracksSlice';

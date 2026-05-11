@@ -10,7 +10,6 @@ import {preprocessSector, calculateTaskLength, distHaversine} from '../../lib/fl
 import {lineString} from '@turf/helpers';
 import lineChunk from '@turf/line-chunk';
 import {coordReduce} from '@turf/meta';
-import {uniqWith as _uniqWith} from 'lodash';
 import {buffer} from '@turf/buffer';
 import type {Feature, LineString, Polygon, MultiPolygon, Position} from 'geojson';
 
@@ -117,19 +116,22 @@ function buildCoordinates(leg: TaskLeg, pl: PreparedTurnpoint): void {
     leg.geoJSON = feature.geometry;
 
     try {
-        leg.coordinates = _uniqWith(
-            coordReduce(
-                leg.type === 'line'
-                    ? lineChunk(lineString(pl.toGeoJSON().geometry.coordinates as Position[]), 0.5)
-                    : lineChunk(lineString(leg.geoJSON!.coordinates[0] as Position[]), 2.5),
-                (prev, current) => {
-                    prev.push(current);
-                    return prev;
-                },
-                []
-            ),
-            (a, b) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000)
+        const coords: Position[] = coordReduce(
+            leg.type === 'line'
+                ? lineChunk(lineString(pl.toGeoJSON().geometry.coordinates as Position[]), 0.5)
+                : lineChunk(lineString(leg.geoJSON!.coordinates[0] as Position[]), 2.5),
+            (prev: Position[], current: Position) => {
+                prev.push(current);
+                return prev;
+            },
+            [] as Position[]
         );
+        const isSame = (a: Position, b: Position) => Math.trunc(a[0] * 100000) == Math.trunc(b[0] * 100000) && Math.trunc(a[1] * 100000) == Math.trunc(b[1] * 100000);
+        const deduped: Position[] = [];
+        for (const c of coords) {
+            if (!deduped.some((d) => isSame(c, d))) deduped.push(c);
+        }
+        leg.coordinates = deduped;
     } catch {
         // If coordinate generation fails (e.g. tiny sectors), use a simple ring
         leg.coordinates = [[leg.nlng, leg.nlat]];

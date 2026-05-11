@@ -82,7 +82,7 @@ import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_EN
 import {trackMetric, initialiseInsights} from '../insights';
 //import {pathToFileURL} from 'node:url';
 
-import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
+import {sortedLastIndexBy} from '../util/binarySearch';
 
 export enum AprsCommandEnum {
     none,
@@ -1199,7 +1199,7 @@ export async function processPacket(packet: aprsPacket) {
         const messageQueue = aircraft.messages;
         if ((messageQueue.at(-1)?.t ?? 0) > perAircraftMessage.t) {
             statistics.outOfOrder++;
-            const insertIndex = _sortedLastIndexBy(messageQueue, perAircraftMessage, messageSortKey);
+            const insertIndex = sortedLastIndexBy(messageQueue, perAircraftMessage, messageSortKey);
             if (insertIndex > 0 && messageQueue[insertIndex - 1].t == perAircraftMessage.t) {
                 statistics.duplicates++;
             }
@@ -1226,7 +1226,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     const start = (aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch;
     const realNow = getNow();
     const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
-    let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
+    let position = sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
     if (!log) {
         log = aircraft.log;

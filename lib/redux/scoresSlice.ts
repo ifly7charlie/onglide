@@ -18,17 +18,7 @@ import {assembleLabeledLine} from '../react/distanceLine';
 
 import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey, OptimalGridEntry} from '../types';
 
-import {
-    reduce as _reduce,
-    forEach as _foreach,
-    cloneDeep as _cloneDeep,
-    find as _find,
-    map as _map,
-    isEqual as _isEqual,
-    sortedIndex as _sortedIndex,
-    sortedIndexOf as _sortedIndexOf,
-    sortedIndexBy as _sortedIndexBy
-} from 'lodash';
+import {sortedIndexBy} from '../util/binarySearch';
 
 import type {RootState} from './store';
 
@@ -117,17 +107,15 @@ export const scoresSlice = createSlice({
                 if (!t) {
                     return scores;
                 }
-                return _reduce(
-                    historical,
-                    (result, scores, compno) => {
-                        const index = _sortedIndexBy(scores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
-                        if (index >= 0 && scores[index]) {
-                            result[compno] = scores[index];
-                        }
-                        return result;
-                    },
-                    {}
-                );
+                const result: Record<string, PilotScoreDisplay> = {};
+                for (const compno in historical!) {
+                    const scores = historical![compno];
+                    const index = sortedIndexBy(scores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
+                    if (index >= 0 && scores[index]) {
+                        result[compno] = scores[index];
+                    }
+                }
+                return result;
             }
             /*            {
                 memoizeOptions: {
@@ -144,26 +132,22 @@ export const scoresSlice = createSlice({
             ],
             (t: Epoch | undefined, scores: ScoreData | null, historical: HistoricalScoreData | null) => {
                 if (!t) {
-                    return _reduce(
-                        scores,
-                        (prev, current, key) => {
-                            prev[key] = {t: current.t, status: current.flightStatus};
-                            return prev;
-                        },
-                        {}
-                    );
+                    const prev: Record<string, {t: number; status: number}> = {};
+                    for (const key in scores!) {
+                        const current = scores![key];
+                        prev[key] = {t: current.t, status: current.flightStatus};
+                    }
+                    return prev;
                 }
-                return _reduce(
-                    historical,
-                    (result, scores, compno) => {
-                        const index = _sortedIndexBy(scores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
-                        if (index >= 0) {
-                            result[compno] = {t: scores[index].t, status: scores[index].flightStatus};
-                        }
-                        return result;
-                    },
-                    {}
-                );
+                const result: Record<string, {t: number; status: number}> = {};
+                for (const compno in historical!) {
+                    const histScores = historical![compno];
+                    const index = sortedIndexBy(histScores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
+                    if (index >= 0) {
+                        result[compno] = {t: histScores[index].t, status: histScores[index].flightStatus};
+                    }
+                }
+                return result;
             }
             /*    {
                 memoizeOptions: {
@@ -179,26 +163,22 @@ export const scoresSlice = createSlice({
             ],
             (t: Epoch | undefined, scores: ScoreData | null, historical: HistoricalScoreData | null) => {
                 if (!t) {
-                    return _reduce(
-                        scores ?? {},
-                        (prev, current, key) => {
-                            prev[key] = {startUtc: current.utcStart, finishUtc: current.utcFinish};
-                            return prev;
-                        },
-                        {}
-                    );
+                    const prev: Record<string, {startUtc: number; finishUtc: number}> = {};
+                    for (const key in scores ?? {}) {
+                        const current = scores![key];
+                        prev[key] = {startUtc: current.utcStart, finishUtc: current.utcFinish};
+                    }
+                    return prev;
                 }
-                return _reduce(
-                    historical ?? {},
-                    (prev, pilotScores, key) => {
-                        const index = _sortedIndexBy(pilotScores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
-                        if (index >= 0 && pilotScores[index]) {
-                            prev[key] = {startUtc: pilotScores[index].utcStart, finishUtc: pilotScores[index].utcFinish};
-                        }
-                        return prev;
-                    },
-                    {}
-                );
+                const prev: Record<string, {startUtc: number; finishUtc: number}> = {};
+                for (const key in historical ?? {}) {
+                    const pilotScores = historical![key];
+                    const index = sortedIndexBy(pilotScores, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
+                    if (index >= 0 && pilotScores[index]) {
+                        prev[key] = {startUtc: pilotScores[index].utcStart, finishUtc: pilotScores[index].utcFinish};
+                    }
+                }
+                return prev;
             }
         ),
         selectPilotScore: createSelector(
@@ -219,7 +199,7 @@ export const scoresSlice = createSlice({
                 if (!historical) {
                     return undefined;
                 }
-                const index = _sortedIndexBy(historical, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
+                const index = sortedIndexBy(historical, {t} as unknown as PilotScoreDisplay, (x) => x.t) - 1;
                 return index >= 0 ? historical[index] : undefined;
             },
             {
@@ -237,7 +217,7 @@ export const scoresSlice = createSlice({
             (t: Epoch | undefined, compno: Compno | undefined, entries: OptimalGridEntry[] | undefined) => {
                 if (!compno || !entries?.length) return undefined;
                 if (!t) return entries.at(-1);
-                const index = _sortedIndexBy(entries, {t} as OptimalGridEntry, (x) => x.t) - 1;
+                const index = sortedIndexBy(entries, {t} as OptimalGridEntry, (x) => x.t) - 1;
                 return index >= 0 ? entries[index] : undefined;
             },
             {
@@ -310,37 +290,33 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     if (action.payload.scoreId != state.scoreId) {
         return;
     }
-    _reduce(
-        action.payload.pilots,
-        (result, score: PilotScore, compno) => {
-            // Extract optimal grid into separate storage (emitted once per sector entry)
-            const {optimalGrid, ...scoreWithoutGrid} = score;
-            if (optimalGrid?.length) {
-                const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: optimalGrid};
-                const gh = (state.optimalGrids[compno as Compno] ??= []);
-                const gIdx = _sortedIndexBy(gh, entry, (x) => x.t);
-                gh.splice(gIdx, Infinity, entry);
-            }
+    const result = state.scores ?? {};
+    for (const compno in action.payload.pilots) {
+        const score: PilotScore = action.payload.pilots[compno];
+        // Extract optimal grid into separate storage (emitted once per sector entry)
+        const {optimalGrid, ...scoreWithoutGrid} = score;
+        if (optimalGrid?.length) {
+            const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: optimalGrid};
+            const gh = (state.optimalGrids[compno as Compno] ??= []);
+            const gIdx = sortedIndexBy(gh, entry, (x) => x.t);
+            gh.splice(gIdx, Infinity, entry);
+        }
 
-            // Read the prior display score via original() so we get the plain
-            // pre-draft value — passing an Immer draft as prev risks smuggling
-            // draft references into the new object.
-            const prev = result[compno] ? (original(result[compno]) as PilotScoreDisplay | undefined) : undefined;
-            result[compno] = mapScoresToDisplayScores(prev, scoreWithoutGrid as PilotScore);
+        // Read the prior display score via original() so we get the plain
+        // pre-draft value — passing an Immer draft as prev risks smuggling
+        // draft references into the new object.
+        const prev = result[compno] ? (original(result[compno]) as PilotScoreDisplay | undefined) : undefined;
+        result[compno] = mapScoresToDisplayScores(prev, scoreWithoutGrid as PilotScore);
 
-            // If the scoreId is the current one then we will use that
-            const sh = (state.historical[compno] ??= []);
-            const index = _sortedIndexBy(sh, score, (x) => x.t);
-            if (index < sh.length && index >= 0 && sh[index].t != score.t) {
-                console.log(compno, '***** rewind score history to ', index, sh[index].t, d(sh[index].t));
-                console.log(compno, `   ** new ${score.t} ${d(score.t)}, latest: ${sh.at(-1)?.t} ${d(sh.at(-1)?.t ?? 0)}`);
-            }
-            sh.splice(index, Infinity, result[compno]);
-
-            return result;
-        },
-        state.scores ?? {}
-    );
+        // If the scoreId is the current one then we will use that
+        const sh = (state.historical[compno] ??= []);
+        const index = sortedIndexBy(sh, score, (x) => x.t);
+        if (index < sh.length && index >= 0 && sh[index].t != score.t) {
+            console.log(compno, '***** rewind score history to ', index, sh[index].t, d(sh[index].t));
+            console.log(compno, `   ** new ${score.t} ${d(score.t)}, latest: ${sh.at(-1)?.t} ${d(sh.at(-1)?.t ?? 0)}`);
+        }
+        sh.splice(index, Infinity, result[compno]);
+    }
 }
 
 function sameNumberArray(a: number[] | undefined, b: number[] | undefined): boolean {
@@ -404,7 +380,7 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
             if (!ns.optimalGrid?.length) continue;
             const entry: OptimalGridEntry = {t: ns.t as Epoch, currentLeg: ns.currentLeg, grid: ns.optimalGrid};
             const gh = (state.optimalGrids[compno as Compno] ??= []);
-            const gIdx = _sortedIndexBy(gh, entry, (x) => x.t);
+            const gIdx = sortedIndexBy(gh, entry, (x) => x.t);
             if (gh[gIdx]?.t === entry.t) {
                 gh[gIdx] = entry;
             } else {

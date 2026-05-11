@@ -57,12 +57,21 @@ console.log('dev mode', dev);
 
 let db: ReturnType<typeof mysql>;
 
-// lodash
-import {reduce, keyBy, filter as _filter, pick as _pick, map as _map, flatMap as _flatmap, remove as _remove, sortedIndex as _sortedIndex, sortedIndexBy as _sortedIndexBy} from 'lodash';
+import {sortedIndexBy, sortedIndexNumber} from '../lib/util/binarySearch';
+import equal from 'fast-deep-equal';
 
-//import _remove from 'lodash.remove';
-//import _groupby from 'lodash.groupby';
-import {groupBy as _groupby, cloneDeep as _clonedeep, isEqual as _isEqual} from 'lodash';
+// Mutate arr in place by removing all elements matching pred, returning the removed elements
+// in their original order. Iterates back-to-front so splices don't shift unvisited indices.
+function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
+    const removed: T[] = [];
+    for (let i = arr.length - 1; i >= 0; i--) {
+        if (pred(arr[i])) {
+            removed.unshift(arr[i]);
+            arr.splice(i, 1);
+        }
+    }
+    return removed;
+}
 
 // Launch our listener
 import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
@@ -578,16 +587,16 @@ async function main() {
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
 
             // Remove invalid
-            const notValid = _remove(channel.clients, (client: OgnWebSocket) => {
+            const notValid = removeInPlace(channel.clients, (client: OgnWebSocket) => {
                 return client.isValid === false;
             });
 
-            const closed = _remove(channel.clients, (client: OgnWebSocket) => {
+            const closed = removeInPlace(channel.clients, (client: OgnWebSocket) => {
                 return client.isClosed === true;
             });
 
             // Remove any that are still marked as not alive
-            const notAlive = _remove(channel.clients, (client: OgnWebSocket) => {
+            const notAlive = removeInPlace(channel.clients, (client: OgnWebSocket) => {
                 return client.isAlive === false;
             });
 
@@ -1333,7 +1342,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     for (const [cname, channel] of Object.entries(newchannels)) {
         channels[cname as ChannelName] = channel;
     }
-    const channelsLine = _map(newchannels, (c) => `${c.displayName}${c.datecode}`).join(',');
+    const channelsLine = Object.values(newchannels).map((c) => `${c.displayName}${c.datecode}`).join(',');
     if (lastChannelsLog.get(competition.compid) !== channelsLine) {
         console.log(`${compShort(competition.compid)} channels: ${channelsLine}`);
         lastChannelsLog.set(competition.compid, channelsLine);
@@ -1440,7 +1449,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
         // Update the task from the db
         const updatedTask = await getTask(channel, maxHandicap);
 
-        if (!_isEqual(channel.task ?? {}, updatedTask ?? {})) {
+        if (!equal(channel.task ?? {}, updatedTask ?? {})) {
             console.log(
                 `new task for ${channel.displayName}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs
                     ?.reduce((a, l) => a + l.length, 0)
@@ -1679,8 +1688,8 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
     // every other comp's gliders as "removed" and wipe them from the global
     // map, leaving the APRS worker still ticking for compnos main-thread no
     // longer knows about.
-    const keyedDb = keyBy<CTrackerRow>(cTrackers, makeClassname_Compno);
-    const removedGliders = _filter(gliders, (g) => {
+    const keyedDb: Record<string, CTrackerRow> = Object.fromEntries(cTrackers.map((c) => [makeClassname_Compno(c), c]));
+    const removedGliders = Object.values(gliders).filter((g) => {
         if (g.compid !== compid) return false;
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
@@ -2174,14 +2183,12 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
         console.log(`${channel.displayName}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
-        const toStream = reduce(
-            gliders,
-            (result, glider, compno) => {
+        const toStream = Object.entries(gliders).reduce<Record<string, any>>((result, [compno, glider]) => {
                 if (glider.className == channel.className) {
                     const p = glider.deck;
                     if (p) {
-                        const start = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
-                        const end = Math.max(Math.min(_sortedIndex(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
+                        const start = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
+                        const end = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
                         const length = end - start;
                         //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                         if (length) {
@@ -2201,9 +2208,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                     }
                 }
                 return result;
-            },
-            {}
-        );
+            }, {});
         // Send the client the current version of the tracks
         channel.webPathData[now.toString()] = Buffer.from(OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: 0}}).finish());
         channel.webPathBaseTime = now;
@@ -2215,40 +2220,36 @@ async function generateRecentPilotTracks(channel: Channel) {
     // Make sure they are up to date (does nothing if they are)
     await generateHistoricalTracks(channel);
 
-    const toStream = reduce(
-        gliders,
-        (result, glider) => {
-            if (glider.className == channel.className) {
-                const p = glider.deck;
-                if (p) {
-                    const start = glider.webPathEndPosition;
-                    const end = p.posIndex;
-                    const length = end - start;
-                    if (length > 0) {
-                        result[glider.compno] = {
-                            compno: glider.compno,
-                            positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
-                            t: new Uint8Array(p.t.buffer, start * 4, length * 4),
-                            climbRate: new Uint8Array(p.climbRate.buffer, start, length),
-                            agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
-                            posIndex: length,
-                            trackVersion: p.trackVersion
-                        };
-                    } else {
-                        // make the placeholder, it's empty but the other end will make
-                        // a new deck object for it.
-                        result[glider.compno] = {
-                            compno: glider.compno,
-                            posIndex: 0,
-                            trackVersion: p.trackVersion
-                        };
-                    }
+    const toStream = Object.values(gliders).reduce<Record<string, any>>((result, glider) => {
+        if (glider.className == channel.className) {
+            const p = glider.deck;
+            if (p) {
+                const start = glider.webPathEndPosition;
+                const end = p.posIndex;
+                const length = end - start;
+                if (length > 0) {
+                    result[glider.compno] = {
+                        compno: glider.compno,
+                        positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
+                        t: new Uint8Array(p.t.buffer, start * 4, length * 4),
+                        climbRate: new Uint8Array(p.climbRate.buffer, start, length),
+                        agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                        posIndex: length,
+                        trackVersion: p.trackVersion
+                    };
+                } else {
+                    // make the placeholder, it's empty but the other end will make
+                    // a new deck object for it.
+                    result[glider.compno] = {
+                        compno: glider.compno,
+                        posIndex: 0,
+                        trackVersion: p.trackVersion
+                    };
                 }
             }
-            return result;
-        },
-        {}
-    );
+        }
+        return result;
+    }, {});
     // Send the client the current version of the tracks
     return OnglideWebSocketMessage.encode({tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}).finish();
 }
@@ -2383,7 +2384,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 shid.set(compno, (sh = []));
             }
 
-            const i = _sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
+            const i = sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
             const prev = sh[i - 1];
             const next = sh[i];
 
@@ -2920,7 +2921,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     // must match a pilot entered in this competition, not a sibling one.
     if (ddbf && (ddbf.cn != '' || ddbf.registration != '')) {
         // Find all our gliders that could match, may be 0, 1 or possibly 2
-        let matches = _filter(gliders, (x) => {
+        let matches = Object.values(gliders).filter((x) => {
             if (x.compid !== competition.compid) return false;
             return ddbf.cn == x.compno || (ddbf.registration == x.greg && (x.greg || '') != '');
         });

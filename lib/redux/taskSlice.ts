@@ -15,8 +15,6 @@ import {taskGeoJSON} from '../flightprocessing/taskhelper';
 
 import {d} from '../now';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
-
 interface TaskSliceState {
     className: ClassName;
     datecode: Datecode;

@@ -23,8 +23,6 @@ import {getNow} from '../now';
 
 import type {ClassPositions} from '../protobuf/onglide';
 
-import {map as _map, reduce as _reduce} from 'lodash';
-
 interface OtherPilotsSliceState {
     positions: OtherPilotData;
     latestUpdate: Epoch;
@@ -47,7 +45,7 @@ const _selectAllPositions = createSelector(
     (className: ClassName, t: Epoch | undefined, others: OtherPilotData) => {
         try {
             const timeCutoff = (t == undefined ? Math.trunc(getNow()) - 180 : t - 180) as Epoch;
-            const m = _map(others, (pos, key) => ({
+            const m = Object.entries(others).map(([key, pos]) => ({
                 className: key?.split('_')?.[0],
                 compno: pos.c,
                 ...pos,

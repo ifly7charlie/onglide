@@ -4,8 +4,6 @@ import {Epoch, ClassName, Compno, Task, TaskScoresGenerator, PositionStatusText}
 
 import {PilotScore} from '../protobuf/onglide';
 
-import {cloneDeep as _clonedeep, keyBy as _keyby} from 'lodash';
-
 import {MessagePort} from 'node:worker_threads';
 
 import {setTimeout} from 'timers/promises';

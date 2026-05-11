@@ -55,8 +55,6 @@ import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
 import buffer from '@turf/buffer';
 
-import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
-
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
 import {pilotsTrackLayer} from './pilotstracklayer';
