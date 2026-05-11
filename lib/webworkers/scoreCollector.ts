@@ -1,6 +1,6 @@
 import {trackMetric} from '../insights';
 
-import {Epoch, ClassName, Compno, Task, TaskScoresGenerator, PositionStatusText} from '../types';
+import {Epoch, ClassName, Compno, TaskScoresGenerator, PositionStatusText} from '../types';
 
 import {PilotScore} from '../protobuf/onglide';
 
@@ -8,7 +8,7 @@ import {MessagePort} from 'node:worker_threads';
 
 import {setTimeout} from 'timers/promises';
 
-import equal from 'fast-deep-equal';
+import {scoreChanged} from '../flightprocessing/scoreChanged';
 
 import {d} from '../now';
 
@@ -88,7 +88,11 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     // object structure and flag that it's there
     function updateScore(compno: Compno, score: PilotScore, scoreId: string) {
         const c = getScoreIdDetails(scoreId);
-        if (scoreChanged(c.allScores[compno], score, className)) {
+        const oldScore = c.allScores[compno];
+        if (scoreChanged(oldScore, score, true)) {
+            if (oldScore && oldScore.flightStatus != score.flightStatus) {
+                console.log(`${className}:${score.compno}: ${PositionStatusText[oldScore.flightStatus ?? 0]} => ${PositionStatusText[score.flightStatus ?? 0]} @ ${d(score.t)}`);
+            }
             const recentStart = score.utcStart && c.mostRecentStart[compno] != score.utcStart ? score.utcStart : undefined;
             c.mostRecentStart[compno] = score.utcStart as Epoch;
 
@@ -213,43 +217,3 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
     console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
 }
 
-function scoreChanged(oldScore?: PilotScore, newScore?: PilotScore, className?: ClassName): boolean {
-    //    console.log('CHANGED', oldScore, newScore);
-    if (!oldScore || !newScore) {
-        return !oldScore !== !newScore; // both undefined or defined
-    }
-
-    // If we have switched from replay
-    if (oldScore.live !== newScore.live) {
-        return true;
-    }
-
-    // If the timestamp is the same then nothing has changed
-    if (oldScore.t === newScore.t) {
-        return false;
-    }
-    // If the start time is different then it must have changed
-    if (oldScore.utcStart !== newScore.utcStart) {
-        return true;
-    }
-
-    // Now we know that duration or flight status must change for it to count
-    if (oldScore.flightStatus != newScore.flightStatus) {
-        console.log(`${className ?? '?'}:${newScore.compno}: ${PositionStatusText[oldScore.flightStatus ?? 0]} => ${PositionStatusText[newScore.flightStatus ?? 0]} @ ${d(newScore.t)}`);
-        return true;
-    }
-
-    // If we haven't started then all we care about is flight status
-    if (!newScore.utcStart) {
-        return false;
-    }
-
-    // If we have scored and the score hasn't changed then we are equivalent - nothing after
-    // finish matters
-    if (oldScore.utcFinish && oldScore.utcFinish == newScore.utcFinish) {
-        return false;
-    }
-
-    // Otherwise check time and distance - actual should always be there and it's enough
-    return !equal(oldScore.actual, newScore.actual);
-}

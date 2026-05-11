@@ -59,6 +59,7 @@ let db: ReturnType<typeof mysql>;
 
 import {sortedIndexBy, sortedIndexNumber} from '../lib/util/binarySearch';
 import {roundedUint32, safeEncode} from '../lib/util/proto';
+import {scoreChanged} from '../lib/flightprocessing/scoreChanged';
 import equal from 'fast-deep-equal';
 
 // Mutate arr in place by removing all elements matching pred, returning the removed elements
@@ -454,29 +455,31 @@ async function main() {
         console.log('PM2/DOCKER: starting http(s) listener');
     }
 
-    if (process.env.WEBSOCKET_PORT && ('NEXT_PUBLIC_WEBSOCKET_HOST' in process.env || 'NEXT_PUBLIC_SITEURL' in process.env)) {
-        if (
-            ![process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].some((host) => {
-                try {
-                    const options = {
-                        key: readFileSync(`keys/${host}.key.pem`),
-                        cert: readFileSync(`keys/${host}.cert.pem`)
-                    };
+    const hasSSL = [process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].some((host) => {
+        if (host) {
+            try {
+                const options = {
+                    key: readFileSync(`keys/${host}.key.pem`),
+                    cert: readFileSync(`keys/${host}.cert.pem`)
+                };
 
-                    if (options.key && options.cert) {
-                        console.log('initialising SSL');
-                        const server = https.createServer(options, setupOgnWebServer);
-                        server.listen(parseInt(process.env.WEBSOCKET_PORT!) + 1000);
-                        setupWebSocketServer(server);
-                        console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT!) + 1000} ssh key for ${host}`);
-                    }
-                } catch (e) {
-                    console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
+                if (options.key && options.cert) {
+                    console.log('initialising SSL');
+                    const server = https.createServer(options, setupOgnWebServer);
+                    server.listen(parseInt(process.env.WEBSOCKET_PORT!) + 1000);
+                    setupWebSocketServer(server);
+                    console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT!) + 1000} ssh key for ${host}`);
                 }
-            })
-        ) {
-            console.log(`Not initialising SSL: port: ${process.env.WEBSOCKET_PORT}, url: ${process.env.NEXT_PUBLIC_SITEURL}`);
+                return true;
+            } catch (e) {
+                console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
+            }
         }
+        return false;
+    });
+
+    if (!hasSSL) {
+        console.log(`SSL not initialised`);
     }
 
     // We always open an non-ssl one
@@ -519,16 +522,18 @@ async function main() {
                 (a, c: Channel) => {
                     if (c.toSend.length) {
                         a[c.className] = {
-                            positions: c.toSend.map((p): PilotPosition => ({
-                                c: p.c,
-                                lat: p.lat,
-                                lng: p.lng,
-                                a: Math.trunc(p.a),
-                                g: Math.trunc(p.g),
-                                t: Math.trunc(p.t),
-                                b: Math.trunc(p.b ?? 0),
-                                s: Math.trunc(p.s ?? 0)
-                            }))
+                            positions: c.toSend.map(
+                                (p): PilotPosition => ({
+                                    c: p.c,
+                                    lat: p.lat,
+                                    lng: p.lng,
+                                    a: Math.trunc(p.a),
+                                    g: Math.trunc(p.g),
+                                    t: Math.trunc(p.t),
+                                    b: Math.trunc(p.b ?? 0),
+                                    s: Math.trunc(p.s ?? 0)
+                                })
+                            )
                         };
                     }
                     return a;
@@ -1086,9 +1091,7 @@ function getSunset(competition: CompetitionContext, datecode: Datecode) {
     const loc = competition.location;
     const {sunset, localMidday} = computeSunset(datecode, loc.lat, loc.lng, loc.tzoffset);
     if (sunset != loc.sunset) {
-        console.log(
-            `${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset, loc.tz)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday)} (site:${dateToText(localMidday, loc.tz)})`
-        );
+        console.log(`${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset, loc.tz)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday)} (site:${dateToText(localMidday, loc.tz)})`);
         loc.sunset = sunset;
     }
 }
@@ -1354,7 +1357,9 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     for (const [cname, channel] of Object.entries(newchannels)) {
         channels[cname as ChannelName] = channel;
     }
-    const channelsLine = Object.values(newchannels).map((c) => `${c.displayName}${c.datecode}`).join(',');
+    const channelsLine = Object.values(newchannels)
+        .map((c) => `${c.displayName}${c.datecode}`)
+        .join(',');
     if (lastChannelsLog.get(competition.compid) !== channelsLine) {
         console.log(`${compShort(competition.compid)} channels: ${channelsLine}`);
         lastChannelsLog.set(competition.compid, channelsLine);
@@ -2198,31 +2203,31 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
         console.log(`${channel.displayName}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
         const toStream = Object.entries(gliders).reduce<Record<string, any>>((result, [compno, glider]) => {
-                if (glider.className == channel.className) {
-                    const p = glider.deck;
-                    if (p) {
-                        const start = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
-                        const end = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
-                        const length = end - start;
-                        //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
-                        if (length) {
-                            result[glider.compno] = {
-                                compno: glider.compno,
-                                positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
-                                t: new Uint8Array(p.t.buffer, start * 4, length * 4),
-                                climbRate: new Uint8Array(p.climbRate.buffer, start, length),
-                                agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
-                                posIndex: length,
-                                trackVersion: p.trackVersion
-                            };
-                        }
-                        glider.webPathEndPosition = end;
-                    } else {
-                        glider.webPathEndPosition = 0;
+            if (glider.className == channel.className) {
+                const p = glider.deck;
+                if (p) {
+                    const start = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
+                    const end = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
+                    const length = end - start;
+                    //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
+                    if (length) {
+                        result[glider.compno] = {
+                            compno: glider.compno,
+                            positions: new Uint8Array(p.positions.buffer, start * 12, length * 12),
+                            t: new Uint8Array(p.t.buffer, start * 4, length * 4),
+                            climbRate: new Uint8Array(p.climbRate.buffer, start, length),
+                            agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                            posIndex: length,
+                            trackVersion: p.trackVersion
+                        };
                     }
+                    glider.webPathEndPosition = end;
+                } else {
+                    glider.webPathEndPosition = 0;
                 }
-                return result;
-            }, {});
+            }
+            return result;
+        }, {});
         // Send the client the current version of the tracks
         const webPath = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: 0}}, `webPath ${channel.displayName}`);
         if (webPath) {
@@ -2407,25 +2412,23 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
             const i = sortedIndexBy(sh, {t} as unknown as PilotScore, (x) => x.t);
             const prev = sh[i - 1];
-            const next = sh[i];
 
-            // Rewind log (we’re going to drop tail from i or i-1)
-            if (i < sh.length - 1) {
+            if (i === sh.length) {
+                // In-order tail append: drop positional drift within
+                // scoreFrequency of the last survivor. State transitions
+                // (leg / sector / flight status / start / finish) always
+                // land a row via scoreChanged so we never silently swallow
+                // a meaningful event.
+                if (!prev || t - prev.t >= scoreFrequency || scoreChanged(prev, score, false)) {
+                    sh.push(score);
+                }
+            } else {
+                // Out-of-order arrival: the chain rewound (e.g. dogleg
+                // backtrack in taskpositiongenerator) and is now re-emitting
+                // from t. Drop the stale tail and insert.
                 console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[i].t)} sh:[${i}/${sh.length}]`);
+                sh.splice(i, Infinity, score);
             }
-
-            const leftDist = prev ? t - prev.t : Infinity;
-            const rightDist = next ? next.t - t : Infinity;
-            const prevClose = leftDist < scoreFrequency;
-            const nextClose = rightDist < scoreFrequency;
-
-            // replace previous or current
-            const replacePrev = prevClose && nextClose ? leftDist <= rightDist : prevClose;
-
-            //  i === sh.length + prevClose -> replace last
-            //  i === sh.length + !prevClose -> append
-            //  i < sh.length -> insert/replace and drop tail (rewind)
-            sh.splice(replacePrev ? i - 1 : i, Infinity, score);
         }
 
         // Score from Live packets (either end of rescore or end of current score)
@@ -2744,11 +2747,7 @@ function broadcastCompetitionsSnapshot(client: OgnWebSocket) {
             lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
         }
     }
-    const msg = safeEncode(
-        OnglideWebSocketMessage,
-        {competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}},
-        'competitions full snapshot'
-    );
+    const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}}, 'competitions full snapshot');
     if (msg && client.readyState === WebSocket.OPEN) {
         client.send(msg, {binary: true});
     }
@@ -2784,11 +2783,7 @@ function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: st
 
     if (dirty.length === 0 && removedCompids.length === 0) return;
 
-    const msg = safeEncode(
-        OnglideWebSocketMessage,
-        {competitions: {competitions: dirty, generatedAt: Math.floor(getNow()), full: false, removed: removedCompids}},
-        'competitions delta'
-    );
+    const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: dirty, generatedAt: Math.floor(getNow()), full: false, removed: removedCompids}}, 'competitions delta');
     if (!msg) return;
 
     competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
@@ -2810,11 +2805,7 @@ function broadcastCompetitionsKeepalive() {
     if (!competitionsListeners.length) return;
 
     const now = getNow();
-    const msg = safeEncode(
-        OnglideWebSocketMessage,
-        {t: now, ka: {keepalive: true, at: Math.floor(now), listeners: competitionsListeners.length, airborne: 0}},
-        'competitions keepalive'
-    );
+    const msg = safeEncode(OnglideWebSocketMessage, {t: now, ka: {keepalive: true, at: Math.floor(now), listeners: competitionsListeners.length, airborne: 0}}, 'competitions keepalive');
     if (!msg) return;
 
     competitionsListeners.forEach((client) => client.send(msg, {binary: true}));
