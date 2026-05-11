@@ -12,6 +12,7 @@ import https from 'node:https';
 import {readFileSync, existsSync, createWriteStream} from 'fs';
 
 import {computeSunset} from '../lib/util/sunset';
+import {gitVersion} from '../lib/util/gitVersion';
 
 // Helper function
 //import distance from '@turf/distance';
@@ -490,7 +491,7 @@ async function main() {
     });
 
     setupWebSocketServer(server);
-    console.log(`listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
+    console.log(`Onglide startup ${gitVersion()} listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
 
     // Phase 3: load trackers + tasks per comp, then rebuild the APRS
     // filter so it picks up task bboxes. The rebuild's lastAprsFilter
