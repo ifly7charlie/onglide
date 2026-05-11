@@ -1,4 +1,4 @@
-import type {Epoch, OtherPilotData, ClassName} from '../types';
+import type {Epoch, ClassName} from '../types';
 
 import {IconLayer} from '@deck.gl/layers';
 
@@ -23,16 +23,18 @@ function faToData(f: any) {
 
 const otherUrl = faToData(faCircleUser);
 
-export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch | undefined) {
+export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolean, now: Epoch | undefined, classnameByClass?: Record<ClassName, string>) {
     const data = useSelector((state) => selectAllPositions(state, vc, now));
 
     if (!data || !data.length) {
         return null;
     }
 
-    return new IconLayer<(typeof data)[0]>({
+    const enriched = classnameByClass ? data.map((p) => ({...p, classname: classnameByClass[p.class] ?? p.class})) : data;
+
+    return new IconLayer<(typeof enriched)[0]>({
         id: 'other_pilots',
-        data,
+        data: enriched,
         getSize: map2d ? 14 : 12,
         /*        getAngle: (i) => {
             if (i.c == 'TA') {
@@ -41,7 +43,7 @@ export function otherPilotsLayer(vc: ClassName, mapLight: boolean, map2d: boolea
             return i.b ? i.b : 0;
         }, */
 
-        getColor: !mapLight ? [64, 64, 192, 255] : [255, 255, 255, 255],
+        getColor: mapLight ? [64, 64, 192, 255] : [255, 255, 255, 255],
 
         getIcon: () => ({
             id: 'other',

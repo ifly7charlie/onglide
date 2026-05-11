@@ -44,11 +44,11 @@ export function deckTooltip({
 
         let response = '';
         const compno = layer?.props?.compno ?? object.compno;
-        const className = layer?.props?.className ?? object.className;
+        const classLabel = layer?.props?.className ?? object.classname ?? object.class;
         const time = Array.isArray(object.t) ? object.t[1] : object.t;
 
-        if (className) {
-            response += `<strong>${compno}</strong>: ${className}<br/>`;
+        if (classLabel) {
+            response += `<strong>${compno}</strong>: ${classLabel}<br/>`;
         } else if (compno) {
             response += `<strong>${compno}</strong><br/>`;
         }

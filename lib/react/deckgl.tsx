@@ -542,7 +542,12 @@ export default function MApp(props: {
     const gridInteractiveLayerIds = useMemo(() => (gridHoverEnabled ? ['optimal_heatmap'] : undefined), [gridHoverEnabled]);
 
     // If we are displaying other pilots
-    const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
+    const classnameByClass = useMemo(() => {
+        const m: Record<string, string> = {};
+        for (const c of props.comp?.classes ?? []) m[c.class] = c.classname;
+        return m as Record<ClassName, string>;
+    }, [props.comp]);
+    const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch), classnameByClass);
 
     // X-marker at the competition's site (competition.lt/lg). Hidden when
     // zoomed out so it doesn't clutter the regional view — by zoom 8 the

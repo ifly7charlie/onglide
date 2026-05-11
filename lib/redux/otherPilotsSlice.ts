@@ -46,12 +46,12 @@ const _selectAllPositions = createSelector(
         try {
             const timeCutoff = (t == undefined ? Math.trunc(getNow()) - 180 : t - 180) as Epoch;
             const m = Object.entries(others).map(([key, pos]) => ({
-                className: key?.split('_')?.[0],
+                class: key?.split('_')?.[0] as ClassName,
                 compno: pos.c,
                 ...pos,
                 position: [pos.lng, pos.lat, pos.a]
             }));
-            return m.filter((p) => p.t > timeCutoff && p.className != className);
+            return m.filter((p) => p.t > timeCutoff && p.class != className);
         } catch (e) {
             console.error(e);
         }
