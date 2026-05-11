@@ -103,7 +103,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
         return null;
     };
 
-    const actualLegs = score.legs.filter((f) => f.legno != 0);
+    const actualLegs = (Object.values(score.legs) as PilotScoreLeg[]).filter((f) => f.legno != 0);
     const hasHandicappedResults = score?.handicapped;
 
     const taskRadios: {key: string; label: string}[] = [
