@@ -3,8 +3,7 @@ import {promises as fsp, readdirSync, openSync, closeSync, readSync, statSync} f
 import * as path from 'path';
 import * as os from 'os';
 
-import {openLog, appendPoint, closeLog, loadPoints, __testGetActiveStream} from '../lib/webworkers/pointlog';
-import {convertLogFileToV8, serializeRecord, deserializeRecord, binarySearchForTsV8, parseFileHeader, V8_FILE_HEADER_SIZE, V8_RECORD_SIZE} from '../lib/webworkers/pointlog-v8';
+import {openLog, appendPoint, closeLog, loadPoints, __testGetActiveStream, serializeRecord, deserializeRecord, binarySearchForTs, parseFileHeader, FILE_HEADER_SIZE, RECORD_SIZE} from '../lib/webworkers/pointlog';
 
 async function freshEnv(sub: string, rotateMb = 100, retainHours = 24): Promise<string> {
     const dir = path.join(os.tmpdir(), `onglide-pointlog-${sub}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -64,7 +63,7 @@ describe('pointlog', () => {
         await new Promise((r) => setTimeout(r, 100));
         await closeLog();
 
-        const files = readdirSync(dir).filter((f) => f.startsWith('aprs-') && f.endsWith('.log'));
+        const files = readdirSync(dir).filter((f) => f.startsWith('aprs-') && f.endsWith('.v8'));
         expect(files.length).toBeGreaterThan(1);
 
         const got: any[] = [];
@@ -218,7 +217,6 @@ describe('pointlog-v8', () => {
 
     afterEach(async () => {
         await closeLog();
-        delete process.env.POINTLOG_FORMAT;
         try {
             await fsp.rm(dir, {recursive: true, force: true});
         } catch {}
@@ -228,9 +226,9 @@ describe('pointlog-v8', () => {
         const msg = makeMsg(1700000123, 'ABCDEF');
         msg.d = 5;
         const {rec, payloadBytes} = serializeRecord(msg);
-        expect(rec.length).toBe(V8_RECORD_SIZE);
+        expect(rec.length).toBe(RECORD_SIZE);
         expect(payloadBytes).toBeGreaterThan(0);
-        expect(payloadBytes).toBeLessThanOrEqual(V8_RECORD_SIZE - 6);
+        expect(payloadBytes).toBeLessThanOrEqual(RECORD_SIZE - 6);
         // Header: 4 B writeTime, 2 B signed d
         expect(rec.readUInt32LE(0)).toBe(msg.t + msg.d);
         expect(rec.readInt16LE(4)).toBe(msg.d);
@@ -264,10 +262,10 @@ describe('pointlog-v8', () => {
         const base = 1700000000;
         const records: Buffer[] = [];
         // file header
-        records.push(Buffer.alloc(V8_FILE_HEADER_SIZE));
+        records.push(Buffer.alloc(FILE_HEADER_SIZE));
         Buffer.from('ONG8', 'ascii').copy(records[0]!, 0);
         records[0]!.writeUInt16LE(1, 4);
-        records[0]!.writeUInt16LE(V8_RECORD_SIZE, 6);
+        records[0]!.writeUInt16LE(RECORD_SIZE, 6);
         for (let i = 0; i < N; i++) {
             records.push(serializeRecord(makeMsg(base + i, 'X')).rec);
         }
@@ -276,15 +274,15 @@ describe('pointlog-v8', () => {
         const fd = openSync(file, 'r');
         try {
             const size = statSync(file).size;
-            const hdr = Buffer.alloc(V8_FILE_HEADER_SIZE);
-            readSync(fd, hdr, 0, V8_FILE_HEADER_SIZE, 0);
+            const hdr = Buffer.alloc(FILE_HEADER_SIZE);
+            readSync(fd, hdr, 0, FILE_HEADER_SIZE, 0);
             const {recSize} = parseFileHeader(hdr);
-            const recordCount = (size - V8_FILE_HEADER_SIZE) / recSize;
+            const recordCount = (size - FILE_HEADER_SIZE) / recSize;
             expect(recordCount).toBe(N);
 
             // Search for several targets, compare to linear-scan ground truth.
             for (const target of [base - 100, base, base + 1, base + 500, base + N - 1, base + N, base + N + 100]) {
-                const idx = binarySearchForTsV8(fd, recordCount, recSize, target);
+                const idx = binarySearchForTs(fd, recordCount, recSize, target);
                 const linear = (() => {
                     for (let i = 0; i < N; i++) {
                         if (base + i >= target) return i;
@@ -298,67 +296,6 @@ describe('pointlog-v8', () => {
         }
     });
 
-    test('cross-format: convert .log → .v8 then loadPoints with POINTLOG_FORMAT=v8 matches .log read', async () => {
-        dir = await freshEnv('crossformat');
-        await openLog();
-
-        const baseT = 1700000000;
-        const expected: any[] = [];
-        for (let i = 0; i < 1500; i++) {
-            const flarm = i % 3 === 0 ? 'ABCDEF' : `OTH${i % 11}`;
-            const msg = makeMsg(baseT + i, flarm);
-            appendPoint(msg);
-            if (flarm === 'ABCDEF') expected.push(msg);
-        }
-        await closeLog();
-
-        // Read via .log first as the ground truth.
-        delete process.env.POINTLOG_FORMAT;
-        const fromLog: any[] = [];
-        for await (const m of loadPoints({flarmId: 'ABCDEF' as any, since: baseT})) fromLog.push(m);
-        expect(fromLog.length).toBe(expected.length);
-
-        // Convert every .log file in dir to .v8.
-        const logs = readdirSync(dir).filter((f) => f.endsWith('.log'));
-        expect(logs.length).toBeGreaterThan(0);
-        for (const log of logs) {
-            const src = path.join(dir, log);
-            const dst = path.join(dir, log.slice(0, -'.log'.length) + '.v8');
-            const stats = await convertLogFileToV8(src, dst);
-            expect(stats.recordsWritten).toBeGreaterThan(0);
-        }
-
-        // Swap to .v8 mode and re-read; same records, same order.
-        process.env.POINTLOG_FORMAT = 'v8';
-        const fromV8: any[] = [];
-        for await (const m of loadPoints({flarmId: 'ABCDEF' as any, since: baseT})) fromV8.push(m);
-        expect(fromV8.length).toBe(fromLog.length);
-        expect(fromV8.map((m) => m.t)).toEqual(fromLog.map((m) => m.t));
-        // Spot-check a couple of fields survived the V8 roundtrip.
-        for (let i = 0; i < fromV8.length; i++) {
-            expect(fromV8[i].f).toBe(fromLog[i].f);
-            expect(fromV8[i].lat).toBe(fromLog[i].lat);
-            expect(fromV8[i].lng).toBe(fromLog[i].lng);
-        }
-    });
-
-    test('v8 reader: since/until window narrows the result the same way', async () => {
-        dir = await freshEnv('v8window');
-        await openLog();
-        const baseT = 1700000000;
-        for (let i = 0; i < 1000; i++) appendPoint(makeMsg(baseT + i, 'W'));
-        await closeLog();
-        const logs = readdirSync(dir).filter((f) => f.endsWith('.log'));
-        for (const log of logs) {
-            await convertLogFileToV8(path.join(dir, log), path.join(dir, log.slice(0, -'.log'.length) + '.v8'));
-        }
-        process.env.POINTLOG_FORMAT = 'v8';
-        const got: any[] = [];
-        for await (const m of loadPoints({flarmId: 'W' as any, since: baseT + 200, until: baseT + 300})) got.push(m);
-        expect(got.length).toBe(101);
-        expect(got[0].t).toBe(baseT + 200);
-        expect(got.at(-1).t).toBe(baseT + 300);
-    });
 });
 
 async function fspMkTmp(sub: string): Promise<string> {

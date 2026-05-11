@@ -1,15 +1,64 @@
+// APRS point log: per-process write-only stream + bulk reader.
+//
+// On-disk format — fixed-size records of V8-native serialized messages,
+// indexed by record number for trivial binary search:
+//
+//   File header (16 bytes):
+//     0  4  magic     "ONG8"
+//     4  2  version   uint16 LE (= 1)
+//     6  2  recSize   uint16 LE (= RECORD_SIZE by default)
+//     8  8  reserved  zeros
+//
+//   Record N at offset 16 + N * recSize. Record layout (recSize bytes):
+//     0  4  writeTime  uint32 LE (= t + d at append; always positive, monotonic)
+//     4  2  d          int16  LE (signed; t = writeTime - d)
+//     6  ?  v8         output of v8.serialize(message); self-delimiting
+//             ...      zero padding to recSize
+//
+// The 4-byte writeTime is the binary-search key directly — no add, no sign
+// math, no V8 deserialize on the probe path. The 2-byte d lets the scanner
+// compute t = writeTime - d for the per-record `since`/`until` filter
+// before paying the V8 deserialize. d is signed because backfill replays
+// and receiver clock skew can produce t > writeTime.
+//
+// The file is monotonic in writeTime (each record is appended at writer-now)
+// but NOT in t — and for a given writeTime there is no guarantee that t is
+// ordered either: two packets ingested in the same second can carry quite
+// different t values (one live, one a backfill replay). The binary search
+// therefore lands on the first record with writeTime >= target - SLACK and
+// the linear scan from there applies the t-filter per record.
+//
+// No length prefix on the V8 payload: v8.serialize emits a self-delimiting
+// stream (header byte + version + tag-driven body), and v8.deserialize
+// stops at the end of the encoded value, ignoring any trailing bytes.
+// Records padded with zeros to recSize round-trip cleanly.
+
 import {createWriteStream, WriteStream, promises as fsp, openSync, closeSync, readSync, statSync} from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import {serialize as v8serialize, deserialize as v8deserialize} from 'v8';
 
-import type {PositionMessage} from '../types';
-import type {FlarmID} from '../types';
-import {scanFileV8, scanFileForIdsV8, scanFileAllV8} from './pointlog-v8';
+import type {PositionMessage, FlarmID} from '../types';
 
-// Line format: the serialized message itself, one JSON object per line.
-// The message carries t (epoch), f (flarmId), o (sender) already — no
-// wrapper needed.
 export type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
+
+// ---------- format constants ----------
+
+const FILE_MAGIC = Buffer.from('ONG8', 'ascii');
+const FILE_FORMAT_VERSION = 1;
+export const FILE_HEADER_SIZE = 16;
+// 6 B record header + 131 B observed max payload = 137 B floor; 144 B gives
+// 7 B of headroom and packs ~910 records per 128 KB chunk read. The writer
+// throws immediately if anything exceeds the per-record budget — bump if
+// it ever fires.
+export const RECORD_SIZE = 144;
+const RECORD_HEADER_SIZE = 6;
+const D_MIN = -0x8000;
+const D_MAX = 0x7fff;
+
+// Chunk size for sequential scan reads.
+const RECORDS_PER_CHUNK = 512; // 512 × 144 B ≈ 72 KB
+const OUT_OF_ORDER_SLACK_SEC = 30;
 
 // ---------- module state ----------
 // Strip non-alphanumerics so the hostname always occupies exactly one
@@ -33,7 +82,7 @@ let activePath: string = '';
 let activeFirstTs: number = 0;
 let activeBytes: number = 0;
 let rotating = false;
-const pendingWrites: string[] = [];
+const pendingWrites: Buffer[] = [];
 
 // Silent-failure diagnostics. The WriteStream has no error path of its own;
 // if writes start going nowhere we want one log line per failure mode rather
@@ -43,6 +92,7 @@ let lastWriteTs = 0;
 let lastNoStreamLog = 0;
 let lastQueueLog = 0;
 let lastWriteFailLog = 0;
+let lastEncodeFailLog = 0;
 let pendingHighWater = 0;
 
 // Auto-reopen state. After a stream error / unexpected close / failed rotate
@@ -61,20 +111,10 @@ function logThrottled(lastTsRef: () => number, setLastTs: (t: number) => void, i
 }
 
 // ---------- filename helpers ----------
-// Active:   aprs-<host>-<pid>-<firstTs>.log        (3 segments)
-// Rotated:  aprs-<host>-<pid>-<firstTs>-<lastTs>.log (4 segments)
-// V8 variant uses the same scheme with .v8 suffix; produced by
-// bin/convert-pointlog.ts, never written by the live daemon.
+// Active:   aprs-<host>-<pid>-<firstTs>.v8        (3 segments)
+// Rotated:  aprs-<host>-<pid>-<firstTs>-<lastTs>.v8 (4 segments)
 const FILE_PREFIX = 'aprs-';
-const FILE_SUFFIX_LOG = '.log';
-const FILE_SUFFIX_V8 = '.v8';
-
-export type PointlogFormat = 'log' | 'v8';
-
-function pointlogFormat(): PointlogFormat {
-    const v = process.env.POINTLOG_FORMAT;
-    return v === 'v8' ? 'v8' : 'log';
-}
+const FILE_SUFFIX = '.v8';
 
 interface ParsedName {
     file: string;
@@ -83,23 +123,11 @@ interface ParsedName {
     firstTs: number;
     lastTs?: number; // defined iff rotated
     rotated: boolean;
-    format: PointlogFormat;
 }
 
 function parseFilename(file: string): ParsedName | undefined {
-    if (!file.startsWith(FILE_PREFIX)) return undefined;
-    let format: PointlogFormat;
-    let suffix: string;
-    if (file.endsWith(FILE_SUFFIX_LOG)) {
-        format = 'log';
-        suffix = FILE_SUFFIX_LOG;
-    } else if (file.endsWith(FILE_SUFFIX_V8)) {
-        format = 'v8';
-        suffix = FILE_SUFFIX_V8;
-    } else {
-        return undefined;
-    }
-    const core = file.slice(FILE_PREFIX.length, -suffix.length);
+    if (!file.startsWith(FILE_PREFIX) || !file.endsWith(FILE_SUFFIX)) return undefined;
+    const core = file.slice(FILE_PREFIX.length, -FILE_SUFFIX.length);
     const segments = core.split('-');
     // host segment itself may contain hyphens (hostnames can) — collapse to last 3 or 4.
     if (segments.length < 3) return undefined;
@@ -128,71 +156,19 @@ function parseFilename(file: string): ParsedName | undefined {
     if (!Number.isFinite(parsedPid) || !Number.isFinite(parsedFirst)) return undefined;
     const parsedLast = lastStr != null ? Number(lastStr) : undefined;
     if (lastStr != null && !Number.isFinite(parsedLast)) return undefined;
-    return {file, host, pid: parsedPid, firstTs: parsedFirst, lastTs: parsedLast, rotated: lastStr != null, format};
+    return {file, host, pid: parsedPid, firstTs: parsedFirst, lastTs: parsedLast, rotated: lastStr != null};
 }
 
 function activeFilename(firstTs: number): string {
-    return `${FILE_PREFIX}${hostname}-${pid}-${firstTs}${FILE_SUFFIX_LOG}`;
+    return `${FILE_PREFIX}${hostname}-${pid}-${firstTs}${FILE_SUFFIX}`;
 }
 
 function rotatedFilename(host: string, pidN: number, firstTs: number, lastTs: number): string {
-    return `${FILE_PREFIX}${host}-${pidN}-${firstTs}-${lastTs}${FILE_SUFFIX_LOG}`;
+    return `${FILE_PREFIX}${host}-${pidN}-${firstTs}-${lastTs}${FILE_SUFFIX}`;
 }
 
 async function ensureDir(): Promise<void> {
     await fsp.mkdir(basePath(), {recursive: true});
-}
-
-// Wire up stream error / close logging. The default behaviour for an unhandled
-// 'error' on a WriteStream is to crash the process; without listeners the
-// emit happens before any write callback fires, so writes silently disappear.
-function attachStreamHandlers(stream: WriteStream, p: string): void {
-    stream.on('error', (err: NodeJS.ErrnoException) => {
-        const ageMs = lastWriteTs ? Date.now() - lastWriteTs : -1;
-        console.log(`pointlog: STREAM ERROR ${p}: ${err.message} (code=${err.code ?? 'unknown'}, lastWriteAgeMs=${ageMs}) — scheduling reopen`);
-        if (activeStream === stream) {
-            // Force the next appendPoint into the no-stream branch so we
-            // notice rather than writing into a dead descriptor.
-            activeStream = undefined;
-            scheduleReopen();
-        }
-    });
-    stream.on('close', () => {
-        if (activeStream === stream && !rotating) {
-            const ageMs = lastWriteTs ? Date.now() - lastWriteTs : -1;
-            console.log(`pointlog: stream closed unexpectedly ${p} (writes=${writesSinceOpen}, bytes=${activeBytes}, lastWriteAgeMs=${ageMs})`);
-            activeStream = undefined;
-            scheduleReopen();
-        }
-    });
-}
-
-// Open a fresh fd against the existing activePath. Used after a stream-level
-// failure: filename / firstTs stay the same so readers don't see a phantom
-// new session, and writes resume in append mode into the same file.
-function reopenStream(): void {
-    if (closing || activeStream || !activePath) return;
-    try {
-        const s = createWriteStream(activePath, {flags: 'a'});
-        attachStreamHandlers(s, activePath);
-        activeStream = s;
-        reopenAttempt = 0;
-        lastWriteTs = Date.now();
-        console.log(`pointlog: reopened ${activePath} after failure`);
-    } catch (e: any) {
-        console.log(`pointlog: reopen failed ${activePath}: ${e?.message ?? e} (code=${e?.code ?? 'unknown'})`);
-        scheduleReopen();
-    }
-}
-
-function scheduleReopen(): void {
-    if (closing || activeStream || reopenTimer) return;
-    const delay = Math.min(60_000, 1000 * Math.pow(2, reopenAttempt));
-    reopenAttempt++;
-    reopenTimer = setTimeout(() => {
-        reopenTimer = undefined;
-        reopenStream();
-    }, delay);
 }
 
 async function listAprsFiles(): Promise<ParsedName[]> {
@@ -222,7 +198,117 @@ function isPidAlive(p: number): boolean {
     }
 }
 
-// ---------- public API ----------
+// ---------- codec ----------
+
+export function buildFileHeader(recSize: number = RECORD_SIZE): Buffer {
+    const h = Buffer.alloc(FILE_HEADER_SIZE);
+    FILE_MAGIC.copy(h, 0);
+    h.writeUInt16LE(FILE_FORMAT_VERSION, 4);
+    h.writeUInt16LE(recSize, 6);
+    return h;
+}
+
+export function parseFileHeader(buf: Buffer): {version: number; recSize: number} {
+    if (buf.length < FILE_HEADER_SIZE) throw new Error('pointlog: file too short for header');
+    if (buf.compare(FILE_MAGIC, 0, 4, 0, 4) !== 0) throw new Error(`pointlog: bad magic (got ${buf.subarray(0, 4).toString('hex')})`);
+    const version = buf.readUInt16LE(4);
+    const recSize = buf.readUInt16LE(6);
+    if (version !== FILE_FORMAT_VERSION) throw new Error(`pointlog: unsupported version ${version}`);
+    if (recSize <= RECORD_HEADER_SIZE) throw new Error(`pointlog: bad recSize ${recSize}`);
+    return {version, recSize};
+}
+
+export interface SerializedRecord {
+    rec: Buffer;
+    payloadBytes: number;
+}
+
+// Serialize one message into a recSize-byte record. Returns the record
+// plus the V8 payload size — the record itself doesn't carry a length
+// (v8.deserialize self-delimits), but callers that track stats or detect
+// near-budget records want the payload size. Throws if the payload doesn't
+// fit or if d falls outside the int16 header field.
+export function serializeRecord(msg: LoggedMessage, recSize: number = RECORD_SIZE): SerializedRecord {
+    const payload = v8serialize(msg);
+    const maxPayload = recSize - RECORD_HEADER_SIZE;
+    if (payload.length > maxPayload) {
+        throw new Error(`pointlog: payload ${payload.length} bytes exceeds budget ${maxPayload} for flarm=${(msg as any).f} t=${msg.t}`);
+    }
+    const d = ((msg.d ?? 0) as number) | 0;
+    if (d < D_MIN || d > D_MAX) {
+        throw new Error(`pointlog: d=${d} out of int16 range for flarm=${(msg as any).f} t=${msg.t}`);
+    }
+    const writeTime = (msg.t + d) >>> 0;
+    const rec = Buffer.alloc(recSize);
+    rec.writeUInt32LE(writeTime, 0);
+    rec.writeInt16LE(d, 4);
+    payload.copy(rec, RECORD_HEADER_SIZE);
+    return {rec, payloadBytes: payload.length};
+}
+
+// Deserialize a record from a buffer at the given offset. The V8 stream is
+// self-delimiting — extra trailing bytes in the record's body (zero
+// padding, or even neighbour-record bytes if a slice runs long) are
+// ignored by v8.deserialize.
+export function deserializeRecord(buf: Buffer, offset: number, recSize: number = RECORD_SIZE): LoggedMessage {
+    return v8deserialize(buf.subarray(offset + RECORD_HEADER_SIZE, offset + recSize)) as LoggedMessage;
+}
+
+// ---------- writer ----------
+
+// Wire up stream error / close logging. The default behaviour for an unhandled
+// 'error' on a WriteStream is to crash the process; without listeners the
+// emit happens before any write callback fires, so writes silently disappear.
+function attachStreamHandlers(stream: WriteStream, p: string): void {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+        const ageMs = lastWriteTs ? Date.now() - lastWriteTs : -1;
+        console.log(`pointlog: STREAM ERROR ${p}: ${err.message} (code=${err.code ?? 'unknown'}, lastWriteAgeMs=${ageMs}) — scheduling reopen`);
+        if (activeStream === stream) {
+            // Force the next appendPoint into the no-stream branch so we
+            // notice rather than writing into a dead descriptor.
+            activeStream = undefined;
+            scheduleReopen();
+        }
+    });
+    stream.on('close', () => {
+        if (activeStream === stream && !rotating) {
+            const ageMs = lastWriteTs ? Date.now() - lastWriteTs : -1;
+            console.log(`pointlog: stream closed unexpectedly ${p} (writes=${writesSinceOpen}, bytes=${activeBytes}, lastWriteAgeMs=${ageMs})`);
+            activeStream = undefined;
+            scheduleReopen();
+        }
+    });
+}
+
+// Open a fresh fd against the existing activePath. Used after a stream-level
+// failure: filename / firstTs stay the same so readers don't see a phantom
+// new session, and writes resume in append mode into the same file. The
+// file header is already at offset 0 from the original openLog, so we don't
+// re-emit it here.
+function reopenStream(): void {
+    if (closing || activeStream || !activePath) return;
+    try {
+        const s = createWriteStream(activePath, {flags: 'a'});
+        attachStreamHandlers(s, activePath);
+        activeStream = s;
+        reopenAttempt = 0;
+        lastWriteTs = Date.now();
+        console.log(`pointlog: reopened ${activePath} after failure`);
+    } catch (e: any) {
+        console.log(`pointlog: reopen failed ${activePath}: ${e?.message ?? e} (code=${e?.code ?? 'unknown'})`);
+        scheduleReopen();
+    }
+}
+
+function scheduleReopen(): void {
+    if (closing || activeStream || reopenTimer) return;
+    const delay = Math.min(60_000, 1000 * Math.pow(2, reopenAttempt));
+    reopenAttempt++;
+    reopenTimer = setTimeout(() => {
+        reopenTimer = undefined;
+        reopenStream();
+    }, delay);
+}
 
 export async function openLog(): Promise<void> {
     closing = false;
@@ -240,7 +326,9 @@ export async function openLog(): Promise<void> {
     activePath = path.join(basePath(), activeFilename(activeFirstTs));
     activeStream = createWriteStream(activePath, {flags: 'a'});
     attachStreamHandlers(activeStream, activePath);
-    activeBytes = 0;
+    const fileHeader = buildFileHeader();
+    activeStream.write(fileHeader);
+    activeBytes = fileHeader.length;
     writesSinceOpen = 0;
     lastWriteTs = Date.now();
     console.log(`pointlog: opened ${activePath} (pid=${pid}, host=${hostname})`);
@@ -274,9 +362,22 @@ export function appendPoint(message: LoggedMessage): void {
         if (!rotating) scheduleReopen();
         return;
     }
-    const line = JSON.stringify(message) + '\n';
+    let rec: Buffer;
+    try {
+        rec = serializeRecord(message).rec;
+    } catch (e: any) {
+        // Over-budget payload, or d out of int16 range. Drop the record
+        // rather than crash the daemon, but throttle-log so it's visible.
+        logThrottled(
+            () => lastEncodeFailLog,
+            (t) => (lastEncodeFailLog = t),
+            10000,
+            `pointlog: appendPoint dropped — serializeRecord failed: ${e?.message ?? e}`
+        );
+        return;
+    }
     if (rotating) {
-        pendingWrites.push(line);
+        pendingWrites.push(rec);
         if (pendingWrites.length > pendingHighWater) pendingHighWater = pendingWrites.length;
         // 5 000 ≈ a couple of seconds of nominal traffic; if rotate() has
         // wedged we want to see the queue climbing rather than silently
@@ -291,7 +392,7 @@ export function appendPoint(message: LoggedMessage): void {
         }
         return;
     }
-    const ok = activeStream.write(line);
+    const ok = activeStream.write(rec);
     if (!ok) {
         // Backpressure isn't fatal but if it pins for long the kernel buffer
         // is full or the disk is choking — worth one line per 30s.
@@ -302,7 +403,7 @@ export function appendPoint(message: LoggedMessage): void {
             `pointlog: write returned false (backpressure) on ${activePath}, bytes=${activeBytes}`
         );
     }
-    activeBytes += Buffer.byteLength(line, 'utf8');
+    activeBytes += rec.length;
     writesSinceOpen++;
     lastWriteTs = Date.now();
     if (activeBytes >= rotateThreshold) {
@@ -325,10 +426,10 @@ async function rotate(): Promise<void> {
         const oldPath = activePath;
         const oldFirstTs = activeFirstTs;
         // Encode the writer's wall-clock at close into the filename. This
-        // is an upper bound on every record's t in the file — every record
-        // was written before this moment, and d ≥ 0 means t ≤ write_time.
-        // Using max(t in records) here would underestimate the bound when
-        // the file ends with a backfilled chunk whose t lags wall clock.
+        // is an upper bound on every record's writeTime in the file — every
+        // record was written before this moment. Using max(writeTime) here
+        // would underestimate the bound when the file ends with a backfilled
+        // chunk whose t lags wall clock; wall-clock at close is conservative.
         const oldLastTs = Math.floor(Date.now() / 1000);
 
         await new Promise<void>((resolve) => {
@@ -352,13 +453,15 @@ async function rotate(): Promise<void> {
             activeStream = createWriteStream(activePath, {flags: 'a'});
             attachStreamHandlers(activeStream, activePath);
         } catch (e: any) {
-            console.log(`pointlog: createWriteStream failed for ${activePath}: ${e?.message ?? e} (code=${e?.code ?? 'unknown'}) — discarding ${pendingWrites.length} queued lines, scheduling reopen`);
+            console.log(`pointlog: createWriteStream failed for ${activePath}: ${e?.message ?? e} (code=${e?.code ?? 'unknown'}) — discarding ${pendingWrites.length} queued records, scheduling reopen`);
             activeStream = undefined;
             pendingWrites.length = 0;
             scheduleReopen();
             return;
         }
-        activeBytes = 0;
+        const newHeader = buildFileHeader();
+        activeStream.write(newHeader);
+        activeBytes = newHeader.length;
         writesSinceOpen = 0;
         lastWriteTs = Date.now();
         console.log(`pointlog: rotated → ${rotatedPath}; new active ${activePath} (queued=${queuedAtStart}, highWater=${pendingHighWater})`);
@@ -366,9 +469,9 @@ async function rotate(): Promise<void> {
 
         // Flush any writes that queued during rotation.
         while (pendingWrites.length > 0) {
-            const line = pendingWrites.shift()!;
-            activeStream.write(line);
-            activeBytes += Buffer.byteLength(line, 'utf8');
+            const rec = pendingWrites.shift()!;
+            activeStream.write(rec);
+            activeBytes += rec.length;
         }
     } finally {
         rotating = false;
@@ -378,10 +481,7 @@ async function rotate(): Promise<void> {
 
 async function adoptOrphans(): Promise<void> {
     const files = await listAprsFiles();
-    const now = Math.floor(Date.now() / 1000);
     for (const f of files) {
-        // .v8 files are derived/static — never an "active" stream to adopt.
-        if (f.format !== 'log') continue;
         if (f.rotated) continue;
         if (f.host !== hostname) continue;
         if (f.pid === pid) continue; // our own (shouldn't exist yet, but be safe)
@@ -400,8 +500,9 @@ async function adoptOrphans(): Promise<void> {
         } catch (e: any) {
             console.log(`pointlog: cannot stat ${f.file}: ${e.message}`);
         }
-        if (fileSize === 0 || lastTs == null) {
-            // Empty / unreadable — delete.
+        // A file with only the file header carries no records — treat as
+        // empty and delete instead of rotating.
+        if (fileSize <= FILE_HEADER_SIZE || lastTs == null) {
             try {
                 await fsp.unlink(fullPath);
                 console.log(`pointlog: removed empty orphan ${f.file}`);
@@ -419,7 +520,6 @@ async function adoptOrphans(): Promise<void> {
             console.log(`pointlog: adopt rename failed: ${e.message}`);
         }
     }
-    void now;
 }
 
 async function purgeStale(): Promise<void> {
@@ -429,15 +529,10 @@ async function purgeStale(): Promise<void> {
         const fullPath = path.join(basePath(), f.file);
         let shouldUnlink = false;
 
-        if (f.format === 'v8') {
-            // Derived files. Purge by lastTs if rotated, firstTs otherwise —
-            // they have no live writer to protect.
-            const refTs = f.rotated ? (f.lastTs as number) : f.firstTs;
-            if (nowMs - refTs * 1000 > retainMs) shouldUnlink = true;
-        } else if (f.rotated) {
+        if (f.rotated) {
             if (nowMs - (f.lastTs as number) * 1000 > retainMs) shouldUnlink = true;
         } else {
-            // Active .log file. Never purge our own or a live same-host peer.
+            // Active file. Never purge our own or a live same-host peer.
             if (f.host === hostname && f.pid === pid) continue;
             if (f.host === hostname && isPidAlive(f.pid)) continue;
             // Either cross-host, or same-host dead PID that adopt missed — purge by firstTs.
@@ -463,26 +558,132 @@ export interface LoadPointsQuery {
     until?: number; // epoch seconds (inclusive)
 }
 
-const OUT_OF_ORDER_SLACK_SEC = 30;
+export interface LoadPointsForIdsQuery {
+    flarmIds?: Set<string>;
+    since: number;
+    until?: number;
+}
+
+interface OpenFile {
+    fd: number;
+    size: number;
+    recSize: number;
+    recordCount: number;
+}
+
+function openRecordFile(fullPath: string): OpenFile | undefined {
+    const size = statSync(fullPath).size;
+    if (size < FILE_HEADER_SIZE) return undefined;
+    const fd = openSync(fullPath, 'r');
+    try {
+        const hdr = Buffer.alloc(FILE_HEADER_SIZE);
+        const n = readSync(fd, hdr, 0, FILE_HEADER_SIZE, 0);
+        if (n < FILE_HEADER_SIZE) {
+            closeSync(fd);
+            return undefined;
+        }
+        const {recSize} = parseFileHeader(hdr);
+        const body = size - FILE_HEADER_SIZE;
+        const recordCount = Math.floor(body / recSize);
+        return {fd, size, recSize, recordCount};
+    } catch (e) {
+        closeSync(fd);
+        throw e;
+    }
+}
+
+// Returns the index of the first record whose writeTime >= target, or
+// recordCount if every record is below target. Reads only the 4-byte
+// writeTime field — no V8 deserialization, no signed math, no addition
+// on the probe path.
+export function binarySearchForTs(fd: number, recordCount: number, recSize: number, target: number): number {
+    const probe = Buffer.alloc(4);
+    let lo = 0;
+    let hi = recordCount;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        const off = FILE_HEADER_SIZE + mid * recSize;
+        const n = readSync(fd, probe, 0, 4, off);
+        if (n < 4) {
+            hi = mid;
+            continue;
+        }
+        const writeTime = probe.readUInt32LE(0);
+        if (writeTime < target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
+// One-shot scanner. Chunked reads, then per-record: peek the 6-byte header,
+// drop on t-range, deserialize the V8 payload only for the records we're
+// going to yield.
+async function* scanFileRecords(fullPath: string, q: {since: number; until?: number; flarmId?: FlarmID; flarmIds?: Set<string>}): AsyncGenerator<LoggedMessage> {
+    const opened = openRecordFile(fullPath);
+    if (!opened) return;
+    const {fd, recSize, recordCount} = opened;
+    try {
+        const startIndex = binarySearchForTs(fd, recordCount, recSize, q.since - OUT_OF_ORDER_SLACK_SEC);
+        const chunkBytes = RECORDS_PER_CHUNK * recSize;
+        const buf = Buffer.alloc(chunkBytes);
+        for (let i = startIndex; i < recordCount; ) {
+            const recsThisChunk = Math.min(RECORDS_PER_CHUNK, recordCount - i);
+            const toRead = recsThisChunk * recSize;
+            const off = FILE_HEADER_SIZE + i * recSize;
+            const n = readSync(fd, buf, 0, toRead, off);
+            if (n <= 0) break;
+            const recsRead = Math.floor(n / recSize);
+            for (let r = 0; r < recsRead; r++) {
+                const recOff = r * recSize;
+                const writeTime = buf.readUInt32LE(recOff);
+                const d = buf.readInt16LE(recOff + 4);
+                const t = writeTime - d;
+                if (t < q.since) continue;
+                // File is monotonic in writeTime but NOT in t — a backfill
+                // replay can drop a packet with future-ish t in the middle.
+                // `continue`, don't `return`, so the rest of the scan stands.
+                if (q.until != null && t > q.until) continue;
+                const msg = deserializeRecord(buf, recOff, recSize);
+                if (q.flarmId != null && msg.f !== q.flarmId) continue;
+                if (q.flarmIds && !q.flarmIds.has(msg.f)) continue;
+                yield msg;
+            }
+            i += recsRead;
+            if (recsRead < recsThisChunk) break; // short read at EOF
+            // Cooperative yield so live APRS packets and parentPort messages
+            // don't starve during a long scan.
+            await new Promise<void>((r) => setImmediate(r));
+        }
+    } finally {
+        closeSync(fd);
+    }
+}
+
+// Filename timestamps are writer wall-clock at open (firstTs) and close
+// (lastTs). lastTs is a hard upper bound on every record's writeTime in
+// the file — so `lastTs < since - SLACK` is a safe "this file has nothing
+// in our window" prefilter for rotated files. We never prefilter by
+// `firstTs` against `until`: firstTs is open time, not a lower bound on
+// the message t (a backfill replay can append old-t records to a freshly
+// opened file).
+function pickCandidates(files: ParsedName[], since: number): ParsedName[] {
+    return files
+        .filter((f) => {
+            if (f.rotated && (f.lastTs as number) < since - OUT_OF_ORDER_SLACK_SEC) return false;
+            return true;
+        })
+        .sort((a, b) => a.firstTs - b.firstTs);
+}
 
 // Iterate every message across every file — diagnostic use (CLI tools that
 // summarise across all flarmids). Slow (O(total bytes)) but simple.
 export async function* scanAll(opts: {since?: number; until?: number} = {}): AsyncGenerator<LoggedMessage> {
-    const fmt = pointlogFormat();
     const files = await listAprsFiles();
     const since = opts.since ?? 0;
-    const candidates = files
-        .filter((f) => f.format === fmt)
-        .filter((f) => (f.rotated && (f.lastTs as number) < since - OUT_OF_ORDER_SLACK_SEC ? false : true))
-        .sort((a, b) => a.firstTs - b.firstTs);
-    for (const f of candidates) {
+    for (const f of pickCandidates(files, since)) {
         const fullPath = path.join(basePath(), f.file);
         try {
-            if (f.format === 'v8') {
-                yield* scanFileAllV8(fullPath, since, opts.until);
-            } else {
-                yield* scanFileAll(fullPath, since, opts.until);
-            }
+            yield* scanFileRecords(fullPath, {since, until: opts.until});
         } catch (e: any) {
             if (e.code === 'ENOENT') continue;
             console.log(`pointlog: scan ${f.file}: ${e.message}`);
@@ -490,48 +691,16 @@ export async function* scanAll(opts: {since?: number; until?: number} = {}): Asy
     }
 }
 
-async function* scanFileAll(fullPath: string, since: number, until: number | undefined): AsyncGenerator<LoggedMessage> {
-    const size = statSync(fullPath).size;
-    if (size === 0) return;
-    const startOffset = since > 0 ? binarySearchForTs(fullPath, size, since - OUT_OF_ORDER_SLACK_SEC) : 0;
-    const fd = openSync(fullPath, 'r');
-    try {
-        const chunkSize = 64 * 1024;
-        const buf = Buffer.alloc(chunkSize);
-        let leftover = '';
-        let offset = startOffset;
-        while (offset < size) {
-            const toRead = Math.min(chunkSize, size - offset);
-            const n = readSync(fd, buf, 0, toRead, offset);
-            if (n <= 0) break;
-            offset += n;
-            const chunk = leftover + buf.subarray(0, n).toString('utf8');
-            const lines = chunk.split('\n');
-            leftover = lines.pop() ?? '';
-            for (const line of lines) {
-                if (!line) continue;
-                let msg: LoggedMessage;
-                try {
-                    msg = JSON.parse(line);
-                } catch {
-                    continue;
-                }
-                if (typeof msg.t !== 'number') continue;
-                if (msg.t < since) continue;
-                // See scanFileForIds: file is arrival-ordered, not
-                // strictly t-ordered.
-                if (until != null && msg.t > until) continue;
-                yield msg;
-            }
+export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
+    const files = await listAprsFiles();
+    for (const f of pickCandidates(files, q.since)) {
+        const fullPath = path.join(basePath(), f.file);
+        try {
+            yield* scanFileRecords(fullPath, {since: q.since, until: q.until, flarmId: q.flarmId});
+        } catch (e: any) {
+            if (e.code === 'ENOENT') continue; // rotated/purged mid-scan
+            console.log(`pointlog: scan ${f.file}: ${e.message}`);
         }
-        if (leftover) {
-            try {
-                const msg: LoggedMessage = JSON.parse(leftover);
-                if (typeof msg.t === 'number' && msg.t >= since && (until == null || msg.t <= until)) yield msg;
-            } catch {}
-        }
-    } finally {
-        closeSync(fd);
     }
 }
 
@@ -543,268 +712,15 @@ async function* scanFileAll(fullPath: string, since: number, until: number | und
 //
 // If flarmIds is omitted, every record in the window is yielded — used by
 // matching tools that don't know the candidate ids in advance.
-export interface LoadPointsForIdsQuery {
-    flarmIds?: Set<string>;
-    since: number;
-    until?: number;
-}
-
 export async function* loadPointsForIds(q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
-    const fmt = pointlogFormat();
     const files = await listAprsFiles();
-    const candidates = files
-        .filter((f) => f.format === fmt)
-        .filter((f) => {
-            if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
-            return true;
-        })
-        .sort((a, b) => a.firstTs - b.firstTs);
-
-    for (const f of candidates) {
+    for (const f of pickCandidates(files, q.since)) {
         const fullPath = path.join(basePath(), f.file);
         try {
-            if (f.format === 'v8') {
-                yield* scanFileForIdsV8(fullPath, q);
-            } else {
-                yield* scanFileForIds(fullPath, q);
-            }
+            yield* scanFileRecords(fullPath, {since: q.since, until: q.until, flarmIds: q.flarmIds});
         } catch (e: any) {
             if (e.code === 'ENOENT') continue;
             console.log(`pointlog: scan ${f.file}: ${e.message}`);
         }
     }
-}
-
-async function* scanFileForIds(fullPath: string, q: LoadPointsForIdsQuery): AsyncGenerator<LoggedMessage> {
-    const size = statSync(fullPath).size;
-    if (size === 0) return;
-
-    const startOffset = binarySearchForTs(fullPath, size, q.since - OUT_OF_ORDER_SLACK_SEC);
-
-    const fd = openSync(fullPath, 'r');
-    try {
-        const chunkSize = 64 * 1024;
-        const buf = Buffer.alloc(chunkSize);
-        let leftover = '';
-        let offset = startOffset;
-
-        while (offset < size) {
-            const toRead = Math.min(chunkSize, size - offset);
-            const n = readSync(fd, buf, 0, toRead, offset);
-            if (n <= 0) break;
-            offset += n;
-            const chunk = leftover + buf.subarray(0, n).toString('utf8');
-            const lines = chunk.split('\n');
-            leftover = lines.pop() ?? '';
-
-            for (const line of lines) {
-                if (!line) continue;
-                let msg: LoggedMessage;
-                try {
-                    msg = JSON.parse(line);
-                } catch {
-                    continue;
-                }
-                if (typeof msg.t !== 'number') continue;
-                if (msg.t < q.since) continue;
-                // The log is roughly arrival-ordered, not t-ordered: a
-                // backfill replay or a receiver with clock skew can drop
-                // a packet with future-ish t in the middle of the file.
-                // `continue` (not `return`) past it so the rest of the
-                // file's legitimate records still get scanned.
-                if (q.until != null && msg.t > q.until) continue;
-                if (q.flarmIds && !q.flarmIds.has(msg.f)) continue;
-                yield msg;
-            }
-
-            // Yield to the macrotask queue so live APRS data and parentPort
-            // messages don't starve during a long bulk scan.
-            await new Promise<void>((r) => setImmediate(r));
-        }
-        if (leftover) {
-            try {
-                const msg: LoggedMessage = JSON.parse(leftover);
-                if (typeof msg.t === 'number' && msg.t >= q.since && (q.until == null || msg.t <= q.until) && (!q.flarmIds || q.flarmIds.has(msg.f))) {
-                    yield msg;
-                }
-            } catch {}
-        }
-    } finally {
-        closeSync(fd);
-    }
-}
-
-export async function* loadPoints(q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
-    const fmt = pointlogFormat();
-    const files = await listAprsFiles();
-    // Filename timestamps are writer wall-clock at open (firstTs) and
-    // close (lastTs). With every record carrying d ≥ 0, lastTs is a hard
-    // upper bound on every record's t in the file — so `lastTs < since`
-    // is a safe "this file has nothing in our window" prefilter for
-    // rotated files. We never prefilter by `firstTs` against `until`:
-    // firstTs is open time, not a lower bound on t (a backfill replay can
-    // append old-t records to a freshly opened file).
-    const candidates = files
-        .filter((f) => f.format === fmt)
-        .filter((f) => {
-            if (f.rotated && (f.lastTs as number) < q.since - OUT_OF_ORDER_SLACK_SEC) return false;
-            return true;
-        })
-        .sort((a, b) => a.firstTs - b.firstTs);
-
-    for (const f of candidates) {
-        const fullPath = path.join(basePath(), f.file);
-        try {
-            if (f.format === 'v8') {
-                yield* scanFileV8(fullPath, q);
-            } else {
-                yield* scanFile(fullPath, q);
-            }
-        } catch (e: any) {
-            if (e.code === 'ENOENT') continue; // rotated/purged mid-scan
-            console.log(`pointlog: scan ${f.file}: ${e.message}`);
-        }
-    }
-}
-
-// Scan a single file, starting at a binary-search position for since.
-async function* scanFile(fullPath: string, q: LoadPointsQuery): AsyncGenerator<LoggedMessage> {
-    const size = statSync(fullPath).size;
-    if (size === 0) return;
-
-    const startOffset = binarySearchForTs(fullPath, size, q.since - OUT_OF_ORDER_SLACK_SEC);
-
-    const fd = openSync(fullPath, 'r');
-    try {
-        const chunkSize = 64 * 1024;
-        const buf = Buffer.alloc(chunkSize);
-        let leftover = '';
-        let offset = startOffset;
-
-        while (offset < size) {
-            const toRead = Math.min(chunkSize, size - offset);
-            const n = readSync(fd, buf, 0, toRead, offset);
-            if (n <= 0) break;
-            offset += n;
-            const chunk = leftover + buf.subarray(0, n).toString('utf8');
-            const lines = chunk.split('\n');
-            leftover = lines.pop() ?? '';
-
-            for (const line of lines) {
-                if (!line) continue;
-                let msg: LoggedMessage;
-                try {
-                    msg = JSON.parse(line);
-                } catch {
-                    continue;
-                }
-                if (msg.f !== q.flarmId) continue;
-                if (typeof msg.t !== 'number') continue;
-                if (msg.t < q.since) continue;
-                // See note in scanFileForIds: file is arrival-ordered,
-                // not strictly t-ordered, so a single rogue future-t
-                // packet should not truncate the rest of the scan.
-                if (q.until != null && msg.t > q.until) continue;
-                yield msg;
-            }
-
-            // Yield to the macrotask queue so live APRS data and parentPort
-            // messages don't starve while we're chewing through a long file.
-            // The for-await consumer otherwise drains microtasks back-to-back
-            // and never returns to the event loop.
-            await new Promise<void>((r) => setImmediate(r));
-        }
-        // Try the trailing leftover too (file might not end with \n).
-        if (leftover) {
-            try {
-                const msg: LoggedMessage = JSON.parse(leftover);
-                if (msg.f === q.flarmId && typeof msg.t === 'number' && msg.t >= q.since && (q.until == null || msg.t <= q.until)) {
-                    yield msg;
-                }
-            } catch {
-                // partial last line
-            }
-        }
-    } finally {
-        closeSync(fd);
-    }
-}
-
-// Return a byte offset at which to start scanning. The offset points to the
-// start of a line whose t+d (writer wall-clock at the moment that line was
-// serialized) is roughly <= target. We compare on t+d, not t alone: the
-// file is monotonic in t+d (each line is appended at its writer-now), but
-// NOT in t — backfill replays from APRS-IS history can inject very-old-t
-// packets in the middle of an otherwise live-ordered file (d up to ~17 min
-// observed), and a probed t there is wildly out of step with the file's
-// ambient write-time at that offset. The caller is responsible for final
-// filtering (t >= since) during scan.
-function binarySearchForTs(fullPath: string, size: number, target: number): number {
-    const fd = openSync(fullPath, 'r');
-    try {
-        let lo = 0;
-        let hi = size;
-        const probeBuf = Buffer.alloc(512);
-
-        while (hi - lo > 4096) {
-            const mid = Math.floor((lo + hi) / 2);
-            const {offset, t, d} = readLineAt(fd, size, mid, probeBuf);
-            if (offset == null || t == null) {
-                // Couldn't parse — widen toward lo.
-                hi = mid;
-                continue;
-            }
-            const writeTime = t + d;
-            if (writeTime < target)
-                lo = offset + 1; // skip past this line start
-            else hi = offset;
-        }
-        // Align lo to a line start: scan backward from lo to the previous \n (or BOF).
-        return alignToLineStart(fd, lo);
-    } finally {
-        closeSync(fd);
-    }
-}
-
-// Read the line that contains byte `pos`: seek to pos, back up to the
-// previous '\n', read forward to the next '\n', parse. Returns the start
-// offset of that line, its parsed t, and its parsed d (defaults to 0 when
-// absent — older log format, or live packets that didn't record a latency).
-function readLineAt(fd: number, size: number, pos: number, _scratch: Buffer): {offset: number | null; t: number | null; d: number} {
-    const start = alignToLineStart(fd, pos);
-    // Read up to 8 KB from start to find next newline and parse.
-    const maxLine = 8 * 1024;
-    const buf = Buffer.alloc(Math.min(maxLine, size - start));
-    const n = readSync(fd, buf, 0, buf.length, start);
-    if (n <= 0) return {offset: null, t: null, d: 0};
-    const text = buf.subarray(0, n).toString('utf8');
-    const nl = text.indexOf('\n');
-    const line = nl >= 0 ? text.slice(0, nl) : text;
-    try {
-        const msg = JSON.parse(line);
-        if (typeof msg.t === 'number') {
-            return {offset: start, t: msg.t, d: typeof msg.d === 'number' ? msg.d : 0};
-        }
-    } catch {
-        // fall through
-    }
-    return {offset: start, t: null, d: 0};
-}
-
-function alignToLineStart(fd: number, pos: number): number {
-    if (pos <= 0) return 0;
-    const probe = Buffer.alloc(512);
-    let cur = pos;
-    while (cur > 0) {
-        const readFrom = Math.max(0, cur - probe.length);
-        const toRead = cur - readFrom;
-        const n = readSync(fd, probe, 0, toRead, readFrom);
-        if (n <= 0) return 0;
-        // Find last '\n' in probe[0..n]
-        for (let i = n - 1; i >= 0; i--) {
-            if (probe[i] === 0x0a) return readFrom + i + 1;
-        }
-        cur = readFrom;
-    }
-    return 0;
 }
