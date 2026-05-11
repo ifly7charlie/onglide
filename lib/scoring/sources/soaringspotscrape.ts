@@ -29,7 +29,7 @@ import {processIGC, checkForOGNMatches} from '../../flightprocessing/launchlandi
 import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
 import {findApproximateContestLocation} from '../shared/contestLocation';
-import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctHandicap, type PilotRecord} from '../shared/pilots';
+import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctClassHandicaps, type PilotRecord} from '../shared/pilots';
 import {enqueueFaiLookup} from '../shared/fai';
 import {FAI_SYNTHETIC_FLOOR} from '../shared/faiApi';
 import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
@@ -210,14 +210,14 @@ async function updateContest(
 // and the embedded IGC-href regex are SoaringSpot-specific.
 //
 async function processDayResults(
-    db: any, //
-    log: (msg: string, ...args: unknown[]) => void,
+    ctx: SourceCtx, //
     classid: ClassId,
     className: string,
     date: string,
     dayNumber: string,
     results: any
 ): Promise<void> {
+    const {db, log, countrycode} = ctx;
     let rows = 0;
     // let doCheckForOGNMatches = false; // disabled — IGC download check is gated off below
     const dateCode = toDateCode(date);
@@ -240,6 +240,12 @@ async function processDayResults(
     const igcRe = /a href=&quot;.(en_gb.download-contest-flight.+=1)&quot;/i;
     const cnRe = /([A-Z0-9]+)\s*<.a>\s*$/i;
     const flagRe = /class="flag.*title="([a-z]+)"/i;
+
+    const convertHandicap = correctClassHandicaps(
+        (results[0] as any[]).map((r) => r.Handicap),
+        countrycode,
+        (msg, ...args) => log(`${className}: ${msg}`, ...args)
+    );
 
     for (const row of results[0]) {
         if (row['#'] == 'DNF') continue;
@@ -324,7 +330,7 @@ async function processDayResults(
 
         const actuals = parseFloat(row.Speed);
         const actuald = parseFloat(row.Distance);
-        const handicap = correctHandicap(row.Handicap);
+        const handicap = convertHandicap(row.Handicap);
 
         const scoredvals = {
             as: duration ? actuald / duration : 0,
@@ -512,6 +518,33 @@ export class SoaringSpotScrapeSource implements ScoringSource {
             const pilotsList: any[] = parsed[0] ?? [];
             ctx.log(`fetchPilots: ${pilotsList.length} pilot row(s) for ${ctx.compid}`);
 
+            // Pre-scan to bucket raw handicaps by class so we can build a
+            // per-class converter — Polish comps need H = fsm/fs across
+            // the class, so we need every raw handicap in the class
+            // before normalising any single pilot.
+            const handicapsByClass = new Map<ClassId, any[]>();
+            for (const raw of pilotsList) {
+                if (!raw.CN || raw.CN == '') {
+                    continue;
+                }
+                const nc = normalizeClassName(raw.Class);
+                if (!nc) {
+                    continue;
+                }
+                const cid = makeClassId(ctx.compid, nc) as ClassId;
+                if (!handicapsByClass.has(cid)) {
+                    handicapsByClass.set(cid, []);
+                }
+                handicapsByClass.get(cid)!.push(raw.Handicap);
+            }
+            const convertersByClass = new Map<ClassId, (raw: any) => number>();
+            for (const [cid, handicaps] of handicapsByClass) {
+                convertersByClass.set(
+                    cid,
+                    correctClassHandicaps(handicaps, ctx.countrycode, (msg, ...args) => ctx.log(`${cid}: ${msg}`, ...args))
+                );
+            }
+
             for (const raw of pilotsList) {
                 if (!raw.CN || raw.CN == '') {
                     continue;
@@ -523,7 +556,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     continue;
                 }
                 const classid = makeClassId(ctx.compid, normalizedClass) as ClassId;
-                const handicap = correctHandicap(raw.Handicap);
+                const handicap = convertersByClass.get(classid)!(raw.Handicap);
                 const className = normalizedClass.replace(/[_]/gi, ' ');
 
                 const pilot: PilotRecord = {
@@ -668,7 +701,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                             if (resultTableNode) {
                                 const fragment = getOuterHTML(resultTableNode);
                                 const resultsHtml = Tabletojson.convert(fragment, {stripHtmlFromCells: false});
-                                await processDayResults(ctx.db, ctx.log, classid, className, date, daynumber, resultsHtml);
+                                await processDayResults(ctx, classid, className, date, daynumber, resultsHtml);
                             }
                         } catch (e) {
                             ctx.log(`results fetch failed for ${classid} ${date}:`, e);

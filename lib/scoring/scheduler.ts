@@ -70,6 +70,7 @@ interface CompState {
     type: string;
     raw: Record<string, any>;
     tz: string;
+    countrycode: string | null;
     metadataLoaded: boolean;
 
     // last successful fetches (epoch ms)
@@ -576,24 +577,30 @@ async function processCompetition(
         st = await initState(db, src, log);
         state.set(src.compid, st);
     } else {
-        // Refresh tz from DB in case it was updated by a previous fetch.
-        st.tz = (await readCompetitionTz(db, src.compid)) ?? st.tz;
+        // Refresh tz/countrycode from DB in case they were updated by a previous fetch.
+        const fields = await readCompetitionFields(db, src.compid);
+        st.tz = fields.tz ?? st.tz;
+        st.countrycode = fields.countrycode ?? st.countrycode;
     }
 
     const ctx: SourceCtx = {
         compid: src.compid,
         url: src.url,
         tz: st.tz,
+        countrycode: st.countrycode,
         db,
         log: (msg: string, ...args: unknown[]) => log(`[${src.compid}] ${msg}`, ...args),
         raw: src
     };
 
-    // First time: ensure metadata so we have a competition row + tz.
+    // First time: ensure metadata so we have a competition row + tz + countrycode.
     if (!st.metadataLoaded) {
         await adapter.ensureMetadata(ctx);
-        st.tz = (await readCompetitionTz(db, src.compid)) ?? st.tz;
+        const fields = await readCompetitionFields(db, src.compid);
+        st.tz = fields.tz ?? st.tz;
+        st.countrycode = fields.countrycode ?? st.countrycode;
         ctx.tz = st.tz;
+        ctx.countrycode = st.countrycode;
         st.metadataLoaded = true;
     }
 
@@ -705,7 +712,8 @@ async function initState(
     src: any,
     log: (msg: string, ...args: unknown[]) => void
 ): Promise<CompState> {
-    const tz = (await readCompetitionTz(db, src.compid)) ?? 'Europe/London';
+    const fields = await readCompetitionFields(db, src.compid);
+    const tz = fields.tz ?? 'Europe/London';
     log(`scheduler: registering compid=${src.compid} type=${src.type} tz=${tz}`);
     return {
         compid: src.compid,
@@ -713,6 +721,7 @@ async function initState(
         type: src.type,
         raw: src,
         tz,
+        countrycode: fields.countrycode,
         metadataLoaded: false,
         lastPilotsFetch: 0,
         lastResultsFetch: 0,
@@ -731,16 +740,16 @@ async function initState(
     };
 }
 
-async function readCompetitionTz(db: any, compid: string): Promise<string | null> {
+async function readCompetitionFields(db: any, compid: string): Promise<{tz: string | null; countrycode: string | null}> {
     try {
         const row = (
             await db.query(escape`
-                SELECT tz FROM competition WHERE compid = ${compid}
+                SELECT tz, countrycode FROM competition WHERE compid = ${compid}
             `)
         )?.[0];
-        return row?.tz ?? null;
+        return {tz: row?.tz ?? null, countrycode: row?.countrycode ?? null};
     } catch {
-        return null;
+        return {tz: null, countrycode: null};
     }
 }
 

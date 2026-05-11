@@ -203,11 +203,19 @@ async function main(): Promise<void> {
                 compid,
                 url: urlArg,
                 tz: 'Europe/London', // adapter will refine via metadata + tasks
+                countrycode: null, // refreshed below once ensureMetadata has geocoded
                 db: mysql_db,
                 log: (msg, ...args) => console.log(`[${compid}] ${msg}`, ...args),
                 raw: {compid, url: urlArg, type: 'soaringspotscrape'}
             };
             await adapter.ensureMetadata(ctx);
+            const refreshed = (
+                await mysql_db.query(escape`
+                    SELECT tz, countrycode FROM competition WHERE compid = ${compid}
+                `)
+            )[0];
+            if (refreshed?.tz) ctx.tz = refreshed.tz;
+            ctx.countrycode = refreshed?.countrycode ?? null;
             await adapter.fetchPilots(ctx);
             await adapter.fetchResultsAndTasks(ctx, () => false);
             console.log(`scrape complete for compid=${compid}`);
