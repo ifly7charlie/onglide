@@ -11,7 +11,7 @@ import https from 'node:https';
 
 import {readFileSync, existsSync, createWriteStream} from 'fs';
 
-import SunCalc from 'suncalc';
+import {computeSunset} from '../lib/util/sunset';
 
 // Helper function
 //import distance from '@turf/distance';
@@ -1084,11 +1084,10 @@ async function tickCompetitionTrackersAndTasks(competition: CompetitionContext, 
 
 function getSunset(competition: CompetitionContext, datecode: Datecode) {
     const loc = competition.location;
-    const localMidday = new Date(fromDateCode(datecode)).getTime() - (loc.tzoffset - 12 * 3600) * 1000;
-    const sunset = Math.round(SunCalc.getTimes(new Date(localMidday), loc.lat, loc.lng).night.getTime() / 1000) as Epoch;
+    const {sunset, localMidday} = computeSunset(datecode, loc.lat, loc.lng, loc.tzoffset);
     if (sunset != loc.sunset) {
         console.log(
-            `${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset, loc.tz)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday / 1000)} (site:${dateToText((localMidday / 1000) as Epoch, loc.tz)})`
+            `${compShort(competition.compid)} sunset: ${d(sunset)} (site:${dateToText(sunset, loc.tz)}), dc: ${fromDateCode(datecode)}, localMidday: ${d(localMidday)} (site:${dateToText(localMidday, loc.tz)})`
         );
         loc.sunset = sunset;
     }
