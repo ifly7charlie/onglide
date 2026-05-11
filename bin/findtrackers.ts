@@ -255,7 +255,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
 
         if (multi) console.log(`\n--- ${className} / ${datecode} — results ---`);
 
-        const priorMap = await loadPriorEvidence(job.compid, datecode, className);
+        const priorMap = await loadPriorEvidence(datecode, className);
         if (priorMap.size) console.log(`  loaded ${priorMap.size} prior pair-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
 
         const scoreMap = computeScoreMap(matches, results, ddb, priorMap);
@@ -284,13 +284,13 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
                 : proposals
             : [];
 
-        const applied = accepted.length ? await applyProposals(job.compid, className, datecode, accepted) : 0;
+        const applied = accepted.length ? await applyProposals(className, datecode, accepted) : 0;
         summary.applied += applied;
         // Persist evidence rows for every (compno, flarmid) above the
         // ledger floor that wasn't covered by an applied startmatch row.
         // This is the multi-day fuel — written every run, not just on
         // proposal-driven changes.
-        await writeEvidence(job.compid, className, datecode, scoreMap, accepted);
+        await writeEvidence(className, datecode, scoreMap, accepted);
     }
     return summary;
 }
@@ -432,12 +432,16 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
 // rows from before the score columns existed — get LEGACY_PRIOR_NATS as
 // a fixed positive prior, then decay normally. The task-day list comes
 // from the `tasks` table; rows whose datecode isn't in that list are
-// silently dropped (they're not part of the comp's task sequence).
+// silently dropped (they're not part of this class's task sequence).
+//
+// Scope is per-class. `tasks` and `trackerhistory` are both keyed by
+// `class` (compid is reached via the `classes` join elsewhere) so we
+// filter directly on class without joining classes here.
 type PriorMap = Map<string, number>;
-async function loadPriorEvidence(compid: string, currentDatecode: Datecode, className: ClassName): Promise<PriorMap> {
+async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName): Promise<PriorMap> {
     const taskDayRows = await mysql.query<{datecode: Datecode}[]>(escape`
         SELECT DISTINCT datecode FROM tasks
-        WHERE compid = ${compid} AND datecode IS NOT NULL
+        WHERE class = ${className} AND datecode IS NOT NULL
         ORDER BY datecode
     `);
     const taskDayIndex = new Map<string, number>();
@@ -454,14 +458,12 @@ async function loadPriorEvidence(compid: string, currentDatecode: Datecode, clas
             method: string;
         }[]
     >(escape`
-        SELECT th.compno, th.flarmid, th.datecode, th.pair_score, th.method
-        FROM trackerhistory th
-        JOIN classes cl ON cl.class = th.class
-        WHERE cl.compid = ${compid}
-          AND th.class = ${className}
-          AND th.datecode IS NOT NULL
-          AND th.datecode <> ${String(currentDatecode)}
-          AND th.method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
+        SELECT compno, flarmid, datecode, pair_score, method
+        FROM trackerhistory
+        WHERE class = ${className}
+          AND datecode IS NOT NULL
+          AND datecode <> ${String(currentDatecode)}
+          AND method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
     `);
 
     const grouped = new Map<string, {scoreNats: number | null; taskDaysAgo: number}[]>();
@@ -1053,7 +1055,7 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
     return accepted;
 }
 
-async function applyProposals(_compid: string, className: ClassName, datecode: Datecode, proposals: Proposal[]): Promise<number> {
+async function applyProposals(className: ClassName, datecode: Datecode, proposals: Proposal[]): Promise<number> {
     if (!proposals.length) return 0;
     const t = mysql.transaction();
     for (const p of proposals) {
@@ -1093,7 +1095,7 @@ function countEvidenceRows(scoreMap: ScoreMap): number {
 // Idempotent per-day: deletes the previous day's evidence rows for this
 // (class, datecode) before inserting fresh ones, so re-runs don't
 // accumulate.
-async function writeEvidence(_compid: string, className: ClassName, datecode: Datecode, scoreMap: ScoreMap, applied: Proposal[]): Promise<number> {
+async function writeEvidence(className: ClassName, datecode: Datecode, scoreMap: ScoreMap, applied: Proposal[]): Promise<number> {
     const appliedKeys = new Set(applied.map((p) => `${p.compno}|${(p.addedIds[0] ?? '').toString()}`));
     const writes: {compno: Compno; flarmid: FlarmID; deltaStart: number | null; deltaFinish: number | null; pairScore: number; margin: number; ddbLink: string}[] = [];
     for (const [key, v] of scoreMap) {

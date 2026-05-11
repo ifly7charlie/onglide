@@ -356,7 +356,7 @@ CREATE TABLE `trackerhistory` (
   `launchtime` time DEFAULT NULL,
   `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch','evidence','startmatch-swap') DEFAULT 'none',
   `class` char(15) DEFAULT NULL,
-  `datecode` char(2) DEFAULT NULL,
+  `datecode` char(3) DEFAULT NULL,
   `delta_start` smallint DEFAULT NULL,
   `delta_finish` smallint DEFAULT NULL,
   `pair_score` float DEFAULT NULL,
