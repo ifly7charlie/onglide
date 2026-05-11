@@ -187,14 +187,14 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     const concurrentGroups = findConcurrentPilots(results, tolerance);
     const concurrentCompnos = new Set<Compno>();
     for (const group of concurrentGroups) {
-        const labels = group.map((r) => `${r.compno} ${r.name}`.trim()).join(', ');
+        const labels = group.map((r) => String(r.compno)).join(', ');
         log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on start and finish) — matches will be ambiguous: ${labels}`);
         for (const r of group) concurrentCompnos.add(r.compno);
     }
 
     // Watch times for the debug trace: each pilot's official start (resp.
     // finish), labelled so the trace marker tells you which pilot.
-    const labelOf = (r: OfficialResult) => `${r.compno}${r.name ? ' ' + r.name : ''}`;
+    const labelOf = (r: OfficialResult) => String(r.compno);
     const startWatch: WatchTime[] = results.map((r) => ({t: r.startUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
     const finishWatch: WatchTime[] = results //
         .filter((r): r is OfficialResult & {finishUtc: Epoch} => r.finishUtc !== null)
@@ -793,7 +793,16 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
     for (const r of results) {
         const assignedIds = parseAssignedIds(r.trackerid);
         const existingIds = new Set((perPilot.get(r.compno) ?? []).map((m) => m.flarmid));
-        for (const f of startOnlyFlarmids) {
+        // For landout pilots (finishUtc=null) we widen the start-side
+        // candidate pool to *every* flarmid that crossed the start, not
+        // just the single-sided ones. Phase 1 only runs for pilots with
+        // an official finish, so a flarmid in `flarmidsWithBoth` (it
+        // also produced a finish crossing for somebody else, or transited
+        // the finish line later) would otherwise be invisible — even
+        // when its start crossing matches this landout pilot's official
+        // start cleanly.
+        const startCandidates = r.finishUtc === null ? Array.from(startCrossings.keys()) : startOnlyFlarmids;
+        for (const f of startCandidates) {
             if (existingIds.has(f)) continue;
             const ds = closestDelta(startCrossings.get(f)!, r.startUtc);
             if (Math.abs(ds) > tolerance) continue;

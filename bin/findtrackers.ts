@@ -73,7 +73,9 @@ main().catch((e) => {
 
 interface Job {
     compid: string;
-    className: ClassName;
+    compName: string; // competition.name — friendly competition title for the report header
+    className: ClassName; // the class id (15-char hash) — used as the key everywhere downstream
+    classDisplay: string; // classes.classname — friendly class title for the report header
     datecode: Datecode;
 }
 
@@ -185,8 +187,10 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     // Pass 1 — scan each class.
     const classMatches: ClassMatches[] = [];
     for (const job of group) {
-        const {compid, className, datecode} = job;
-        console.log(`\n=== ${className} / ${datecode}   (compid ${compid}, ${fromDateCode(datecode)}) ===`);
+        const {compid, compName, className, classDisplay, datecode} = job;
+        const compLabel = compName ? `${compName} [${compid}]` : compid;
+        const classLabel = classDisplay ? `${classDisplay} [${className}]` : className;
+        console.log(`\n=== ${classLabel} / ${datecode} ${fromDateCode(datecode)}   (${compLabel}) ===`);
 
         const task = await getTask(className, datecode);
         if (!task) {
@@ -253,7 +257,10 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         const {job, results, matches} = cm;
         const {className, datecode} = job;
 
-        if (multi) console.log(`\n--- ${className} / ${datecode} — results ---`);
+        if (multi) {
+            const classLabel = job.classDisplay ? `${job.classDisplay} [${className}]` : className;
+            console.log(`\n--- ${classLabel} / ${datecode} — results ---`);
+        }
 
         const priorMap = await loadPriorEvidence(datecode, className);
         if (priorMap.size) console.log(`  loaded ${priorMap.size} prior pair-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
@@ -313,11 +320,15 @@ async function pickCompetitions(): Promise<string[]> {
 async function listJobs(compid: string): Promise<Job[]> {
     const filterClass = argv.class ? escape` AND cl.class = ${argv.class}` : escape``;
     const filterDc = argv.datecode ? escape` AND t.datecode = ${argv.datecode}` : escape``;
-    const rows = await mysql.query<{class: ClassName; datecode: Datecode}[]>(
+    const rows = await mysql.query<{class: ClassName; classname: string; compname: string; datecode: Datecode}[]>(
         escape`
-        SELECT DISTINCT cl.class AS class, t.datecode AS datecode
+        SELECT DISTINCT cl.class             AS class,
+                        COALESCE(cl.classname, '') AS classname,
+                        COALESCE(c.name, '')       AS compname,
+                        t.datecode           AS datecode
           FROM tasks t
-          JOIN classes cl ON cl.class = t.class
+          JOIN classes     cl ON cl.class  = t.class
+          JOIN competition c  ON c.compid  = cl.compid
          WHERE cl.compid = ${compid}
            AND t.flown = 'Y'
            AND EXISTS (
@@ -325,14 +336,13 @@ async function listJobs(compid: string): Promise<Job[]> {
                 WHERE pr.class    = cl.class
                   AND pr.datecode = t.datecode
                   AND pr.start  IS NOT NULL AND pr.start  <> '00:00:00'
-                  AND pr.finish IS NOT NULL AND pr.finish <> '00:00:00'
            )
     `
             .append(filterClass)
             .append(filterDc)
             .append(escape` ORDER BY t.datecode DESC, cl.class ASC`)
     );
-    return rows.map((r) => ({compid, className: r.class, datecode: r.datecode}));
+    return rows.map((r) => ({compid, compName: r.compname, className: r.class, classDisplay: r.classname, datecode: r.datecode}));
 }
 
 // Lifted from bin/exporttrack.ts:240. Returns a fully-prepared Task.
@@ -573,10 +583,20 @@ function rowTag(m: TrackerMatch): string {
 function pilotHeaderTag(rows: TrackerMatch[]): string {
     const flags: string[] = [];
     const assignedRow = rows.find((m) => m.assigned);
+    // Phase 1.5 single-sided rows carry withinTolerance=false by design
+    // (the legacy gate requires both sides), but their available delta
+    // IS within tolerance — the row tag says [assigned, start-only match]
+    // and the side that fired is fine. Don't call it "outside tolerance"
+    // in the header. We surface it as informational ("no finish crossing
+    // today" / "no start crossing today") since the operator may want to
+    // glance at it even though it's not a problem.
+    const isOneSidedClean = (m: TrackerMatch) => m.confidence !== null && (m.deltaStart === null) !== (m.deltaFinish === null);
     if (assignedRow && !assignedRow.withinTolerance) {
         if (assignedRow.bboxOnly) flags.push('assigned ID flying outside task area (wrong tracker)');
         else if (assignedRow.skipped) flags.push('assigned ID skipped (first sighting out of task area)');
-        else if (assignedRow.confidence === null) flags.push('assigned ID has no crossings');
+        else if (isOneSidedClean(assignedRow)) {
+            flags.push(assignedRow.deltaStart !== null ? 'assigned ID has no finish crossing today' : 'assigned ID has no start crossing today');
+        } else if (assignedRow.confidence === null) flags.push('assigned ID has no crossings');
         else flags.push('assigned ID outside tolerance');
     }
     const altMatch = rows.find((m) => m.withinTolerance && !m.assigned);
@@ -591,7 +611,7 @@ function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: 
     if (!all) return [];
     return all
         .filter((h) => h.className !== thisClass)
-        .map((h) => `also matches ${String(h.compno).trim()} ${h.name}`.trim() + ` in class ${h.className}`);
+        .map((h) => `also matches ${String(h.compno).trim()} in class ${h.className}`);
 }
 
 type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean; deltaStart: number | null; deltaFinish: number | null}>;
@@ -778,8 +798,7 @@ function fmtPeers(peers: {compno: Compno; name: string; dt: number}[]): string {
 function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], tolerance: number, scoreMap?: ScoreMap, crossClass?: CrossClassMap, thisClass?: ClassName): void {
     if (!arr.length) return;
     const r = results.find((x) => x.compno === compno);
-    const name = arr[0].name || (r?.name ?? '');
-    console.log(`  ${String(compno).padEnd(4)} ${name}${pilotHeaderTag(arr)}`);
+    console.log(`  ${String(compno).padEnd(4)}${pilotHeaderTag(arr)}`);
     if (r) {
         const startPeers = timePeers(r, results, tolerance, 'start');
         const finishPeers = timePeers(r, results, tolerance, 'finish');
@@ -1012,7 +1031,7 @@ function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClas
 
 function summariseProposal(p: Proposal): string {
     const cur = p.currentTrackerid || '(none)';
-    const parts = [`${p.compno} ${p.name}`.trim(), `trackerid: ${cur} → ${p.newTrackerid}`];
+    const parts = [String(p.compno), `trackerid: ${cur} → ${p.newTrackerid}`];
     if (p.addedIds.length) parts.push(`+${p.addedIds.join(',')}`);
     if (p.removedIds.length) parts.push(`−${p.removedIds.join(',')}`);
     parts.push(`(${p.reason})`);
