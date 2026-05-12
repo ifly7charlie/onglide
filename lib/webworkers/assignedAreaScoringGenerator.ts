@@ -195,7 +195,8 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 taskStatus.inSector ? '1' : '0',
                 taskStatus.inPenalty ? '1' : '0',
                 taskStatus.utcFinish || 0,
-                taskStatus.startFound ? 1 : 0
+                taskStatus.startFound ? 1 : 0,
+                taskStatus.flightStatus
             ].join('|');
             if (!isTick(taskStatus) && newScoredKey === lastScoredKey) {
                 continue;

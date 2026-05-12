@@ -31,8 +31,11 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
     }
 
     let compno = '';
-    let lastClosestToNext: DistanceKM | undefined = Infinity as DistanceKM;
-    let lastTime: Epoch | undefined = undefined;
+    // Skip key: set to the racing-state hash of the last iteration that made it through to a yield.
+    // If the next iteration hashes to the same value, nothing the scoring calculation actually
+    // depends on has changed, so we `continue` and the downstream viewer keeps showing the
+    // previous score. Forced ticks still fall through so time-based heartbeats keep firing.
+    let lastScoredKey = '';
 
     const minGraph = new DistanceOptimiser<BasePositionMessage>(distHaversine, task.legs.length); // min remaining graph
     task.legs.forEach((t) => {
@@ -66,12 +69,22 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
 
             compno = taskStatus.compno;
 
-            // Make sure the task position or time has changed
-            if (!isTick(taskStatus) && lastClosestToNext === taskStatus.closestDistanceToNext && lastTime === taskStatus.t) {
+            // Build the racing-state fingerprint and skip if unchanged since last yield.
+            // Mirrors assignedAreaScoringGenerator's newScoredKey approach.
+            const newScoredKey = [
+                taskStatus.currentLeg,
+                taskStatus.inSector ? '1' : '0',
+                taskStatus.inPenalty ? '1' : '0',
+                taskStatus.utcFinish || 0,
+                taskStatus.startFound ? 1 : 0,
+                taskStatus.flightStatus,
+                taskStatus.closestDistanceToNext,
+                taskStatus.t
+            ].join('|');
+            if (!isTick(taskStatus) && newScoredKey === lastScoredKey) {
                 continue;
             }
-            lastClosestToNext = taskStatus.closestDistanceToNext;
-            lastTime = taskStatus.t;
+            lastScoredKey = newScoredKey;
 
             taskStatus.distance = 0 as DistanceKM;
 
