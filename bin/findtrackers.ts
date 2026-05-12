@@ -945,8 +945,28 @@ function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClas
         // Prefer Phase 1 (both-sided) over Phase 1.5 (single-sided) when
         // both exist for the same pilot — defensive: filter logic above
         // already guards this, but keep the precedence explicit.
-        const addRow = altMatches[0] ?? altSingleSided[0] ?? null;
-        const addId: FlarmID | null = addRow?.flarmid ?? null;
+        let addRow = altMatches[0] ?? altSingleSided[0] ?? null;
+        let addId: FlarmID | null = addRow?.flarmid ?? null;
+
+        // Score gate: only replace an assigned tracker when the proposed
+        // alternative actually outscores it. Phase 1/1.5 categorisation is
+        // a blunt instrument — on landout / one-sided days the assigned
+        // tracker often ends up in `assignedBad` purely because Phase 1.5
+        // carries withinTolerance=false, even when its score (Δstart, in-
+        // area presence, DDB CN, base) clearly beats any contender. Drop
+        // the add candidate in that case so the existing assignment stands.
+        if (addId && assignedBad.length) {
+            const addScore = scoreMap.get(scoreKey(compno, addId))?.score.total ?? 0;
+            let bestAssignedScore = -Infinity;
+            for (const m of assignedBad) {
+                const s = scoreMap.get(scoreKey(compno, m.flarmid))?.score.total ?? 0;
+                if (s > bestAssignedScore) bestAssignedScore = s;
+            }
+            if (addScore <= bestAssignedScore) {
+                addRow = null;
+                addId = null;
+            }
+        }
 
         // Only propose removing an assigned tracker if we have *positive*
         // evidence it's wrong. "Outside tolerance" alone can be poor FLARM
