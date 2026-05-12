@@ -35,7 +35,8 @@ describe('pointlog', () => {
         const baseT = 1700000000;
         const targets: any[] = [];
         for (let i = 0; i < 500; i++) {
-            const flarm = i % 5 === 0 ? 'ABCDEF' : `OTHER${i % 7}`;
+            // hex flarmIDs so the fid-prefilter works on real data shape.
+            const flarm = i % 5 === 0 ? 'ABCDEF' : `BBBBB${i % 7}`;
             const msg = makeMsg(baseT + i, flarm);
             appendPoint(msg);
             if (flarm === 'ABCDEF') targets.push(msg);
@@ -55,7 +56,7 @@ describe('pointlog', () => {
         const baseT = 1700000000;
         const expected: any[] = [];
         for (let i = 0; i < 500; i++) {
-            const msg = makeMsg(baseT + i, 'TARGET');
+            const msg = makeMsg(baseT + i, 'AABBCC');
             appendPoint(msg);
             expected.push(msg);
             if (i % 50 === 0) await new Promise((r) => setImmediate(r));
@@ -67,7 +68,7 @@ describe('pointlog', () => {
         expect(files.length).toBeGreaterThan(1);
 
         const got: any[] = [];
-        for await (const m of loadPoints({flarmId: 'TARGET' as any, since: baseT})) got.push(m);
+        for await (const m of loadPoints({flarmId: 'AABBCC' as any, since: baseT})) got.push(m);
         expect(got.length).toBe(expected.length);
     });
 
@@ -76,12 +77,12 @@ describe('pointlog', () => {
         await openLog();
 
         const baseT = 1700000000;
-        for (let i = 0; i < 20000; i++) appendPoint(makeMsg(baseT + i, i % 2 === 0 ? 'A' : 'B'));
+        for (let i = 0; i < 20000; i++) appendPoint(makeMsg(baseT + i, i % 2 === 0 ? 'AAAAAA' : 'BBBBBB'));
         await closeLog();
 
         const midT = baseT + 10000;
         const got: any[] = [];
-        for await (const m of loadPoints({flarmId: 'A' as any, since: midT})) got.push(m);
+        for await (const m of loadPoints({flarmId: 'AAAAAA' as any, since: midT})) got.push(m);
         expect(got.length).toBe(5000);
         for (const m of got) expect(m.t).toBeGreaterThanOrEqual(midT);
     });
@@ -91,11 +92,11 @@ describe('pointlog', () => {
         await openLog();
 
         const baseT = Math.floor(Date.now() / 1000); // realistic (live-style) message times
-        for (let i = 0; i < 1000; i++) appendPoint(makeMsg(baseT + i, 'X'));
+        for (let i = 0; i < 1000; i++) appendPoint(makeMsg(baseT + i, 'AABBCC'));
         await closeLog();
 
         const got: any[] = [];
-        for await (const m of loadPoints({flarmId: 'X' as any, since: baseT + 100, until: baseT + 200})) got.push(m);
+        for await (const m of loadPoints({flarmId: 'AABBCC' as any, since: baseT + 100, until: baseT + 200})) got.push(m);
         expect(got.length).toBe(101);
         expect(got[0].t).toBe(baseT + 100);
         expect(got.at(-1).t).toBe(baseT + 200);
@@ -108,13 +109,13 @@ describe('pointlog', () => {
         const baseT = 1700000000;
         for (let i = 0; i < 1000; i++) {
             const jitter = i % 50 === 0 ? -5 : 0;
-            appendPoint(makeMsg(baseT + i + jitter, 'Y'));
+            appendPoint(makeMsg(baseT + i + jitter, 'AABBCC'));
         }
         await closeLog();
 
         const since = baseT + 500;
         const got: any[] = [];
-        for await (const m of loadPoints({flarmId: 'Y' as any, since})) got.push(m);
+        for await (const m of loadPoints({flarmId: 'AABBCC' as any, since})) got.push(m);
         for (const m of got) expect(m.t).toBeGreaterThanOrEqual(since);
         expect(got.length).toBeGreaterThan(0);
     });
@@ -122,7 +123,7 @@ describe('pointlog', () => {
     test('empty directory yields no points', async () => {
         dir = await freshEnv('empty');
         const got: any[] = [];
-        for await (const m of loadPoints({flarmId: 'NOPE' as any, since: 0})) got.push(m);
+        for await (const m of loadPoints({flarmId: 'AABBCC' as any, since: 0})) got.push(m);
         expect(got.length).toBe(0);
     });
 
@@ -152,12 +153,12 @@ describe('pointlog', () => {
 
         // Post-reopen writes go into the same activePath (append mode); a
         // single `loadPoints` query covers them.
-        for (let i = 0; i < 10; i++) appendPoint(makeMsg(baseT + 100 + i, 'TARGET'));
+        for (let i = 0; i < 10; i++) appendPoint(makeMsg(baseT + 100 + i, 'AABBCC'));
 
         await closeLog();
 
         const got: any[] = [];
-        for await (const m of loadPoints({flarmId: 'TARGET' as any, since: baseT + 100})) got.push(m);
+        for await (const m of loadPoints({flarmId: 'AABBCC' as any, since: baseT + 100})) got.push(m);
         expect(got.length).toBe(10);
     });
 
@@ -202,7 +203,7 @@ describe('pointlog', () => {
 
             // appendPoint into the no-stream branch should be idempotent —
             // existing scheduled reopen still fires.
-            appendPoint(makeMsg(1700000000, 'X'));
+            appendPoint(makeMsg(1700000000, 'AABBCC'));
             await vi.advanceTimersByTimeAsync(1100);
         } finally {
             vi.useRealTimers();
@@ -225,10 +226,8 @@ describe('pointlog-v8', () => {
     test('record round-trip via serializeRecord / deserializeRecord', () => {
         const msg = makeMsg(1700000123, 'ABCDEF');
         msg.d = 5;
-        const {rec, payloadBytes} = serializeRecord(msg);
+        const rec = serializeRecord(msg);
         expect(rec.length).toBe(RECORD_SIZE);
-        expect(payloadBytes).toBeGreaterThan(0);
-        expect(payloadBytes).toBeLessThanOrEqual(RECORD_SIZE - 6);
         // Header: 4 B writeTime, 2 B signed d
         expect(rec.readUInt32LE(0)).toBe(msg.t + msg.d);
         expect(rec.readInt16LE(4)).toBe(msg.d);
@@ -236,17 +235,23 @@ describe('pointlog-v8', () => {
         expect(round.t).toBe(msg.t);
         expect(round.f).toBe(msg.f);
         expect(round.o).toBe(msg.o);
-        expect(round.lat).toBe(msg.lat);
-        expect(round.lng).toBe(msg.lng);
+        // lat/lng quantize to 1e-7 grid; tolerate the round-trip delta.
+        expect(round.lat).toBeCloseTo(msg.lat, 6);
+        expect(round.lng).toBeCloseTo(msg.lng, 6);
         expect(round.a).toBe(msg.a);
         expect(round.g).toBe(msg.g);
+        expect(round.b).toBe(msg.b);
+        expect(round.s).toBe(msg.s);
         expect(round.d).toBe(msg.d);
+        // c is reconstructed as f for diagnostic compatibility; l is always null.
+        expect(round.c).toBe(msg.f);
+        expect(round.l).toBeNull();
     });
 
     test('negative d survives the int16 header field', () => {
-        const msg = makeMsg(1700000200, 'XYZ');
+        const msg = makeMsg(1700000200, 'CAFE00');
         msg.d = -7; // clock skew: packet stamped in the future
-        const {rec} = serializeRecord(msg);
+        const rec = serializeRecord(msg);
         expect(rec.readUInt32LE(0)).toBe(msg.t + msg.d);
         expect(rec.readInt16LE(4)).toBe(-7);
         const round = deserializeRecord(rec, 0) as any;
@@ -254,20 +259,28 @@ describe('pointlog-v8', () => {
         expect(round.t).toBe(msg.t);
     });
 
-    test('binary search lands on first record with t+d >= target', async () => {
-        dir = await fspMkTmp('binsearchv8');
+    test('long sender truncates to 10 ASCII bytes', () => {
+        const msg = makeMsg(1700000300, 'AABBCC', 'LONGRECEIVER01'); // 14 chars
+        const rec = serializeRecord(msg);
+        const round = deserializeRecord(rec, 0) as any;
+        expect(round.o).toBe('LONGRECEIV');
+    });
+
+    test('binary search lands on first record with writeTime >= target', async () => {
+        dir = await fspMkTmp('binsearch');
         const file = path.join(dir, 'aprs-h-1-1700000000.v8');
-        // Build 1000 records, monotonic in t+d. d = 0 to keep things obvious.
+        // Build 1000 records, monotonic in writeTime. d = 0 keeps t == writeTime.
         const N = 1000;
         const base = 1700000000;
         const records: Buffer[] = [];
-        // file header
-        records.push(Buffer.alloc(FILE_HEADER_SIZE));
-        Buffer.from('ONG8', 'ascii').copy(records[0]!, 0);
-        records[0]!.writeUInt16LE(1, 4);
-        records[0]!.writeUInt16LE(RECORD_SIZE, 6);
+        // File header (must match FILE_FORMAT_VERSION = 2 and RECORD_SIZE)
+        const fileHeader = Buffer.alloc(FILE_HEADER_SIZE);
+        Buffer.from('ONG8', 'ascii').copy(fileHeader, 0);
+        fileHeader.writeUInt16LE(2, 4);
+        fileHeader.writeUInt16LE(RECORD_SIZE, 6);
+        records.push(fileHeader);
         for (let i = 0; i < N; i++) {
-            records.push(serializeRecord(makeMsg(base + i, 'X')).rec);
+            records.push(serializeRecord(makeMsg(base + i, 'AABBCC')));
         }
         await fsp.writeFile(file, Buffer.concat(records));
 
@@ -296,6 +309,25 @@ describe('pointlog-v8', () => {
         }
     });
 
+    test('fid pre-filter: records with non-matching flarm IDs are not yielded', async () => {
+        dir = await freshEnv('fidfilter');
+        await openLog();
+        const baseT = 1700000000;
+        const wanted: any[] = [];
+        for (let i = 0; i < 600; i++) {
+            // 1 in 6 records is "AABBCC"; rest are five distinct hex IDs.
+            const flarm = i % 6 === 0 ? 'AABBCC' : `BBBBB${i % 5}`;
+            const msg = makeMsg(baseT + i, flarm);
+            appendPoint(msg);
+            if (flarm === 'AABBCC') wanted.push(msg);
+        }
+        await closeLog();
+
+        const got: any[] = [];
+        for await (const m of loadPoints({flarmId: 'AABBCC' as any, since: baseT})) got.push(m);
+        expect(got.length).toBe(wanted.length);
+        for (const m of got) expect(m.f).toBe('AABBCC');
+    });
 });
 
 async function fspMkTmp(sub: string): Promise<string> {

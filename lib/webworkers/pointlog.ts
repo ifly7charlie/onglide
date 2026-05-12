@@ -1,25 +1,33 @@
 // APRS point log: per-process write-only stream + bulk reader.
 //
-// On-disk format — fixed-size records of V8-native serialized messages,
-// indexed by record number for trivial binary search:
+// On-disk format — fixed 36-byte records, every field at a known offset,
+// indexed by record number for trivial binary search. Every byte is data;
+// there is no per-record padding.
 //
 //   File header (16 bytes):
-//     0  4  magic     "ONG8"
-//     4  2  version   uint16 LE (= 1)
-//     6  2  recSize   uint16 LE (= RECORD_SIZE by default)
-//     8  8  reserved  zeros
+//     0  4  magic       "ONG8"
+//     4  2  version     uint16 LE  (= 2)
+//     6  2  recSize     uint16 LE  (= 36)
+//     8  8  reserved    zeros
 //
-//   Record N at offset 16 + N * recSize. Record layout (recSize bytes):
-//     0  4  writeTime  uint32 LE (= t + d at append; always positive, monotonic)
-//     4  2  d          int16  LE (signed; t = writeTime - d)
-//     6  ?  v8         output of v8.serialize(message); self-delimiting
-//             ...      zero padding to recSize
+//   Record N at offset 16 + N * 36. Layout:
+//     0   4   writeTime  uint32 LE   (= t + d at append; monotonic; binary-search key)
+//     4   2   d          int16  LE   (signed delay; t = writeTime - d)
+//     6   4   f          uint32 LE   (= parseInt(msg.f, 16); also serves as fid filter key)
+//    10  10   o          10 ASCII    (sender callsign, zero-padded; truncated if > 10 chars)
+//    20   4   lat        int32  LE   (= round(msg.lat * 1e7); 1.1 cm grid)
+//    24   4   lng        int32  LE
+//    28   2   a          int16  LE   (altitude AMSL m)
+//    30   2   g          int16  LE   (altitude AGL m)
+//    32   2   b          int16  LE   (bearing 0-359; -1 = absent)
+//    34   2   s_x10      int16  LE   (speed × 10; -1 = absent)
 //
 // The 4-byte writeTime is the binary-search key directly — no add, no sign
-// math, no V8 deserialize on the probe path. The 2-byte d lets the scanner
-// compute t = writeTime - d for the per-record `since`/`until` filter
-// before paying the V8 deserialize. d is signed because backfill replays
-// and receiver clock skew can produce t > writeTime.
+// math, no decode on the probe path. The 2-byte d lets the scanner compute
+// t = writeTime - d for the per-record `since`/`until` filter before any
+// further decode. d is signed because backfill replays and receiver clock
+// skew can produce t > writeTime. The 4-byte f at offset 6 lets the scanner
+// reject non-matching flarm IDs without touching the rest of the record.
 //
 // The file is monotonic in writeTime (each record is appended at writer-now)
 // but NOT in t — and for a given writeTime there is no guarantee that t is
@@ -28,15 +36,13 @@
 // therefore lands on the first record with writeTime >= target - SLACK and
 // the linear scan from there applies the t-filter per record.
 //
-// No length prefix on the V8 payload: v8.serialize emits a self-delimiting
-// stream (header byte + version + tag-driven body), and v8.deserialize
-// stops at the end of the encoded value, ignoring any trailing bytes.
-// Records padded with zeros to recSize round-trip cleanly.
+// Dropped from storage: c (every consumer overwrites or falls back),
+// l (writer always emits null), _ (writer never sets), ad (only consumer
+// is a cosmetic ground-filter that no-ops gracefully when absent).
 
 import {createWriteStream, WriteStream, promises as fsp, openSync, closeSync, readSync, statSync} from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import {serialize as v8serialize, deserialize as v8deserialize} from 'v8';
 
 import type {PositionMessage, FlarmID} from '../types';
 
@@ -45,19 +51,17 @@ export type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: numbe
 // ---------- format constants ----------
 
 const FILE_MAGIC = Buffer.from('ONG8', 'ascii');
-const FILE_FORMAT_VERSION = 1;
+const FILE_FORMAT_VERSION = 2;
 export const FILE_HEADER_SIZE = 16;
-// 6 B record header + 131 B observed max payload = 137 B floor; 144 B gives
-// 7 B of headroom and packs ~910 records per 128 KB chunk read. The writer
-// throws immediately if anything exceeds the per-record budget — bump if
-// it ever fires.
-export const RECORD_SIZE = 144;
-const RECORD_HEADER_SIZE = 6;
+export const RECORD_SIZE = 36;
+const O_FIELD_LEN = 10;
 const D_MIN = -0x8000;
 const D_MAX = 0x7fff;
 
-// Chunk size for sequential scan reads.
-const RECORDS_PER_CHUNK = 512; // 512 × 144 B ≈ 72 KB
+// Chunk size for sequential scan reads. 4096 × 36 B = 144 KB per syscall —
+// amortises read cost; doesn't affect file layout (the file is exactly
+// 16 + N * 36 bytes, no padding).
+const RECORDS_PER_CHUNK = 4096;
 const OUT_OF_ORDER_SLACK_SEC = 30;
 
 // ---------- module state ----------
@@ -214,44 +218,89 @@ export function parseFileHeader(buf: Buffer): {version: number; recSize: number}
     const version = buf.readUInt16LE(4);
     const recSize = buf.readUInt16LE(6);
     if (version !== FILE_FORMAT_VERSION) throw new Error(`pointlog: unsupported version ${version}`);
-    if (recSize <= RECORD_HEADER_SIZE) throw new Error(`pointlog: bad recSize ${recSize}`);
+    if (recSize !== RECORD_SIZE) throw new Error(`pointlog: unexpected recSize ${recSize} (expected ${RECORD_SIZE})`);
     return {version, recSize};
 }
 
-export interface SerializedRecord {
-    rec: Buffer;
-    payloadBytes: number;
+// Field offsets within a record.
+const OFF_WRITE_TIME = 0;
+const OFF_D = 4;
+const OFF_F = 6;
+const OFF_O = 10;
+const OFF_LAT = 20;
+const OFF_LNG = 24;
+const OFF_A = 28;
+const OFF_G = 30;
+const OFF_B = 32;
+const OFF_S = 34;
+
+// Parse a 6-hex flarm ID to a uint32. Production flarmids are always 6-hex
+// (OGN protocol), so this round-trips cleanly. `| 0` coerces NaN to 0 in
+// the unexpected non-hex case.
+export function fidFromFlarm(flarm: string): number {
+    return parseInt(flarm, 16) | 0;
 }
 
-// Serialize one message into a recSize-byte record. Returns the record
-// plus the V8 payload size — the record itself doesn't carry a length
-// (v8.deserialize self-delimits), but callers that track stats or detect
-// near-budget records want the payload size. Throws if the payload doesn't
-// fit or if d falls outside the int16 header field.
-export function serializeRecord(msg: LoggedMessage, recSize: number = RECORD_SIZE): SerializedRecord {
-    const payload = v8serialize(msg);
-    const maxPayload = recSize - RECORD_HEADER_SIZE;
-    if (payload.length > maxPayload) {
-        throw new Error(`pointlog: payload ${payload.length} bytes exceeds budget ${maxPayload} for flarm=${(msg as any).f} t=${msg.t}`);
-    }
+// Serialize one message into a 36-byte record. Throws only if d falls
+// outside int16 range (writer state corruption — surfaces immediately).
+export function serializeRecord(msg: LoggedMessage): Buffer {
     const d = ((msg.d ?? 0) as number) | 0;
     if (d < D_MIN || d > D_MAX) {
-        throw new Error(`pointlog: d=${d} out of int16 range for flarm=${(msg as any).f} t=${msg.t}`);
+        throw new Error(`pointlog: d=${d} out of int16 range for flarm=${msg.f} t=${msg.t}`);
     }
     const writeTime = (msg.t + d) >>> 0;
-    const rec = Buffer.alloc(recSize);
-    rec.writeUInt32LE(writeTime, 0);
-    rec.writeInt16LE(d, 4);
-    payload.copy(rec, RECORD_HEADER_SIZE);
-    return {rec, payloadBytes: payload.length};
+    const rec = Buffer.alloc(RECORD_SIZE);
+    rec.writeUInt32LE(writeTime, OFF_WRITE_TIME);
+    rec.writeInt16LE(d, OFF_D);
+    rec.writeUInt32LE(fidFromFlarm(msg.f), OFF_F);
+    // 10-byte fixed ASCII slot for the sender. `write` truncates anything
+    // longer than 10 chars and leaves zero padding after a short value
+    // (Buffer.alloc above filled with zeros). The aprs.ts dedup tiebreaker
+    // compares the decoded string, so the full sender name round-trips up
+    // to 10 chars; longer collisions are a soft quality degradation.
+    rec.write(msg.o ?? '', OFF_O, O_FIELD_LEN, 'ascii');
+    rec.writeInt32LE(Math.round((msg.lat as number) * 1e7), OFF_LAT);
+    rec.writeInt32LE(Math.round((msg.lng as number) * 1e7), OFF_LNG);
+    rec.writeInt16LE((msg.a as number) | 0, OFF_A);
+    rec.writeInt16LE((msg.g as number) | 0, OFF_G);
+    rec.writeInt16LE(msg.b == null ? -1 : (msg.b as number) | 0, OFF_B);
+    rec.writeInt16LE(msg.s == null ? -1 : Math.round((msg.s as number) * 10), OFF_S);
+    return rec;
 }
 
-// Deserialize a record from a buffer at the given offset. The V8 stream is
-// self-delimiting — extra trailing bytes in the record's body (zero
-// padding, or even neighbour-record bytes if a slice runs long) are
-// ignored by v8.deserialize.
-export function deserializeRecord(buf: Buffer, offset: number, recSize: number = RECORD_SIZE): LoggedMessage {
-    return v8deserialize(buf.subarray(offset + RECORD_HEADER_SIZE, offset + recSize)) as LoggedMessage;
+// Decode a record from the given offset into a LoggedMessage. Reconstructed
+// fields: t (= writeTime - d), f (uppercase hex), c (= f, for dumptracks),
+// l (always null, matches what the writer always stored).
+export function deserializeRecord(buf: Buffer, offset: number): LoggedMessage {
+    const writeTime = buf.readUInt32LE(offset + OFF_WRITE_TIME);
+    const d = buf.readInt16LE(offset + OFF_D);
+    const fid = buf.readUInt32LE(offset + OFF_F);
+    const f = fid.toString(16).toUpperCase().padStart(6, '0');
+    // ASCII slot is zero-padded — strip the trailing zeros.
+    let oEnd = offset + OFF_O + O_FIELD_LEN;
+    while (oEnd > offset + OFF_O && buf[oEnd - 1] === 0) oEnd--;
+    const o = buf.toString('ascii', offset + OFF_O, oEnd);
+    const lat = buf.readInt32LE(offset + OFF_LAT) / 1e7;
+    const lng = buf.readInt32LE(offset + OFF_LNG) / 1e7;
+    const a = buf.readInt16LE(offset + OFF_A);
+    const g = buf.readInt16LE(offset + OFF_G);
+    const bRaw = buf.readInt16LE(offset + OFF_B);
+    const sRaw = buf.readInt16LE(offset + OFF_S);
+    const out: any = {
+        t: writeTime - d,
+        d,
+        f,
+        c: f, // dumptracks fallback; aprs.ts reload overwrites with target.compno
+        o,
+        lat,
+        lng,
+        a,
+        g,
+        l: null,
+    };
+    if (bRaw !== -1) out.b = bRaw;
+    if (sRaw !== -1) out.s = sRaw / 10;
+    return out as LoggedMessage;
 }
 
 // ---------- writer ----------
@@ -364,7 +413,7 @@ export function appendPoint(message: LoggedMessage): void {
     }
     let rec: Buffer;
     try {
-        rec = serializeRecord(message).rec;
+        rec = serializeRecord(message);
     } catch (e: any) {
         // Over-budget payload, or d out of int16 range. Drop the record
         // rather than crash the daemon, but throttle-log so it's visible.
@@ -622,6 +671,11 @@ async function* scanFileRecords(fullPath: string, q: {since: number; until?: num
     const opened = openRecordFile(fullPath);
     if (!opened) return;
     const {fd, recSize, recordCount} = opened;
+    // Pre-compute uint32 fingerprints for the filter set so the hot loop
+    // does a single Set.has(uint32) per record. Flarm IDs are always 6-hex
+    // in production (the OGN protocol enforces it), so the fid uniquely
+    // identifies the flarm — no string post-check needed.
+    const fidSet: Set<number> | undefined = q.flarmId != null ? new Set([fidFromFlarm(q.flarmId)]) : q.flarmIds != null ? new Set([...q.flarmIds].map(fidFromFlarm)) : undefined;
     try {
         const startIndex = binarySearchForTs(fd, recordCount, recSize, q.since - OUT_OF_ORDER_SLACK_SEC);
         const chunkBytes = RECORDS_PER_CHUNK * recSize;
@@ -635,18 +689,21 @@ async function* scanFileRecords(fullPath: string, q: {since: number; until?: num
             const recsRead = Math.floor(n / recSize);
             for (let r = 0; r < recsRead; r++) {
                 const recOff = r * recSize;
-                const writeTime = buf.readUInt32LE(recOff);
-                const d = buf.readInt16LE(recOff + 4);
+                const writeTime = buf.readUInt32LE(recOff + OFF_WRITE_TIME);
+                const d = buf.readInt16LE(recOff + OFF_D);
                 const t = writeTime - d;
                 if (t < q.since) continue;
                 // File is monotonic in writeTime but NOT in t — a backfill
                 // replay can drop a packet with future-ish t in the middle.
                 // `continue`, don't `return`, so the rest of the scan stands.
                 if (q.until != null && t > q.until) continue;
-                const msg = deserializeRecord(buf, recOff, recSize);
-                if (q.flarmId != null && msg.f !== q.flarmId) continue;
-                if (q.flarmIds && !q.flarmIds.has(msg.f)) continue;
-                yield msg;
+                // Fast flarm-ID pre-filter — single uint32 read, no further
+                // decode for the ~97% of records that don't match.
+                if (fidSet) {
+                    const fid = buf.readUInt32LE(recOff + OFF_F);
+                    if (!fidSet.has(fid)) continue;
+                }
+                yield deserializeRecord(buf, recOff);
             }
             i += recsRead;
             if (recsRead < recsThisChunk) break; // short read at EOF
