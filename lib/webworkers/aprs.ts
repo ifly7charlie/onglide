@@ -23,8 +23,6 @@ import {getElevationOffset} from '../getelevationoffset';
 //import { getOffset } from '../egm96.mjs';
 
 // Helper function for geometry
-import distance from '@turf/distance';
-import {Coord, point} from '@turf/helpers';
 
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
@@ -34,7 +32,6 @@ import {getNow, d} from '../now';
 import {PositionMessage} from '../types';
 interface InterimPositionMessage extends PositionMessage {
     //    aircraft: Aircraft;
-    j?: Coord;
     f: FlarmID; // id
     o: string; // sender
     ad: number; // airfield distance
@@ -42,6 +39,7 @@ interface InterimPositionMessage extends PositionMessage {
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
 import {APRS_MAX_FILTER_BYTES, Bbox, pointInBbox} from '../flightprocessing/taskBbox';
+import {distHaversine} from '../flightprocessing/taskhelper';
 
 // APRS connection
 let connection: ISSocket & {aprsc: string; lastPacketTime: number};
@@ -237,7 +235,7 @@ export interface Tracker {
 // config and updated at runtime via AprsCommandEnum.setAirfields.
 export interface Airfield {
     compid: string;
-    point: Coord;
+    point: {lat: number; lng: number};
     elevation: AltitudeAgl;
     // Expanded task bbox for the comp. Mutated in place by setAirfields when
     // the main thread ships a new bbox via rebuildAprsFilter.
@@ -249,11 +247,11 @@ const airfields: Airfield[] = [];
 // Lazily created on first dispatch; closed when the airfield goes away.
 const unknownChannels: Record<string, BroadcastChannel> = {};
 
-function nearestAirfield(jPoint: Coord): {field: Airfield; distance: number} | null {
+function nearestAirfield(jPoint: {lat: number; lng: number}): {field: Airfield; distance: number} | null {
     let best: Airfield | null = null;
     let bestD = Infinity;
     for (const a of airfields) {
-        const d = distance(jPoint, a.point);
+        const d = distHaversine(jPoint, a.point);
         if (d < bestD) {
             bestD = d;
             best = a;
@@ -291,7 +289,7 @@ export function setAirfields(specs: AirfieldSpec[]) {
     // clobber a bbox that rebuildAprsFilter has already pushed.
     for (const s of specs) {
         const existing = airfields.find((a) => a.compid === s.compid);
-        const p = point([s.lt, s.lg]);
+        const p = {lat: s.lt, lng: s.lg};
         if (existing) {
             existing.point = p;
         } else {
@@ -992,10 +990,6 @@ async function flushLoads() {
             const baseMessage = raw as InterimPositionMessage & {d?: number};
             if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
 
-            // Build the GeoJSON point once per loaded record, share across
-            // any targets that have this flarm ID.
-            const j = point([baseMessage.lat, baseMessage.lng]);
-
             for (const target of targets) {
                 if (raw.t < target.since) continue;
                 // Pre-task comps (no bbox) keep current behaviour; for a comp
@@ -1003,7 +997,7 @@ async function flushLoads() {
                 // per target, so multi-comp registrations naturally route
                 // each point to whichever comp(s) actually contain it.
                 if (target.airfield.bbox && !pointInBbox(target.airfield.bbox, baseMessage.lat, baseMessage.lng)) continue;
-                target.queue.push({...baseMessage, c: target.compno, j});
+                target.queue.push({...baseMessage, c: target.compno});
                 dispatched++;
             }
         }
@@ -1121,8 +1115,7 @@ export async function processPacket(packet: aprsPacket) {
     // Apply the correction
     let altitude = Math.floor(packet.altitude + aoa);
 
-    // geojson for helper function slater
-    const jPoint = point([packet.latitude, packet.longitude]);
+    const jPoint = {lat: packet.latitude!, lng: packet.longitude!};
 
     statistics.msgsReceived++;
 
@@ -1181,8 +1174,6 @@ export async function processPacket(packet: aprsPacket) {
     }
 
     statistics.knownReceived++;
-
-    message.j = jPoint;
 
     // Per-aircraft bbox prefilter and multi-comp disambiguation. See
     // selectAircraftForPosition for the rules.
@@ -1255,7 +1246,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         const sorted = lastSent
             ? duplicates
                   .map((point) => {
-                      const dH = distance(point.j!, lastSent!.j!);
+                      const dH = distHaversine(point, lastSent!);
                       const dV = point.a - lastSent!.a;
                       const dT = point.t - lastSent!.t;
                       return {
@@ -1327,7 +1318,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // point and then get reverted when the "live" final point lands. The heartbeat tick below
         // (always _:true) is what signals the replay/live boundary to iog.
         const live = start != 0 || (position < messages.length && messages[position].t >= to);
-        aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
+        aircraft.channel!.postMessage({...point, aircraft: undefined, _: live});
         log('sent->', point);
     }
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {

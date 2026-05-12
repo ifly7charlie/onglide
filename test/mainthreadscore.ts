@@ -97,8 +97,6 @@ const argv = yargs(hideBin(process.argv))
     .help()
     .parseSync();
 
-let location: AirfieldLocation;
-
 run();
 
 async function run() {
@@ -123,14 +121,16 @@ async function run() {
             )
     `);
 
-    location = ((await mysql.query('SELECT name, lt as lat,lg as lng,tz FROM competition LIMIT 1')) as any)[0];
-    location.point = point([location.lng, location.lat]);
-    location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
-    const internalName = location.name.replace(/[^a-z]/gi, '').substring(0, 10);
-
-    const results = (await Promise.allSettled(pilots.map((p) => runScore(argv.datecode as Datecode, p.class, p.compno, p.trackerid, p.handicap))))
+    const settled = await Promise.allSettled(pilots.map((p) => runScore(argv.datecode as Datecode, p.class, p.compno, p.trackerid, p.handicap)));
+    for (let i = 0; i < settled.length; i++) {
+        const r = settled[i];
+        if (r.status === 'rejected') {
+            console.error(`runScore rejected for ${pilots[i].compno}:`, r.reason);
+        }
+    }
+    const results = settled
         .filter((r) => r.status == 'fulfilled')
-        .map((p) => p.value)
+        .map((p) => (p as PromiseFulfilledResult<any>).value)
         .filter((p) => p !== undefined);
 
     const points = results.reduce((a, r) => a + (r.points as number), 0);
@@ -171,7 +171,7 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     // Stub airfield: mainthread-score is a replay/test harness that never
     // invokes the worker prefilter. Bbox absent → pre-task semantics if any
     // path ever did consult it.
-    const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any};
+    const stubAirfield: Airfield = {compid: '', point: {lat: 0, lng: 0}, elevation: 0 as any};
 
     const glider: Aircraft = {
         compno,
@@ -220,6 +220,21 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     if (!task) {
         return;
     }
+
+    const airfieldRows = (await mysql.query(
+        escape`SELECT c.name, c.lt as lat, c.lg as lng, c.tz, c.tzoffset
+               FROM competition c
+               JOIN classes cl ON cl.compid = c.compid
+               WHERE cl.class = ${className}
+               LIMIT 1`
+    )) as any[];
+    if (!airfieldRows.length) {
+        console.error(`${className}: no airfield row found via classes.compid join`);
+        return;
+    }
+    const location = airfieldRows[0] as AirfieldLocation;
+    location.point = point([location.lng, location.lat]);
+    location.officialDelay = parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch;
 
     task.preparedLegs = task.legs.map((_leg, i) => new PreparedTurnpoint(task.legs, i));
 
