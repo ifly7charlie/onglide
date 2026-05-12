@@ -115,10 +115,10 @@ function logThrottled(lastTsRef: () => number, setLastTs: (t: number) => void, i
 }
 
 // ---------- filename helpers ----------
-// Active:   aprs-<host>-<pid>-<firstTs>.v8        (3 segments)
-// Rotated:  aprs-<host>-<pid>-<firstTs>-<lastTs>.v8 (4 segments)
+// Active:   aprs-<host>-<pid>-<firstTs>.bin        (3 segments)
+// Rotated:  aprs-<host>-<pid>-<firstTs>-<lastTs>.bin (4 segments)
 const FILE_PREFIX = 'aprs-';
-const FILE_SUFFIX = '.v8';
+const FILE_SUFFIX = '.bin';
 
 interface ParsedName {
     file: string;
@@ -296,7 +296,7 @@ export function deserializeRecord(buf: Buffer, offset: number): LoggedMessage {
         lng,
         a,
         g,
-        l: null,
+        l: null
     };
     if (bRaw !== -1) out.b = bRaw;
     if (sRaw !== -1) out.s = sRaw / 10;
