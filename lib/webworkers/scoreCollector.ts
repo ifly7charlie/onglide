@@ -217,4 +217,3 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
     trackMetric('sc.done', 1);
     console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
 }
-

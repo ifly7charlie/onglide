@@ -62,20 +62,7 @@ import {homeLocationLayer} from './homeLocationLayer';
 //import {turnpointLayer} from './turnpointlayer';
 
 import {registerMapIcons} from './mapIcons';
-import {
-    DmPointStyle,
-    hullLineStyle,
-    hullPointStyle,
-    maxLineStyle,
-    maxSignStyle,
-    minLineStyle,
-    minSignStyle,
-    scoredLineStyle,
-    scoringPointStyle,
-    suggestedLineStyle,
-    turnpointStyle2d,
-    turnpointStyle3d
-} from './mapLayerStyles';
+import {DmPointStyle, hullLineStyle, hullPointStyle, maxLineStyle, maxSignStyle, minLineStyle, minSignStyle, scoredLineStyle, scoringPointStyle, suggestedLineStyle, turnpointStyle2d, turnpointStyle3d} from './mapLayerStyles';
 
 export default function MApp(props: {
     options: Options;
@@ -168,11 +155,7 @@ export default function MApp(props: {
 
     const nextPoint = (() => {
         if (!task || !selectedScore) return null;
-        const leg = !selectedScore?.utcStart
-            ? task.legs[0]
-            : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
-              ? task.legs.at(-1)
-              : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0));
+        const leg = !selectedScore?.utcStart ? task.legs[0] : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6 ? task.legs.at(-1) : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0));
         return leg ? ([leg.nlng, leg.nlat] as [number, number]) : undefined;
     })();
 
@@ -641,4 +624,3 @@ export default function MApp(props: {
         </ErrorBoundary>
     );
 }
-

@@ -7,7 +7,6 @@
 
 import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, isEnrichedTick} from '../types';
 
-
 import {stripPoints} from '../flightprocessing/taskhelper';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
@@ -198,7 +197,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (status.utcStart && point.t < status.utcStart) {
                     if (point._) {
                         yield status;
-
                     }
                     continue;
                 }
@@ -225,7 +223,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                     if (point._) {
                         yield status;
-
                     }
                     continue;
                 }
@@ -251,7 +248,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             relaxedStartCandidate = null; // strict takes priority
                             if (point._) {
                                 yield status;
-        
                             }
                         } else {
                             // if we are entering then we can reset - this only works for sectors not lines
@@ -291,7 +287,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             relaxedStartCandidate = null;
                             if (point._) {
                                 yield status;
-        
                             }
                         } else if (distToTP1 > relaxedStartCandidate.distToTP1 + 2.0) {
                             // Pilot moving away from TP1 → reject candidate
@@ -306,7 +301,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (!status.startFound) {
                     if (point._) {
                         yield status;
-
                     }
                     continue;
                 }

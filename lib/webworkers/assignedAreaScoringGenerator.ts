@@ -3,7 +3,6 @@ import {type ShortestResult, DistanceOptimiser} from '../flightprocessing/distan
 import type {Epoch, DistanceKM, Task, CalculatedTaskStatus, CalculatedTaskGenerator, TaskStatusGenerator, BasePositionMessage, TaskLegStatus} from '../types';
 import {isTick, PositionStatus} from '../types';
 
-
 import {distHaversine, sumPath, stripPoints} from '../flightprocessing/taskhelper';
 
 import {convexHull} from '../flightprocessing/convexHull';

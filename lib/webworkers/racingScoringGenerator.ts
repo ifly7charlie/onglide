@@ -136,8 +136,9 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                     currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
                     if (currentLeg.distance > 0) {
                         const leg = task.legs[taskStatus.currentLeg];
-                        currentLeg.point = preparedLegs[taskStatus.currentLeg]
-                            .scoredPointRemaining(Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (leg.legDistanceAdjust || 0), leg.length + (leg.legDistanceAdjust || 0)) as DistanceKM);
+                        currentLeg.point = preparedLegs[taskStatus.currentLeg].scoredPointRemaining(
+                            Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (leg.legDistanceAdjust || 0), leg.length + (leg.legDistanceAdjust || 0)) as DistanceKM
+                        );
                     }
                     taskStatus.scoringClosestPoint = taskStatus.closestToNextSectorPoint;
                 }
