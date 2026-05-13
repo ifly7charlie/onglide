@@ -212,7 +212,11 @@ export interface Aircraft {
 
     //    kf?: any; // altitude smoothing
     stationary: number; // consecutive stationary fixes
-    ground: boolean;
+    // Capped 0-10 ground-state counter. Saturated to 10 while the
+    // aircraft looks parked (stationary + low AGL) and decremented once
+    // per high-AGL fix. Treated as "on ground" whenever > 0 — debounces
+    // single stray GPS points that briefly read high altitude.
+    ground: number;
 
     channel?: BroadcastChannel; // where to send packets
 
@@ -889,7 +893,7 @@ function trackGlider(task: AprsCommandTrack) {
         tzoffset: task.tzoffset,
 
         stationary: 0,
-        ground: false,
+        ground: 0,
         lastTick: 0 as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
@@ -1303,23 +1307,34 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
             aircraft.stationary++;
 
             // If we had been stationary for a while and we are low enough to be on the ground
-            // then mark it as so
-            if (aircraft.stationary > 5 && point.g < 100 && !aircraft.ground) {
-                console.log(`${point.c}: on ground @ ${point.t}`);
-                aircraft.ground = true;
+            // then mark it as so. Saturate the counter at 10 each time — while clearly
+            // parked we keep re-asserting on-ground state.
+            if (aircraft.stationary > 5 && point.g < 100) {
+                if (aircraft.ground === 0) {
+                    console.log(`${point.c}: on ground @ ${point.t}`);
+                }
+                aircraft.ground = 6;
             }
         }
 
-        // If we have 'taken' off
-        if (aircraft.ground && point.g > 110) {
-            console.log(`${point.c}: left ground @ ${point.t}`);
-            aircraft.ground = false;
+        // If we look like we have 'taken' off, decrement once. A handful of
+        // bad GPS fixes won't clear the on-ground state — we need ~10
+        // consecutive high-AGL points to fully leave ground.
+        if (aircraft.ground > 0) {
+            if (point.g > 110) {
+                aircraft.ground--;
+                if (aircraft.ground === 0) {
+                    console.log(`${point.c}: left ground @ ${point.t}`);
+                }
+            } else if (point.g < 100) {
+                aircraft.ground = 6;
+            }
         }
 
         // If we are on the ground and we are more than 3 km from airfield location then we don't
         // want to report it. This doesn't filter initial points as you are not marked as on the ground
         // till several stationary points have happened
-        if (aircraft.ground && (point.ad ?? 0) > 3) {
+        if (aircraft.ground > 0 && (point.ad ?? 0) > 3) {
             continue;
         }
 
