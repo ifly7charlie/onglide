@@ -269,7 +269,8 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
             }
         }
         const url = oldScoresUrl(className, datecode, requestChunk.toString(), state.scoreId);
-        while (!signal.aborted) {
+        const MAX_RETRIES = 10;
+        for (let attempt = 0; attempt < MAX_RETRIES && !signal.aborted; attempt++) {
             try {
                 const res = await fetch(url, {signal});
                 if (res.ok) {

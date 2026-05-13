@@ -235,12 +235,18 @@ const _selectAllAMSL = createSelector(
 );
 
 // Find the old tracks
+const MAX_RETRIES = 10;
 export const fetchOldTracks = createAsyncThunk<{downloaded: PilotTracks; websocket: PilotTracks}, {baseTime: Epoch; className: ClassName; datecode: Datecode; residual: PilotTracks}>(
     'tracks/fetchOldTracks', //
     async ({baseTime, datecode, className, residual}, {signal, getState}) => {
+        // baseTime === 0 means the daemon has no historical snapshot yet
+        // (no pilots flown). Don't fetch — just apply the websocket residual.
+        if (!baseTime) {
+            return {downloaded: undefined, websocket: residual};
+        }
         const state = (getState() as RootState).tracks;
         const url = oldTracksUrl(className, datecode, baseTime.toString(), state.scoreId);
-        while (!signal.aborted) {
+        for (let attempt = 0; attempt < MAX_RETRIES && !signal.aborted; attempt++) {
             try {
                 const res = await fetch(url, {signal});
                 if (res.ok) {
