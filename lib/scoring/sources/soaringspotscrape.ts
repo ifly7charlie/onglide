@@ -214,7 +214,6 @@ async function processDayResults(
     classid: ClassId,
     className: string,
     date: string,
-    dayNumber: string,
     results: any
 ): Promise<void> {
     const {db, log, countrycode} = ctx;
@@ -238,7 +237,12 @@ async function processDayResults(
     }
 
     const igcRe = /a href=&quot;.(en_gb.download-contest-flight.+=1)&quot;/i;
-    const cnRe = /([A-Z0-9]+)\s*<.a>\s*$/i;
+    // Strip the outer popover/IGC anchor (if any) so what's left is the
+    // bare CN text — SoaringSpot drops the anchor entirely for pilots
+    // with no IGC available (DNF, no upload), so a regex that requires
+    // </a> at the end can't find them.
+    const stripTags = (s: string) => s.replace(/<[^>]*>/g, '').trim();
+    const cnRe = /^([A-Z0-9]+)/i;
     const flagRe = /class="flag.*title="([a-z]+)"/i;
 
     const convertHandicap = correctClassHandicaps(
@@ -248,9 +252,7 @@ async function processDayResults(
     );
 
     for (const row of results[0]) {
-        if (row['#'] == 'DNF') continue;
-
-        const pilotExtractor = row.CN.match(cnRe);
+        const pilotExtractor = stripTags(row.CN).match(cnRe);
         if (!pilotExtractor) {
             log(`${date} ${className} ${row.CN} - no CN found!`);
             continue;
@@ -712,7 +714,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                             if (resultTableNode) {
                                 const fragment = getOuterHTML(resultTableNode);
                                 const resultsHtml = Tabletojson.convert(fragment, {stripHtmlFromCells: false});
-                                await processDayResults(ctx, classid, className, date, daynumber, resultsHtml);
+                                await processDayResults(ctx, classid, className, date, resultsHtml);
                             }
                         } catch (e) {
                             ctx.log(`results fetch failed for ${classid} ${date}:`, e);
