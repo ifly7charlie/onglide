@@ -945,7 +945,7 @@ function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClas
         // Prefer Phase 1 (both-sided) over Phase 1.5 (single-sided) when
         // both exist for the same pilot — defensive: filter logic above
         // already guards this, but keep the precedence explicit.
-        let addRow = altMatches[0] ?? altSingleSided[0] ?? null;
+        let addRow: TrackerMatch | null = altMatches[0] ?? altSingleSided[0] ?? null;
         let addId: FlarmID | null = addRow?.flarmid ?? null;
 
         // Score gate: only replace an assigned tracker when the proposed
