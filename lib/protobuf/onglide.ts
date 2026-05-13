@@ -64,6 +64,8 @@ export interface CompetitionSummary {
   classStatusesDiffer: boolean;
   displayStatus: string;
   classes: CompetitionClassStatus[];
+  /** seconds; resolved from competition.delay_seconds with NEXT_PUBLIC_COMPETITION_DELAY fallback */
+  officialDelay?: number | undefined;
 }
 
 /**
@@ -835,6 +837,7 @@ function createBaseCompetitionSummary(): CompetitionSummary {
     classStatusesDiffer: false,
     displayStatus: "",
     classes: [],
+    officialDelay: undefined,
   };
 }
 
@@ -884,6 +887,9 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
     }
     for (const v of message.classes) {
       CompetitionClassStatus.encode(v!, writer.uint32(122).fork()).join();
+    }
+    if (message.officialDelay !== undefined) {
+      writer.uint32(128).uint32(message.officialDelay);
     }
     return writer;
   },
@@ -1015,6 +1021,14 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
           message.classes.push(CompetitionClassStatus.decode(reader, reader.uint32()));
           continue;
         }
+        case 16: {
+          if (tag !== 128) {
+            break;
+          }
+
+          message.officialDelay = reader.uint32();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1043,6 +1057,7 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
       classes: globalThis.Array.isArray(object?.classes)
         ? object.classes.map((e: any) => CompetitionClassStatus.fromJSON(e))
         : [],
+      officialDelay: isSet(object.officialDelay) ? globalThis.Number(object.officialDelay) : undefined,
     };
   },
 
@@ -1093,6 +1108,9 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
     if (message.classes?.length) {
       obj.classes = message.classes.map((e) => CompetitionClassStatus.toJSON(e));
     }
+    if (message.officialDelay !== undefined) {
+      obj.officialDelay = Math.round(message.officialDelay);
+    }
     return obj;
   },
 
@@ -1116,6 +1134,7 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
     message.classStatusesDiffer = object.classStatusesDiffer ?? false;
     message.displayStatus = object.displayStatus ?? "";
     message.classes = object.classes?.map((e) => CompetitionClassStatus.fromPartial(e)) || [];
+    message.officialDelay = object.officialDelay ?? undefined;
     return message;
   },
 };

@@ -189,6 +189,20 @@ To enable SSL add ONGLIDE_SSL to the .env file
 ONGLIDE_SSL=yes
 ```
 
+### Per-competition official tracking delay
+
+Each row in the `competition` table has a `delayseconds` column controlling how
+far behind real-time the public stream lags for that comp's scoring worker
+(propagated to the frontend label in the time strip and pilot panel). `NULL`
+means inherit from the `NEXT_PUBLIC_COMPETITION_DELAY` env var (default 10s);
+set a numeric value to override per-comp. Live edits picked up on the next
+60s reconcile tick — no daemon restart required.
+
+```
+UPDATE competition SET delayseconds = 600 WHERE compid = 'mychamps2026';
+UPDATE competition SET delayseconds = NULL WHERE compid = 'leagueround3'; -- back to env-var default
+```
+
 Once you have configure the environment variables use docker compose to create all the 'services' required.
 
 _NOTE_ You need to re-run build if you change the environment variables as the are copied into the

@@ -136,12 +136,20 @@ interface CompetitionMetadata {
     end: string; // YYYY-MM-DD
     tz: string;
     tzoffset: number;
+    officialDelay: number; // seconds; resolved from competition.delayseconds or env-var fallback
 }
 
 interface CompetitionContext {
     compid: string;
     internalName: string;
     location: AirfieldLocation;
+    // Per-comp clock bound to location.officialDelay. Used for anything
+    // emitted on a per-comp websocket (keepalive `at`, positions broadcast
+    // `t`, etc.) so the frontend's notion of "now" tracks the delayed data
+    // stream. Lives on the context (not on location) because location is
+    // shipped to scoring workers via structured clone, which can't carry
+    // function values. Rebuilt by reconcileContexts when delay changes.
+    getNow: () => Epoch;
     ownedChannels: Set<ChannelName>;
     unknownChannel?: BroadcastChannel;
     lastDatecode?: Datecode;
@@ -339,7 +347,16 @@ interface OgnWebSocket extends WebSocket {
 // Load the current file & Get the parsed version of the configuration
 const error = dotenv.config({path: '.env.local'}).error;
 
-import {getNow, getDelay, readOnly, replayBase, d, getReplayDatecode} from '../lib/now';
+import {getNow, getDelay, makeGetNow, readOnly, replayBase, d, getReplayDatecode} from '../lib/now';
+
+// Per-channel "now" — lags real time by the comp's officialDelay so the
+// keepalive's `at`, the positions message `t`, and per-channel score
+// timestamps all match the delayed data stream. Falls back to the global
+// clock for channels whose comp context has gone (cleanup paths) or for
+// pre-context emission. See CompetitionContext.getNow for the bound closure.
+function channelNow(channel: Channel): Epoch {
+    return contexts[channel.compid]?.getNow?.() ?? getNow();
+}
 
 async function main() {
     if (error) {
@@ -543,7 +560,11 @@ async function main() {
             );
 
             const compid = compChannels[0]?.compid;
-            const msg = safeEncode(OnglideWebSocketMessage, {positions: {class: positions}, t: Math.trunc(now)}, `positions ${compid}`);
+            // Per-comp "now" so the message timestamp matches the delayed
+            // position stream — frontend reads this as its current-time
+            // reference for staleness / uptodate detection.
+            const compNow = contexts[compid]?.getNow?.() ?? now;
+            const msg = safeEncode(OnglideWebSocketMessage, {positions: {class: positions}, t: Math.trunc(compNow)}, `positions ${compid}`);
 
             for (const channel of compChannels) {
                 channel.statistics.activeListeners += channel.clients.length;
@@ -768,7 +789,7 @@ async function discoverCompetitions(): Promise<{active: any[]; upcoming: any[]}>
     // on the start side). Date window filtering is done in TypeScript
     // below so replay mode can bypass it.
     const base = `SELECT c.compid, c.name, c.sitename, c.countrycode, c.mainwebsite,
-                         c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats, c.trackingconsent,
+                         c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats, c.trackingconsent, c.delayseconds,
                          (SELECT COUNT(*)
                           FROM tasks t
                           JOIN compstatus cs ON cs.class = t.class AND cs.datecode = t.datecode
@@ -870,7 +891,16 @@ async function reconcileContexts() {
             const newEnd = row.end instanceof Date ? row.end.toISOString().slice(0, 10) : typeof row.end === 'string' ? row.end.slice(0, 10) : ctx.summary.end;
             ctx.summary.start = newStart;
             ctx.summary.end = newEnd;
-            if (row.lat !== ctx.location.lat || row.lng !== ctx.location.lng) {
+            const newDelay = (row.delayseconds != null ? Number(row.delayseconds) : (getDelay() as number)) as Epoch;
+            const delayChanged = newDelay !== ctx.location.officialDelay;
+            const siteMoved = row.lat !== ctx.location.lat || row.lng !== ctx.location.lng;
+            if (delayChanged) {
+                console.log(`${compShort(compid)}: official delay ${ctx.location.officialDelay}s -> ${newDelay}s`);
+                ctx.location.officialDelay = newDelay;
+                ctx.getNow = makeGetNow(newDelay);
+                ctx.summary.officialDelay = newDelay;
+            }
+            if (siteMoved) {
                 console.log(`${compShort(compid)}: site moved (${ctx.location.lat},${ctx.location.lng}) -> (${row.lat},${row.lng})`);
                 ctx.location.lat = row.lat;
                 ctx.location.lng = row.lng;
@@ -880,9 +910,12 @@ async function reconcileContexts() {
                 getElevationOffset(row.lat, row.lng, (agl: any) => {
                     ctx.location.altitude = agl;
                 });
-                // Push the new airfield into every scoring worker for this
-                // comp so sticky landing classifications (Home / Landed /
-                // Grid) recompute against the corrected coordinates.
+            }
+            if (siteMoved || delayChanged) {
+                // Push the airfield into every scoring worker for this comp
+                // so sticky landing classifications (Home / Landed / Grid)
+                // recompute against the corrected coordinates AND so the
+                // worker rebuilds its per-comp getNow from the new delay.
                 for (const cname of ctx.ownedChannels) {
                     channels[cname]?.scoring?.setAirfield(ctx.location);
                 }
@@ -911,7 +944,7 @@ async function reconcileContexts() {
     }
 
     // Push the combined airfield list to the APRS worker in one shot.
-    const af: AirfieldSpec[] = Object.values(contexts).map((c) => ({compid: c.compid, lt: c.location.lat, lg: c.location.lng}));
+    const af: AirfieldSpec[] = Object.values(contexts).map((c) => ({compid: c.compid, lt: c.location.lat, lg: c.location.lng, officialDelay: c.location.officialDelay}));
     setAirfields(af);
     // Rebuild now so airfield-radius fallback clauses pick up any moved
     // sites on this tick instead of waiting for the next minute boundary.
@@ -921,7 +954,7 @@ async function reconcileContexts() {
 async function createCompetitionContext(row: any): Promise<CompetitionContext> {
     const location: AirfieldLocation = {...row};
     location.point = point([location.lng, location.lat]);
-    location.officialDelay = getDelay();
+    location.officialDelay = (row.delayseconds != null ? Number(row.delayseconds) : getDelay()) as Epoch;
     location.tzoffset = parseInt(location.tzoffset as unknown as string);
 
     const ymd = (v: any): string => {
@@ -933,6 +966,7 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
         compid: row.compid,
         internalName: location.name.replace(/[^a-z]/gi, '').substring(0, 10),
         location,
+        getNow: makeGetNow(location.officialDelay),
         ownedChannels: new Set(),
         state: 'starting',
         trackingconsent: row.trackingconsent || 'N',
@@ -946,7 +980,8 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
             start: ymd(row.start),
             end: ymd(row.end),
             tz: row.tz || '',
-            tzoffset: parseInt(row.tzoffset as unknown as string) || 0
+            tzoffset: parseInt(row.tzoffset as unknown as string) || 0,
+            officialDelay: location.officialDelay
         }
     };
 
@@ -1888,7 +1923,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                         channel.allScores[t.compno] = PilotScore.fromPartial({
                             compno: t.compno,
                             flightStatus: PositionStatus.Blocked,
-                            t: getNow()
+                            t: channelNow(channel)
                         });
                         channel.scoreIdUpdateRequired = true;
                     }
@@ -2316,7 +2351,7 @@ async function sendAllScores(client: OgnWebSocket) {
                 scoreId: channel.liveScoreId,
                 pilots: channel.allScores
             },
-            t: getNow()
+            t: channelNow(channel)
         },
         `sendAllScores ${channel.displayName}`
     );
@@ -2330,7 +2365,7 @@ async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = fa
         OnglideWebSocketMessage,
         {
             identifiers: getIdentifiers(channel),
-            t: getNow(),
+            t: channelNow(channel),
             ...(includeScore
                 ? {
                       scores: {
@@ -2549,6 +2584,7 @@ async function refreshUpcomingCompetitions(rows: any[]) {
         }
 
         const tzoffset = parseInt(row.tzoffset as unknown as string) || 0;
+        const officialDelay = row.delayseconds != null ? Number(row.delayseconds) : (getDelay() as number);
         const next: CompetitionMetadata & {classnames: string[]} = {
             name: row.name,
             sitename: row.sitename ?? null,
@@ -2560,6 +2596,7 @@ async function refreshUpcomingCompetitions(rows: any[]) {
             end: ymd(row.end),
             tz: row.tz || '',
             tzoffset,
+            officialDelay,
             classnames
         };
         const prev = upcomingComps[compid];
@@ -2615,7 +2652,8 @@ function buildUpcomingSummary(compid: string): CompetitionSummary | null {
         classCount: classes.length,
         classStatusesDiffer: false,
         displayStatus: 'upcoming',
-        classes
+        classes,
+        officialDelay: meta.officialDelay
     };
 }
 
@@ -2726,7 +2764,8 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         classCount: classes.length,
         classStatusesDiffer,
         displayStatus,
-        classes
+        classes,
+        officialDelay: sum.officialDelay
     };
 }
 
@@ -2815,7 +2854,14 @@ function broadcastCompetitionsKeepalive() {
 }
 
 async function sendKeepalive(channel: Channel) {
+    // Wall-clock for the viewing-time log — `connectedAt` is set with the
+    // global getNow at WebSocket accept time, so we have to match it here
+    // or the per-client delta would be off by the comp's delay.
     const now = getNow();
+    // Per-comp clock for the `at` field that the frontend reads as its
+    // current-time reference. Without this, wsStatus.at runs ahead of the
+    // delayed position stream and every info box gets greyed out.
+    const compNow = channelNow(channel);
 
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
 
@@ -2828,10 +2874,10 @@ async function sendKeepalive(channel: Channel) {
         OnglideWebSocketMessage,
         {
             identifiers: getIdentifiers(channel),
-            t: now,
+            t: compNow,
             ka: {
                 keepalive: true,
-                at: Math.floor(now),
+                at: Math.floor(compNow),
                 listeners: channel.clients.length,
                 airborne: channel.activeGliders.size
             }

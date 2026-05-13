@@ -27,7 +27,7 @@ import {getElevationOffset} from '../getelevationoffset';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {getNow, d} from '../now';
+import {makeGetNow, d} from '../now';
 
 import {PositionMessage} from '../types';
 interface InterimPositionMessage extends PositionMessage {
@@ -140,6 +140,7 @@ export interface AirfieldSpec {
     compid: string;
     lt: number;
     lg: number;
+    officialDelay?: number; // seconds; per-comp tracking delay (from competition.delayseconds or env fallback). Omitted by test fixtures and treated as 0.
 }
 
 export interface AprsCommandSetAirfields {
@@ -237,6 +238,15 @@ export interface Airfield {
     compid: string;
     point: {lat: number; lng: number};
     elevation: AltitudeAgl;
+    // Per-comp official delay in seconds and its bound clock.
+    // processMessageQueue calls airfield.getNow() to gate its output, so
+    // packets sit in aircraft.messages long enough that downstream
+    // consumers (main thread → websocket, scoring worker → inordergenerator)
+    // see a delayed stream. The closure is rebuilt in-place by setAirfields
+    // whenever the delay actually changes, so live edits propagate without
+    // restarting any aircraft state.
+    officialDelay: Epoch;
+    getNow: () => Epoch;
     // Expanded task bbox for the comp. Mutated in place by setAirfields when
     // the main thread ships a new bbox via rebuildAprsFilter.
     bbox?: Bbox;
@@ -290,10 +300,18 @@ export function setAirfields(specs: AirfieldSpec[]) {
     for (const s of specs) {
         const existing = airfields.find((a) => a.compid === s.compid);
         const p = {lat: s.lt, lng: s.lg};
+        const delay = (s.officialDelay ?? 0) as Epoch;
         if (existing) {
             existing.point = p;
+            // Only rebuild the bound clock when the delay actually changes;
+            // the hot path (processMessageQueue) reads airfield.getNow on
+            // every iteration so we don't want fresh allocations every tick.
+            if (existing.officialDelay !== delay) {
+                existing.officialDelay = delay;
+                existing.getNow = makeGetNow(delay);
+            }
         } else {
-            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl};
+            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl, officialDelay: delay, getNow: makeGetNow(delay)};
             airfields.push(a);
             getElevationOffset(s.lt, s.lg, (e: any) => (a.elevation = e));
         }
@@ -1215,7 +1233,10 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     let lastSent = aircraft.lastSent;
     let messages = aircraft.messages;
     const start = (aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch;
-    const realNow = getNow();
+    // Per-comp clock: aircraft.airfield.getNow is rebuilt by setAirfields
+    // whenever officialDelay changes, so live delay edits propagate to the
+    // next call here. makeGetNow honours replay mode.
+    const realNow = aircraft.airfield.getNow();
     const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
     let position = sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 

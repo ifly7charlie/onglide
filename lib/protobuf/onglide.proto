@@ -41,6 +41,7 @@ message CompetitionSummary {
 	bool classStatusesDiffer = 13;
 	string displayStatus = 14;
 	repeated CompetitionClassStatus classes = 15;
+	optional uint32 officialDelay = 16; // seconds; resolved from competition.delayseconds with NEXT_PUBLIC_COMPETITION_DELAY fallback
 }
 
 // Pushed to clients of the reserved /all channel. On initial connect the

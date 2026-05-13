@@ -91,7 +91,7 @@ async function main() {
     // flushBackfills, so the prefilter never reads this field. Bbox is left
     // undefined (pre-task semantics) so any code that did consult it would
     // fall through to the broadcast fallback.
-    const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any};
+    const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any, officialDelay: 0 as any, getNow: () => 0 as any};
 
     const glider: Aircraft = {
         compno,

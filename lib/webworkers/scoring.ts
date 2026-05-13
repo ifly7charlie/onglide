@@ -39,7 +39,18 @@ import {scoreCollector} from './scoreCollector';
 // Optional flight statistics (thermals/straights/wind), per competition flag
 import {createFlightStatistics} from './flightStatistics';
 
-import {getNow} from '../now';
+import {makeGetNow, getDelay} from '../now';
+
+// Per-worker clock. Each scoring worker owns one class — and therefore one
+// competition — so its getNow lags real-time by the comp's configured
+// official delay. The scoring pipeline's inordergenerator gates output on
+// this clock, so the visible delay on the public websocket matches the
+// per-comp setting. Rebuilt in the setAirfield handler so live edits to
+// competition.delayseconds take effect at the next rescore. In the main
+// thread (where this module is loaded by `import` for the controller class
+// but no scoring runs) we still wire a sensible getNow via the env-var
+// fallback so any stray call matches the rest of the codebase.
+let getNow: () => Epoch = makeGetNow(!isMainThread && workerData ? (workerData as ScoringConfig).airfield.officialDelay : getDelay());
 
 // FLOW:
 //
@@ -383,7 +394,11 @@ if (!isMainThread) {
                 // Mutate in place so any in-flight enrichedPositionGenerator
                 // closures see the new point on their next read.
                 Object.assign(workerData.airfield, task.airfield);
-                console.log(`${task.className}: airfield moved to (${workerData.airfield.lat},${workerData.airfield.lng}), rescoring ${Object.keys(gliders).length} gliders`);
+                // Rebuild the per-comp clock so a changed delayseconds
+                // takes effect on the next rescore — scoring chains
+                // constructed below close over this fresh getNow.
+                getNow = makeGetNow(workerData.airfield.officialDelay);
+                console.log(`${task.className}: airfield moved to (${workerData.airfield.lat},${workerData.airfield.lng}) delay=${workerData.airfield.officialDelay}s, rescoring ${Object.keys(gliders).length} gliders`);
                 for (const g of Object.values(gliders)) {
                     rescoreGlider(g.compno, {className: g.className, datecode: workerData.datecode, airfield: workerData.airfield, flightstats: workerData.flightstats}, g.handicap, g.utcStart, g.scoreId);
                 }

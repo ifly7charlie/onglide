@@ -36,6 +36,17 @@ export function getDelay() {
     return compDelay as Epoch;
 }
 
+// Per-competition clock for scoring workers. Each scoring worker owns one
+// class (and therefore one comp), so building a getNow from the comp's
+// own delay lets each comp's public stream lag by its configured amount.
+// Replay mode bypasses the per-comp delay: replays are deterministic walks
+// of historical time, and the "how delayed are spectators" knob doesn't
+// apply.
+export function makeGetNow(officialDelay: Epoch): () => Epoch {
+    if (replayBase) return internalGetNow;
+    return (): Epoch => (Math.trunc(Date.now() / 1000) - officialDelay) as Epoch;
+}
+
 export const readOnly = process.env.REPLAY_DB ? true : process.env.OGN_READ_ONLY == undefined ? false : !!parseInt(process.env.OGN_READ_ONLY);
 
 export function replay() {

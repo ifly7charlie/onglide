@@ -354,7 +354,8 @@ export const Details = ({
     units,
     tz,
     replayTime,
-    onEditHandicap
+    onEditHandicap,
+    officialDelay = 0
 }: {
     compno: Compno;
     pilot: API_ClassName_Pilots_PilotDetail;
@@ -362,22 +363,23 @@ export const Details = ({
     units: Units;
     replayTime: Epoch | undefined;
     onEditHandicap?: (compno: Compno, handicap: number) => void;
+    officialDelay?: number;
 }) => {
     const {t} = useTranslation('common');
     let competitionDelay = useMemo(() => {
-        if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
+        if (officialDelay) {
             return (
                 <a href="#" title={t('pilot.view_delayed_official')} className="tooltipicon">
                     <span style={{color: 'grey'}}>
                         &nbsp;+&nbsp;
                         <FontAwesomeIcon icon={faClockRotateLeft} size="sm" />
-                        &nbsp;{OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
+                        &nbsp;{OptionalDurationMM('', officialDelay as Epoch, 'm')}
                     </span>
                 </a>
             );
         }
         return null;
-    }, [t]);
+    }, [t, officialDelay]);
 
     // Get vario for specific time
     const vario = useSelector((state) => selectPilotVario(state, compno, replayTime));

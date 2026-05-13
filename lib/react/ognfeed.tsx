@@ -60,6 +60,7 @@ import dynamic from 'next/dynamic';
 import {selectAvailableScoreTimes} from '../redux/nowSlice';
 import {useSelector, useDispatch} from '../redux';
 import {offline} from '../redux/nowSlice';
+import {selectCompByCompid} from '../redux/competitionsSlice';
 
 const MApp = dynamic(() => import('./deckgl').then((mod) => mod), {
     ssr: false,
@@ -131,6 +132,8 @@ export const OgnFeed = memo(
 
         //        const now = useSelector(selectNow);
         const availableScores = useSelector(selectAvailableScoreTimes);
+        const compSummary = useSelector(selectCompByCompid(compid));
+        const officialDelay = compSummary?.officialDelay ?? 0;
 
         // Keep track of online/offline status of the page
         //        const [online] = useState(navigator.onLine);
@@ -222,10 +225,10 @@ export const OgnFeed = memo(
         const status = useMemo(() => {
             const lang = router.locale ?? 'en';
             return (
-                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, lang)}) + ' | ' : '') + //
+                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, lang, officialDelay)}) + ' | ' : '') + //
                 ` <a href='#' title='${t('connection.viewers')}'>${wsStatus.listeners} 👥</a> | <a href='#' title='${t('connection.tracked_planes')}'>${wsStatus.airborne} ✈️  </a>`
             );
-        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, router.locale]);
+        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, router.locale, officialDelay]);
 
         // Scale map to fit the bounds
         const fitBounds = useCallback(() => {
@@ -376,7 +379,7 @@ export const OgnFeed = memo(
                     ) : null}
                     {effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? (
                         <div className="mobile-pilot-details">
-                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
+                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} officialDelay={officialDelay} />
                         </div>
                     ) : null}
                     {playback}
@@ -410,7 +413,7 @@ export const OgnFeed = memo(
                     }
                     footer={
                         effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? ( //
-                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} />
+                            <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} officialDelay={officialDelay} />
                         ) : (
                             <Sponsors at={wsStatus.at} />
                         )
@@ -448,17 +451,17 @@ export const OgnFeed = memo(
         o.handicapped === n.handicapped
 );
 
-function formatTimes(time: number, tz: TZ, lang: string) {
-    const competitionDelay = process.env.NEXT_PUBLIC_COMPETITION_DELAY
+function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) {
+    const competitionDelay = officialDelay
         ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                 <span style={{color: 'grey'}}>
-                 &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
+                 &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', officialDelay as Epoch, 'm')}
             </span>
           </a>`
         : '';
 
     const dt = new Date(time * 1000);
-    const dtl = !process.env.NEXT_PUBLIC_COMPETITION_DELAY ? dt : new Date((time + parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0')) * 1000);
+    const dtl = !officialDelay ? dt : new Date((time + officialDelay) * 1000);
     return (
         `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
         `<a href='#' title='your time'>${dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`
