@@ -451,37 +451,48 @@ export class SoaringSpotScrapeSource implements ScoringSource {
     readonly type = 'soaringspotscrape';
 
     async ensureMetadata(ctx: SourceCtx): Promise<void> {
-        // Pull the same /pilots page used by fetchPilots, but only
-        // consume the contest-info header (name, site, dates) so we can
-        // populate the `competition` row before anything else fires.
+        // Try each tab in turn — every SoaringSpot contest page (pilots,
+        // results, root) carries the same contest-title header, so any
+        // one of them is enough to learn name/site/dates. /pilots is the
+        // historical first choice; the fallbacks cover the observed case
+        // where SoaringSpot's /pilots returns 200 but a body that lacks
+        // the header (no public root cause yet — the body-length log
+        // below is here to capture evidence next time it happens).
         //
-        // We ALWAYS call updateContest at the end, even on failure paths.
-        // With empty inputs, the date regex misses and the UPDATE is
+        // updateContest ALWAYS runs at the end, even on full failure.
+        // With empty inputs the date regex misses and the UPDATE is
         // skipped — but the INSERT IGNORE still plants a placeholder
-        // row with a sentinel past `end`, so dropDeadCompetition can
-        // reap URLs that never scrape successfully. A later successful
-        // call overwrites start/end with the real values.
+        // row so dropDeadCompetition can reap URLs that never scrape.
         let name = '';
         let site = '';
         let dates = '';
-        try {
-            const res = await fetch(ctx.url + '/pilots');
-            if (!res.ok) {
-                ctx.log(`ensureMetadata: ${ctx.url}/pilots returned ${res.status}`);
-            } else {
-                const dom = htmlparser.parseDocument(await res.text());
+        const candidates = ['/pilots', '/results', ''];
+        for (const suffix of candidates) {
+            const target = ctx.url + suffix;
+            try {
+                const res = await fetch(target);
+                if (!res.ok) {
+                    ctx.log(`ensureMetadata: ${target} returned ${res.status}`);
+                    continue;
+                }
+                const body = await res.text();
+                const dom = htmlparser.parseDocument(body);
                 const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
                 if (!contestInfo) {
-                    ctx.log(`ensureMetadata: no contest-title div for ${ctx.compid}`);
-                } else {
-                    const children = contestInfo.children ?? [];
-                    name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
-                    site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
-                    dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
+                    ctx.log(`ensureMetadata: no contest-title div at ${target} (body=${body.length}B)`);
+                    continue;
                 }
+                const children = contestInfo.children ?? [];
+                name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
+                site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
+                dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
+                if (suffix !== '/pilots') {
+                    ctx.log(`ensureMetadata: extracted header from fallback ${target}`);
+                }
+                break;
+            } catch (e) {
+                ctx.log(`ensureMetadata fetch failed for ${target}:`, e);
             }
-        } catch (e) {
-            ctx.log(`ensureMetadata failed for ${ctx.compid}:`, e);
         }
         try {
             await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
