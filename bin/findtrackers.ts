@@ -935,17 +935,34 @@ function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClas
 
         const assignedBad = rows.filter((m) => m.assigned && !m.withinTolerance);
         if (!altMatches.length && !altSingleSided.length && !assignedBad.length) continue;
-        // Multiple non-assigned candidates within tolerance — can't pick one safely.
-        if (altMatches.length > 1) continue;
-        // Multiple safe single-sided candidates for the same pilot — ambiguous.
-        if (altMatches.length === 0 && altSingleSided.length > 1) continue;
+
+        // When multiple unassigned candidates compete for the same pilot,
+        // pick the highest-scoring one — provided it strictly outscores the
+        // runner-up. A tie is genuinely ambiguous, but a clear score
+        // separation (e.g. one candidate with a DDB CN match, the other
+        // without) shouldn't get treated the same way. Phase 1 (both-sided)
+        // candidates win over Phase 1.5 (single-sided) for the same pilot;
+        // within a phase, score breaks the tie.
+        const pickBestByScore = (cands: TrackerMatch[]): TrackerMatch | null => {
+            if (cands.length === 0) return null;
+            if (cands.length === 1) return cands[0];
+            const scored = cands.map((m) => ({m, s: scoreMap.get(scoreKey(compno, m.flarmid))?.score.total ?? 0}));
+            scored.sort((a, b) => b.s - a.s);
+            if (scored[0].s <= scored[1].s) return null; // genuine tie
+            return scored[0].m;
+        };
+        const bestAlt = pickBestByScore(altMatches);
+        const bestSingle = pickBestByScore(altSingleSided);
+        // If altMatches was non-empty but tied on score, fall through to
+        // single-sided rather than declaring the pilot ambiguous outright.
+        if (altMatches.length > 1 && !bestAlt && altSingleSided.length === 0 && !assignedBad.length) continue;
+        if (altMatches.length === 0 && altSingleSided.length > 1 && !bestSingle && !assignedBad.length) continue;
 
         const first = rows[0];
         const currentIds = parseCurrentIds(first.currentTrackerid);
         // Prefer Phase 1 (both-sided) over Phase 1.5 (single-sided) when
-        // both exist for the same pilot — defensive: filter logic above
-        // already guards this, but keep the precedence explicit.
-        let addRow: TrackerMatch | null = altMatches[0] ?? altSingleSided[0] ?? null;
+        // both exist for the same pilot.
+        let addRow: TrackerMatch | null = bestAlt ?? bestSingle ?? null;
         let addId: FlarmID | null = addRow?.flarmid ?? null;
 
         // Score gate: only replace an assigned tracker when the proposed
