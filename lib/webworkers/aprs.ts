@@ -207,7 +207,7 @@ export interface Aircraft {
 
     lastTime?: number;
     lastSent?: InterimPositionMessage;
-    lastMoved?: number;
+    lastMoved: number;
     lastTick: Epoch;
 
     //    kf?: any; // altitude smoothing
@@ -895,6 +895,7 @@ function trackGlider(task: AprsCommandTrack) {
         stationary: 0,
         ground: 0,
         lastTick: 0 as Epoch,
+        lastMoved: 0 as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
         log:
@@ -1268,16 +1269,19 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // If we have many we need to reduce this to one
         // we take smallest difference in position, or if the same the smallest vertical difference from
         // previously selected point. If point is the same then don't prefer it.
-        const sorted = lastSent
-            ? duplicates
+        const sortedPoint = !lastSent
+            ? null
+            : duplicates
                   .map((point) => {
                       const dH = distHaversine(point, lastSent!);
                       const dV = point.a - lastSent!.a;
+                      const dG = point.g - lastSent!.g;
                       const dT = point.t - lastSent!.t;
                       return {
                           ...point,
                           dH: dH * 1000,
                           dV,
+                          dG,
                           dT,
                           dSH: (3600 * dH) / dT, //km/s
                           dSV: Math.abs(dV / dT) // m/s
@@ -1287,29 +1291,29 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
                   // as they can't possible be correct (point.s is the flarm reported speed)
                   .filter((point) => point.dSH < (point.s || 160) * 2.3 && point.dSV < 30)
                   // Then sort them by amount of change
-                  .sort((a, b) => (a.dH - a.dH > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
-            : duplicates;
-
-        // If it hasn't changed then we will ignore it - this should prevent us getting stuck on the previous
-        // one
-        const filtered = lastSent ? sorted.filter((a) => a.lat != lastSent!.lat || a.lng != lastSent!.lng || a.a != lastSent!.a) : sorted;
-
-        // We haven't picked one because we have had no movement but we have had packets
-        const stationary = lastSent && !filtered.length && sorted.length && realNow - lastSent.t > 30;
+                  .sort((a, b) => (Math.abs(a.dH - b.dH) > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
+                  .at(0);
 
         // Take the first one, if we don't have one then we can just do nothing for now
-        const point = filtered.at(0) ?? (stationary ? sorted[0] : undefined);
+        // don't bypass the filtering for jumps by assuming null sortedPoint means take first point
+        const point = lastSent ? sortedPoint : duplicates.at(0);
         if (!point) {
             continue;
         }
 
-        if (stationary) {
-            aircraft.stationary++;
+        // If it hasn't really moved we treat it as "no movement" so the stationary
+        // path below can fire. Raw GPS altitude (a) jitters by a few metres even
+        // when parked, so compare g (AGL, rounded to the metre) and allow a small
+        // horizontal tolerance for GPS drift.
+        const noMovement = sortedPoint ? sortedPoint.dH < 5 && Math.abs(sortedPoint.dG) < 3 : false;
 
+        // We haven't picked one because we have had no movement but we have had packets
+        const stationaryTime = noMovement && sortedPoint && aircraft.lastMoved ? sortedPoint.t - aircraft.lastMoved : 0;
+
+        if (stationaryTime > 60) {
             // If we had been stationary for a while and we are low enough to be on the ground
-            // then mark it as so. Saturate the counter at 10 each time — while clearly
-            // parked we keep re-asserting on-ground state.
-            if (aircraft.stationary > 5 && point.g < 100) {
+            // then mark it as so.
+            if (point.g < 100) {
                 if (aircraft.ground === 0) {
                     console.log(`${point.c}: on ground @ ${point.t}`);
                 }
@@ -1338,9 +1342,12 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
             continue;
         }
 
-        // If we are stationary we don't need to report the points
-        if (!stationary) {
-            aircraft.stationary = 0;
+        if (stationaryTime && point.t - (lastSent?.t ?? 0) < 30) {
+            continue;
+        }
+
+        // If we are not stationary record when we moved so we can track ground or not
+        if (!stationaryTime) {
             aircraft.lastMoved = point.t;
         }
 

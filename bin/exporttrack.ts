@@ -103,6 +103,7 @@ async function main() {
         stationary: 0,
         ground: 0,
         lastTick: 0 as Epoch,
+        lastMoved: 0 as Epoch,
         receiveNewPoints: false,
         log: () => {},
         messages: []

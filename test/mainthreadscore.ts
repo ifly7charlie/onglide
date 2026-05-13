@@ -186,6 +186,7 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
         stationary: 0,
         ground: 0,
         lastTick: 0 as Epoch,
+        lastMoved: 0 as Epoch,
         receiveNewPoints: false,
 
         // Setup logging
