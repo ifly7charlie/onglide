@@ -2256,15 +2256,8 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
             if (glider.className == channel.className) {
                 const p = glider.deck;
                 if (p) {
-                    // Cap at the pilot's finish time so a reloaded tracker's
-                    // post-finish tail (taxi, parking) doesn't leak into the
-                    // snapshot. Falls back to the cached PilotScore from the
-                    // previous run while the scoring chain is still replaying
-                    // and hasn't refreshed glider.scoredFinish yet.
-                    const finishTime = (glider.scoredFinish || channel.allScores[glider.compno]?.utcFinish || 0) as Epoch;
-                    const ceilIdx = finishTime ? sortedIndexNumber(p.t.subarray(0, p.posIndex), (finishTime + 1) as Epoch) : p.posIndex;
-                    const start = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, ceilIdx), firstPointTime), ceilIdx - 3), 0);
-                    const end = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, ceilIdx), now), ceilIdx - 2), 0);
+                    const start = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
+                    const end = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
                     const length = end - start;
                     //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                     if (length) {
@@ -2305,13 +2298,8 @@ async function generateRecentPilotTracks(channel: Channel) {
         if (glider.className == channel.className) {
             const p = glider.deck;
             if (p) {
-                // Same finish-time cap as generateHistoricalTracks — empties
-                // the residual once we're past the pilot's finish so late
-                // packets can't extend the visible track.
-                const finishTime = (glider.scoredFinish || channel.allScores[glider.compno]?.utcFinish || 0) as Epoch;
-                const ceilIdx = finishTime ? sortedIndexNumber(p.t.subarray(0, p.posIndex), (finishTime + 1) as Epoch) : p.posIndex;
                 const start = glider.webPathEndPosition;
-                const end = ceilIdx;
+                const end = p.posIndex;
                 const length = end - start;
                 if (length > 0) {
                     result[glider.compno] = {
