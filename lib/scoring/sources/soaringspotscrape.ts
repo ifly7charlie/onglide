@@ -261,7 +261,7 @@ async function processDayResults(
         const url = urlExtractor && urlExtractor[1] ? 'https://www.soaringspot.com/' + urlExtractor[1] : undefined;
 
         const flagExtractor = row.Contestant.match(flagRe);
-        if (flagExtractor && dayNumber == 'Task 1') {
+        if (flagExtractor) {
             const flag = flagExtractor[1].toUpperCase();
             // Pull the current FAI/country before we update so we can
             // detect the "we now know the country" transition that
