@@ -17,7 +17,7 @@ import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
 import {scoreSignals, computeMargins, summarisePrior, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
 import {loadMergedDDB, gliderEquivalent, type DDBEntry} from '../lib/ddb';
-import {LEGACY_PRIOR_NATS, DEFAULT_LEDGER_MIN_NATS} from '../lib/constants';
+import {LEGACY_PRIOR_NATS, DEFAULT_LEDGER_MIN_NATS, DEFAULT_AUTO_MARGIN_NATS} from '../lib/constants';
 
 import prompts from 'prompts';
 import escape from 'sql-template-strings';
@@ -928,8 +928,22 @@ function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClas
             const peers = byFlarm.get(m.flarmid) ?? [];
             // Phase 1 (both-sided) match for the same flarmid wins, regardless of pilot.
             if (peers.some((p) => p.withinTolerance)) return false;
-            // Another pilot has a single-sided claim on this flarmid → ambiguous.
-            if (peers.some((p) => p.compno !== m.compno && isOneSided(p))) return false;
+            // Another pilot has a single-sided claim on this flarmid — but
+            // only counts as competing if that peer actually prefers this
+            // flarmid. A peer that strongly prefers a different candidate
+            // of their own (pilotMargin ≤ -DEFAULT_AUTO_MARGIN_NATS on this
+            // flarmid) isn't really in contention — their score is decisively
+            // higher elsewhere. Ignore them and let the rightful claimant
+            // take this flarmid. We require *strong* preference (not just
+            // any negative margin) so thin score differences don't override
+            // a peer's legitimate claim.
+            const competingPeer = peers.some((p) => {
+                if (p.compno === m.compno) return false;
+                if (!isOneSided(p)) return false;
+                const peerPilotMargin = scoreMap.get(scoreKey(p.compno, p.flarmid))?.margins.pilotMargin ?? 0;
+                return peerPilotMargin > -DEFAULT_AUTO_MARGIN_NATS;
+            });
+            if (competingPeer) return false;
             return true;
         });
 
