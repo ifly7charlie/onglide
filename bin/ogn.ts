@@ -359,6 +359,35 @@ function channelNow(channel: Channel): Epoch {
     return contexts[channel.compid]?.getNow?.() ?? getNow();
 }
 
+// Bind a server to its port, retrying on EADDRINUSE so a freshly-started
+// daemon can sit waiting for an outgoing one to release the port. Any
+// other listen error (EACCES, etc.) is fatal — those are config problems,
+// not deploy races. Resolves once `listening` fires.
+async function listenWithRetry(server: http.Server | https.Server, port: number, label: string) {
+    while (true) {
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const onError = (e: NodeJS.ErrnoException) => {
+                    server.off('listening', onListening);
+                    reject(e);
+                };
+                const onListening = () => {
+                    server.off('error', onError);
+                    resolve();
+                };
+                server.once('error', onError);
+                server.once('listening', onListening);
+                server.listen(port);
+            });
+            return;
+        } catch (e: any) {
+            if (e?.code !== 'EADDRINUSE') throw e;
+            console.log(`${label}: port ${port} in use, waiting for previous process to release it…`);
+            await setTimeoutPromise(5000);
+        }
+    }
+}
+
 async function main() {
     if (error) {
         console.log('New install: no configuration found, or script not being run in the root directory');
@@ -455,69 +484,83 @@ async function main() {
         userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${first.internalName}-${datecode}.txt`, {flags: 'a'});
     }
 
-    // Phase 2: start the websocket/HTTP server. Channels exist with
-    // cached scores from Phase 1, so a client connecting now gets the
-    // restored scores via sendCurrentState() → sendAllScores() while the
-    // tracker/task work in Phase 3 is still in flight.
-    if ('PM2_HOME' in process.env || existsSync('.docker')) {
-        console.log('PM2/DOCKER: waiting for scoring to be completed...');
-        /*        const checkScoringNotReady = () => {
+    // Phase 3: load trackers + tasks per comp, then rebuild the APRS
+    // filter so it picks up task bboxes. The rebuild's lastAprsFilter
+    // memo no-ops if the filter string is unchanged. Runs before the
+    // listener opens so a client's first /all snapshot is built from a
+    // fully-populated `contexts` — without this guarantee a reconnect
+    // mid-Phase-3 would deliver a partial snapshot and the client's
+    // wipe-and-rebuild would drop comps the user is actively viewing.
+    for (const {ctx, datecode} of phase1) {
+        await tickCompetitionTrackersAndTasks(ctx, datecode);
+    }
+    rebuildAprsFilter();
+
+    // Optional rescore gate: don't open the listener until every channel
+    // has a `liveScoreId`. Scoring workers populate this asynchronously
+    // after Phase 3 fires their initial task/tracker IPC, so without this
+    // wait a /all snapshot taken right after Phase 3 can advertise comps
+    // that have no scores yet.
+    if (process.env.WAIT_FOR_RESCORE) {
+        const checkScoringNotReady = () => {
             const notReady = Object.values(channels).filter((c) => !c.liveScoreId);
             if (notReady.length) {
                 console.log(`still need ${notReady.map((c) => c.className).join(',')} to finish scoring`);
             }
-            return !notReady.length;
+            return notReady.length > 0;
         };
         while (checkScoringNotReady()) {
             await setTimeoutPromise(1000);
-        } */
+        }
+    }
+
+    // Phase 2: start the websocket/HTTP server. Deferred to here so the
+    // port-open signal doubles as a readiness flag — a load balancer (or a
+    // second daemon process spun up for a rolling deploy) sees the port as
+    // unbound until everything above has finished.
+    if ('PM2_HOME' in process.env || existsSync('.docker')) {
         console.log('PM2/DOCKER: starting http(s) listener');
     }
 
-    const hasSSL = [process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].some((host) => {
-        if (host) {
-            try {
-                const options = {
-                    key: readFileSync(`keys/${host}.key.pem`),
-                    cert: readFileSync(`keys/${host}.cert.pem`)
-                };
-
-                if (options.key && options.cert) {
-                    console.log('initialising SSL');
-                    const server = https.createServer(options, setupOgnWebServer);
-                    server.listen(parseInt(process.env.WEBSOCKET_PORT!) + 1000);
-                    setupWebSocketServer(server);
-                    console.log(`listening on [SSL] ${parseInt(process.env.WEBSOCKET_PORT!) + 1000} ssh key for ${host}`);
+    const hasSSL = (
+        await Promise.all(
+            [process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].map(async (host) => {
+                if (!host) return false;
+                let options;
+                try {
+                    options = {
+                        key: readFileSync(`keys/${host}.key.pem`),
+                        cert: readFileSync(`keys/${host}.cert.pem`)
+                    };
+                } catch (e) {
+                    console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
+                    return false;
                 }
+                if (!options.key || !options.cert) return false;
+                console.log('initialising SSL');
+                const sslPort = parseInt(process.env.WEBSOCKET_PORT!) + 1000;
+                const server = https.createServer(options, setupOgnWebServer);
+                await listenWithRetry(server, sslPort, `SSL ${host}`);
+                setupWebSocketServer(server);
+                console.log(`listening on [SSL] ${sslPort} ssh key for ${host}`);
                 return true;
-            } catch (e) {
-                console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
-            }
-        }
-        return false;
-    });
+            })
+        )
+    ).some(Boolean);
 
     if (!hasSSL) {
         console.log(`SSL not initialised`);
     }
 
     // We always open an non-ssl one
+    const port = parseInt(process.env.WEBSOCKET_PORT || '8080');
     const server = http.createServer(setupOgnWebServer);
-    server.listen(process.env.WEBSOCKET_PORT || 8080);
     server.on('clientError', function (ex, _socket) {
         console.log('****> clientError', ex);
     });
-
+    await listenWithRetry(server, port, 'HTTP');
     setupWebSocketServer(server);
-    console.log(`Onglide startup ${gitVersion()} listening on ${process.env.WEBSOCKET_PORT || '8080'}`);
-
-    // Phase 3: load trackers + tasks per comp, then rebuild the APRS
-    // filter so it picks up task bboxes. The rebuild's lastAprsFilter
-    // memo no-ops if the filter string is unchanged.
-    for (const {ctx, datecode} of phase1) {
-        await tickCompetitionTrackersAndTasks(ctx, datecode);
-    }
-    rebuildAprsFilter();
+    console.log(`Onglide startup ${gitVersion()} listening on ${port}`);
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
