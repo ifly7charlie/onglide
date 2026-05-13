@@ -2231,7 +2231,9 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
         }, {});
         // Send the client the current version of the tracks
         const webPath = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: 0}}, `webPath ${channel.displayName}`);
-        if (webPath) {
+        // Don't advertise a baseTime for a snapshot with no pilots — viewers
+        // would fetch the empty .bin and the proxy/browser would cache it.
+        if (webPath && Object.keys(toStream).length > 0) {
             channel.webPathData[now.toString()] = Buffer.from(webPath);
             channel.webPathBaseTime = now;
         }
@@ -3305,10 +3307,21 @@ function setupOgnWebServer(req, res) {
                     const scoreId = pScoreId.substring(1); // has leading '/' from url regex
                     const d = (d) => new Date(d * 1000).toISOString();
 
+                    // Daemon hasn't built a history map for this scoreId yet — tell the
+                    // client to retry instead of caching an empty 200 for up to 24h.
+                    const scoresForId = channel.scoreHistory.get(scoreId);
+                    if (!scoresForId) {
+                        headers['Cache-Control'] = 'no-store';
+                        headers['Retry-After'] = '2';
+                        res.writeHead(503, headers);
+                        res.end();
+                        return;
+                    }
+
                     const history: Record<Compno, {history: PilotScore[]}> = {};
                     let scoreCount = 0;
                     let glidersWithScores = 0;
-                    for (const [compno, scores] of channel.scoreHistory.get(scoreId) ?? []) {
+                    for (const [compno, scores] of scoresForId) {
                         const preceeding = scores.findLast((score) => score.t < chunkStart);
                         history[compno] = {
                             history: [
@@ -3368,9 +3381,13 @@ function setupOgnWebServer(req, res) {
                         res.write(channel.webPathData[timestamp], 'binary');
                         res.end(null, 'binary');
                         return;
-                    } else {
-                        console.log('no historical data matching', channelName, timestamp);
                     }
+                    console.log('no historical data matching', channelName, timestamp);
+                    headers['Cache-Control'] = 'no-store';
+                    headers['Retry-After'] = '2';
+                    res.writeHead(503, headers);
+                    res.end();
+                    return;
                 }
             }
         }

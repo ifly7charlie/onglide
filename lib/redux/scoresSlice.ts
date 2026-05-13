@@ -268,10 +268,35 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
                 return;
             }
         }
-        return await fetch(oldScoresUrl(className, datecode, requestChunk.toString(), state.scoreId), {signal}) //
-            .then((res) => res.arrayBuffer())
-            .then(async (ab) => ({data: ClassScoreHistory.decode(new Uint8Array(ab)), chunkId}))
-            .catch((e) => void console.error('FOS:', e));
+        const url = oldScoresUrl(className, datecode, requestChunk.toString(), state.scoreId);
+        while (!signal.aborted) {
+            try {
+                const res = await fetch(url, {signal});
+                if (res.ok) {
+                    const ab = await res.arrayBuffer();
+                    return {data: ClassScoreHistory.decode(new Uint8Array(ab)), chunkId};
+                }
+                // 503 = daemon's not ready, retry; anything else, give up
+                if (res.status !== 503) {
+                    return;
+                }
+                const retryAfter = Math.max(1, parseInt(res.headers.get('Retry-After') ?? '2', 10));
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(resolve, retryAfter * 1000);
+                    signal.addEventListener(
+                        'abort',
+                        () => {
+                            clearTimeout(timer);
+                            reject(signal.reason);
+                        },
+                        {once: true}
+                    );
+                });
+            } catch (e) {
+                console.error('FOS:', e);
+                return;
+            }
+        }
     }
 );
 

@@ -239,10 +239,35 @@ export const fetchOldTracks = createAsyncThunk<{downloaded: PilotTracks; websock
     'tracks/fetchOldTracks', //
     async ({baseTime, datecode, className, residual}, {signal, getState}) => {
         const state = (getState() as RootState).tracks;
-        return await fetch(oldTracksUrl(className, datecode, baseTime.toString(), state.scoreId), {signal}) //
-            .then((res) => res.arrayBuffer())
-            .then(async (ab) => ({downloaded: OnglideWebSocketMessage.decode(new Uint8Array(ab)).tracks, websocket: residual}))
-            .catch(async (_ab) => ({downloaded: undefined, websocket: residual}));
+        const url = oldTracksUrl(className, datecode, baseTime.toString(), state.scoreId);
+        while (!signal.aborted) {
+            try {
+                const res = await fetch(url, {signal});
+                if (res.ok) {
+                    const ab = await res.arrayBuffer();
+                    return {downloaded: OnglideWebSocketMessage.decode(new Uint8Array(ab)).tracks, websocket: residual};
+                }
+                // 503 = daemon's not ready, retry; anything else, give up
+                if (res.status !== 503) {
+                    return {downloaded: undefined, websocket: residual};
+                }
+                const retryAfter = Math.max(1, parseInt(res.headers.get('Retry-After') ?? '2', 10));
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(resolve, retryAfter * 1000);
+                    signal.addEventListener(
+                        'abort',
+                        () => {
+                            clearTimeout(timer);
+                            reject(signal.reason);
+                        },
+                        {once: true}
+                    );
+                });
+            } catch {
+                return {downloaded: undefined, websocket: residual};
+            }
+        }
+        return {downloaded: undefined, websocket: residual};
     }
 );
 
