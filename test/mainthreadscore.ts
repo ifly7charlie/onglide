@@ -184,7 +184,7 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
         // Not had a message
         stationary: 0,
-        ground: false,
+        ground: 0,
         lastTick: 0 as Epoch,
         receiveNewPoints: false,
 

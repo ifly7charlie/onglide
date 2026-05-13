@@ -101,7 +101,7 @@ async function main() {
         datecode,
         tzoffset,
         stationary: 0,
-        ground: false,
+        ground: 0,
         lastTick: 0 as Epoch,
         receiveNewPoints: false,
         log: () => {},

@@ -2340,8 +2340,17 @@ async function primeAndBroadcast(channel: Channel, label: string): Promise<void>
     if (baseTime) {
         const host = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_SITEURL;
         if (host) {
-            const proto = dev ? 'http' : 'https';
-            const url = `${proto}://${host}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
+            // Respect an explicit scheme if one was baked into the env var,
+            // otherwise pick http for loopback hosts (where the daemon's
+            // own HTTP listener answers) and https everywhere else (where
+            // an upstream proxy is terminating TLS).
+            let url: string;
+            if (/^https?:\/\//i.test(host)) {
+                url = `${host.replace(/\/$/, '')}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
+            } else {
+                const proto = /^(localhost|127\.|\[::1\])/i.test(host) ? 'http' : 'https';
+                url = `${proto}://${host}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
+            }
             const ctl = new AbortController();
             const timer = setTimeout(() => ctl.abort(), 1000);
             try {
