@@ -271,6 +271,13 @@ let lastPendingChannelsLog: string | null = null;
 // state (position broadcasts, keepalive, stats) stays untouched.
 let competitionsListeners: OgnWebSocket[] = [];
 
+// Flipped by handleExit before the per-comp teardown fan-out, suppresses
+// the `removed` /all broadcast in destroyCompetitionContext. Without this
+// a graceful shutdown wipes every comp from connected clients before the
+// socket actually closes — the user reconnects to the new daemon already
+// staring at an empty "can't find competition" overlay.
+let shuttingDown = false;
+
 // Last-broadcast cache, keyed by compid. Used by broadcastCompetitionsDelta
 // to suppress no-op frames: a tick that rebuilds an identical summary skips
 // the wire altogether. Stores the encoded CompetitionSummary bytes.
@@ -787,6 +794,7 @@ process.on('SIGTERM', handleExit);
 // and then kill of any timers
 async function handleExit(signal: string) {
     console.log(`received signal: ${signal}`);
+    shuttingDown = true;
 
     // Fan out over every active context so each one gets its full
     // destroy path — reload clients, close broadcast channels, wait
@@ -1121,7 +1129,10 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
     delete contexts[competition.compid];
     console.log(`${tag}: competition context stopped`);
     // Tell /all listeners the comp is gone so the globe drops its marker.
-    broadcastCompetitionsDelta([], [competition.compid]);
+    // Skipped during process shutdown — the socket is going down anyway,
+    // and broadcasting `removed` would leave clients on a "can't find
+    // competition" overlay until they reconnect to the new daemon.
+    if (!shuttingDown) broadcastCompetitionsDelta([], [competition.compid]);
 }
 
 async function tickCompetition(competition: CompetitionContext) {
