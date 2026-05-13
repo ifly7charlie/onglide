@@ -88,6 +88,12 @@ interface CompState {
     // each heartbeat. Used to decide when an "empty active comp" warrants
     // an urgent pilots fetch instead of waiting for the 10am gate.
     pilotsInDb: number | null;
+    // Number of task rows currently in DB for this compid, refreshed
+    // each heartbeat. When tasks exist but pilots don't, we trigger an
+    // urgent pilots fetch regardless of comp dates — `fetchResultsAndTasks`
+    // has already proven the comp is real, so waiting for the date window
+    // would leave the front-end with results it can't attribute.
+    tasksInDb: number | null;
     // Classes the pilots page reported on the last successful fetchPilots
     // in this process. Authoritative for "which classes are registered"
     // and used to veto the results-page class-diff so a staggered task
@@ -161,13 +167,20 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
     // nextPilotsAt cooldown. Handles newly-added or restart-after-crash
     // comps whose scraper would otherwise sleep until 10:00 local while
     // the comp is already flying.
+    //
+    // Also urgent: tasks have been installed but no pilots are loaded.
+    // `fetchResultsAndTasks` has already succeeded for this comp, so
+    // waiting for `competitionStart <= today` would leave us with
+    // unattributable results (and a placeholder competition row whose
+    // sentinel dates may keep us out of the date window indefinitely).
     const isActiveToday = //
         state.competitionStart != null && //
         state.competitionEnd != null && //
         state.competitionStart <= localNow.iso && //
         localNow.iso <= state.competitionEnd;
     const isEmpty = state.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
-    const urgentPilotsFetch = isActiveToday && isEmpty;
+    const tasksWithoutPilots = (state.tasksInDb ?? 0) > 0 && (state.pilotsInDb ?? 0) === 0;
+    const urgentPilotsFetch = (isActiveToday || tasksWithoutPilots) && isEmpty;
 
     // Rule 2: pre-task daily fetch — only if no class has a task today,
     // we're past 10:00 local (or urgent), and we haven't already fetched
@@ -182,7 +195,11 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
         nowMs >= state.nextPilotsAt
     ) {
         fetchPilots = true;
-        reasons.push(urgentPilotsFetch ? 'pilots:urgent-empty-active' : 'pilots:daily-10am');
+        if (urgentPilotsFetch) {
+            reasons.push(tasksWithoutPilots && !isActiveToday ? 'pilots:urgent-tasks-no-pilots' : 'pilots:urgent-empty-active');
+        } else {
+            reasons.push('pilots:daily-10am');
+        }
     }
 
     // Rule 4: hourly pilots fetch on a task day until first launch.
@@ -320,7 +337,8 @@ function scheduleNextPilots(state: CompState, localNow: LocalTime, nowMs: number
         state.competitionStart <= localNow.iso && //
         localNow.iso <= state.competitionEnd;
     const isEmpty = state.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
-    if (isActiveToday && isEmpty) {
+    const tasksWithoutPilots = (state.tasksInDb ?? 0) > 0 && (state.pilotsInDb ?? 0) === 0;
+    if ((isActiveToday || tasksWithoutPilots) && isEmpty) {
         return nowMs + applyJitter(INTERVAL_PILOTS_URGENT_MS);
     }
     // Pre-task. If we're already past 10:00 today, the next chance is
@@ -386,7 +404,12 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
                     SELECT COUNT(*) FROM pilots p
                     JOIN classes cl ON cl.class = p.class
                     WHERE cl.compid = ${ctx.compid}
-                ) AS pilotCount
+                ) AS pilotCount,
+                (
+                    SELECT COUNT(*) FROM tasks t
+                    JOIN classes cl ON cl.class = t.class
+                    WHERE cl.compid = ${ctx.compid}
+                ) AS taskCount
             FROM competition c
             WHERE c.compid = ${ctx.compid}
         `)) as any[];
@@ -394,6 +417,7 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
         state.competitionStart = row?.compStart ?? null;
         state.competitionEnd = row?.compEnd ?? null;
         state.pilotsInDb = row ? Number(row.pilotCount ?? 0) : null;
+        state.tasksInDb = row ? Number(row.taskCount ?? 0) : null;
     } catch (e) {
         ctx.log(`refreshObservations: meta query failed for ${ctx.compid}:`, e);
     }
@@ -730,6 +754,7 @@ async function initState(
         competitionStart: null,
         competitionEnd: null,
         pilotsInDb: null,
+        tasksInDb: null,
         firstLaunch: new Map(),
         firstLaunchDate: null,
         nextPilotsAt: 0,
