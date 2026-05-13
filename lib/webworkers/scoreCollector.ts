@@ -90,7 +90,6 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
         const c = getScoreIdDetails(scoreId);
         const oldScore = c.allScores[compno];
         const changed = scoreChanged(oldScore, score, true);
-        console.log(`[${id}] SC.updateScore ${className}:${compno} t=${score.t} fs=${score.flightStatus} old=${oldScore?.flightStatus} live=${score.live} changed=${changed}`);
         if (changed) {
             if (oldScore && oldScore.flightStatus != score.flightStatus) {
                 console.log(`${className}:${score.compno}: ${PositionStatusText[oldScore.flightStatus ?? 0]} => ${PositionStatusText[score.flightStatus ?? 0]} @ ${d(score.t)}`);
