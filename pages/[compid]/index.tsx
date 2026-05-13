@@ -107,12 +107,17 @@ export default function CombinePage(props) {
     const selectedClass = summary.classes.find((c) => c.class === className);
 
     if (!selectedClass) {
+        // displayStatus='upcoming' is the daemon's signal that the comp
+        // window hasn't opened yet (see buildUpcomingSummary in bin/ogn.ts).
+        // In that state the per-class menu is empty/meaningless, so a
+        // "please choose a class" prompt is misleading.
+        const upcoming = summary.displayStatus === 'upcoming';
         return (
             <>
                 <Head>
                     <title>{summary.name}</title>
                 </Head>
-                <h1>{t('competition.no_class_selected')}</h1>
+                <h1>{t(upcoming ? 'competition.not_started' : 'competition.no_class_selected')}</h1>
             </>
         );
     }

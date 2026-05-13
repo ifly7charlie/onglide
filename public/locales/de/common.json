@@ -14,6 +14,7 @@
         "live_count": "{{count}} live",
         "upcoming_count": "{{count}} bevorstehend",
         "no_class_selected": "Bitte wähle eine Klasse aus der Menüleiste",
+        "not_started": "Wettbewerb hat noch nicht begonnen",
         "no_tasks_yet": "Noch keine Aufgaben",
         "not_found_title": "Wettbewerb nicht gefunden",
         "not_found": "Wettbewerb nicht gefunden",

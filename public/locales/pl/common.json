@@ -14,6 +14,7 @@
         "live_count": "{{count}} na żywo",
         "upcoming_count": "{{count}} nadchodzące",
         "no_class_selected": "Wybierz klasę z menu",
+        "not_started": "Zawody jeszcze się nie rozpoczęły",
         "no_tasks_yet": "Brak konkurencji",
         "not_found_title": "Nie znaleziono zawodów",
         "not_found": "Nie znaleziono zawodów",

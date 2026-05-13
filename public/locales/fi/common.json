@@ -14,6 +14,7 @@
         "live_count": "{{count}} suorana",
         "upcoming_count": "{{count}} tulossa",
         "no_class_selected": "Valitse luokka valikosta",
+        "not_started": "Kilpailu ei ole vielä alkanut",
         "no_tasks_yet": "Ei vielä tehtäviä",
         "not_found_title": "Kilpailua ei löytynyt",
         "not_found": "Kilpailua ei löytynyt",

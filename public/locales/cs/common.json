@@ -14,6 +14,7 @@
         "live_count": "{{count}} živě",
         "upcoming_count": "{{count}} nadcházející",
         "no_class_selected": "Vyberte třídu z menu",
+        "not_started": "Soutěž ještě nezačala",
         "no_tasks_yet": "Žádné úlohy",
         "not_found_title": "Soutěž nenalezena",
         "not_found": "Soutěž nenalezena",
