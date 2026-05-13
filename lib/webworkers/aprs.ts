@@ -1015,7 +1015,7 @@ async function flushLoads() {
                 // per target, so multi-comp registrations naturally route
                 // each point to whichever comp(s) actually contain it.
                 if (target.airfield.bbox && !pointInBbox(target.airfield.bbox, baseMessage.lat, baseMessage.lng)) continue;
-                target.queue.push({...baseMessage, c: target.compno});
+                target.queue.push({...baseMessage, c: target.compno, ad: distHaversine(baseMessage, target.airfield.point)});
                 dispatched++;
             }
         }
