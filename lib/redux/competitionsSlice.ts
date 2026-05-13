@@ -80,7 +80,7 @@ export const selectCompetitionsList = createSelector([selectCompetitionsByCompid
 export const selectCompByCompid = (compid: string | undefined) =>
     createSelector([selectCompetitionsByCompid], (byCompid): CompetitionSummary | null => (compid ? byCompid[compid] ?? null : null));
 
-function summaryToCompetition(s: CompetitionSummary): Competition {
+export function summaryToCompetition(s: CompetitionSummary): Competition {
     return {
         compid: s.compid,
         name: s.name,

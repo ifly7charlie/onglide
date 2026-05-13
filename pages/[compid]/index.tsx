@@ -16,7 +16,7 @@ import {MeasureContext} from '../../lib/react/measure';
 import {ClassName, Datecode} from '../../lib/types';
 
 import {useSelector} from '../../lib/redux';
-import {selectCompByCompid, selectCompetitionsList, selectCompetitionsSnapshotReceived} from '../../lib/redux/competitionsSlice';
+import {selectCompByCompid, selectCompetitionsList, selectCompetitionsSnapshotReceived, summaryToCompetition} from '../../lib/redux/competitionsSlice';
 import Link from 'next/link';
 
 //
@@ -117,7 +117,25 @@ export default function CombinePage(props) {
                 <Head>
                     <title>{summary.name}</title>
                 </Head>
-                <h1>{t(upcoming ? 'competition.not_started' : 'competition.no_class_selected')}</h1>
+                <CompetitionGlobe competitions={[summaryToCompetition(summary)]} countriesGeoJson={null} />
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: '5%',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 10,
+                        background: 'rgba(0,0,0,0.6)',
+                        color: 'white',
+                        padding: '12px 20px',
+                        borderRadius: 6,
+                        textAlign: 'center',
+                        pointerEvents: 'auto'
+                    }}
+                >
+                    <div style={{fontSize: '1.1em', marginBottom: 6}}>{summary.name}</div>
+                    <div>{t(upcoming ? 'competition.not_started' : 'competition.no_class_selected')}</div>
+                </div>
             </>
         );
     }
