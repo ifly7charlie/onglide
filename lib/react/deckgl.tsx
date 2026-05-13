@@ -467,7 +467,7 @@ export default function MApp(props: {
     // briefly render before the raster arrives. Symbol layers (labels) stay visible
     // in both modes. contour-line is the exception — it's an overlay shown only on
     // satellite, hidden in street mode.
-    const fixupMap = useCallback(() => {
+    useEffect(() => {
         try {
             const map = mapRef?.current?.getMap();
             if (!map) return;
@@ -483,10 +483,11 @@ export default function MApp(props: {
             map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
         } catch (e) {}
     }, [mapStreet, mapRef?.current]);
-    useEffect(fixupMap, [mapStreet, mapRef?.current]);
 
     // Record if this is a new load or a reload
-    useEffect(() => props.setOptions({...props.options, loadId: (props.options.loadId ?? 0) + 1}), []);
+    useEffect(() => {
+        props.setOptions({...props.options, loadId: (props.options.loadId ?? 0) + 1});
+    }, []);
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
@@ -593,15 +594,13 @@ export default function MApp(props: {
                         <Layer key="scoringPoint" {...scoringPointStyle} />
                     </Source>
                 ) : null}
-                {valid && !unmounting ? (
-                    <DeckGLOverlay
-                        getTooltip={toolTip}
-                        onClick={onClick}
-                        onDragStart={onDragStart}
-                        layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]} //
-                        interleaved={true}
-                    />
-                ) : null}
+                <DeckGLOverlay
+                    getTooltip={toolTip}
+                    onClick={onClick}
+                    onDragStart={onDragStart}
+                    layers={valid && !unmounting ? ([...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
+                    interleaved={true}
+                />
                 {debouncedScore && options.constructionLines && debouncedScore.scoredGeoJSON ? (
                     <>
                         {debouncedScore.minGeoJSON && !lastLeg ? (
