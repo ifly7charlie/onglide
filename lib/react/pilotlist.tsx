@@ -367,7 +367,7 @@ export const Details = ({
 }) => {
     const {t} = useTranslation('common');
     let competitionDelay = useMemo(() => {
-        if (officialDelay) {
+        if (officialDelay > 10) {
             return (
                 <a href="#" title={t('pilot.view_delayed_official')} className="tooltipicon">
                     <span style={{color: 'grey'}}>
@@ -403,7 +403,7 @@ export const Details = ({
         )
     ) : null;
 
-    const distance = score?.actual ? (hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} />) : null;
+    const distance = score?.actual ? hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} /> : null;
     const gr = score?.actual ? ( //
         hasHandicappedResults ? (
             <HandicappedGRComponent handicappedGrRemaining={score.handicapped.grRemaining} actualGrRemaining={score.actual.grRemaining} />
@@ -430,7 +430,13 @@ export const Details = ({
     // gets updated regularily
     const delay = (replayTime ?? latestUpdate ?? Infinity) - (vario?.t || 0);
     const uptodate = delay < 45;
-    const old = delay > offlineTime && score && score.flightStatus != PositionStatus.Home && score.flightStatus != PositionStatus.Finished && score.flightStatus != PositionStatus.Landed && score.flightStatus != PositionStatus.Blocked;
+    const old =
+        delay > offlineTime &&
+        score &&
+        score.flightStatus != PositionStatus.Home &&
+        score.flightStatus != PositionStatus.Finished &&
+        score.flightStatus != PositionStatus.Landed &&
+        score.flightStatus != PositionStatus.Blocked;
 
     // Figure out what to show based on the db status
     let flightDetails = null;
