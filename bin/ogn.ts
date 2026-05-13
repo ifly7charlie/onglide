@@ -245,6 +245,7 @@ interface Channel {
     webPathBaseTime: Epoch;
     webPathData: Record<string, Buffer>;
     mostRecentPosition: Epoch; // last time we had something to send
+    tracksBroadcastRequired: boolean;
 
     // Sending helpers
     sendBinary: (data: Uint8Array) => void;
@@ -1116,6 +1117,7 @@ async function tickCompetitionTrackersAndTasks(competition: CompetitionContext, 
     rebuildAprsFilter();
     await updateTrackers(competition, datecode, pilotData);
     await finaliseScoreId(competition);
+    await finaliseTracksBroadcast(competition);
     if (competition.state === 'starting') competition.state = 'running';
     // Push any change picked up by this tick (new class, new pilot count,
     // task wired up, etc.) to /all listeners. broadcastCompetitionsDelta
@@ -1285,6 +1287,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
                 webPathData: {},
+                tracksBroadcastRequired: false,
                 scoreHistory: new Map(),
                 allScores: {},
                 scoreId,
@@ -1960,6 +1963,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                         glider.scoringConfigured = true;
                         channel.webPathBaseTime = 0 as Epoch;
                         channel.scoreIdUpdateRequired = true;
+                        channel.tracksBroadcastRequired = true;
                     } catch (e) {
                         console.error(e);
                     }
@@ -2180,6 +2184,16 @@ async function finaliseScoreId(competition: CompetitionContext) {
         }
     }
 }
+
+async function finaliseTracksBroadcast(competition: CompetitionContext) {
+    for (const channel of Object.values(channels)) {
+        if (channel.compid !== competition.compid) continue;
+        if (channel.tracksBroadcastRequired) {
+            channel.tracksBroadcastRequired = false;
+            await primeAndBroadcast(channel, `updateTrackers ${channel.displayName}`);
+        }
+    }
+}
 function getProposedScoreId(competition: CompetitionContext) {
     for (const channel of Object.values(channels)) {
         if (channel.compid !== competition.compid) continue;
@@ -2314,6 +2328,35 @@ async function generateRecentPilotTracks(channel: Channel) {
     return safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.displayName}`) ?? new Uint8Array(0);
 }
 
+// Build the tracks message and broadcast it to all clients of the channel.
+// When a non-zero webPathBaseTime is present we first fetch the snapshot
+// through the public host so the upstream proxy/CDN caches it before clients
+// race to fetch it themselves. Best-effort: failures don't block the send.
+async function primeAndBroadcast(channel: Channel, label: string): Promise<void> {
+    const msg = await generateRecentPilotTracks(channel);
+    if (!msg.byteLength) return;
+
+    const baseTime = channel.webPathBaseTime ?? 0;
+    if (baseTime) {
+        const host = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_SITEURL;
+        if (host) {
+            const proto = dev ? 'http' : 'https';
+            const url = `${proto}://${host}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
+            const ctl = new AbortController();
+            const timer = setTimeout(() => ctl.abort(), 1000);
+            try {
+                await fetch(url, {signal: ctl.signal, method: 'GET'});
+            } catch (e) {
+                console.log(`${label}: prime failed for ${url}: ${(e as Error).message}`);
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+    }
+
+    channel.sendBinary(msg);
+}
+
 function getIdentifiers(channel: Channel) {
     [channel.earliestStart, channel.earliestScore, channel.latestScore] = Object.values(channel.allScores).reduce(
         ([earliestStart, earliestScore, latestScore], score) => [
@@ -2395,7 +2438,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         channel.webPathBaseTime = 0 as Epoch; // we rescored so probably all the tracks have changed
         sendIdentifiersToAll(channel, true);
         console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
-        channel.sendBinary(await generateRecentPilotTracks(channel));
+        await primeAndBroadcast(channel, `_live ${channel.displayName}/${channel.datecode}`);
 
         const pendingChannels = Object.values(channels).filter((c) => !c.liveScoreId);
         if (pendingChannels.length) {

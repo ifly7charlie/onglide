@@ -53,6 +53,30 @@ Wire format is **protobuf** (`OnglideWebSocketMessage` in `lib/protobuf/onglide.
 
 Client decode happens in `lib/react/useWebsocketDecoder.tsx`, which dispatches into Redux slices in `lib/redux/` (`tracksSlice`, `scoresSlice`, `taskSlice`, `nowSlice`, `otherPilotsSlice`, `competitionsSlice`). Components subscribe via `useSelector`; deck.gl layers in `lib/react/*Layer*.ts(x)` read from Redux.
 
+### Tracks & scores broadcast
+
+Tracks are not streamed per-position. They're bulk-broadcast via `generateRecentPilotTracks(channel)` in `bin/ogn.ts`, called only from:
+
+- `sendCurrentState` — new client connect (sends to one client)
+- `_live` handler in `sendScore` — channel scoring transitions to live
+- `finaliseTracksBroadcast` — after `updateTrackers` when new pilots were configured this tick
+
+`generateRecentPilotTracks` first calls `generateHistoricalTracks`, which (every ~5 min, or whenever `channel.webPathBaseTime` is 0) freezes the prior window into `channel.webPathData[now]` and bumps `webPathBaseTime = now`. The frozen snapshot is served from RAM at `/tracks/{CLASS}{DATECODE}.{baseTime}.bin` (`Cache-Control: immutable max-age=300`). The websocket message carries only the delta past the snapshot plus the current `baseTime`.
+
+Client reconciliation (`lib/redux/tracksSlice.ts`):
+- `baseTime === 0` in the message → erase existing decks, apply residual inline (no HTTP fetch).
+- `baseTime > 0` → fetch the snapshot URL (its internal `baseTime: 0` triggers erase), then apply the residual delta.
+- `trackVersion` (random uint32 stamped on each `initialiseDeck`) is the *per-pilot* equivalent: mismatch triggers a per-pilot deck rebuild regardless of `baseTime`. Only changes when the deck is rebuilt from scratch — first pilot setup (`ogn.ts:1961`) or a `message.t == 0` reset from the scoring worker (`ogn.ts:2964`). It does **not** change on rescore, `_live`, or `utcStart` changes.
+
+`primeAndBroadcast(channel, label)` wraps `generateRecentPilotTracks` for all-clients broadcasts: before sending, it fires a self-GET via `NEXT_PUBLIC_HISTORY_HOST || NEXT_PUBLIC_SITEURL` (1s timeout, best-effort) to warm the upstream proxy/CDN cache so concurrent client fetches hit warm. Single-client sends skip the prime.
+
+Convention: deferred channel-level work uses a `*Required` boolean on `Channel`, consumed by a `finalise*` function called from `tickCompetitionTrackersAndTasks` — see `scoreIdUpdateRequired`/`finaliseScoreId` and `tracksBroadcastRequired`/`finaliseTracksBroadcast`.
+
+Scores broadcast on three paths:
+- Live per-pilot — `sendScore` emits `{scores: {scoreId, pilots: {[compno]: score}}}` on every `score.live`.
+- Bulk — `sendAllScores` (on connect) and `sendIdentifiersToAll(channel, includeScore=true)` (on `_live`).
+- Historical — served via HTTP at `/scorehistory/{CLASS}{DATECODE}.{timestamp}/{scoreId}.bin` in 30-min chunks from `channel.scoreHistory`.
+
 ### Scoring pipeline (the core of `bin/ogn.ts`)
 
 Scoring is an **async-generator chain**, one chain per glider. APRS packets feed in at the top; scored output flows out the bottom. From `lib/webworkers/scoring.ts`:
