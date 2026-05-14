@@ -448,7 +448,6 @@ async function main() {
 
     console.log('Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL);
     console.log(`db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}`);
-    process.title = process.env.MYSQL_DATABASE ?? 'unknown';
 
     // Download the list of trackers so we know who to look for. The DDB is
     // global across comps.
@@ -520,6 +519,11 @@ async function main() {
             await setTimeoutPromise(1000);
         }
     }
+
+    // Rename the process now that startup is complete — `ps`/`htop` show
+    // the renamed entry only for ready instances, which is handy during a
+    // rolling deploy where the outgoing and incoming processes coexist.
+    process.title = `onglide ${process.env.MYSQL_DATABASE ?? 'unknown'}`;
 
     // Phase 2: start the websocket/HTTP server. Deferred to here so the
     // port-open signal doubles as a readiness flag — a load balancer (or a
