@@ -13,8 +13,8 @@ import {
     faRoute, //
     faUsers,
     fa1,
-    faRoad,
-    faSatellite,
+    // faRoad, // satellite imagery temporarily disabled
+    // faSatellite, // satellite imagery temporarily disabled
     faPersonArrowUpFromLine
 } from '@fortawesome/free-solid-svg-icons';
 import {faCompass, faHandPointer} from '@fortawesome/free-regular-svg-icons';
@@ -53,9 +53,10 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
         }
         props.setOptions(newOptions);
     };
-    const toggleSatellite = () => {
-        props.setOptions(structuredClone({...props.options, mapType: !props.options.mapType}));
-    };
+    // Satellite imagery temporarily disabled
+    // const toggleSatellite = () => {
+    //     props.setOptions(structuredClone({...props.options, mapType: !props.options.mapType}));
+    // };
     const toggleUnits = () => {
         props.setOptions(structuredClone({...props.options, units: !props.options.units}));
     };
@@ -128,6 +129,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                 </button>
             )}
             {false ? <br className="smallScreen" /> : null}
+            {/* Satellite imagery temporarily disabled
             {props.options.mapType ? (
                 <button title={t('satellite_to_road')} onClick={toggleSatellite}>
                     <FontAwesomeIcon icon={faRoad} />
@@ -137,6 +139,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     <FontAwesomeIcon icon={faSatellite} />
                 </button>
             )}
+            */}
             {
                 [
                     <button title={t('north_up')} onClick={toggleTaskUp}>

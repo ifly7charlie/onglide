@@ -6,7 +6,8 @@ const PMTILES_URL = process.env.NEXT_PUBLIC_PMTILES_URL || '';
 // layer is hidden — MapLibre stops fetching the big base tiles entirely.
 const PMTILES_LABELS_URL = process.env.NEXT_PUBLIC_PMTILES_LABELS_URL || '';
 const DEM_TILE_URL = process.env.NEXT_PUBLIC_DEM_TILE_URL || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
-const SATELLITE_TILE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+// Satellite imagery temporarily disabled
+// const SATELLITE_TILE_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 
 const HAS_SPLIT_LABELS = PMTILES_LABELS_URL && PMTILES_LABELS_URL !== PMTILES_URL;
 export const LABELS_SOURCE = HAS_SPLIT_LABELS ? 'openmaptiles_labels' : 'openmaptiles';
@@ -36,13 +37,14 @@ export function buildMapStyle(): StyleSpecification {
                       }
                   }
                 : {}),
-            satellite: {
-                type: 'raster',
-                tiles: [SATELLITE_TILE_URL],
-                tileSize: 256,
-                maxzoom: 19,
-                attribution: 'Imagery © Esri, Maxar, Earthstar Geographics'
-            },
+            // Satellite imagery temporarily disabled
+            // satellite: {
+            //     type: 'raster',
+            //     tiles: [SATELLITE_TILE_URL],
+            //     tileSize: 256,
+            //     maxzoom: 19,
+            //     attribution: 'Imagery © Esri, Maxar, Earthstar Geographics'
+            // },
             terrain: {
                 type: 'raster-dem',
                 tiles: [DEM_TILE_URL],
@@ -222,13 +224,14 @@ export function buildMapStyle(): StyleSpecification {
                 },
                 paint: {'text-color': '#333', 'text-halo-color': '#fff', 'text-halo-width': 2}
             },
-            {
-                id: 'satellite',
-                type: 'raster',
-                source: 'satellite',
-                layout: {visibility: 'none'},
-                paint: {'raster-opacity': 1}
-            },
+            // Satellite imagery temporarily disabled
+            // {
+            //     id: 'satellite',
+            //     type: 'raster',
+            //     source: 'satellite',
+            //     layout: {visibility: 'none'},
+            //     paint: {'raster-opacity': 1}
+            // },
             {
                 id: 'water-label-line',
                 type: 'symbol',

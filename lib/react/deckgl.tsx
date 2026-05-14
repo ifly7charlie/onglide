@@ -444,28 +444,29 @@ export default function MApp(props: {
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
-    // Adjust to satellite or not. Style has all layers in it; we just toggle visibility
-    // (much quicker than swapping styles). Vector base layers (fills/lines from the
-    // openmaptiles source) are hidden on satellite to prevent a flicker where streets
-    // briefly render before the raster arrives. Symbol layers (labels) stay visible
-    // in both modes. contour-line is the exception — it's an overlay shown only on
-    // satellite, hidden in street mode.
-    useEffect(() => {
-        try {
-            const map = mapRef?.current?.getMap();
-            if (!map) return;
-            const style = map.getStyle();
-            if (!style?.layers) return;
-            for (const layer of style.layers) {
-                if (layer.id === 'contour-line') {
-                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'none' : 'visible');
-                } else if ((layer as any).source === 'openmaptiles' && layer.type !== 'symbol') {
-                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
-                }
-            }
-            map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
-        } catch (e) {}
-    }, [mapStreet, mapRef?.current]);
+    // Satellite imagery temporarily disabled
+    // // Adjust to satellite or not. Style has all layers in it; we just toggle visibility
+    // // (much quicker than swapping styles). Vector base layers (fills/lines from the
+    // // openmaptiles source) are hidden on satellite to prevent a flicker where streets
+    // // briefly render before the raster arrives. Symbol layers (labels) stay visible
+    // // in both modes. contour-line is the exception — it's an overlay shown only on
+    // // satellite, hidden in street mode.
+    // useEffect(() => {
+    //     try {
+    //         const map = mapRef?.current?.getMap();
+    //         if (!map) return;
+    //         const style = map.getStyle();
+    //         if (!style?.layers) return;
+    //         for (const layer of style.layers) {
+    //             if (layer.id === 'contour-line') {
+    //                 map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'none' : 'visible');
+    //             } else if ((layer as any).source === 'openmaptiles' && layer.type !== 'symbol') {
+    //                 map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
+    //             }
+    //         }
+    //         map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
+    //     } catch (e) {}
+    // }, [mapStreet, mapRef?.current]);
 
     // Record if this is a new load or a reload
     useEffect(() => {
