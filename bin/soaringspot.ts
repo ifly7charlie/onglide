@@ -705,13 +705,46 @@ async function process_day_task(day, classid, classname, keys) {
         duration = new Date(task_details.task_duration * 1000).toISOString().substr(11, 8);
     }
 
-    // Identify a distance handicap task, or an eglide one
-    if (info.match(/distance handicapping/i)) {
+    // Identify a distance handicap task or an eglide one from free text
+    // in either info or notes. e-glide implies the eglide variant of a
+    // distance handicap task so it overrides 'D'. Regatta / grand prix
+    // are handled separately via classes.grandprixstart='Y' below — that
+    // keeps the distance-handicap signal intact for tasks that are both
+    // regatta-style AND handicapped.
+    const taskText = `${info} ${task_details.notes ?? ''}`;
+    const isRegatta = /regatta/i.test(taskText);
+    const isGrandPrix = /grand[\s-]?prix/i.test(taskText);
+    const isEglide = /e[\s-]?glide/i.test(taskText);
+    let typedFromText = false;
+    if (taskText.match(/distance[\s-]?handicap/i)) {
         tasktype = 'D';
-        if (task_details.notes.match(/kwh/i)) {
-            tasktype = 'E';
+        typedFromText = true;
+    }
+    if (isEglide) {
+        tasktype = 'E';
+        typedFromText = true;
+    }
+
+    // Regatta, grand prix and e-glide all imply grandprix-start. Flip
+    // classes.grandprixstart='Y' (one-way) so the in-memory rule reads
+    // cleanly from a single source. tasktype='E' is preserved above so
+    // the UI can render the task as an eglide task.
+    if (isRegatta || isGrandPrix || isEglide) {
+        const reason = isEglide ? 'e-glide' : isGrandPrix ? 'grand prix' : 'regatta';
+        const r = await mysql_db.query(escape`
+            UPDATE classes
+            SET
+                grandprixstart = 'Y'
+            WHERE
+                class = ${classid}
+                AND grandprixstart <> 'Y'
+        `);
+        if (r?.affectedRows) {
+            console.log(`${classid}: ${reason} detected in task notes; set grandprixstart=Y`);
         }
-    } else if (winddir && windspeed) {
+    }
+
+    if (!typedFromText && winddir && windspeed) {
         const {contestWindDivisionFactor} = (
             await mysql_db.query(escape`
                 SELECT

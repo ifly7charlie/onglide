@@ -378,7 +378,7 @@ async function getTask(className: ClassName, datecode: Datecode): Promise<Task |
 
     const task: Task = {
         rules: {
-            grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
+            grandprixstart: taskdetails.grandprixstart == 'Y',
             nostartutc: taskdetails.nostartutc,
             aat: taskdetails.type == 'A',
             dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',

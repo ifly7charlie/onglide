@@ -106,11 +106,49 @@ export async function upsertTaskAndLegs(
     const date: string = day.task_date;
     const dateCode = toDateCode(date);
 
-    let tasktype: 'S' | 'A' = 'S';
+    let tasktype: 'S' | 'A' | 'D' | 'E' = 'S';
     let duration = '00:00';
     if (day.task_type == 'assigned_area') {
         tasktype = 'A';
         duration = new Date(day.task_duration * 1000).toISOString().substring(11, 19);
+    }
+
+    // Override tasktype from free-text task notes. Mirrors the OAuth
+    // source (bin/soaringspot.ts). "e-glide" wins over plain distance
+    // handicap because it implies the eglide variant. Regatta and grand
+    // prix don't change tasktype — they flip classes.grandprixstart
+    // below instead, which keeps the distance-handicap signal intact for
+    // tasks that are both regatta-style AND handicapped.
+    const noteText = String(day.notes ?? '');
+    const isRegatta = /regatta/i.test(noteText);
+    const isGrandPrix = /grand[\s-]?prix/i.test(noteText);
+    const isEglide = /e[\s-]?glide/i.test(noteText);
+    if (noteText.match(/distance[\s-]?handicap/i)) {
+        tasktype = 'D';
+    }
+    if (isEglide) {
+        tasktype = 'E';
+    }
+
+    // Regatta, grand prix and e-glide all imply grandprix-start. Flip
+    // classes.grandprixstart='Y' (one-way, matches the start-time
+    // detector and the contest-name detector in soaringspotscrape.ts)
+    // so the in-memory rule reads cleanly from a single source. The
+    // tasktype='E' assignment above is preserved so the UI can still
+    // render the task as an eglide task.
+    if (isRegatta || isGrandPrix || isEglide) {
+        const reason = isEglide ? 'e-glide' : isGrandPrix ? 'grand prix' : 'regatta';
+        const r = await db.query(escape`
+            UPDATE classes
+            SET
+                grandprixstart = 'Y'
+            WHERE
+                class = ${classid}
+                AND grandprixstart <> 'Y'
+        `);
+        if (r?.affectedRows) {
+            log(`${classid}: ${reason} detected in task notes; set grandprixstart=Y`);
+        }
     }
 
     // Promote compstatus to 'B' (briefed) unconditionally whenever we see

@@ -1508,7 +1508,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
 
         let task: Task = {
             rules: {
-                grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
+                grandprixstart: taskdetails.grandprixstart == 'Y',
                 nostartutc: taskdetails.nostartutc,
                 aat: taskdetails.type == 'A',
                 dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',

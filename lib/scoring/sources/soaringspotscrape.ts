@@ -677,6 +677,22 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                             if (task) {
                                 const taskJSON = JSON.parse(task[1]);
                                 if (cancelled) taskJSON.result_status = 'cancelled';
+                                // Pull the "Task notes" <p> out of the page
+                                // body. taskNormalize(...) doesn't carry it,
+                                // but downstream (upsertTaskAndLegs) needs
+                                // it to spot tags like "distance handicapped",
+                                // "grand prix", "regatta", "e-glide" that
+                                // drive tasks.type.
+                                const taskDom = htmlparser.parseDocument(taskBody);
+                                const notesH3 = findOne((x) => x.name === 'h3' && /task notes/i.test(textContent(x) ?? ''), taskDom.children);
+                                if (notesH3) {
+                                    let sib: any = (notesH3 as any).next;
+                                    while (sib && sib.name !== 'p') sib = sib.next;
+                                    const notesText = sib ? textContent(sib).trim() : '';
+                                    if (notesText) {
+                                        taskJSON.notes = taskJSON.notes ? `${taskJSON.notes}\n${notesText}` : notesText;
+                                    }
+                                }
                                 await upsertTaskAndLegs(ctx.db, ctx.log, classid, className, taskJSON);
                             }
                         } catch (e) {

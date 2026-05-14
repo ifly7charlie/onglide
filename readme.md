@@ -2,8 +2,86 @@
 
 [https://www.onglide.com/]
 
+This includes tasks, scoring (AAT/Speed/Distance Handicap) and matching trackers
 
-## Running (Docker)
+## Task Types
+
+### AAT
+
+AATs will be scored automatically as pilots fly. You can see what the
+solution is by enabling construction lines, and if you also use replay
+you can see how it changes as pilots fly the sectors.
+
+### Speed Tasks
+
+Start/Finish times, flown distance speed and landouts all calculated automatically.
+
+### SGP/Regatta starts
+
+If you are running a grand prix and want regattastarts you should
+ensure that your task has a start time set and the contest name
+includes the text 'SGP' or the task notes has 'grandprix' or 'regatta'. 
+
+Alternatively after the first results are published it will detect
+that all the start times are the same and adjust it to be grand prix
+scoring.
+
+### Distance Handicap
+
+You can indicate that the task is 'distance handicapped' using an
+approximation of the Distance Handicap adjustment programme. This
+means that gliders of different handicaps will be scored against
+different tasks, when a pilot is selected the map will show
+approximately what their task is. (If you know how to exactly
+calculate it please let me know)
+
+To enable this add the text 'distance handicapping' or 'distance
+handicapped' to the task notes.
+
+It will need to be set every day as the task settings are per set task
+
+
+## Glider matching and identification
+
+Primary matching is done using the OGN and Flarmnet DDB databases. A
+secondary cross check is conducted based on start and finish times
+over the course of the competition. This generally corrects incorrect
+matches within a few days, as well as picking up unregistered gliders
+
+### Do Not Track 
+
+If a Flarm ID is listed in *either* as 'do not track' they will not be
+tracked unless the competition has requested tracking (eg it's in
+their rules). OGN does not forward do-not-track packets so in reality
+gliders listed as DNT in OGN DDB will not be seen anyway, you need to
+change it there
+
+## Delayed Tracking
+
+Onglide can support delayed tracking to mix the IGC delayed trackers
+into live Flarm tracking without ghosting. If tracking is delayed it
+will be indicated in the status bar.
+
+Normally points are delayed for 10 seconds to allow for out order
+packet filtering. This removes 'jumps' from bad trackers
+
+## Landout/Ground tracking
+
+Points on the ground are normally supressed. GPS with poor coverage
+may occasionally leak through (jumps) otherwise we miss people running ridges. 
+
+Tracking should stop at 3km from airfield center (marked with a cross on the
+map).  Stationary gliders may not be reliably tracked.
+
+## Merging IDs
+
+Onglide can support multiple IDs for a pilot. These are not currently
+automatically detected but I'm happy to configure them if needed (it's
+used for the delayed IGC trackers and SGP for example)
+
+# Other
+
+## Running your own 
 
 This repo includes docker commands to launch everything required to
 run your own competition. I don't use docker to run it so the edges will be rough
