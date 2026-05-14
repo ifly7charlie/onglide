@@ -120,7 +120,7 @@ let scoreFrequency = 60;
 
 process.setMaxListeners(35);
 
-// Per-competition state. Channels, gliders, scoreDb, and the APRS worker
+// Per-competition state. Channels, gliders, and the APRS worker
 // remain process-wide, but everything that varies across comps — location,
 // timezone, internal name, the set of channel keys this comp owns — lives
 // in a CompetitionContext. PR 4 restructures but stays single-comp; PR 5
@@ -239,7 +239,6 @@ interface Channel {
     scoreIdUpdateRequired: boolean;
     scoresUpdatedAt: Epoch;
     scoreHistory: Map<string, Map<Compno, PilotScore[]>>;
-    scoreDb: AbstractSublevel<ClassicLevel<Compno, string>, string | Buffer | Uint8Array, string, string>;
 
     // For the web buffer
     webPathBaseTime: Epoch;
@@ -811,11 +810,6 @@ async function handleExit(signal: string) {
 
     // Close the shared resources once no context is holding them open.
     try {
-        await scoreDb?.close();
-    } catch (e) {
-        console.error('scoreDb close during exit:', e);
-    }
-    try {
         await aprsController?.shutdown();
     } catch (e) {
         console.error('aprsController shutdown during exit:', e);
@@ -1236,21 +1230,11 @@ async function getDCode(competition: CompetitionContext): Promise<Datecode> {
     return toDateCode(new Date(utcTime));
 }
 
-import {ClassicLevel} from 'classic-level';
-import {AbstractSublevel} from 'abstract-level';
 import {WriteStream} from 'node:fs';
-let scoreDb: ClassicLevel<Compno, string> | undefined = undefined;
 
 //
 // Fetch the trackers from the database
 async function updateClasses(competition: CompetitionContext, datecode: Datecode) {
-    if (!scoreDb) {
-        const path = `${process.env.DB_PATH ?? './db/'}/scores.db`;
-        console.log(`opening scoreDB ${path}`);
-        scoreDb = new ClassicLevel(path);
-        await scoreDb.open().catch((e) => console.log(e));
-    }
-
     const location = competition.location;
 
     // Fetch the trackers from the database and the channel they are supposed to be in.
@@ -1355,37 +1339,12 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 scoresUpdatedAt: 0 as Epoch,
                 earliestScore: Infinity as Epoch,
                 earliestStart: Infinity as Epoch,
-                scoreDb: scoreDb?.sublevel(cname),
                 latestScore: 0 as Epoch,
                 sendBinary(data: Uint8Array) {
                     this.clients.forEach((c: OgnWebSocket) => c.sendBinary(data));
                 }
             };
             channel.scoreHistory.set(scoreId, new Map<Compno, PilotScore[]>());
-
-            // Read any old history. Pass each parsed record through
-            // PilotScore.fromPartial so the ts-proto factory fills in
-            // defaults for fields that didn't exist when the record was
-            // persisted. In particular every `repeated` field becomes
-            // `[]` rather than `undefined`, which matters because protobuf
-            // encode does `for (const v of message.field)` unconditionally
-            // and explodes with "is not iterable" if the field is missing.
-            // This was blowing up sendAllScores with older leveldb records
-            // that predate optimalGrid (field 65) et al.
-            if (channel.scoreDb) {
-                for await (const [compno, scoreJSON] of channel.scoreDb?.iterator() ?? []) {
-                    const raw = JSON.parse(scoreJSON);
-                    const score = PilotScore.fromPartial(raw);
-                    if (!channel.liveScoreId && score.scoreId) {
-                        channel.liveScoreId = score.scoreId;
-                    }
-                    score.scoreId = channel.liveScoreId ?? score.scoreId ?? '';
-                    channel.allScores[compno] = score;
-                }
-                console.log(`${channel.displayName}: ${Object.keys(channel.allScores).length} scores loaded on id ${channel.liveScoreId}`);
-            } else {
-                console.log(`${channel.displayName}: no score db`);
-            }
         } else {
             // We move it to the new list
             delete channels[cname];
@@ -1460,12 +1419,6 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     if (lastChannelsLog.get(competition.compid) !== channelsLine) {
         console.log(`${compShort(competition.compid)} channels: ${channelsLine}`);
         lastChannelsLog.set(competition.compid, channelsLine);
-    }
-
-    if (!Object.keys(newchannels).length && scoreDb) {
-        console.log('closing scoredb, no channels');
-        await scoreDb.close();
-        scoreDb = undefined;
     }
 }
 
@@ -1696,15 +1649,13 @@ interface CTrackerRow {
     scoredStatus: 'H' | 'F' | 'S';
 }
 
-// Drop a pilot from every score store on a channel: in-memory current and
-// historical scores, plus the leveldb-backed cache so they don't reappear
-// after a restart.
+// Drop a pilot from every in-memory score store on a channel: current and
+// historical scores.
 function forgetCompno(channel: Channel, compno: Compno) {
     delete channel.allScores[compno];
     for (const shid of channel.scoreHistory.values()) {
         shid.delete(compno);
     }
-    channel.scoreDb?.del(compno).catch((e) => console.log(`scoreDb del ${compno}:`, e));
 }
 
 interface PilotData {
@@ -2521,13 +2472,6 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 console.log('*** sent process ready');
                 process.send('ready');
             }
-            try {
-                for (const compno in channel.allScores) {
-                    await channel.scoreDb?.put(compno, JSON.stringify(channel.allScores[compno]));
-                }
-            } catch (e) {
-                console.log(e);
-            }
         }
         return;
     }
@@ -2592,8 +2536,8 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             // we don't differentiate between the two scoreIds but it's not a history so will
             // be fixed after a rescore. It could jump between two scores as the old scoring is terminated
             // Carry the prior optimalGrid forward when this tick didn't emit one (the worker only
-            // populates it on leg entry) so sendAllScores / sendIdentifiersToAll / scoreDb restore
-            // still ship a grid for the pilot's current leg.
+            // populates it on leg entry) so sendAllScores / sendIdentifiersToAll still ship a grid
+            // for the pilot's current leg.
             const prior = channel.allScores[compno];
             // Don't let a stale worker score overwrite the synthesised Blocked
             // entry — the worker may still have track points cached from before
@@ -2607,9 +2551,6 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                     ? {...score, optimalGrid: prior.optimalGrid}
                     : score;
             channel.allScores[compno] = stored;
-            channel.scoreDb?.put(compno, JSON.stringify(stored)).catch((e) => {
-                console.log(`error saving score ${compno}, ${e}`);
-            });
         }
     }
 
@@ -3366,7 +3307,6 @@ function setupOgnWebServer(req, res) {
         const replacer = (key, value) => {
             switch (key) {
                 case 'scoreHistory':
-                case 'scoreDb':
                 case 'broadcastChannel':
                 case 'deck':
                 case 'flarmIdRegex':

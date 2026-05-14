@@ -37,7 +37,6 @@
         "@turf/line-intersect": "^6.5.0",
         "@turf/line-to-polygon": "^6.5.0",
         "@turf/turf": ">=5.1.6",
-        "classic-level": "^3.0.0",
         "country-iso-2-to-3": "=1.1.0",
         "country-iso-3-to-2": "=1.1.1",
         "deck.gl": "=9.2.11",
