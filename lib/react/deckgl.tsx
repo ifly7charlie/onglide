@@ -97,12 +97,13 @@ export default function MApp(props: {
 
     const isMoving = mapRef?.current?.isMoving() ?? true;
 
-    // Map display style
+    // Map display style. MapType.street=0, MapType.satellite=1, so the road
+    // basemap is active when options.mapType is falsy. mapLight tracks whether
+    // the basemap is light-coloured (true on road, false on satellite) and is
+    // consumed by layer style helpers to pick dark-on-light vs light-on-dark
+    // variants. The earlier `!!options.mapType` was inverted on both flags.
     const map2d = options.map2d;
-    // Satellite imagery temporarily disabled — force road/non-light layer styling
-    // regardless of the persisted options.mapType.
-    // const mapStreet = !!options.mapType;
-    const mapStreet = false;
+    const mapStreet = !options.mapType;
     const mapLight = mapStreet;
 
     // Rules & legs etc
@@ -447,29 +448,28 @@ export default function MApp(props: {
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
-    // Satellite imagery temporarily disabled
-    // // Adjust to satellite or not. Style has all layers in it; we just toggle visibility
-    // // (much quicker than swapping styles). Vector base layers (fills/lines from the
-    // // openmaptiles source) are hidden on satellite to prevent a flicker where streets
-    // // briefly render before the raster arrives. Symbol layers (labels) stay visible
-    // // in both modes. contour-line is the exception — it's an overlay shown only on
-    // // satellite, hidden in street mode.
-    // useEffect(() => {
-    //     try {
-    //         const map = mapRef?.current?.getMap();
-    //         if (!map) return;
-    //         const style = map.getStyle();
-    //         if (!style?.layers) return;
-    //         for (const layer of style.layers) {
-    //             if (layer.id === 'contour-line') {
-    //                 map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'none' : 'visible');
-    //             } else if ((layer as any).source === 'openmaptiles' && layer.type !== 'symbol') {
-    //                 map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
-    //             }
-    //         }
-    //         map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
-    //     } catch (e) {}
-    // }, [mapStreet, mapRef?.current]);
+    // Adjust to satellite or not. Style has all layers in it; we just toggle visibility
+    // (much quicker than swapping styles). Vector base layers (fills/lines from the
+    // openmaptiles source) are hidden on satellite to prevent a flicker where streets
+    // briefly render before the raster arrives. Symbol layers (labels) stay visible
+    // in both modes. contour-line is the exception — it's an overlay shown only on
+    // satellite, hidden in street mode.
+    useEffect(() => {
+        try {
+            const map = mapRef?.current?.getMap();
+            if (!map) return;
+            const style = map.getStyle();
+            if (!style?.layers) return;
+            for (const layer of style.layers) {
+                if (layer.id === 'contour-line') {
+                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'none' : 'visible');
+                } else if ((layer as any).source === 'openmaptiles' && layer.type !== 'symbol') {
+                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
+                }
+            }
+            map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
+        } catch (e) {}
+    }, [mapStreet, mapRef?.current]);
 
     // Record if this is a new load or a reload
     useEffect(() => {

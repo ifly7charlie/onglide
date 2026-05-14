@@ -415,7 +415,7 @@ export const OgnFeed = memo(
                         effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? ( //
                             <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} officialDelay={officialDelay} />
                         ) : (
-                            <Sponsors at={wsStatus.at} />
+                            <Sponsors wsStatus={wsStatus} tz={tz} lang={router.locale ?? 'en'} officialDelay={officialDelay} />
                         )
                     }
                 >
@@ -452,7 +452,8 @@ export const OgnFeed = memo(
 );
 
 function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) {
-    const competitionDelay = officialDelay
+    const showDelay = officialDelay > 10;
+    const competitionDelay = showDelay
         ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
                 <span style={{color: 'grey'}}>
                  &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', officialDelay as Epoch, 'm')}
@@ -461,9 +462,12 @@ function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) 
         : '';
 
     const dt = new Date(time * 1000);
-    const dtl = !officialDelay ? dt : new Date((time + officialDelay) * 1000);
-    return (
-        `<a href='#' title='competition time'>${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})} ${competitionDelay} ✈️ </a> | ` + //
-        `<a href='#' title='your time'>${dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'})} ⌚️</a>`
-    );
+    const dtl = !showDelay ? dt : new Date((time + officialDelay) * 1000);
+    const compTime = dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    const yourTime = dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
+    const compPart = `<a href='#' title='competition time'>${compTime} ${competitionDelay} ✈️ </a>`;
+    if (yourTime === compTime) {
+        return compPart;
+    }
+    return `${compPart} | <a href='#' title='your time'>${yourTime} ⌚️</a>`;
 }
