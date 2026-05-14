@@ -53,6 +53,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             inSector: false,
             inPenalty: false,
             pointsProcessed: status?.pointsProcessed || 0,
+            lastProcessedPoint: status?.lastProcessedPoint,
             legs: task.legs.map((l) => {
                 return {legno: l.legno, points: [], penaltyPoints: []};
             })
@@ -241,6 +242,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     if (hc.everInside) {
                         if (!hc.finalInside) {
                             // for starts it's always the last crossing that matters
+                            resetStart();
                             status.legs[0].points = [simplifyPoint(hc.crossings.at(-1)?.at!)];
                             status.startFound = true;
                             status.currentLeg = 1;
