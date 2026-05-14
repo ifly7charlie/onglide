@@ -20,7 +20,7 @@ import {getElevationOffset} from '../lib/getelevationoffset';
 import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchlanding';
 
 import {toDateCode} from '../lib/datecode';
-import {makeClassId} from '../lib/classid';
+import {makeClassId, normalizeClassNameForDisplay} from '../lib/classid';
 
 // DB access
 //const db = require('../db')
@@ -311,7 +311,7 @@ async function update_class(compClass, keys) {
             (
                 ${classid},
                 ${keys.compid},
-                ${name.substr(0, 29)},
+                ${normalizeClassNameForDisplay(name).substr(0, 29)},
                 ${name},
                 ${compClass.type},
                 ${isHandicapped},

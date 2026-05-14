@@ -39,7 +39,7 @@ let cnhandicaps = {};
 // Load the current file
 const dotenv = require('dotenv');
 
-import {makeClassId} from '../lib/classid';
+import {makeClassId, normalizeClassNameForDisplay} from '../lib/classid';
 
 // Location information, fetched from DB
 var location;
@@ -210,7 +210,7 @@ async function update_class(compid: string, className: string, data: any, dataHt
             (
                 ${classid},
                 ${compid},
-                ${name.substr(0, 29)},
+                ${normalizeClassNameForDisplay(name).substr(0, 29)},
                 ${name},
                 'club'
             ) ON DUPLICATE KEY
