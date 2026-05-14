@@ -226,8 +226,17 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
     const todaysObs = state.observations.filter((o) => o.isToday);
     const allTodayScored = todaysObs.length > 0 && todaysObs.every((o) => o.fullyScored);
 
+    // Startup prime: nextResultsAt is 0 on a fresh process. Force one
+    // fetch on the first heartbeat so an operator restart in the
+    // evening still pulls late-arriving results, and so the scheduler
+    // logs a concrete "I just hit upstream" line at boot.
+    const startupPrime = state.nextResultsAt === 0;
+
     let fetchResults = false;
-    if (allTodayScored) {
+    if (startupPrime) {
+        fetchResults = true;
+        reasons.push('results:startup-prime');
+    } else if (allTodayScored) {
         reasons.push('results:all-scored-stop');
     } else if (localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
         if (nowMs >= state.nextResultsAt) {
@@ -685,7 +694,11 @@ async function processCompetition(
         if (LAUNCHED_STATES.has(obs.status)) anyLaunchedToday = true;
     }
 
-    if (decisions.fetchPilots || decisions.fetchResults) {
+    // Always log the per-tick decision when there's anything to say —
+    // including "we chose to skip" reasons like results:after-22:00-stop
+    // or results:all-scored-stop. Silent ticks otherwise hide why the
+    // scheduler isn't hitting upstream.
+    if (decisions.reasons.length > 0) {
         ctx.log(`scheduler: ${decisions.reasons.join(', ')}`);
     }
 
