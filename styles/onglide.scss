@@ -223,6 +223,27 @@ button {
             font-size: 18px;
         }
 
+        .sidepanel-comp-logo {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+
+            a,
+            img {
+                display: block;
+                max-width: 100%;
+                max-height: 100%;
+            }
+
+            img {
+                object-fit: contain;
+            }
+        }
+
         .sidepanel-title {
             flex: 1;
             min-width: 0;
@@ -373,6 +394,33 @@ button {
         &.highlighted {
             background: var(--panel-hover);
             border-left-color: var(--panel-fg);
+        }
+
+        .entry-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .entry-logo {
+            flex-shrink: 0;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+
+            img {
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+            }
+        }
+
+        .entry-text {
+            flex: 1;
+            min-width: 0;
         }
 
         .entry-title {

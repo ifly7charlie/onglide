@@ -93,6 +93,7 @@ export function summaryToCompetition(s: CompetitionSummary): Competition {
         tz: s.tz,
         tzoffset: s.tzoffset,
         mainwebsite: s.mainwebsite ?? null,
+        urllogo: s.urllogo ?? null,
         classCount: s.classCount,
         classes: s.classes.map(
             (c): CompetitionClass => ({

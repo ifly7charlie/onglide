@@ -130,6 +130,7 @@ interface CompetitionMetadata {
     sitename: string | null;
     countrycode: string;
     mainwebsite: string | null;
+    urllogo: string | null;
     lat: number;
     lng: number;
     start: string; // YYYY-MM-DD
@@ -846,7 +847,7 @@ async function discoverCompetitions(): Promise<{active: any[]; upcoming: any[]}>
     // current scoring datecode (the "pre-comp practice day" escape hatch
     // on the start side). Date window filtering is done in TypeScript
     // below so replay mode can bypass it.
-    const base = `SELECT c.compid, c.name, c.sitename, c.countrycode, c.mainwebsite,
+    const base = `SELECT c.compid, c.name, c.sitename, c.countrycode, c.mainwebsite, c.urllogo,
                          c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats, c.trackingconsent, c.delayseconds,
                          (SELECT COUNT(*)
                           FROM tasks t
@@ -943,6 +944,7 @@ async function reconcileContexts() {
             ctx.summary.sitename = row.sitename ?? null;
             ctx.summary.countrycode = row.countrycode || '';
             ctx.summary.mainwebsite = row.mainwebsite ?? null;
+            ctx.summary.urllogo = row.urllogo ?? null;
             ctx.summary.tz = row.tz || ctx.summary.tz;
             ctx.summary.tzoffset = parseInt(row.tzoffset as unknown as string) || ctx.summary.tzoffset;
             const newStart = row.start instanceof Date ? row.start.toISOString().slice(0, 10) : typeof row.start === 'string' ? row.start.slice(0, 10) : ctx.summary.start;
@@ -1033,6 +1035,7 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
             sitename: row.sitename ?? null,
             countrycode: row.countrycode || '',
             mainwebsite: row.mainwebsite ?? null,
+            urllogo: row.urllogo ?? null,
             lat: Number(row.lat) || 0,
             lng: Number(row.lng) || 0,
             start: ymd(row.start),
@@ -2649,6 +2652,7 @@ async function refreshUpcomingCompetitions(rows: any[]) {
             sitename: row.sitename ?? null,
             countrycode: row.countrycode || '',
             mainwebsite: row.mainwebsite ?? null,
+            urllogo: row.urllogo ?? null,
             lat: Number(row.lat) || 0,
             lng: Number(row.lng) || 0,
             start: ymd(row.start),
@@ -2708,6 +2712,7 @@ function buildUpcomingSummary(compid: string): CompetitionSummary | null {
         tz: meta.tz,
         tzoffset: meta.tzoffset,
         mainwebsite: meta.mainwebsite ?? undefined,
+        urllogo: meta.urllogo ?? undefined,
         classCount: classes.length,
         classStatusesDiffer: false,
         displayStatus: 'upcoming',
@@ -2820,6 +2825,7 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         tz: sum.tz,
         tzoffset: sum.tzoffset,
         mainwebsite: sum.mainwebsite ?? undefined,
+        urllogo: sum.urllogo ?? undefined,
         classCount: classes.length,
         classStatusesDiffer,
         displayStatus,

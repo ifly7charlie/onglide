@@ -60,6 +60,7 @@ export interface CompetitionSummary {
   tz: string;
   tzoffset: number;
   mainwebsite?: string | undefined;
+  urllogo?: string | undefined;
   classCount: number;
   classStatusesDiffer: boolean;
   displayStatus: string;
@@ -833,6 +834,7 @@ function createBaseCompetitionSummary(): CompetitionSummary {
     tz: "",
     tzoffset: 0,
     mainwebsite: undefined,
+    urllogo: undefined,
     classCount: 0,
     classStatusesDiffer: false,
     displayStatus: "",
@@ -875,6 +877,9 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
     }
     if (message.mainwebsite !== undefined) {
       writer.uint32(90).string(message.mainwebsite);
+    }
+    if (message.urllogo !== undefined) {
+      writer.uint32(138).string(message.urllogo);
     }
     if (message.classCount !== 0) {
       writer.uint32(96).uint32(message.classCount);
@@ -989,6 +994,14 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
           message.mainwebsite = reader.string();
           continue;
         }
+        case 17: {
+          if (tag !== 138) {
+            break;
+          }
+
+          message.urllogo = reader.string();
+          continue;
+        }
         case 12: {
           if (tag !== 96) {
             break;
@@ -1051,6 +1064,7 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
       tz: isSet(object.tz) ? globalThis.String(object.tz) : "",
       tzoffset: isSet(object.tzoffset) ? globalThis.Number(object.tzoffset) : 0,
       mainwebsite: isSet(object.mainwebsite) ? globalThis.String(object.mainwebsite) : undefined,
+      urllogo: isSet(object.urllogo) ? globalThis.String(object.urllogo) : undefined,
       classCount: isSet(object.classCount) ? globalThis.Number(object.classCount) : 0,
       classStatusesDiffer: isSet(object.classStatusesDiffer) ? globalThis.Boolean(object.classStatusesDiffer) : false,
       displayStatus: isSet(object.displayStatus) ? globalThis.String(object.displayStatus) : "",
@@ -1096,6 +1110,9 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
     if (message.mainwebsite !== undefined) {
       obj.mainwebsite = message.mainwebsite;
     }
+    if (message.urllogo !== undefined) {
+      obj.urllogo = message.urllogo;
+    }
     if (message.classCount !== 0) {
       obj.classCount = Math.round(message.classCount);
     }
@@ -1130,6 +1147,7 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
     message.tz = object.tz ?? "";
     message.tzoffset = object.tzoffset ?? 0;
     message.mainwebsite = object.mainwebsite ?? undefined;
+    message.urllogo = object.urllogo ?? undefined;
     message.classCount = object.classCount ?? 0;
     message.classStatusesDiffer = object.classStatusesDiffer ?? false;
     message.displayStatus = object.displayStatus ?? "";

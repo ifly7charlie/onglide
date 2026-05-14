@@ -37,11 +37,23 @@ export function compShortName(comp: any) {
 export function SidePanelHeader({comp}: {comp: any}) {
     const {t} = useTranslation('common');
     const shortName = compShortName(comp);
+    const logo = comp?.urllogo ? (
+        <div className="sidepanel-comp-logo">
+            {comp?.mainwebsite ? (
+                <a href={comp.mainwebsite} aria-label={shortName}>
+                    <img src={comp.urllogo} alt="" />
+                </a>
+            ) : (
+                <img src={comp.urllogo} alt="" />
+            )}
+        </div>
+    ) : null;
     return (
         <div className="sidepanel-header">
             <Link href="/" className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                 <FontAwesomeIcon icon={faGlobe} />
             </Link>
+            {logo}
             <div className="sidepanel-title">
                 <div className="sidepanel-comp-name">
                     {comp?.mainwebsite ? (

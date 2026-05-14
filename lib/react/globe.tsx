@@ -53,6 +53,7 @@ export interface Competition {
     tz: string;
     tzoffset: number;
     mainwebsite: string | null;
+    urllogo: string | null;
     classCount: number;
     classes?: CompetitionClass[];
     classStatusesDiffer?: boolean;
@@ -537,10 +538,19 @@ function CompetitionListEntry({
 
     return (
         <div ref={registerRef} onMouseEnter={onHover} onMouseLeave={onLeave} onClick={onClick} className={entryClass}>
-            <div className="entry-title">{comp.name}</div>
-            {comp.sitename ? <div className="entry-sitename">{comp.sitename}</div> : null}
-            <div className="entry-dates">
-                {comp.start} – {comp.end}
+            <div className="entry-row">
+                {comp.urllogo ? (
+                    <div className="entry-logo">
+                        <img src={comp.urllogo} alt="" />
+                    </div>
+                ) : null}
+                <div className="entry-text">
+                    <div className="entry-title">{comp.name}</div>
+                    {comp.sitename ? <div className="entry-sitename">{comp.sitename}</div> : null}
+                    <div className="entry-dates">
+                        {comp.start} – {comp.end}
+                    </div>
+                </div>
             </div>
             {inActiveWindow && classes.length > 0
                 ? classes.map((cls) => {

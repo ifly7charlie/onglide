@@ -37,6 +37,7 @@ message CompetitionSummary {
 	string tz = 9;
 	int32 tzoffset = 10;
 	optional string mainwebsite = 11;
+	optional string urllogo = 17;
 	uint32 classCount = 12;
 	bool classStatusesDiffer = 13;
 	string displayStatus = 14;
