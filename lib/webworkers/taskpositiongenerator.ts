@@ -35,10 +35,19 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     let relaxedStartCandidate: {crossing: {entered: boolean; left: boolean; at: BasePositionMessage}; beyondM: number; distToTP1: DistanceKM} | null = null;
     let closestDistToStartLine: DistanceKM = Infinity as DistanceKM;
 
+    interface PossibleAdvance {
+        possiblePoints: BasePositionMessage[];
+        rewindTo: Epoch;
+        estimatedTurnType: EstimatedTurnType;
+        ld: number;
+    }
+    let possibleAdvances: PossibleAdvance[] = [];
+
     // Reset everything related to the current task
     function resetStart() {
         relaxedStartCandidate = null;
         closestDistToStartLine = Infinity as DistanceKM;
+        possibleAdvances = [];
         status = {
             compno: status?.compno || ('init' as Compno),
             t: status?.t || (0 as Epoch),
@@ -73,15 +82,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
     // state for the search
     let landedBack = false;
-
-    interface PossibleAdvance {
-        possiblePoints: BasePositionMessage[];
-        rewindTo: Epoch;
-        estimatedTurnType: EstimatedTurnType;
-        ld: number;
-    }
-
-    let possibleAdvances: PossibleAdvance[] = [];
 
     // Shortcut to the startline/finishline which is expected to always be the first/last points
     var startLine = legs[0];
