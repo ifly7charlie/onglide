@@ -483,7 +483,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                 const dom = htmlparser.parseDocument(body);
                 const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
                 if (!contestInfo) {
-                    ctx.log(`ensureMetadata: no contest-title div at ${target} (body=${body.length}B)`);
+                    ctx.log(`ensureMetadata: no contest-title div at ${target} (body=${body.length}B)${body.length < 2000 ? ` snippet=${JSON.stringify(body.slice(0, 200))}` : ''}`);
                     continue;
                 }
                 const children = contestInfo.children ?? [];
@@ -616,6 +616,14 @@ export class SoaringSpotScrapeSource implements ScoringSource {
             const dom = htmlparser.parseDocument(body);
 
             const allresults = findAll((x) => x.name == 'table' && x.attribs?.class == 'result-overview', dom.children);
+
+            // Suspiciously short body or empty table set usually means
+            // SoaringSpot rate-limited or returned an error stub
+            // (typical real /results body is tens of KB). Surface the
+            // first 200 chars so the cause is diagnosable from the log.
+            if (allresults.length === 0 && body.length < 2000) {
+                ctx.log(`fetchResultsAndTasks: no result-overview tables (body=${body.length}B) snippet=${JSON.stringify(body.slice(0, 200))}`);
+            }
 
             for (const result of allresults) {
                 const nameRaw = textContent(findOne((x) => x.name == 'th', result.children) ?? []).trim();
