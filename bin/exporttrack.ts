@@ -6,7 +6,7 @@ import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
 import {loadPoints} from '../lib/webworkers/pointlog';
 
-import {fromDateCode, competitionStartTs} from '../lib/datecode';
+import {fromDateCode, competitionStartForDatecode} from '../lib/datecode';
 
 import escape from 'sql-template-strings';
 import Mysql from 'serverless-mysql';
@@ -79,11 +79,7 @@ async function main() {
     }
 
     const tzoffset = Number(pilots[0].tzoffset) || 0;
-    // Anchor on the datecode's 10am-local-time (via fromDateCode → reference
-    // timestamp that falls inside the desired day). competitionStartTs then
-    // returns the UTC epoch for that 10am boundary.
-    const dayMidday = new Date(fromDateCode(datecode)).getTime() / 1000 + 12 * 3600;
-    const since = competitionStartTs(tzoffset, dayMidday);
+    const since = competitionStartForDatecode(datecode, tzoffset);
     const until = since + 24 * 3600;
     const messageQueue: any[] = [];
 

@@ -40,3 +40,13 @@ export function competitionStartTs(tzoffsetSeconds: number, referenceTs?: number
     if (localMs < local10amMs) local10amMs -= 86400 * 1000;
     return Math.floor((local10amMs - tzoffsetSeconds * 1000) / 1000);
 }
+
+// UTC epoch seconds of 10:00 local on the calendar day represented by the
+// datecode — the comp day start for that datecode regardless of when the
+// caller runs. Equivalent to `competitionStartTs(tz, midday-of-datecode)`
+// but doesn't depend on wall-clock now, so a load fired between midnight
+// UTC and local 10:00 won't anchor to yesterday's comp day.
+export function competitionStartForDatecode(datecode: string, tzoffsetSeconds: number): number {
+    const dayMidday = new Date(fromDateCode(datecode)).getTime() / 1000 + 12 * 3600;
+    return competitionStartTs(tzoffsetSeconds, dayMidday);
+}

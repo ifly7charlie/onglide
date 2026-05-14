@@ -408,7 +408,7 @@ let loadTimer: NodeJS.Timeout | null = null;
 
 // Our persistence
 import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
-import {competitionStartTs} from '../datecode';
+import {competitionStartForDatecode} from '../datecode';
 import {inorderAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
 
 //
@@ -911,7 +911,10 @@ function trackGlider(task: AprsCommandTrack) {
     allAircraft[key] = glider;
 
     const interimQueue: InterimPositionMessage[] = [];
-    const since = competitionStartTs(task.tzoffset);
+    // Anchor on the datecode being registered, not wall-clock now: at the
+    // midnight-UTC rollover competitionStartTs(now) still points at yesterday's
+    // 10:00 local, which would backfill yesterday's flight into today's tracker.
+    const since = competitionStartForDatecode(task.datecode, task.tzoffset);
 
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
     const dedupedIds = [...new Set(trackerList)];

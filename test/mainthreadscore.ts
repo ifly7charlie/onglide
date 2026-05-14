@@ -20,7 +20,7 @@ import {createFlightStatistics} from '../lib/webworkers/flightStatistics';
 import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
 import {loadPoints} from '../lib/webworkers/pointlog';
-import {competitionStartTs, fromDateCode} from '../lib/datecode';
+import {fromDateCode, competitionStartForDatecode} from '../lib/datecode';
 
 import escape from 'sql-template-strings';
 import Mysql from 'serverless-mysql';
@@ -197,8 +197,7 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
 
     const interimQueue: any[] = [];
 
-    const dayMidday = new Date(fromDateCode(datecode)).getTime() / 1000 + 12 * 3600;
-    const since = competitionStartTs(tzoffset, dayMidday);
+    const since = competitionStartForDatecode(datecode, tzoffset);
     const until = since + 24 * 3600;
 
     for (const id of [...new Set(glider.trackers)]) {
