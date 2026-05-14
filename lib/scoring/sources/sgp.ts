@@ -50,7 +50,7 @@ function toRad(deg: number): number {
 }
 
 // Convert SGP's `startOpenTs` (seconds-since-midnight integer) into the
-// 'HH:MM:SS' MySQL TIME literal compstatus.starttime expects. The legacy
+// 'HH:MM:SS' MySQL TIME literal that tasks.nostart expects. The legacy
 // daemon refused anything outside 10:00–17:00 local as a sanity check
 // against bogus feed values; preserve that gate.
 function deriveStartOpen(startOpenTs: number | string | undefined | null): string {

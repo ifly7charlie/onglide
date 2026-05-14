@@ -23,6 +23,22 @@ export interface OnglideWebSocketMessage {
 }
 
 /**
+ * Winner of a flown day — populated for /all CompetitionClassStatus when
+ * displayStatus is 'home' or 'yesterday' and the class has scored at least
+ * one pilot. Speed/distance are taken from the leading pilot's handicapped
+ * score: taskSpeed if any pilot has one, otherwise taskDistance.
+ */
+export interface ClassWinner {
+  compno: string;
+  /** km/h, handicapped (preferred for display) */
+  taskSpeed?:
+    | number
+    | undefined;
+  /** km, handicapped (shown when no speed) */
+  taskDistance?: number | undefined;
+}
+
+/**
  * Per-class status row shown on the globe landing page; mirrors the JSON
  * previously returned by /api/competitions.
  */
@@ -43,7 +59,15 @@ export interface CompetitionClassStatus {
     | TaskRules
     | undefined;
   /** per-class WS-channel datecode (10am-local cutoff) */
-  datecode?: string | undefined;
+  datecode?:
+    | string
+    | undefined;
+  /** current day's task; FE picks distance (speed task) or duration (AAT) */
+  taskDetails?:
+    | TaskDetails
+    | undefined;
+  /** home/yesterday with at least one score */
+  winner?: ClassWinner | undefined;
 }
 
 export interface CompetitionSummary {
@@ -638,6 +662,98 @@ export const OnglideWebSocketMessage: MessageFns<OnglideWebSocketMessage> = {
   },
 };
 
+function createBaseClassWinner(): ClassWinner {
+  return { compno: "", taskSpeed: undefined, taskDistance: undefined };
+}
+
+export const ClassWinner: MessageFns<ClassWinner> = {
+  encode(message: ClassWinner, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.compno !== "") {
+      writer.uint32(10).string(message.compno);
+    }
+    if (message.taskSpeed !== undefined) {
+      writer.uint32(17).double(message.taskSpeed);
+    }
+    if (message.taskDistance !== undefined) {
+      writer.uint32(25).double(message.taskDistance);
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ClassWinner {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClassWinner();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.compno = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 17) {
+            break;
+          }
+
+          message.taskSpeed = reader.double();
+          continue;
+        }
+        case 3: {
+          if (tag !== 25) {
+            break;
+          }
+
+          message.taskDistance = reader.double();
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ClassWinner {
+    return {
+      compno: isSet(object.compno) ? globalThis.String(object.compno) : "",
+      taskSpeed: isSet(object.taskSpeed) ? globalThis.Number(object.taskSpeed) : undefined,
+      taskDistance: isSet(object.taskDistance) ? globalThis.Number(object.taskDistance) : undefined,
+    };
+  },
+
+  toJSON(message: ClassWinner): unknown {
+    const obj: any = {};
+    if (message.compno !== "") {
+      obj.compno = message.compno;
+    }
+    if (message.taskSpeed !== undefined) {
+      obj.taskSpeed = message.taskSpeed;
+    }
+    if (message.taskDistance !== undefined) {
+      obj.taskDistance = message.taskDistance;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ClassWinner>, I>>(base?: I): ClassWinner {
+    return ClassWinner.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ClassWinner>, I>>(object: I): ClassWinner {
+    const message = createBaseClassWinner();
+    message.compno = object.compno ?? "";
+    message.taskSpeed = object.taskSpeed ?? undefined;
+    message.taskDistance = object.taskDistance ?? undefined;
+    return message;
+  },
+};
+
 function createBaseCompetitionClassStatus(): CompetitionClassStatus {
   return {
     class: "",
@@ -648,6 +764,8 @@ function createBaseCompetitionClassStatus(): CompetitionClassStatus {
     displayStatus: "",
     taskRules: undefined,
     datecode: undefined,
+    taskDetails: undefined,
+    winner: undefined,
   };
 }
 
@@ -676,6 +794,12 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
     }
     if (message.datecode !== undefined) {
       writer.uint32(66).string(message.datecode);
+    }
+    if (message.taskDetails !== undefined) {
+      TaskDetails.encode(message.taskDetails, writer.uint32(74).fork()).join();
+    }
+    if (message.winner !== undefined) {
+      ClassWinner.encode(message.winner, writer.uint32(82).fork()).join();
     }
     return writer;
   },
@@ -751,6 +875,22 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
           message.datecode = reader.string();
           continue;
         }
+        case 9: {
+          if (tag !== 74) {
+            break;
+          }
+
+          message.taskDetails = TaskDetails.decode(reader, reader.uint32());
+          continue;
+        }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.winner = ClassWinner.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -770,6 +910,8 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
       displayStatus: isSet(object.displayStatus) ? globalThis.String(object.displayStatus) : "",
       taskRules: isSet(object.taskRules) ? TaskRules.fromJSON(object.taskRules) : undefined,
       datecode: isSet(object.datecode) ? globalThis.String(object.datecode) : undefined,
+      taskDetails: isSet(object.taskDetails) ? TaskDetails.fromJSON(object.taskDetails) : undefined,
+      winner: isSet(object.winner) ? ClassWinner.fromJSON(object.winner) : undefined,
     };
   },
 
@@ -799,6 +941,12 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
     if (message.datecode !== undefined) {
       obj.datecode = message.datecode;
     }
+    if (message.taskDetails !== undefined) {
+      obj.taskDetails = TaskDetails.toJSON(message.taskDetails);
+    }
+    if (message.winner !== undefined) {
+      obj.winner = ClassWinner.toJSON(message.winner);
+    }
     return obj;
   },
 
@@ -817,6 +965,12 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
       ? TaskRules.fromPartial(object.taskRules)
       : undefined;
     message.datecode = object.datecode ?? undefined;
+    message.taskDetails = (object.taskDetails !== undefined && object.taskDetails !== null)
+      ? TaskDetails.fromPartial(object.taskDetails)
+      : undefined;
+    message.winner = (object.winner !== undefined && object.winner !== null)
+      ? ClassWinner.fromPartial(object.winner)
+      : undefined;
     return message;
   },
 };

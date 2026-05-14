@@ -68,8 +68,7 @@ CREATE TABLE `compstatus` (
   `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,X=confirm reg,P=prebrief,B=afterbrief,G=gridded,L=launched,S=startopen/flying,F=first finisher imminent,R=all reported,H=all home,Z=scrubbed,O=comp over',
   `resultsdatecode` char(3) DEFAULT NULL COMMENT 'what date is scoring up to with uploading, results after this date wont be displayed',
   `task` char(1) DEFAULT 'A' COMMENT 'selected task',
-  
-  `starttime` time DEFAULT NULL COMMENT 'Startline open time',
+
   `startheight` int(11) DEFAULT '0',
   `notes` text  COMMENT 'Headline message to display', 
   UNIQUE KEY `class` (`class`)

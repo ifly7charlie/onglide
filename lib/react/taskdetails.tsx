@@ -5,7 +5,7 @@ import {memo, useMemo} from 'react';
 import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
-import {faMagnifyingGlassLocation, faCaretUp, faCaretDown} from '@fortawesome/free-solid-svg-icons';
+import {faMagnifyingGlassLocation, faCaretUp, faCaretDown, faHourglassStart} from '@fortawesome/free-solid-svg-icons';
 
 import {useState} from 'react';
 import {Spinner} from './loaders';
@@ -53,12 +53,6 @@ export const TaskDetails = memo(function TaskDetails({
         const date = (task?.details?.calendardate ?? fClass?.datecode) ? fromDateCode(fClass.datecode) : null;
         return date ? `${new Date(date).toLocaleDateString(lang, {day: 'numeric', month: 'short'})}` : '';
     }, [lang, tz, task?.details?.calendardate]);
-
-    const noStart = useMemo(() => {
-        return (task?.rules?.nostartutc ?? 0) > (replayTime ?? getNow())
-            ? t('task.start_opens_at', {time: new Date(task.rules.nostartutc * 1000).toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})})
-            : '';
-    }, [lang, tz, task?.rules?.nostartutc, t]);
 
     // Before 10:00 local-comp-time the daemon is still serving yesterday's
     // tracks (the daily flip happens at 10:00 local). Surface a note while
@@ -124,7 +118,6 @@ export const TaskDetails = memo(function TaskDetails({
                 </button>
             </h5>
             {showPreviousDayNote ? <p className="task-previous-day-note">{t('task.previous_day_note')}</p> : null}
-            {task?.rules?.nostartutc ? <>{noStart}</> : null}
             {open ? (
                 <div id="task-collapse">
                     <p>{task?.details?.nostart != '00:00:00' ? t('task.start_open', {time: task.details.nostart.substring(0, 5)}) : ''}</p>
@@ -141,6 +134,34 @@ export const TaskDetails = memo(function TaskDetails({
         </div>
     );
 });
+
+//
+// Independent "Start Opens at HH:MM" callout for the tracking page. Lives
+// outside TaskDetails so it stays visible even when the user collapses the
+// task panel, and so it can also appear above the pilot list on mobile when
+// the task drawer is closed. Renders nothing once the gate is open (or on
+// classes without a nostartutc).
+//
+export function StartlineNotice({vc, tz, replayTime}: {vc: ClassName; tz: TZ; replayTime: Epoch}) {
+    const {t} = useTranslation('common');
+    const task = useSelector((state) => selectTask(state, vc));
+    const liveNow = useSelector(selectNow);
+
+    const noStart = useMemo(() => {
+        if (!task?.rules?.nostartutc) return '';
+        const nowSec = replayTime || liveNow || getNow();
+        if (task.rules.nostartutc <= nowSec) return '';
+        const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
+        return t('task.start_opens_at', {time: new Date(task.rules.nostartutc * 1000).toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})});
+    }, [tz, task?.rules?.nostartutc, replayTime, liveNow, t]);
+
+    if (!noStart) return null;
+    return (
+        <p className="startline-opens-notice">
+            <FontAwesomeIcon icon={faHourglassStart} /> {noStart}
+        </p>
+    );
+}
 
 // Internal: details on the leg
 function Tasklegs({legs, onSelect}: {legs: TaskLeg[]; onSelect?: (lat: number, lng: number, radius?: number) => void}) {

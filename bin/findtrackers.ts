@@ -356,15 +356,15 @@ async function getTask(className: ClassName, datecode: Datecode): Promise<Task |
             0 AS distance,
             CASE
                 WHEN COALESCE(nostart, '00:00:00') = '00:00:00' THEN 0
-                ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)}, ' ', nostart))
-                     - (SELECT tzoffset FROM competition)
+                ELSE UNIX_TIMESTAMP(CONCAT(${fromDateCode(datecode)}, ' ', nostart)) - comp.tzoffset
             END nostartutc
-        FROM tasks, classes c, contestday cd
+        FROM tasks, classes c, contestday cd, competition comp
         WHERE tasks.datecode = ${datecode}
             AND tasks.class = c.class
             AND cd.class = c.class AND cd.datecode = ${datecode}
             AND tasks.class = ${className}
             AND tasks.flown = 'Y'
+            AND comp.compid = c.compid
     `)) || {})[0];
 
     if (!taskdetails || !taskdetails.type) return null;

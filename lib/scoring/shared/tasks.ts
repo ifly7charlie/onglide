@@ -195,13 +195,21 @@ export async function upsertTaskAndLegs(
     const hash = hashDayPayload(day);
     const dbhashrow = await db.query(escape`
         SELECT
-            hash
+            hash,
+            nostart
         FROM
             tasks
         WHERE
             datecode = ${dateCode}
             AND class = ${classid}
     `);
+
+    // Upstream wins when it provides a value; otherwise we preserve
+    // whatever is already in the DB so a manual nostart override
+    // survives a task re-import. The COALESCE on the INSERT below
+    // applies the same fallback to a fresh row.
+    const upstreamNoStart = !day.no_start ? null : convertToMysqlTime(day.no_start);
+    const existingNoStart = dbhashrow?.[0]?.nostart ? String(dbhashrow[0].nostart) : null;
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
         const sync = await syncPilotResultRows(db, classid, dateCode);
@@ -223,14 +231,6 @@ export async function upsertTaskAndLegs(
 
     await db
         .transaction()
-        .query(escape`
-            UPDATE compstatus
-            SET
-                starttime = COALESCE(${convertToMysqlTime(day.no_start)}, starttime)
-            WHERE
-                datecode = ${dateCode}
-                AND class = ${classid}
-        `)
         .query(escape`
             DELETE FROM tasks
             WHERE
@@ -260,7 +260,7 @@ export async function upsertTaskAndLegs(
                     ${duration},
                     ${tasktype},
                     'B',
-                    '00:00:00',
+                    COALESCE(${upstreamNoStart}, ${existingNoStart}, '00:00:00'),
                     ${hash}
                 )
         `)

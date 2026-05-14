@@ -11,8 +11,13 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
 import {useTranslation} from 'next-i18next/pages';
 
+import {faClockRotateLeft, faHourglassStart, faTrophy} from '@fortawesome/free-solid-svg-icons';
+
+import type {TaskDetails, ClassWinner} from '../protobuf/onglide';
+import type {Epoch} from '../types';
+import {OptionalDurationMM} from './optional';
 import {STATUS_COLOURS, STATUS_LABEL_KEYS, StatusIcon, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
-import {classKey, useStatusSummary, type StatusSummary} from './statusSummary';
+import {useStatusSummary, type StatusSummary} from './statusSummary';
 import {LanguageSwitcher} from './language-switcher';
 import {TranslationHelpFooter} from './translation-help-footer';
 
@@ -39,6 +44,9 @@ export interface CompetitionClass {
     status: string;
     pilotCount: number;
     displayStatus: CompetitionDisplayStatus;
+    taskDetails?: TaskDetails;
+    winner?: ClassWinner;
+    nostartutc?: number;
 }
 
 export interface Competition {
@@ -55,6 +63,7 @@ export interface Competition {
     mainwebsite: string | null;
     urllogo: string | null;
     classCount: number;
+    officialDelay?: number;
     classes?: CompetitionClass[];
     classStatusesDiffer?: boolean;
     displayStatus: CompetitionDisplayStatus;
@@ -520,9 +529,8 @@ function CompetitionListEntry({
     const classes = comp.classes ?? [];
 
     // Competitions in their active window get a per-class breakdown with
-    // status dot + class name + pilot count on each line. Upcoming shows a
-    // compact rollup — "N classes · M pilots" — because the per-class detail
-    // isn't interesting yet.
+    // status dot + class name + task length/time (or winner once flown) on
+    // each line. Upcoming shows a compact rollup — "N classes · M pilots".
     const inActiveWindow = comp.displayStatus !== 'upcoming';
     const totalPilots = classes.reduce((sum, cls) => sum + (cls.pilotCount || 0), 0);
     const compTracked = summary?.byComp.get(comp.compid)?.tracked;
@@ -534,6 +542,68 @@ function CompetitionListEntry({
     const formatPilotCount = (total: number, tracked: number | undefined) => {
         if (typeof tracked === 'number') return t('competition.tracked_pilots', {tracked, total});
         return t('competition.pilot', {count: total});
+    };
+
+    // Right-hand metric for a class row: trophy + winner once a day has been
+    // flown (home/yesterday), otherwise task length (speed) or task time
+    // (AAT). Returns null when there's nothing meaningful to show — pre-task
+    // and upcoming classes render with just the status pill and class name.
+    const renderClassMetric = (cls: CompetitionClass) => {
+        if ((cls.displayStatus === 'home' || cls.displayStatus === 'yesterday') && cls.winner) {
+            const w = cls.winner;
+            const value =
+                typeof w.taskSpeed === 'number' && w.taskSpeed > 0
+                    ? `${w.taskSpeed.toFixed(1)} km/h`
+                    : typeof w.taskDistance === 'number' && w.taskDistance > 0
+                      ? `${w.taskDistance.toFixed(1)} km`
+                      : null;
+            if (!value) return null;
+            return (
+                <span className="count">
+                    <FontAwesomeIcon icon={faTrophy} /> {w.compno} {value}
+                </span>
+            );
+        }
+        const td = cls.taskDetails;
+        if (td) {
+            // Append the start-open time when nostartutc is set and still in
+            // the future — i.e. the gate hasn't opened yet for this class.
+            // td.nostart is the local HH:MM:SS string from the DB row; trim
+            // to HH:MM for display.
+            // Viewer clock is real-time minus the comp's officialDelay; the
+            // gate "appears" closed to the viewer until nostartutc + delay.
+            const viewerNowSec = Date.now() / 1000 - (comp.officialDelay ?? 0);
+            const startNotOpen = (cls.nostartutc ?? 0) > viewerNowSec;
+            const openTime = startNotOpen && td.nostart && td.nostart !== '00:00:00' ? td.nostart.slice(0, 5) : null;
+            const delayed = (comp.officialDelay ?? 0) > 10;
+            const openSuffix = openTime ? (
+                <>
+                    {' · '}
+                    <FontAwesomeIcon icon={faHourglassStart} /> {openTime}
+                    {delayed ? (
+                        <>
+                            {' '}
+                            <FontAwesomeIcon icon={faClockRotateLeft} title={`Broadcast delayed ${OptionalDurationMM('', (comp.officialDelay ?? 0) as Epoch, 'm')}`} />
+                        </>
+                    ) : null}
+                </>
+            ) : null;
+            if (td.type === 'A' && td.duration) {
+                return (
+                    <span className="count">
+                        {td.duration.replace(/^0?(\d+):(\d\d):\d\d$/, '$1:$2')} AAT{openSuffix}
+                    </span>
+                );
+            }
+            if (td.distance > 0) {
+                return (
+                    <span className="count">
+                        {td.distance.toFixed(1)} km{openSuffix}
+                    </span>
+                );
+            }
+        }
+        return null;
     };
 
     return (
@@ -554,7 +624,6 @@ function CompetitionListEntry({
             </div>
             {inActiveWindow && classes.length > 0
                 ? classes.map((cls) => {
-                      const classTracked = summary?.byClass.get(classKey(comp.compid, cls.class))?.tracked;
                       return (
                           <div
                               key={cls.class}
@@ -569,7 +638,7 @@ function CompetitionListEntry({
                                   {t(STATUS_LABEL_KEYS[cls.displayStatus])}
                               </span>
                               <span className="name">{cls.classname}</span>
-                              <span className="count">{formatPilotCount(cls.pilotCount, classTracked)}</span>
+                              {renderClassMetric(cls)}
                           </div>
                       );
                   })

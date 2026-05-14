@@ -471,11 +471,6 @@ async function process_class_task(classid, className, date, day_number, day_info
         await mysql_db
             .transaction()
 
-            // If it is the current day and we have a start time we save it
-            //        .query( escape`
-            //          UPDATE compstatus SET starttime = COALESCE(${convert_to_mysql(task_details.no_start)},starttime)
-            //          WHERE datecode = todcode(${date})` )
-
             // remove any old crud
             .query(escape`
                 DELETE FROM tasks

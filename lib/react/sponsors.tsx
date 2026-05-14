@@ -32,9 +32,8 @@ export default function Sponsor({wsStatus, tz, lang, officialDelay}: SponsorProp
         if (!wsStatus?.at) return null;
         const showDelay = officialDelay > 10;
         const dt = new Date(wsStatus.at * 1000);
-        const dtl = !showDelay ? dt : new Date((wsStatus.at + officialDelay) * 1000);
         const compTime = dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'});
-        const yourTime = dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
+        const yourTime = dt.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
         const showYourTime = yourTime !== compTime;
         const delayLabel = showDelay ? OptionalDurationMM('', officialDelay as Epoch, 'm') : '';
         return (

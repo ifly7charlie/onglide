@@ -22,7 +22,7 @@ import {point} from '@turf/helpers';
 import {WebSocket, WebSocketServer} from 'ws';
 import type {IncomingMessage} from 'http';
 
-import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore, CompetitionSummary, CompetitionClassStatus} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore, CompetitionSummary, CompetitionClassStatus, ClassWinner} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
@@ -1462,17 +1462,13 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
                     WHEN COALESCE(nostart, '00:00:00') = '00:00:00' THEN 0
                     ELSE UNIX_TIMESTAMP (
                         CONCAT(${fromDateCode(datecode)}, ' ', nostart)
-                    ) - (
-                        SELECT
-                            tzoffset
-                        FROM
-                            competition
-                    )
+                    ) - comp.tzoffset
                 END nostartutc
             FROM
                 tasks,
                 classes c,
-                contestday cd
+                contestday cd,
+                competition comp
             WHERE
                 tasks.datecode = ${datecode}
                 AND tasks.class = c.class
@@ -1480,6 +1476,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
                 AND cd.datecode = ${datecode}
                 AND tasks.class = ${className}
                 AND tasks.flown = 'Y'
+                AND comp.compid = c.compid
         `)) || {})[0];
 
         if (!taskdetails || !taskdetails.type) {
@@ -2774,6 +2771,22 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
                     maxHandicap: 0
                 }
               : undefined;
+        // Pick the leader from allScores when the day has flown — used by the
+        // landing-page side panel to show a trophy/winner once everyone is
+        // home or the day has rolled to 'yesterday'. Prefer handicapped speed
+        // (any pilot who completed task), otherwise handicapped distance.
+        let winner: ClassWinner | undefined;
+        if (displayStatus === 'home' || displayStatus === 'yesterday') {
+            const scores = Object.values(ch.allScores);
+            const bySpeed = scores.filter((s) => (s.handicapped?.taskSpeed ?? 0) > 0).sort((a, b) => (b.handicapped!.taskSpeed! - a.handicapped!.taskSpeed!))[0];
+            if (bySpeed) {
+                winner = {compno: bySpeed.compno, taskSpeed: bySpeed.handicapped!.taskSpeed};
+            } else {
+                const byDistance = scores.filter((s) => (s.handicapped?.taskDistance ?? 0) > 0).sort((a, b) => (b.handicapped!.taskDistance - a.handicapped!.taskDistance))[0];
+                if (byDistance) winner = {compno: byDistance.compno, taskDistance: byDistance.handicapped!.taskDistance};
+            }
+        }
+
         classes.push({
             class: ch.className,
             classname: ch.classname || ch.className,
@@ -2782,7 +2795,9 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
             statusDatecode: sdc ?? undefined,
             displayStatus,
             taskRules,
-            datecode: ch.datecode
+            datecode: ch.datecode,
+            taskDetails: ch.task?.details,
+            winner
         });
     }
     classes.sort((a, b) => a.classname.localeCompare(b.classname));

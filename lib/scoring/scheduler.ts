@@ -15,8 +15,8 @@
 //
 // State is in-memory, per-process. On restart, decisions reset to "fetch
 // soon" so any time-sensitive recovery happens within a heartbeat or two.
-// The DB itself remains the source of truth for compstatus and
-// compstatus.starttime.
+// The DB itself remains the source of truth for compstatus and for the
+// per-task start-open time (tasks.nostart on the task='B' row).
 //
 
 import escape from 'sql-template-strings';
@@ -38,7 +38,7 @@ const INTERVAL_PILOTS_URGENT_MS = 30 * 60 * 1000; // active comp, DB still empty
 
 const STOP_RESULTS_LOCAL_MINUTE = 20 * 60; // 20:00 local — stop results checks
 const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
-const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: starttime - 30m
+const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: tasks.nostart - 30m
 
 // Daily SoaringSpot-style index discovery runs at or after this UTC
 // hour, plus once on startup regardless of wall-clock time.
@@ -60,7 +60,7 @@ interface ClassObservation {
     classid: ClassId;
     status: string; // single-char compstatus.status
     datecode: string | null;
-    starttimeMinutes: number | null; // minute-of-day (local), parsed from compstatus.starttime
+    starttimeMinutes: number | null; // minute-of-day (local), parsed from tasks.nostart for the class's current datecode
     isToday: boolean; // does compstatus.datecode match today's local datecode?
 }
 
@@ -289,7 +289,7 @@ function perClassResultsInterval(state: CompState, obs: ClassObservation, localN
     }
 
     // Launched. Look up the launch anchor: prefer the in-memory
-    // first-observed-L epoch, fall back to (starttime - 30 min) if no
+    // first-observed-L epoch, fall back to (tasks.nostart - 30 min) if no
     // OGN coverage ever set status=L.
     const anchor = launchAnchorMs(state, obs, localNow);
     if (anchor != null) {
@@ -304,7 +304,7 @@ function perClassResultsInterval(state: CompState, obs: ClassObservation, localN
 
 // launchAnchorMs — when did launching start for this class today, in
 // epoch ms? Either the in-memory first-L observation, or the fallback
-// "starttime - 30 min" if we never saw L.
+// "tasks.nostart - 30 min" if we never saw L.
 function launchAnchorMs(state: CompState, obs: ClassObservation, localNow: LocalTime): number | null {
     const seen = state.firstLaunch.get(obs.classid);
     if (seen) return seen;
@@ -380,9 +380,10 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
                 cs.class,
                 cs.status,
                 cs.datecode,
-                TIME_TO_SEC(cs.starttime) AS starttimeSecs
+                TIME_TO_SEC(t.nostart) AS starttimeSecs
             FROM compstatus cs
             JOIN classes cl ON cl.class = cs.class
+            LEFT JOIN tasks t ON t.class = cs.class AND t.datecode = cs.datecode AND t.task = 'B'
             WHERE cl.compid = ${ctx.compid}
         `)) as any[];
     } catch (e) {

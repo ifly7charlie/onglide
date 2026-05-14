@@ -95,13 +95,17 @@ export function summaryToCompetition(s: CompetitionSummary): Competition {
         mainwebsite: s.mainwebsite ?? null,
         urllogo: s.urllogo ?? null,
         classCount: s.classCount,
+        officialDelay: s.officialDelay,
         classes: s.classes.map(
             (c): CompetitionClass => ({
                 class: c.class,
                 classname: c.classname,
                 status: c.status,
                 pilotCount: c.pilotCount,
-                displayStatus: c.displayStatus as CompetitionDisplayStatus
+                displayStatus: c.displayStatus as CompetitionDisplayStatus,
+                taskDetails: c.taskDetails,
+                winner: c.winner,
+                nostartutc: c.taskRules?.nostartutc
             })
         ),
         classStatusesDiffer: s.classStatusesDiffer,

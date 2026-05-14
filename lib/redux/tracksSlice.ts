@@ -490,8 +490,6 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
             state.tracks[compno].t = deck.t[deck.posIndex - 1] as Epoch;
             initaliseVH(state.tracks[compno]);
 
-            //            console.log(compno, state.latestUpdate, state.tracks[compno as Compno].t, new Date(state.tracks[compno as Compno].t * 1000).toISOString());
-
             state.latestUpdate = Math.max(state.latestUpdate ?? 0, state.tracks[compno as Compno].t ?? 0) as Epoch;
             return deck.trackVersion.toString(16) ?? compno;
         })

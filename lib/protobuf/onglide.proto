@@ -12,6 +12,16 @@ message OnglideWebSocketMessage {
     optional CompetitionsList competitions = 9;
 }
 
+// Winner of a flown day — populated for /all CompetitionClassStatus when
+// displayStatus is 'home' or 'yesterday' and the class has scored at least
+// one pilot. Speed/distance are taken from the leading pilot's handicapped
+// score: taskSpeed if any pilot has one, otherwise taskDistance.
+message ClassWinner {
+	string compno = 1;
+	optional double taskSpeed = 2;     // km/h, handicapped (preferred for display)
+	optional double taskDistance = 3;  // km, handicapped (shown when no speed)
+}
+
 // Per-class status row shown on the globe landing page; mirrors the JSON
 // previously returned by /api/competitions.
 message CompetitionClassStatus {
@@ -23,6 +33,8 @@ message CompetitionClassStatus {
 	string displayStatus = 6;    // matches CompetitionDisplayStatus union in TS
 	optional TaskRules taskRules = 7;  // when a task is briefed, full rules; pre-task, a stub carrying handicapped/dh from the classes table
 	optional string datecode = 8;      // per-class WS-channel datecode (10am-local cutoff)
+	optional TaskDetails taskDetails = 9;  // current day's task; FE picks distance (speed task) or duration (AAT)
+	optional ClassWinner winner = 10;      // home/yesterday with at least one score
 }
 
 message CompetitionSummary {

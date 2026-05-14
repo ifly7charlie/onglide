@@ -25,7 +25,7 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faLinkSlash, faSpinner, faCaretDown, faCaretUp} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
-import {TaskDetails} from './taskdetails';
+import {TaskDetails, StartlineNotice} from './taskdetails';
 import {OptionalDurationMM} from './optional';
 import {Sorting} from './sorting';
 import {Options as OptionsPanel} from './options';
@@ -130,7 +130,6 @@ export const OgnFeed = memo(
         const {decoder} = useWebsocketDecoder({mergeWsStatus, className: vc, datecode});
         const dispatch = useDispatch();
 
-        //        const now = useSelector(selectNow);
         const availableScores = useSelector(selectAvailableScoreTimes);
         const compSummary = useSelector(selectCompByCompid(compid));
         const officialDelay = compSummary?.officialDelay ?? 0;
@@ -324,6 +323,7 @@ export const OgnFeed = memo(
                                 <FontAwesomeIcon icon={drawerOpen ? faCaretUp : faCaretDown} />
                             </button>
                         </div>
+                        <StartlineNotice vc={vc} tz={tz} replayTime={replayTime} />
                         {valid && connected ? (
                             <PilotList //
                                 key="pilotList"
@@ -421,6 +421,7 @@ export const OgnFeed = memo(
                 >
                     {valid && connected ? (
                         <div className="sidepanel-section">
+                            <StartlineNotice vc={vc} tz={tz} replayTime={replayTime} />
                             <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
                             <PilotList //
                                 key="pilotList"
@@ -462,9 +463,8 @@ function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) 
         : '';
 
     const dt = new Date(time * 1000);
-    const dtl = !showDelay ? dt : new Date((time + officialDelay) * 1000);
     const compTime = dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'});
-    const yourTime = dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
+    const yourTime = dt.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
     const compPart = `<a href='#' title='competition time'>${compTime} ${competitionDelay} ✈️ </a>`;
     if (yourTime === compTime) {
         return compPart;

@@ -784,7 +784,8 @@ async function process_day_task(day, classid, classname, keys) {
     const hash = createHash('sha256').update(JSON.stringify(turnpoints._embedded['http://api.soaringspot.com/rel/points'])).update(JSON.stringify(safeTask)).digest('base64');
     const dbhashrow = await mysql_db.query(escape`
         SELECT
-            hash
+            hash,
+            nostart
         FROM
             tasks
         WHERE
@@ -798,6 +799,13 @@ async function process_day_task(day, classid, classname, keys) {
     } else {
         console.log(`${classid} - ${date}: task changed`, hash, dbhashrow[0]?.hash);
     }
+
+    // Upstream wins when it provides a value; otherwise preserve whatever
+    // is already in the DB so a manual nostart override survives a
+    // re-import. The DELETE+INSERT pattern below means we can't reference
+    // the column inline, so we capture it here.
+    const upstreamNoStart = !task_details.no_start ? null : convert_to_mysql(task_details.no_start);
+    const existingNoStart = dbhashrow?.[0]?.nostart ? String(dbhashrow[0].nostart) : null;
 
     // Get the height of the tp
     for (const tp of turnpoints._embedded['http://api.soaringspot.com/rel/points'].sort((a, b) => a.point_index - b.point_index)) {
@@ -826,23 +834,6 @@ async function process_day_task(day, classid, classname, keys) {
                 )
                 AND class = ${classid}
         `)
-
-        // If it is the current day and we have a start time we save it
-        .query(
-            task_details.no_start && !task_details.no_start.endsWith('00:00:00')
-                ? escape`
-                      UPDATE compstatus
-                      SET
-                          starttime = COALESCE(${convert_to_mysql(task_details.no_start)}, starttime)
-                      WHERE
-                          datecode = ${toDateCode(date)}
-                          AND class = ${classid}
-                  `
-                : escape`
-                      SELECT
-                          1
-                  `
-        )
 
         // remove any old crud
         .query(escape`
@@ -876,7 +867,7 @@ async function process_day_task(day, classid, classname, keys) {
                     ${duration},
                     ${tasktype},
                     'B',
-                    ${convert_to_mysql(task_details.no_start)},
+                    COALESCE(${upstreamNoStart}, ${existingNoStart}, '00:00:00'),
                     ${hash}
                 )
         `)

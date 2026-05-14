@@ -195,6 +195,64 @@ export default function MApp(props: {
         };
     }, [handleKeyPress]);
 
+    // ====== DIAGNOSTIC: catch the FIRST throw on the render path ======
+    // The "Attempting to run(), but is already running." error we keep seeing
+    // is a cascade — it fires when MapLibre's _renderTaskQueue.run() finds
+    // _currentlyRunning still truthy from a previous run where a queued
+    // callback threw and skipped the cleanup. The thrown error usually gets
+    // logged inside an rAF boundary and is easy to miss.
+    //
+    // This wraps run() to log the offending callback explicitly, reset the
+    // queue state so the cascade stops, and re-throw. It also wraps map.fire
+    // to surface listener throws that corrupt the parallel _inRender flag via
+    // react-map-gl's _onBeforeRepaint deferred-event fan-out. Remove once the
+    // root cause is identified.
+    useEffect(() => {
+        const map = mapRef?.current?.getMap() as any;
+        if (!map) return;
+        const queue = map._renderTaskQueue;
+        if (queue && !queue.__onglideDiagInstalled) {
+            queue.__onglideDiagInstalled = true;
+            const origRun = queue.run.bind(queue);
+            queue.run = function patchedRun(e: number) {
+                try {
+                    return origRun(e);
+                } catch (err) {
+                    // eslint-disable-next-line no-console
+                    console.error('[maplibre-diag] _renderTaskQueue.run threw — a queued callback failed before the queue reset', {
+                        err,
+                        message: (err as Error)?.message,
+                        stack: (err as Error)?.stack,
+                        currentlyRunning: this._currentlyRunning,
+                        cleared: this._cleared
+                    });
+                    this._currentlyRunning = false;
+                    this._cleared = false;
+                    throw err;
+                }
+            };
+        }
+        if (!map.__onglideFireDiagInstalled) {
+            map.__onglideFireDiagInstalled = true;
+            const origFire = map.fire.bind(map);
+            map.fire = function patchedFire(eventOrName: any, ...rest: any[]) {
+                try {
+                    return origFire(eventOrName, ...rest);
+                } catch (err) {
+                    const name = typeof eventOrName === 'string' ? eventOrName : eventOrName?.type;
+                    // eslint-disable-next-line no-console
+                    console.error('[maplibre-diag] map.fire listener threw', {
+                        event: name,
+                        err,
+                        message: (err as Error)?.message,
+                        stack: (err as Error)?.stack
+                    });
+                    throw err;
+                }
+            };
+        }
+    }, [mapRef.current]);
+
     // =========== FOLLOW EFFECT ===============
     //
     // We will calculate the nearest point every 60 seconds or when the TP changes or selected pilot changes
