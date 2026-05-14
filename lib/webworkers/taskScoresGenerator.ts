@@ -93,8 +93,11 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             scoredPoints: [],
             minDistancePoints: [],
             maxDistancePoints: [],
-            scoringClosestPoint: item.scoringClosestPoint ? {t: item.scoringClosestPoint.t, lat: item.scoringClosestPoint.lat, lng: item.scoringClosestPoint.lng} : undefined,
-            optimalNextSectorPoint: item.optimalNextSectorPoint ? {t: item.optimalNextSectorPoint.t, lat: item.optimalNextSectorPoint.lat, lng: item.optimalNextSectorPoint.lng} : undefined,
+            // preparedTurnpoint marks synthetic boundary points with t: -pos.t (debug marker);
+            // the maxGraph also uses sentinel negative times for turnpoint/finish nodes. The wire
+            // format only carries the absolute epoch — Math.abs strips the sign before encoding.
+            scoringClosestPoint: item.scoringClosestPoint ? {t: Math.abs(item.scoringClosestPoint.t), lat: item.scoringClosestPoint.lat, lng: item.scoringClosestPoint.lng} : undefined,
+            optimalNextSectorPoint: item.optimalNextSectorPoint ? {t: Math.abs(item.optimalNextSectorPoint.t), lat: item.optimalNextSectorPoint.lat, lng: item.optimalNextSectorPoint.lng} : undefined,
             optimalGrid: item.optimalGrid?.length ? item.optimalGrid : [],
             optimalGridBaseline: item.optimalGridBaseline,
             optimalGridBaselinePath: item.optimalGridBaselinePath ?? [],
@@ -113,7 +116,10 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // 1. AAT specific turnpoint time
             // 2. The entry to the TP
             // 3. the exit from the TP (ie startLine)
-            const legTime = (leg) => (leg.entryTimeStamp && (leg?.point?.t || 0) > 10000 ? leg?.point?.t : null) || leg.entryTimeStamp || leg.exitTimeStamp || 0;
+            // AAT min/max graphs use negative sentinel timestamps (e.g. -999999 for the synthetic
+            // start point in assignedAreaScoringGenerator); treat anything <= 10000 as not-a-real-time.
+            const validTime = (t: number | undefined | null) => (typeof t === 'number' && t > 10000 ? t : 0);
+            const legTime = (leg) => validTime(leg.entryTimeStamp ? leg.point?.t : 0) || validTime(leg.entryTimeStamp) || validTime(leg.exitTimeStamp);
 
             leg.convexHull ??= [];
 
@@ -132,8 +138,8 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                     distance: Math.max(Math.round(leg.distance * 10) / 10, 0),
                     taskDistance: Math.round(((score.legs[leg.legno - 1]?.actual?.taskDistance || 0) + Math.max(leg.distance, 0)) * 10) / 10
                 };
-                if (previousLeg?.point?.a) {
-                    sl.alt = previousLeg?.point?.a;
+                if (previousLeg?.point?.a && isFinite(previousLeg.point.a)) {
+                    sl.alt = Math.round(previousLeg.point.a);
                 }
                 if (!score.utcFinish) {
                     if (leg.minPossible) {
@@ -167,7 +173,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             else {
                 score.legs[leg.legno] = {
                     legno: leg.legno,
-                    time: leg.point?.t || leg.exitTimeStamp || 0,
+                    time: validTime(leg.point?.t) || validTime(leg.exitTimeStamp),
                     convexHull: []
                 };
             }
@@ -197,13 +203,17 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         }
 
         //
-        // Task overalls
-        let duration = (item.utcFinish || item.t) - item.utcStart;
+        // Task overalls. utcStart can be set from task.rules.nostartutc before the pilot
+        // actually crosses the start, so a tick from before nostartutc would compute a
+        // negative duration. Treat that as "no duration yet" — leave taskDuration absent.
+        const endT = item.utcFinish || item.t;
+        const haveDuration = item.utcStart && endT && endT >= item.utcStart;
+        let duration = haveDuration ? endT - item.utcStart : 0;
 
         // AAT (or min duration tasks) with duration configured and a finish we need to make sure
         // it took longer than task time - only do this after finish as it's misleading while they
         // are flying - perhaps it should be done if they are obviously going to be under
-        if (task.details.durationsecs) {
+        if (haveDuration && task.details.durationsecs) {
             score.taskTimeRemaining = duration - task.details.durationsecs;
             if (item.utcFinish) {
                 duration = Math.max(duration, task.details.durationsecs);
@@ -213,7 +223,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         score.actual = {
             taskDistance: Math.max(item.distance, 0)
         };
-        score.taskDuration = duration;
+        if (haveDuration) score.taskDuration = duration;
 
         // Looks weird but take it if it is there, if it isn't then take the alternative
         // AAT uses all three, racing uses dR

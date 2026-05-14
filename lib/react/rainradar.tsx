@@ -8,7 +8,6 @@ import {useTranslation} from 'next-i18next/pages';
 //import Source from '../lib/source';
 import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
 
-import {maxBy as _maxby} from 'lodash';
 import type {Options, TZ} from '../types';
 
 export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
@@ -67,7 +66,7 @@ export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
                         if (options.rainRadarAdvance) {
                             imageMeta = apiData.radar.nowcast[options.rainRadarAdvance - 1];
                         } else {
-                            imageMeta = _maxby(apiData.radar.past, 'time');
+                            imageMeta = apiData.radar.past.reduce((a, b) => (a.time >= b.time ? a : b));
                         }
                         setURL(apiData.host + imageMeta.path + '/256/{z}/{x}/{y}/2/1_1.png');
 

@@ -2,8 +2,6 @@ import {point, lineString, featureCollection} from '@turf/helpers';
 import type {Feature} from 'geojson';
 import length from '@turf/length';
 
-import {cloneDeep as _cloneDeep} from 'lodash';
-
 import {useState, createContext, useContext} from 'react';
 
 import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
@@ -35,7 +33,7 @@ export function MeasureContext({children}) {
             line.properties['distance'] = Math.round(length(line) * 10) / 10 + ' km';
             features.push(line);
         }
-        setFeatures(_cloneDeep(features));
+        setFeatures(structuredClone(features));
     };
 
     const toggle = () => {

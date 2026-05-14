@@ -1,43 +1,79 @@
 import {useMemo} from 'react';
+import {useTranslation} from 'next-i18next/pages';
 
 import {TranslationHelpFooter} from './translation-help-footer';
+import {LanguageSwitcher} from './language-switcher';
+import {OptionalDurationMM} from './optional';
+import type {Epoch, TZ} from '../types';
 
 const OGN_LOGO = (
     <a href="http://www.glidernet.org/" title="OGN Network" target="_blank" rel="noreferrer">
-        <img width="100" height="68" src="/ognlogo.png" alt="OGN Network" />
+        <img width="50" height="34" src="/ognlogo.png" alt="OGN Network" />
     </a>
 );
 
-export default function Sponsor(props: {at: number}) {
-    const sponsorList = [
-        OGN_LOGO,
-        ...(process.env.NEXT_PUBLIC_SITEURL?.startsWith('sgp')
-            ? [
-                  // FAI SPECIFIC
-                  <img
-                      width="150"
-                      height="150"
-                      src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/1bf29bf3-c7cd-42fa-b6b9-927a6bc41e82/LogFAI-SGP.png?format=150w"
-                      alt="FAI Sailplane Grand Prix"
-                      title="FAI Sailplane Grand Prix"
-                  />,
-                  <img width="150" height="57" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/35174206-46ae-45f8-8348-95a6b56b8e49/LxNav.jpg" alt="LxNav" title="LxNav" />,
-                  <img width="145" height="74" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/c27f9a03-c6fa-4054-be63-64ac77646446/Schempp-Hirth.png" />,
-                  <img width="145" height="57" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/6b810832-df21-45b1-b338-5fd5d9e37b75/silentwings-1.jpg" />,
-                  <img width="150" height="100" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/c71be420-e253-4b7d-8dec-d45f3a4ccd6b/TopMeteo.jpg" />,
-                  <img width="150" height="50" src="https://images.squarespace-cdn.com/content/v1/5c2deead5b409b58c72bdba6/1546529524834-R3V7HCK516GTSOVJK696/Southern-Sailplanes-medium.png?format=150w" />,
-                  <img width="145" height="46" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/4e86848d-8e4e-4e19-a18a-229ef2522d6c/CrosscountryAero-1.jpg" />,
-                  <img width="150" height="150" src="https://images.squarespace-cdn.com/content/v1/64ae992947c519518d98ef92/7b75e0da-ff81-4b3f-965b-91b08f60d9bf/AS-1.jpg" />
-              ]
-            : [])
-    ];
+interface WsStatus {
+    listeners: number;
+    airborne: number;
+    at: Epoch;
+}
 
-    const currentSponsor = useMemo(() => sponsorList[Math.trunc(props.at / 60) % sponsorList.length], [Math.trunc(props.at / 60)]);
+interface SponsorProps {
+    wsStatus?: WsStatus;
+    tz: TZ;
+    lang: string;
+    officialDelay: number;
+}
+
+export default function Sponsor({wsStatus, tz, lang, officialDelay}: SponsorProps) {
+    const {t} = useTranslation('common');
+
+    const timeRow = useMemo(() => {
+        if (!wsStatus?.at) return null;
+        const showDelay = officialDelay > 10;
+        const dt = new Date(wsStatus.at * 1000);
+        const dtl = !showDelay ? dt : new Date((wsStatus.at + officialDelay) * 1000);
+        const compTime = dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'});
+        const yourTime = dtl.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
+        const showYourTime = yourTime !== compTime;
+        const delayLabel = showDelay ? OptionalDurationMM('', officialDelay as Epoch, 'm') : '';
+        return (
+            <div className="sponsor-status-row sponsor-status-grid">
+                <span className="sponsor-cell-left">
+                    {t('connection.updated_at', {time: compTime})}
+                    {showDelay ? (
+                        <span style={{color: 'grey'}} title="Tracking is officially delayed for this competition">
+                            &nbsp;+&nbsp;↺&nbsp;{delayLabel}
+                        </span>
+                    ) : null}
+                    &nbsp;✈️
+                </span>
+                <span className="sponsor-cell-center" />
+                <span className="sponsor-cell-right">{showYourTime ? `${yourTime} ⌚️` : ''}</span>
+            </div>
+        );
+    }, [wsStatus?.at, tz, lang, officialDelay, t]);
 
     return (
         <div className="sponsor">
-            {currentSponsor}
-            <TranslationHelpFooter />
+            <div className="sponsor-row">
+                <div className="sponsor-logo">{OGN_LOGO}</div>
+                <div className="sponsor-status">
+                    {timeRow}
+                    <div className="sponsor-status-row sponsor-status-grid">
+                        <span className="sponsor-cell-left" title={t('connection.viewers')}>
+                            {wsStatus?.listeners ?? 0} 👥
+                        </span>
+                        <span className="sponsor-cell-center" title={t('connection.tracked_planes')}>
+                            {wsStatus?.airborne ?? 0} ✈️
+                        </span>
+                        <span className="sponsor-cell-right sponsor-cell-info-lang">
+                            <TranslationHelpFooter />
+                            <LanguageSwitcher className="sponsor-lang" />
+                        </span>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

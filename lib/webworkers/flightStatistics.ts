@@ -233,9 +233,10 @@ export function createFlightStatistics(compno: Compno, log: Function) {
 
             const maxAngleInverted = (circle.maxAngle + 180) % 360;
             const absAngleDiff = Math.abs(maxAngleInverted - circle.minAngle);
-            const [bisector, base] = absAngleDiff > 180 //
-                ? [(360 - absAngleDiff) / 2, circle.minAngle]
-                : [absAngleDiff / 2, maxAngleInverted];
+            const [bisector, base] =
+                absAngleDiff > 180 //
+                    ? [(360 - absAngleDiff) / 2, circle.minAngle]
+                    : [absAngleDiff / 2, maxAngleInverted];
             const windAngle = normalizeAngle(maxAngleInverted <= circle.minAngle ? base + bisector : base - bisector);
             const windSpeed = (circle.maxSpeed - circle.minSpeed) / 2;
 

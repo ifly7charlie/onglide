@@ -53,6 +53,7 @@ export interface Competition {
     tz: string;
     tzoffset: number;
     mainwebsite: string | null;
+    urllogo: string | null;
     classCount: number;
     classes?: CompetitionClass[];
     classStatusesDiffer?: boolean;
@@ -310,15 +311,17 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 
     return (
         <div style={{position: 'fixed', inset: 0, background: '#0b1a33'}}>
-            <DeckGL
-                views={new GlobeView({id: 'globe', resolution: 10}) as any}
-                viewState={viewState as any}
-                onViewStateChange={({viewState: v}: any) => setViewState(v)}
-                controller={hasData}
-                effects={effects as any}
-                parameters={{cull: true} as any}
-                layers={layers}
-            />
+            <div className="globe-canvas">
+                <DeckGL
+                    views={new GlobeView({id: 'globe', resolution: 10}) as any}
+                    viewState={viewState as any}
+                    onViewStateChange={({viewState: v}: any) => setViewState(v)}
+                    controller={hasData}
+                    effects={effects as any}
+                    parameters={{cull: true} as any}
+                    layers={layers}
+                />
+            </div>
 
             {!hasData ? (
                 <div
@@ -535,10 +538,19 @@ function CompetitionListEntry({
 
     return (
         <div ref={registerRef} onMouseEnter={onHover} onMouseLeave={onLeave} onClick={onClick} className={entryClass}>
-            <div className="entry-title">{comp.name}</div>
-            {comp.sitename ? <div className="entry-sitename">{comp.sitename}</div> : null}
-            <div className="entry-dates">
-                {comp.start} – {comp.end}
+            <div className="entry-row">
+                {comp.urllogo ? (
+                    <div className="entry-logo">
+                        <img src={comp.urllogo} alt="" />
+                    </div>
+                ) : null}
+                <div className="entry-text">
+                    <div className="entry-title">{comp.name}</div>
+                    {comp.sitename ? <div className="entry-sitename">{comp.sitename}</div> : null}
+                    <div className="entry-dates">
+                        {comp.start} – {comp.end}
+                    </div>
+                </div>
             </div>
             {inActiveWindow && classes.length > 0
                 ? classes.map((cls) => {

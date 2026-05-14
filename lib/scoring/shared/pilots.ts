@@ -99,6 +99,34 @@ export function correctHandicap(handicap: number | string | null | undefined): n
     return h;
 }
 
+// Polish competitions publish handicaps as raw fs values (typically
+// 600–1000+, where higher fs = worse glider). Convert with H = fsm/fs
+// where fsm is the worst (highest) fs value in the class, so the worst
+// glider maps to 100 and better gliders map above 100 — same shape as
+// the standard percentage handicap. Gated on competition.countrycode =
+// 'PL' AND at least one raw handicap > 600 (the threshold is a sanity
+// check so a PL comp using normal % handicaps still falls through to
+// correctHandicap). Returns a per-class converter.
+export function correctClassHandicaps(
+    rawHandicaps: (number | string | null | undefined)[], //
+    countrycode: string | null | undefined,
+    log?: (msg: string, ...args: unknown[]) => void
+): (raw: number | string | null | undefined) => number {
+    if ((countrycode ?? '').toUpperCase() !== 'PL') return correctHandicap;
+    let fsm = 0;
+    for (const h of rawHandicaps) {
+        const v = typeof h === 'number' ? h : parseFloat(String(h ?? ''));
+        if (!isNaN(v) && v > fsm) fsm = v;
+    }
+    if (fsm <= 600) return correctHandicap;
+    if (log) log(`Polish handicap detected: fsm=${fsm} (worst glider in class)`);
+    return (raw) => {
+        const v = typeof raw === 'number' ? raw : parseFloat(String(raw ?? ''));
+        if (!v || isNaN(v) || v <= 0) return 100;
+        return (fsm / v) * 100;
+    };
+}
+
 //
 // upsertPilot — INSERT … ON DUPLICATE KEY UPDATE for one row, gated FAI
 // resolve, fire-and-forget image refresh. The fai-lookup gate is rule 6:

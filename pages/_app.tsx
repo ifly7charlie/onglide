@@ -29,11 +29,11 @@ const defaultOptions: Options = {
     follow: true,
     zoomTask: true,
     sortKey: 'auto',
-    showOthers: false,
+    showOthers: true,
     fullPaths: PathLength.selectedFull,
     options2d: {taskUp: TaskUp.north, mapType: MapType.street, follow: true},
     options3d: {taskUp: TaskUp.track, mapType: MapType.satellite, follow: true},
-    constructionLines: true
+    constructionLines: false
 };
 
 export function useOptions() {

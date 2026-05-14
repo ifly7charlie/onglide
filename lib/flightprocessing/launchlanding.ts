@@ -14,8 +14,14 @@ import {Compno, ClassName, Epoch, AltitudeAgl, AltitudeAMSL, Datecode} from '../
 
 import {toDateCode} from '../datecode';
 
-//
-import {reduce as _reduce, groupBy as _groupby, forEach as _foreach} from 'lodash';
+function groupBy<T extends Record<string, any>>(arr: T[], key: string): Record<string, T[]> {
+    const out: Record<string, T[]> = {};
+    for (const item of arr) {
+        const k = item[key];
+        (out[k] ??= []).push(item);
+    }
+    return out;
+}
 
 // Keep track of the unknowns
 var unknownTrack = {};
@@ -183,7 +189,7 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
         WHERE
             class = ${classid}
     `);
-    const trackers = _groupby(trackersRaw, 'compno');
+    const trackers = groupBy(trackersRaw, 'compno');
 
     // Check for the tugs
     const frequentFlyersRaw = await mysql.query(sql`
@@ -199,7 +205,7 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
         HAVING
             c > 8
     `);
-    const frequentFlyers = _groupby(frequentFlyersRaw || [{id: 'none'}], 'id');
+    const frequentFlyers = groupBy(frequentFlyersRaw || [{id: 'none'}], 'id');
 
     // Find the potential associations
     const key = [date.substring(8, 11), classid, '%'].join('/');
@@ -236,12 +242,12 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
         console.log(`${date} ${classid}: no IGC/OGN matches found`);
     } else {
         // Collect duplicates, if we have more than one match then we must ignore it
-        const matches = _groupby(matchesRaw, 'glider');
-        const flarmIds = _groupby(matchesRaw, 'flarmid');
+        const matches = groupBy(matchesRaw, 'glider');
+        const flarmIds = groupBy(matchesRaw, 'flarmid');
 
         console.log(`${date} ${classid}: ${Object.keys(matches).length} matches found, ${Object.keys(flarmIds).length} distinct flarm ids`);
 
-        _foreach(matches, (mx) => {
+        for (const mx of Object.values(matches)) {
             const m = mx[0];
 
             // Get compno and make sure it's valid
@@ -306,7 +312,7 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
                     console.log(`${date} ${classid} - ${mCompno} flarm ID ${flarmid} confirmed from takeoff/landing time match`);
                 }
             }
-        });
+        }
     }
 }
 

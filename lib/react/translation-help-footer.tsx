@@ -1,6 +1,6 @@
 import {useTranslation} from 'next-i18next/pages';
 
-const REPO_URL = 'https://github.com/ifly7charlie/onglide';
+const REPO_URL = 'https://github.com/ifly7charlie/onglide#readme';
 
 export function TranslationHelpFooter() {
     const {t} = useTranslation('common');

@@ -10,8 +10,6 @@ import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, Airf
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
 
-import {cloneDeep as _clonedeep} from 'lodash';
-
 //
 // Get a generator to calculate task status
 export const enrichedPositionGenerator = async function* (airfield: AirfieldLocation, pointGenerator: InOrderGenerator, log?: Function): EnrichedPositionGenerator {
@@ -75,6 +73,12 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                                 log(`epg: ${previousPoint.c} not landing out due to rrd: ${ridgeRunningDistance}`);
                             }
                         }
+                    }
+
+                    // Persist the new status so a subsequent tick or low-altitude position doesn't
+                    // re-read the old Airborne value from previousPoint and flip the verdict back.
+                    if (ps != previousPoint.ps) {
+                        previousPoint = {...previousPoint, ps};
                     }
 
                     // if (current.value.t - previousPoint.t > 120) {

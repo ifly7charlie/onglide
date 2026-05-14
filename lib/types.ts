@@ -399,7 +399,7 @@ export interface TasksTableRow {
     task: string;
     flown: string;
     description: string;
-    type: 'S' | 'A' | 'D' | 'E' | 'G';
+    type: 'S' | 'A' | 'D' | 'E';
     //    distance: DistanceKM;
     duration: Duration;
     nostart: StartTime;

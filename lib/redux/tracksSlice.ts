@@ -34,7 +34,7 @@ import type {PilotTracks, PilotTrack} from '../protobuf/onglide';
 
 import {mergePoint, calculateVario, calculateAverage, generateIndices, getEmptyDeck} from '../flightprocessing/incremental';
 
-import {reduce as _reduce, forEach as _foreach, cloneDeep as _cloneDeep, find as _find, map as _map, isEqual as _isEqual, sortedIndex as _sortedIndex} from 'lodash';
+import {sortedIndexNumber} from '../util/binarySearch';
 import {mergeVHPoint, initaliseVH} from '../react/deckvh';
 
 interface TracksSliceState {
@@ -137,7 +137,7 @@ function findDisplayIndex(deck: DeckData, t: Epoch | undefined) {
         return deck.posIndex - 1;
     }
 
-    const nextPoint = _sortedIndex(deck.t.subarray(0, deck.posIndex), t);
+    const nextPoint = sortedIndexNumber(deck.t.subarray(0, deck.posIndex), t);
     return deck.t[nextPoint] > t && nextPoint > 0 ? nextPoint - 1 : nextPoint;
 }
 
@@ -149,20 +149,19 @@ const _selectAllAverageClimb = createSelector(
         (state: TracksSliceState, _t: Epoch | undefined) => state.tracks,
         (state: TracksSliceState) => state.latestUpdate
     ],
-    (t: Epoch | undefined, tracks: TrackData | undefined, now: Epoch | undefined): Record<Compno, number | null> =>
-        _reduce(
-            tracks,
-            (result, track, compno) => {
-                if (!track.deck?.posIndex) {
-                    result[compno] = null;
-                } else {
-                    const posIndex = findDisplayIndex(track.deck, t);
-                    result[compno] = posIndex >= 0 && (t ?? now ?? 0) - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, t ?? now ?? (0 as Epoch), posIndex) : null;
-                }
-                return result;
-            },
-            {} as Record<Compno, number | null>
-        )
+    (t: Epoch | undefined, tracks: TrackData | undefined, now: Epoch | undefined): Record<Compno, number | null> => {
+        const result = {} as Record<Compno, number | null>;
+        for (const compno in tracks) {
+            const track = tracks[compno];
+            if (!track.deck?.posIndex) {
+                result[compno] = null;
+            } else {
+                const posIndex = findDisplayIndex(track.deck, t);
+                result[compno] = posIndex >= 0 && (t ?? now ?? 0) - track.deck.t[posIndex] < 60 ? calculateAverage(track.deck, t ?? now ?? (0 as Epoch), posIndex) : null;
+            }
+        }
+        return result;
+    }
 );
 
 // The current position of all pilots at specified time
@@ -173,7 +172,7 @@ const _selectAllPositions = createSelector(
         (state: TracksSliceState) => state.tracks
     ],
     (t: Epoch, tracks: TrackData) => {
-        return _map(tracks, (track) => {
+        return Object.values(tracks).map((track) => {
             const {deck, name, compno} = track;
             if (!deck) {
                 return {name, compno};
@@ -236,14 +235,45 @@ const _selectAllAMSL = createSelector(
 );
 
 // Find the old tracks
+const MAX_RETRIES = 10;
 export const fetchOldTracks = createAsyncThunk<{downloaded: PilotTracks; websocket: PilotTracks}, {baseTime: Epoch; className: ClassName; datecode: Datecode; residual: PilotTracks}>(
     'tracks/fetchOldTracks', //
     async ({baseTime, datecode, className, residual}, {signal, getState}) => {
+        // baseTime === 0 means the daemon has no historical snapshot yet
+        // (no pilots flown). Don't fetch — just apply the websocket residual.
+        if (!baseTime) {
+            return {downloaded: undefined, websocket: residual};
+        }
         const state = (getState() as RootState).tracks;
-        return await fetch(oldTracksUrl(className, datecode, baseTime.toString(), state.scoreId), {signal}) //
-            .then((res) => res.arrayBuffer())
-            .then(async (ab) => ({downloaded: OnglideWebSocketMessage.decode(new Uint8Array(ab)).tracks, websocket: residual}))
-            .catch(async (_ab) => ({downloaded: undefined, websocket: residual}));
+        const url = oldTracksUrl(className, datecode, baseTime.toString(), state.scoreId);
+        for (let attempt = 0; attempt < MAX_RETRIES && !signal.aborted; attempt++) {
+            try {
+                const res = await fetch(url, {signal});
+                if (res.ok) {
+                    const ab = await res.arrayBuffer();
+                    return {downloaded: OnglideWebSocketMessage.decode(new Uint8Array(ab)).tracks, websocket: residual};
+                }
+                // 503 = daemon's not ready, retry; anything else, give up
+                if (res.status !== 503) {
+                    return {downloaded: undefined, websocket: residual};
+                }
+                const retryAfter = Math.max(1, parseInt(res.headers.get('Retry-After') ?? '2', 10));
+                await new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(resolve, retryAfter * 1000);
+                    signal.addEventListener(
+                        'abort',
+                        () => {
+                            clearTimeout(timer);
+                            reject(signal.reason);
+                        },
+                        {once: true}
+                    );
+                });
+            } catch {
+                return {downloaded: undefined, websocket: residual};
+            }
+        }
+        return {downloaded: undefined, websocket: residual};
     }
 );
 
@@ -404,7 +434,7 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
             }
 
             const ts = track.posIndex > 0 ? new Uint32Array(track.t.slice().buffer) : [];
-            const indexOfOverlap = existing ? _sortedIndex(ts, existing.t[existing.posIndex - 1]) : 0;
+            const indexOfOverlap = existing ? sortedIndexNumber(ts, existing.t[existing.posIndex - 1]) : 0;
 
             let deck: DeckData =
                 track.posIndex > 0

@@ -53,8 +53,6 @@ import {FlightLegs} from './flightLegs';
 // Helpers for loading contest information etc
 import {delayToText} from './timehelper.js';
 
-import {find as _find, filter as _filter, sortBy as _sortby, clone as _clone, map as _map, cloneDeep as _cloneDeep} from 'lodash';
-
 import {useSelector} from '../redux';
 import {selectPilotScore, selectAllStatus} from '../redux/scoresSlice';
 import {selectPilotVario} from '../redux/tracksSlice';
@@ -356,7 +354,8 @@ export const Details = ({
     units,
     tz,
     replayTime,
-    onEditHandicap
+    onEditHandicap,
+    officialDelay = 0
 }: {
     compno: Compno;
     pilot: API_ClassName_Pilots_PilotDetail;
@@ -364,22 +363,23 @@ export const Details = ({
     units: Units;
     replayTime: Epoch | undefined;
     onEditHandicap?: (compno: Compno, handicap: number) => void;
+    officialDelay?: number;
 }) => {
     const {t} = useTranslation('common');
     let competitionDelay = useMemo(() => {
-        if (process.env.NEXT_PUBLIC_COMPETITION_DELAY) {
+        if (officialDelay > 10) {
             return (
                 <a href="#" title={t('pilot.view_delayed_official')} className="tooltipicon">
                     <span style={{color: 'grey'}}>
                         &nbsp;+&nbsp;
                         <FontAwesomeIcon icon={faClockRotateLeft} size="sm" />
-                        &nbsp;{OptionalDurationMM('', parseInt(process.env.NEXT_PUBLIC_COMPETITION_DELAY || '0') as Epoch, 'm')}
+                        &nbsp;{OptionalDurationMM('', officialDelay as Epoch, 'm')}
                     </span>
                 </a>
             );
         }
         return null;
-    }, [t]);
+    }, [t, officialDelay]);
 
     // Get vario for specific time
     const vario = useSelector((state) => selectPilotVario(state, compno, replayTime));
@@ -403,7 +403,7 @@ export const Details = ({
         )
     ) : null;
 
-    const distance = score?.actual ? (hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} />) : null;
+    const distance = score?.actual ? hasHandicappedResults ? <HandicappedDistanceComponent score={score} /> : <ActualDistanceComponent score={score} /> : null;
     const gr = score?.actual ? ( //
         hasHandicappedResults ? (
             <HandicappedGRComponent handicappedGrRemaining={score.handicapped.grRemaining} actualGrRemaining={score.actual.grRemaining} />
@@ -430,7 +430,13 @@ export const Details = ({
     // gets updated regularily
     const delay = (replayTime ?? latestUpdate ?? Infinity) - (vario?.t || 0);
     const uptodate = delay < 45;
-    const old = delay > offlineTime && score && score.flightStatus != PositionStatus.Home && score.flightStatus != PositionStatus.Finished && score.flightStatus != PositionStatus.Landed && score.flightStatus != PositionStatus.Blocked;
+    const old =
+        delay > offlineTime &&
+        score &&
+        score.flightStatus != PositionStatus.Home &&
+        score.flightStatus != PositionStatus.Finished &&
+        score.flightStatus != PositionStatus.Landed &&
+        score.flightStatus != PositionStatus.Blocked;
 
     // Figure out what to show based on the db status
     let flightDetails = null;

@@ -18,12 +18,21 @@ import {Bbox, taskBbox, expandBbox, pointInBbox} from '../../flightprocessing/ta
 
 import {MAX_FLARM_DIST_KM, DEFAULT_MAX_GAP_SEC, DEFAULT_REORDER_WINDOW_SEC, DEFAULT_TOLERANCE_SEC} from '../../constants';
 
+/**
+ * Pilot's official scoring entry for one (class, datecode). `finishUtc`
+ * is null for landout pilots (started but did not complete the task —
+ * scorer didn't record a finish time). They still participate in the
+ * scan so we can recognise their flarmid via the start crossing alone.
+ * Distinct from DNF / DNS in the codebase, which mean "did not fly" /
+ * "did not start" — those don't appear in OfficialResult at all.
+ */
 export interface OfficialResult {
     compno: Compno;
     name: string;
     trackerid: string; // current value in tracker.trackerid (or '')
     startUtc: Epoch;
-    finishUtc: Epoch;
+    finishUtc: Epoch | null; // null for landout pilots (no recorded finish time)
+    glidertype: string; // pilots.glidertype, '' when unset; used for the weak DDB aircraft_model match
 }
 
 export interface TrackerMatch {
@@ -84,7 +93,7 @@ export interface TrackerDiag {
     inBboxPackets: number;
     /** Packets dropped by the bbox prefilter, summed across scans. */
     bboxRejectedPackets: number;
-    /** Min geodesic distance (km) from any in-bbox packet to that scan's TP, across both scans. null if no in-bbox packets. */
+    /** Min closest-approach (km) of any consecutive-pair segment to the start/finish line or sector boundary, across both scans. null if no in-bbox packets or no consecutive pair survived the gap filter. */
     minDistanceKm: number | null;
     /** Mean interval (s) between consecutive in-bbox packets, across both scans. null if <2 in-bbox packets total. */
     avgGapSec: number | null;
@@ -98,9 +107,9 @@ export interface TrackerDiag {
     gapAroundStartSec: number | null;
     /** Same, around the pilot's official finish time, using finish-scan packets. */
     gapAroundFinishSec: number | null;
-    /** Min distance-to-start-TP (km) of the two in-bbox packets bracketing the pilot's official start time. null when gapAroundStartSec is null. */
+    /** Closest approach (km) to the start line/sector among the segments touching the two in-bbox packets bracketing the pilot's official start time. null when gapAroundStartSec is null or both bracketing samples lack a segment-distance reading. */
     distAtStartKm: number | null;
-    /** Same, around the pilot's official finish time, using distance to finish-TP. */
+    /** Same, around the pilot's official finish time, against the finish geometry. */
     distAtFinishKm: number | null;
 }
 
@@ -157,8 +166,17 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     for (const r of results) {
         if (r.startUtc < minStart) minStart = r.startUtc;
         if (r.startUtc > maxStart) maxStart = r.startUtc;
-        if (r.finishUtc < minFinish) minFinish = r.finishUtc;
-        if (r.finishUtc > maxFinish) maxFinish = r.finishUtc;
+        if (r.finishUtc !== null) {
+            if (r.finishUtc < minFinish) minFinish = r.finishUtc;
+            if (r.finishUtc > maxFinish) maxFinish = r.finishUtc;
+        }
+    }
+    // If no pilot finished, fall back to the start-window's outer edge so
+    // the finish scan still runs over a reasonable interval — most landout
+    // days still have some traffic worth surveying for ghost finishes.
+    if (!Number.isFinite(minFinish)) {
+        minFinish = maxStart;
+        maxFinish = maxStart;
     }
 
     // Pilots whose official start AND finish are both within 2×tolerance of
@@ -169,16 +187,19 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     const concurrentGroups = findConcurrentPilots(results, tolerance);
     const concurrentCompnos = new Set<Compno>();
     for (const group of concurrentGroups) {
-        const labels = group.map((r) => `${r.compno} ${r.name}`.trim()).join(', ');
+        const labels = group.map((r) => String(r.compno)).join(', ');
         log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on start and finish) — matches will be ambiguous: ${labels}`);
         for (const r of group) concurrentCompnos.add(r.compno);
     }
 
     // Watch times for the debug trace: each pilot's official start (resp.
     // finish), labelled so the trace marker tells you which pilot.
-    const labelOf = (r: OfficialResult) => `${r.compno}${r.name ? ' ' + r.name : ''}`;
+    const labelOf = (r: OfficialResult) => String(r.compno);
     const startWatch: WatchTime[] = results.map((r) => ({t: r.startUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
-    const finishWatch: WatchTime[] = results.map((r) => ({t: r.finishUtc, label: labelOf(r)})).sort((a, b) => a.t - b.t);
+    const finishWatch: WatchTime[] = results //
+        .filter((r): r is OfficialResult & {finishUtc: Epoch} => r.finishUtc !== null)
+        .map((r) => ({t: r.finishUtc, label: labelOf(r)}))
+        .sort((a, b) => a.t - b.t);
 
     log(`start scan: window ${Math.round((maxStart - minStart) / 60 + (2 * slack) / 60)} min, ${results.length} pilots, maxGap=${maxGapSec}s, reorderWindow=${reorderWindowSec}s${expandedBbox ? ', bbox prefilter on' : ''}`);
     const startScan = await scanLine(startTP, minStart - slack, maxStart + slack, 'start', excludeFlarmids, log, debugFlarmids, startWatch, maxGapSec, reorderWindowSec, expandedBbox);
@@ -203,13 +224,18 @@ interface ScanResult {
     stats: Map<FlarmID, FlarmStatsAcc>;
 }
 
+interface SampleRow extends BasePositionMessage {
+    /** Min boundary distance (km) over the consecutive-pair segments touching this fix; Infinity until the post-scan pass fills it in. */
+    lineKm: number;
+}
+
 interface FlarmStatsAcc {
     bboxRejected: number;
     inBbox: number;
-    minDistanceKm: number; // Infinity until first in-bbox packet
+    minDistanceKm: number; // closest approach (km) of any consecutive-pair segment to the line/sector boundary; Infinity until populated by the post-scan pass
     firstSeenT: number; // -1 until any packet seen
     lastSeenT: number;
-    samples: {t: number; distKm: number}[]; // in-bbox packets (t, dist-to-TP), sorted ascending by t at end-of-scan
+    samples: SampleRow[]; // in-bbox packets sorted ascending by t at end-of-scan; lineKm filled in by post-scan pass
     sumGapSec: number;
     countGap: number;
     maxGapSec: number;
@@ -373,21 +399,22 @@ async function scanLine(
             continue;
         }
         const pos: BasePositionMessage = {lat: msg.lat, lng: msg.lng, a: msg.a, t: msg.t};
-        // Distance to TP — used for the geo gate on first sighting and for
-        // the per-flarmid minDistance stat across all in-bbox packets.
-        const distKm = PreparedTurnpoint.geodesicDistance(center, pos);
-        if (distKm < sStats.minDistanceKm) sStats.minDistanceKm = distKm;
+        // Centroid distance is used only for the first-sighting 150 km gate
+        // (a sanity filter against far-away ghost packets). Line/sector-aware
+        // distance for diag and scoring is filled in by a post-scan pass that
+        // re-runs `hasCrossed` on consecutive pairs and reads its `distanceKm`.
+        const centroidKm = PreparedTurnpoint.geodesicDistance(center, pos);
         sStats.inBbox++;
-        sStats.samples.push({t: msg.t, distKm});
+        sStats.samples.push({t: msg.t as Epoch, lat: msg.lat, lng: msg.lng, a: msg.a, lineKm: Infinity});
         let st = state.get(f);
         if (!st) {
             // First sighting in this scan: geographic gate.
             const d = dbgFor(f);
             if (d) {
                 d.firstArrivalT = pos.t;
-                d.firstArrivalDistKm = distKm;
+                d.firstArrivalDistKm = centroidKm;
             }
-            if (distKm > MAX_FLARM_DIST_KM) {
+            if (centroidKm > MAX_FLARM_DIST_KM) {
                 state.set(f, {buf: [], latestSeen: pos.t, skipped: true});
                 if (d) d.skipped = true;
                 continue;
@@ -453,18 +480,39 @@ async function scanLine(
     const bboxOnly = new Set<FlarmID>();
     for (const f of bboxRejectedFor) if (!state.has(f)) bboxOnly.add(f);
 
-    // Finalize per-flarmid gap stats. Packets are pushed in observation
-    // order during scan, which is mostly time-ascending modulo the small
-    // reorder window — sort once here so consumers can binary-search.
+    // Finalize per-flarmid gap stats and line/sector distances. Packets are
+    // pushed in observation order during scan, which is mostly time-
+    // ascending modulo the small reorder window — sort once here so
+    // consumers can binary-search.
+    //
+    // For each consecutive in-bbox pair we run hasCrossed and harvest the
+    // no-cross distanceKm (line: perpendicular to the segment with endpoint
+    // clamping; sector: closest boundary point). That distance is folded
+    // into the per-flarmid running min (`minDistanceKm`) and into both
+    // endpoints of the sample, so bracketDist returns the closest approach
+    // in the neighbourhood of `target`.
     for (const s of stats.values()) {
         if (s.samples.length < 2) continue;
         s.samples.sort((a, b) => a.t - b.t);
         for (let i = 1; i < s.samples.length; i++) {
             const gap = s.samples[i].t - s.samples[i - 1].t;
-            if (gap <= 0) continue; // duplicates from out-of-order writes
-            s.sumGapSec += gap;
-            s.countGap++;
-            if (gap > s.maxGapSec) s.maxGapSec = gap;
+            if (gap > 0) {
+                s.sumGapSec += gap;
+                s.countGap++;
+                if (gap > s.maxGapSec) s.maxGapSec = gap;
+            }
+            if (gap > maxGapSec) continue; // matches drain's per-pair gate
+            const hc = tp.hasCrossed(s.samples[i - 1], s.samples[i]);
+            // Real crossing → segment passed through the line. Distance to
+            // the line is 0 by definition. Near-miss (crossings empty +
+            // distanceKm set) and no-cross both fall through to the
+            // distanceKm path. Anything else (no distance reported) is
+            // skipped.
+            const d = hc.crossings.length > 0 && hc.distanceKm === undefined ? 0 : (hc.distanceKm as number | undefined);
+            if (d === undefined) continue;
+            if (d < s.samples[i].lineKm) s.samples[i].lineKm = d;
+            if (d < s.samples[i - 1].lineKm) s.samples[i - 1].lineKm = d;
+            if (d < s.minDistanceKm) s.minDistanceKm = d;
         }
     }
 
@@ -562,7 +610,7 @@ function parseAssignedIds(raw: string): Set<FlarmID> {
     return out;
 }
 
-function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResult, startUtc: Epoch, finishUtc: Epoch): TrackerDiag {
+function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResult, startUtc: Epoch, finishUtc: Epoch | null): TrackerDiag {
     const sStart = startScan.stats.get(flarmid);
     const sFinish = finishScan.stats.get(flarmid);
 
@@ -606,13 +654,13 @@ function buildDiag(flarmid: FlarmID, startScan: ScanResult, finishScan: ScanResu
         firstSeenT,
         lastSeenT,
         gapAroundStartSec: bracketGap(sStart?.samples ?? [], startUtc),
-        gapAroundFinishSec: bracketGap(sFinish?.samples ?? [], finishUtc),
+        gapAroundFinishSec: finishUtc === null ? null : bracketGap(sFinish?.samples ?? [], finishUtc),
         distAtStartKm: bracketDist(sStart?.samples ?? [], startUtc),
-        distAtFinishKm: bracketDist(sFinish?.samples ?? [], finishUtc)
+        distAtFinishKm: finishUtc === null ? null : bracketDist(sFinish?.samples ?? [], finishUtc)
     };
 }
 
-type Sample = {t: number; distKm: number};
+type Sample = {t: number; lineKm: number};
 
 // Locate the consecutive sample pair [lo, lo+1] whose timestamps bracket
 // `target`. Returns null if target is outside [first, last] or fewer than
@@ -637,12 +685,14 @@ function bracketGap(samples: Sample[], target: number): number | null {
     return i === null ? null : samples[i + 1].t - samples[i].t;
 }
 
-// Smaller of the two bracketing samples' distance-to-TP (km). Picks the
-// closer of the before/after points, since that's the tightest upper
-// bound on how far from the line the pilot was at `target`.
+// Smaller of the two bracketing samples' line/sector distance (km). Picks
+// the closer of the before/after points — tightest upper bound on how far
+// the pilot was from the start/finish geometry at `target`.
 function bracketDist(samples: Sample[], target: number): number | null {
     const i = bracketIndex(samples, target);
-    return i === null ? null : Math.min(samples[i].distKm, samples[i + 1].distKm);
+    if (i === null) return null;
+    const d = Math.min(samples[i].lineKm, samples[i + 1].lineKm);
+    return Number.isFinite(d) ? d : null;
 }
 
 // Smallest signed delta (crossing − target) across `list`. Used for
@@ -691,8 +741,12 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
 
     for (const r of results) {
         const assignedIds = parseAssignedIds(r.trackerid);
+        // Landout pilots (no official finish time) can't produce a
+        // both-sided match — Phase 1.5 picks them up via start-only.
+        if (r.finishUtc === null) continue;
+        const finishUtc = r.finishUtc;
         for (const f of flarmidsWithBoth) {
-            const {ds, df, score} = bestPair(startCrossings.get(f)!, finishCrossings.get(f)!, r.startUtc, r.finishUtc);
+            const {ds, df, score} = bestPair(startCrossings.get(f)!, finishCrossings.get(f)!, r.startUtc, finishUtc);
             if (score <= tolerance) {
                 const m: TrackerMatch = {
                     compno: r.compno,
@@ -706,7 +760,8 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     withinTolerance: true,
                     ambiguous: false,
                     skipped: false,
-                    bboxOnly: false
+                    bboxOnly: false,
+                    diag: buildDiag(f, startScan, finishScan, r.startUtc, finishUtc)
                 };
                 listAppend(perPilot, r.compno, m);
                 listAppend(perFlarm, f, m);
@@ -715,8 +770,87 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
     }
 
     // Ambiguity is only meaningful for within-tolerance candidates.
+    // Computed BEFORE Phase 1.5 / Phase 2 so single-sided/assigned-only rows
+    // don't artificially mark a clean two-sided match as ambiguous.
     for (const arr of perPilot.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
     for (const arr of perFlarm.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
+
+    // Phase 1.5 — single-sided matches: flarmids that crossed only start
+    // (or only finish) within tolerance of a pilot's official time. Surfaces
+    // landed-out pilots (start-only) and pilots whose start was missed by
+    // APRS coverage but who finished cleanly (finish-only).
+    //
+    // These rows carry withinTolerance=false: single-sided evidence is
+    // genuinely weaker, and pair-flying makes one-sided ambiguity common,
+    // so they're visible for operator review and scoring but don't bypass
+    // the within-tolerance auto-apply gate. Phase 2 below skips ids
+    // already present here, so assigned single-sided cases route through
+    // this phase rather than getting a confidence=null Phase 2 row.
+    const startOnlyFlarmids: FlarmID[] = [];
+    const finishOnlyFlarmids: FlarmID[] = [];
+    for (const f of startCrossings.keys()) if (!finishCrossings.has(f)) startOnlyFlarmids.push(f);
+    for (const f of finishCrossings.keys()) if (!startCrossings.has(f)) finishOnlyFlarmids.push(f);
+    for (const r of results) {
+        const assignedIds = parseAssignedIds(r.trackerid);
+        const existingIds = new Set((perPilot.get(r.compno) ?? []).map((m) => m.flarmid));
+        // For landout pilots (finishUtc=null) we widen the start-side
+        // candidate pool to *every* flarmid that crossed the start, not
+        // just the single-sided ones. Phase 1 only runs for pilots with
+        // an official finish, so a flarmid in `flarmidsWithBoth` (it
+        // also produced a finish crossing for somebody else, or transited
+        // the finish line later) would otherwise be invisible — even
+        // when its start crossing matches this landout pilot's official
+        // start cleanly.
+        const startCandidates = r.finishUtc === null ? Array.from(startCrossings.keys()) : startOnlyFlarmids;
+        for (const f of startCandidates) {
+            if (existingIds.has(f)) continue;
+            const ds = closestDelta(startCrossings.get(f)!, r.startUtc);
+            if (Math.abs(ds) > tolerance) continue;
+            const m: TrackerMatch = {
+                compno: r.compno,
+                name: r.name,
+                flarmid: f,
+                deltaStart: ds,
+                deltaFinish: null,
+                confidence: Math.abs(ds),
+                currentTrackerid: r.trackerid,
+                assigned: assignedIds.has(f),
+                withinTolerance: false,
+                ambiguous: false,
+                skipped: false,
+                bboxOnly: false,
+                diag: buildDiag(f, startScan, finishScan, r.startUtc, r.finishUtc)
+            };
+            listAppend(perPilot, r.compno, m);
+            listAppend(perFlarm, f, m);
+        }
+        // No finish-only candidates for landout pilots — there's no
+        // official finish to anchor against.
+        if (r.finishUtc === null) continue;
+        const finishUtc = r.finishUtc;
+        for (const f of finishOnlyFlarmids) {
+            if (existingIds.has(f)) continue;
+            const df = closestDelta(finishCrossings.get(f)!, finishUtc);
+            if (Math.abs(df) > tolerance) continue;
+            const m: TrackerMatch = {
+                compno: r.compno,
+                name: r.name,
+                flarmid: f,
+                deltaStart: null,
+                deltaFinish: df,
+                confidence: Math.abs(df),
+                currentTrackerid: r.trackerid,
+                assigned: assignedIds.has(f),
+                withinTolerance: false,
+                ambiguous: false,
+                skipped: false,
+                bboxOnly: false,
+                diag: buildDiag(f, startScan, finishScan, r.startUtc, r.finishUtc)
+            };
+            listAppend(perPilot, r.compno, m);
+            listAppend(perFlarm, f, m);
+        }
+    }
 
     // Phase 2 — for every pilot with a recorded trackerid, ensure there's a
     // row for each assigned id even if it falls outside tolerance (or has no
@@ -734,7 +868,9 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
             const wasSkipped = startScan.skipped.has(id) || finishScan.skipped.has(id);
             const wasBboxOnly = startScan.bboxOnly.has(id) || finishScan.bboxOnly.has(id);
             let row: TrackerMatch;
-            if (sList?.length && fList?.length) {
+            // Landout pilots can never produce a both-sided pair — fall
+            // through to the single-sided branch with finish set to null.
+            if (sList?.length && fList?.length && r.finishUtc !== null) {
                 const {ds, df, score} = bestPair(sList, fList, r.startUtc, r.finishUtc);
                 row = {
                     compno: r.compno,
@@ -751,13 +887,13 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                     bboxOnly: false
                 };
             } else if (sList?.length || fList?.length) {
-                // One side crossed but not the other — common for DNFs
-                // (start only) or pilots that never started. Surface the
-                // delta we do have so the operator can see the assigned
-                // id's behaviour on the line that did fire; confidence
-                // stays null because there's no paired score.
+                // One side crossed but not the other — common for landout
+                // pilots (start only) or pilots that never started.
+                // Surface the delta we do have so the operator can see the
+                // assigned id's behaviour on the line that did fire;
+                // confidence stays null because there's no paired score.
                 const ds = sList?.length ? closestDelta(sList, r.startUtc) : null;
-                const df = fList?.length ? closestDelta(fList, r.finishUtc) : null;
+                const df = fList?.length && r.finishUtc !== null ? closestDelta(fList, r.finishUtc) : null;
                 row = {
                     compno: r.compno,
                     name: r.name,
@@ -842,6 +978,9 @@ function findConcurrentPilots(results: OfficialResult[], tolerance: number): Off
         const a = results[i];
         for (let j = i + 1; j < n; j++) {
             const b = results[j];
+            // Landout pilots have null finishUtc — they can't be in a
+            // structurally-concurrent group (no finish time to compare).
+            if (a.finishUtc === null || b.finishUtc === null) continue;
             if (Math.abs(a.startUtc - b.startUtc) <= limit && Math.abs(a.finishUtc - b.finishUtc) <= limit) {
                 parent[find(i)] = find(j);
             }

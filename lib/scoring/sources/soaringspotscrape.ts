@@ -29,7 +29,7 @@ import {processIGC, checkForOGNMatches} from '../../flightprocessing/launchlandi
 import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
 import {findApproximateContestLocation} from '../shared/contestLocation';
-import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctHandicap, type PilotRecord} from '../shared/pilots';
+import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctClassHandicaps, type PilotRecord} from '../shared/pilots';
 import {enqueueFaiLookup} from '../shared/fai';
 import {FAI_SYNTHETIC_FLOOR} from '../shared/faiApi';
 import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
@@ -210,14 +210,13 @@ async function updateContest(
 // and the embedded IGC-href regex are SoaringSpot-specific.
 //
 async function processDayResults(
-    db: any, //
-    log: (msg: string, ...args: unknown[]) => void,
+    ctx: SourceCtx, //
     classid: ClassId,
     className: string,
     date: string,
-    dayNumber: string,
     results: any
 ): Promise<void> {
+    const {db, log, countrycode} = ctx;
     let rows = 0;
     // let doCheckForOGNMatches = false; // disabled — IGC download check is gated off below
     const dateCode = toDateCode(date);
@@ -238,13 +237,22 @@ async function processDayResults(
     }
 
     const igcRe = /a href=&quot;.(en_gb.download-contest-flight.+=1)&quot;/i;
-    const cnRe = /([A-Z0-9]+)\s*<.a>\s*$/i;
+    // Strip the outer popover/IGC anchor (if any) so what's left is the
+    // bare CN text — SoaringSpot drops the anchor entirely for pilots
+    // with no IGC available (DNF, no upload), so a regex that requires
+    // </a> at the end can't find them.
+    const stripTags = (s: string) => s.replace(/<[^>]*>/g, '').trim();
+    const cnRe = /^([A-Z0-9]+)/i;
     const flagRe = /class="flag.*title="([a-z]+)"/i;
 
-    for (const row of results[0]) {
-        if (row['#'] == 'DNF') continue;
+    const convertHandicap = correctClassHandicaps(
+        (results[0] as any[]).map((r) => r.Handicap),
+        countrycode,
+        (msg, ...args) => log(`${className}: ${msg}`, ...args)
+    );
 
-        const pilotExtractor = row.CN.match(cnRe);
+    for (const row of results[0]) {
+        const pilotExtractor = stripTags(row.CN).match(cnRe);
         if (!pilotExtractor) {
             log(`${date} ${className} ${row.CN} - no CN found!`);
             continue;
@@ -255,7 +263,7 @@ async function processDayResults(
         const url = urlExtractor && urlExtractor[1] ? 'https://www.soaringspot.com/' + urlExtractor[1] : undefined;
 
         const flagExtractor = row.Contestant.match(flagRe);
-        if (flagExtractor && dayNumber == 'Task 1') {
+        if (flagExtractor) {
             const flag = flagExtractor[1].toUpperCase();
             // Pull the current FAI/country before we update so we can
             // detect the "we now know the country" transition that
@@ -324,7 +332,7 @@ async function processDayResults(
 
         const actuals = parseFloat(row.Speed);
         const actuald = parseFloat(row.Distance);
-        const handicap = correctHandicap(row.Handicap);
+        const handicap = convertHandicap(row.Handicap);
 
         const scoredvals = {
             as: duration ? actuald / duration : 0,
@@ -445,37 +453,48 @@ export class SoaringSpotScrapeSource implements ScoringSource {
     readonly type = 'soaringspotscrape';
 
     async ensureMetadata(ctx: SourceCtx): Promise<void> {
-        // Pull the same /pilots page used by fetchPilots, but only
-        // consume the contest-info header (name, site, dates) so we can
-        // populate the `competition` row before anything else fires.
+        // Try each tab in turn — every SoaringSpot contest page (pilots,
+        // results, root) carries the same contest-title header, so any
+        // one of them is enough to learn name/site/dates. /pilots is the
+        // historical first choice; the fallbacks cover the observed case
+        // where SoaringSpot's /pilots returns 200 but a body that lacks
+        // the header (no public root cause yet — the body-length log
+        // below is here to capture evidence next time it happens).
         //
-        // We ALWAYS call updateContest at the end, even on failure paths.
-        // With empty inputs, the date regex misses and the UPDATE is
+        // updateContest ALWAYS runs at the end, even on full failure.
+        // With empty inputs the date regex misses and the UPDATE is
         // skipped — but the INSERT IGNORE still plants a placeholder
-        // row with a sentinel past `end`, so dropDeadCompetition can
-        // reap URLs that never scrape successfully. A later successful
-        // call overwrites start/end with the real values.
+        // row so dropDeadCompetition can reap URLs that never scrape.
         let name = '';
         let site = '';
         let dates = '';
-        try {
-            const res = await fetch(ctx.url + '/pilots');
-            if (!res.ok) {
-                ctx.log(`ensureMetadata: ${ctx.url}/pilots returned ${res.status}`);
-            } else {
-                const dom = htmlparser.parseDocument(await res.text());
+        const candidates = ['/pilots', '/results', ''];
+        for (const suffix of candidates) {
+            const target = ctx.url + suffix;
+            try {
+                const res = await fetch(target);
+                if (!res.ok) {
+                    ctx.log(`ensureMetadata: ${target} returned ${res.status}`);
+                    continue;
+                }
+                const body = await res.text();
+                const dom = htmlparser.parseDocument(body);
                 const contestInfo = findOne((x) => x.name == 'div' && x.attribs?.class == 'contest-title', dom?.children ?? []);
                 if (!contestInfo) {
-                    ctx.log(`ensureMetadata: no contest-title div for ${ctx.compid}`);
-                } else {
-                    const children = contestInfo.children ?? [];
-                    name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
-                    site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
-                    dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
+                    ctx.log(`ensureMetadata: no contest-title div at ${target} (body=${body.length}B)`);
+                    continue;
                 }
+                const children = contestInfo.children ?? [];
+                name = cleanText(textContent(findOne((x) => x.name == 'h1', children) ?? []));
+                site = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'location', children) ?? []));
+                dates = cleanText(textContent(findOne((x) => x.name == 'span' && x.attribs?.class == 'date', children) ?? []));
+                if (suffix !== '/pilots') {
+                    ctx.log(`ensureMetadata: extracted header from fallback ${target}`);
+                }
+                break;
+            } catch (e) {
+                ctx.log(`ensureMetadata fetch failed for ${target}:`, e);
             }
-        } catch (e) {
-            ctx.log(`ensureMetadata failed for ${ctx.compid}:`, e);
         }
         try {
             await updateContest(ctx.db, ctx.log, ctx.compid, name, dates, site, ctx.url);
@@ -512,6 +531,33 @@ export class SoaringSpotScrapeSource implements ScoringSource {
             const pilotsList: any[] = parsed[0] ?? [];
             ctx.log(`fetchPilots: ${pilotsList.length} pilot row(s) for ${ctx.compid}`);
 
+            // Pre-scan to bucket raw handicaps by class so we can build a
+            // per-class converter — Polish comps need H = fsm/fs across
+            // the class, so we need every raw handicap in the class
+            // before normalising any single pilot.
+            const handicapsByClass = new Map<ClassId, any[]>();
+            for (const raw of pilotsList) {
+                if (!raw.CN || raw.CN == '') {
+                    continue;
+                }
+                const nc = normalizeClassName(raw.Class);
+                if (!nc) {
+                    continue;
+                }
+                const cid = makeClassId(ctx.compid, nc) as ClassId;
+                if (!handicapsByClass.has(cid)) {
+                    handicapsByClass.set(cid, []);
+                }
+                handicapsByClass.get(cid)!.push(raw.Handicap);
+            }
+            const convertersByClass = new Map<ClassId, (raw: any) => number>();
+            for (const [cid, handicaps] of handicapsByClass) {
+                convertersByClass.set(
+                    cid,
+                    correctClassHandicaps(handicaps, ctx.countrycode, (msg, ...args) => ctx.log(`${cid}: ${msg}`, ...args))
+                );
+            }
+
             for (const raw of pilotsList) {
                 if (!raw.CN || raw.CN == '') {
                     continue;
@@ -523,7 +569,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     continue;
                 }
                 const classid = makeClassId(ctx.compid, normalizedClass) as ClassId;
-                const handicap = correctHandicap(raw.Handicap);
+                const handicap = convertersByClass.get(classid)!(raw.Handicap);
                 const className = normalizedClass.replace(/[_]/gi, ' ');
 
                 const pilot: PilotRecord = {
@@ -631,6 +677,22 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                             if (task) {
                                 const taskJSON = JSON.parse(task[1]);
                                 if (cancelled) taskJSON.result_status = 'cancelled';
+                                // Pull the "Task notes" <p> out of the page
+                                // body. taskNormalize(...) doesn't carry it,
+                                // but downstream (upsertTaskAndLegs) needs
+                                // it to spot tags like "distance handicapped",
+                                // "grand prix", "regatta", "e-glide" that
+                                // drive tasks.type.
+                                const taskDom = htmlparser.parseDocument(taskBody);
+                                const notesH3 = findOne((x) => x.name === 'h3' && /task notes/i.test(textContent(x) ?? ''), taskDom.children);
+                                if (notesH3) {
+                                    let sib: any = (notesH3 as any).next;
+                                    while (sib && sib.name !== 'p') sib = sib.next;
+                                    const notesText = sib ? textContent(sib).trim() : '';
+                                    if (notesText) {
+                                        taskJSON.notes = taskJSON.notes ? `${taskJSON.notes}\n${notesText}` : notesText;
+                                    }
+                                }
                                 await upsertTaskAndLegs(ctx.db, ctx.log, classid, className, taskJSON);
                             }
                         } catch (e) {
@@ -668,7 +730,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                             if (resultTableNode) {
                                 const fragment = getOuterHTML(resultTableNode);
                                 const resultsHtml = Tabletojson.convert(fragment, {stripHtmlFromCells: false});
-                                await processDayResults(ctx.db, ctx.log, classid, className, date, daynumber, resultsHtml);
+                                await processDayResults(ctx, classid, className, date, resultsHtml);
                             }
                         } catch (e) {
                             ctx.log(`results fetch failed for ${classid} ${date}:`, e);

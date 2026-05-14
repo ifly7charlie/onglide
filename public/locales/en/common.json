@@ -14,7 +14,11 @@
         "live_count": "{{count}} Live",
         "upcoming_count": "{{count}} Upcoming",
         "no_class_selected": "Please choose a class from the menu bar",
+        "not_started": "Competition has not started yet",
         "no_tasks_yet": "No tasks yet",
+        "not_found_title": "Competition not found",
+        "not_found": "Competition not found",
+        "not_found_other": "View other competitions",
         "class_one": "{{count}} class",
         "class_other": "{{count}} classes",
         "pilot_one": "{{count}} pilot",
@@ -262,6 +266,6 @@
     },
     "footer": {
         "translation_help": "Help translate Onglide for the gliding community",
-        "translation_help_link_label": "Contribute on GitHub"
+        "translation_help_link_label": "Information on GitHub"
     }
 }

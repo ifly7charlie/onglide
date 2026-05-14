@@ -55,8 +55,6 @@ import bearing from '@turf/bearing';
 import bbox from '@turf/bbox';
 import buffer from '@turf/buffer';
 
-import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep} from 'lodash';
-
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
 import {pilotsTrackLayer} from './pilotstracklayer';
@@ -64,20 +62,7 @@ import {homeLocationLayer} from './homeLocationLayer';
 //import {turnpointLayer} from './turnpointlayer';
 
 import {registerMapIcons} from './mapIcons';
-import {
-    DmPointStyle,
-    hullLineStyle,
-    hullPointStyle,
-    maxLineStyle,
-    maxSignStyle,
-    minLineStyle,
-    minSignStyle,
-    scoredLineStyle,
-    scoringPointStyle,
-    suggestedLineStyle,
-    turnpointStyle2d,
-    turnpointStyle3d
-} from './mapLayerStyles';
+import {DmPointStyle, hullLineStyle, hullPointStyle, maxLineStyle, maxSignStyle, minLineStyle, minSignStyle, scoredLineStyle, scoringPointStyle, suggestedLineStyle, turnpointStyle2d, turnpointStyle3d} from './mapLayerStyles';
 
 export default function MApp(props: {
     options: Options;
@@ -112,9 +97,13 @@ export default function MApp(props: {
 
     const isMoving = mapRef?.current?.isMoving() ?? true;
 
-    // Map display style
+    // Map display style. MapType.street=0, MapType.satellite=1, so the road
+    // basemap is active when options.mapType is falsy. mapLight tracks whether
+    // the basemap is light-coloured (true on road, false on satellite) and is
+    // consumed by layer style helpers to pick dark-on-light vs light-on-dark
+    // variants. The earlier `!!options.mapType` was inverted on both flags.
     const map2d = options.map2d;
-    const mapStreet = !!options.mapType;
+    const mapStreet = !options.mapType;
     const mapLight = mapStreet;
 
     // Rules & legs etc
@@ -170,11 +159,7 @@ export default function MApp(props: {
 
     const nextPoint = (() => {
         if (!task || !selectedScore) return null;
-        const leg = !selectedScore?.utcStart
-            ? task.legs[0]
-            : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6
-              ? task.legs.at(-1)
-              : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0));
+        const leg = !selectedScore?.utcStart ? task.legs[0] : selectedScore?.utcFinish || selectedScore.minDistancePoints.length < 6 ? task.legs.at(-1) : task.legs.at(selectedScore?.currentLeg + (legAdvance ? 1 : 0));
         return leg ? ([leg.nlng, leg.nlat] as [number, number]) : undefined;
     })();
 
@@ -469,7 +454,7 @@ export default function MApp(props: {
     // briefly render before the raster arrives. Symbol layers (labels) stay visible
     // in both modes. contour-line is the exception — it's an overlay shown only on
     // satellite, hidden in street mode.
-    const fixupMap = useCallback(() => {
+    useEffect(() => {
         try {
             const map = mapRef?.current?.getMap();
             if (!map) return;
@@ -485,10 +470,11 @@ export default function MApp(props: {
             map.setLayoutProperty('satellite', 'visibility', mapStreet ? 'none' : 'visible');
         } catch (e) {}
     }, [mapStreet, mapRef?.current]);
-    useEffect(fixupMap, [mapStreet, mapRef?.current]);
 
     // Record if this is a new load or a reload
-    useEffect(() => props.setOptions({...props.options, loadId: (props.options.loadId ?? 0) + 1}), []);
+    useEffect(() => {
+        props.setOptions({...props.options, loadId: (props.options.loadId ?? 0) + 1});
+    }, []);
 
     // Cancel any follow
     const onDragStart = useCallback(() => {
@@ -544,7 +530,12 @@ export default function MApp(props: {
     const gridInteractiveLayerIds = useMemo(() => (gridHoverEnabled ? ['optimal_heatmap'] : undefined), [gridHoverEnabled]);
 
     // If we are displaying other pilots
-    const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch));
+    const classnameByClass = useMemo(() => {
+        const m: Record<string, string> = {};
+        for (const c of props.comp?.classes ?? []) m[c.class] = c.classname;
+        return m as Record<ClassName, string>;
+    }, [props.comp]);
+    const otherPilotLayer = otherPilotsLayer(vc, mapLight, map2d, props.options.showOthers ? props.replayTime : (Infinity as Epoch), classnameByClass);
 
     // X-marker at the competition's site (competition.lt/lg). Hidden when
     // zoomed out so it doesn't clutter the regional view — by zoom 8 the
@@ -590,15 +581,13 @@ export default function MApp(props: {
                         <Layer key="scoringPoint" {...scoringPointStyle} />
                     </Source>
                 ) : null}
-                {valid && !unmounting ? (
-                    <DeckGLOverlay
-                        getTooltip={toolTip}
-                        onClick={onClick}
-                        onDragStart={onDragStart}
-                        layers={[...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]} //
-                        interleaved={true}
-                    />
-                ) : null}
+                <DeckGLOverlay
+                    getTooltip={toolTip}
+                    onClick={onClick}
+                    onDragStart={onDragStart}
+                    layers={valid && !unmounting ? ([...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
+                    interleaved={true}
+                />
                 {debouncedScore && options.constructionLines && debouncedScore.scoredGeoJSON ? (
                     <>
                         {debouncedScore.minGeoJSON && !lastLeg ? (
@@ -639,4 +628,3 @@ export default function MApp(props: {
         </ErrorBoundary>
     );
 }
-

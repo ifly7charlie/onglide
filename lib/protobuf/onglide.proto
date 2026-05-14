@@ -37,10 +37,12 @@ message CompetitionSummary {
 	string tz = 9;
 	int32 tzoffset = 10;
 	optional string mainwebsite = 11;
+	optional string urllogo = 17;
 	uint32 classCount = 12;
 	bool classStatusesDiffer = 13;
 	string displayStatus = 14;
 	repeated CompetitionClassStatus classes = 15;
+	optional uint32 officialDelay = 16; // seconds; resolved from competition.delayseconds with NEXT_PUBLIC_COMPETITION_DELAY fallback
 }
 
 // Pushed to clients of the reserved /all channel. On initial connect the
@@ -73,7 +75,7 @@ message TaskRules {
 	optional bool dh = 4;            // distance handicap
 	optional bool handicapped = 5;
 	optional double dm = 6;          // minimum distance for non-AAT speed tasks
-	uint32 maxHandicap = 7;          // highest handicap in the class
+	double maxHandicap = 7; // highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps
 }
 
 message TaskDetails {

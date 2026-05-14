@@ -25,7 +25,7 @@ import * as dotenv from 'dotenv';
 import {findAirfieldsByName, type RankedAirfield} from '../lib/scoring/shared/airfield';
 import {nowInTz} from '../lib/scoring/shared/timezone';
 import {toDateCode} from '../lib/datecode';
-import {loadMergedDDB, isBlocked, blockedMethod, type DDBEntry} from '../lib/ddb';
+import {loadMergedDDB, isBlocked, blockedMethod, gliderEquivalent, type DDBEntry} from '../lib/ddb';
 
 dotenv.config({path: '.env.local'});
 
@@ -111,13 +111,6 @@ function onCancel() {
 
 function norm(s: string | null | undefined): string {
     return (s || '').trim().toUpperCase();
-}
-
-// Loose glider-type comparison: strip whitespace and dashes before comparing
-// so "ASW-20" == "ASW 20" == "asw20".
-function gliderEquivalent(a: string | null | undefined, b: string | null | undefined): boolean {
-    const strip = (s: string | null | undefined) => (s || '').replace(/[\s-]/g, '').toUpperCase();
-    return strip(a) === strip(b);
 }
 
 function isAutoApply(m: Match): boolean {
@@ -475,6 +468,65 @@ function printAll(matches: Match[]) {
     console.log('');
 }
 
+// Report devices at the airfield that did NOT make it into matches[],
+// and pilots in this comp that have no logbook device today, so the
+// operator can see *why* something is missing rather than guessing.
+function reportUnmatched(devices: LogbookDevice[], pilots: PilotRow[], matches: Match[], ddb: Record<string, DDBEntry> | null) {
+    const compnoSet = new Set(pilots.map((p) => norm(p.compno)));
+    const matchedCompnos = new Set(matches.map((m) => norm(m.pilot.compno)));
+    const pilotByGreg = new Map<string, PilotRow>();
+    for (const p of pilots) {
+        const g = (p.greg || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        if (g) pilotByGreg.set(g, p);
+    }
+
+    const unmatched: {d: LogbookDevice; reason: string}[] = [];
+    for (const d of devices) {
+        if (!d.identified) {
+            unmatched.push({d, reason: 'OGN device not identified (no DDB record)'});
+            continue;
+        }
+        if (!d.competition) {
+            unmatched.push({d, reason: 'no competition compno on DDB record (visitor or unset)'});
+            continue;
+        }
+        const cnNorm = norm(d.competition);
+        if (!compnoSet.has(cnNorm)) {
+            // See if registration would have matched a pilot — common
+            // when the DDB CN drifts from the comp's compno.
+            const regNorm = (d.registration || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+            const gregHit = regNorm ? pilotByGreg.get(regNorm) : undefined;
+            const hint = gregHit ? ` (registration "${d.registration}" matches pilot ${pilotLabel(gregHit)} — DDB CN may be stale)` : '';
+            unmatched.push({d, reason: `compno "${d.competition}" not in this comp's pilot list${hint}`});
+        }
+        // else: pilot was found, device is in matches[]
+    }
+
+    if (unmatched.length) {
+        console.log(`Devices at airfield not matched (${unmatched.length}):`);
+        for (const {d, reason} of unmatched) {
+            const id = d.address || '(no address)';
+            const reg = d.registration ? ` ${d.registration}` : '';
+            const ac = d.aircraft ? ` ${d.aircraft}` : '';
+            const cn = d.competition ? ` cn="${d.competition}"` : '';
+            console.log(`  ${id}${reg}${ac}${cn} — ${reason}`);
+        }
+        console.log('');
+    }
+
+    const unmatchedPilots = pilots.filter((p) => !matchedCompnos.has(norm(p.compno)));
+    if (unmatchedPilots.length) {
+        console.log(`Pilots with no logbook device today (${unmatchedPilots.length}):`);
+        for (const p of unmatchedPilots) {
+            const tid = p.trackerid && norm(p.trackerid) !== '' ? p.trackerid : '(none)';
+            const ddbEntry = ddb && tid !== '(none)' && tid !== 'unknown' && tid !== 'blocked' ? ddb[tid.toLowerCase()] || ddb[tid.toUpperCase()] || ddb[tid] : undefined;
+            const ddbHint = ddbEntry ? `  [DDB: cn=${ddbEntry.cn || '-'} reg=${ddbEntry.registration || '-'} ${ddbEntry.aircraft_model || ''}]` : '';
+            console.log(`  ${pilotLabel(p)}  trackerid=${tid}  greg=${p.greg || '(none)'}  ${p.glidertype || '(no type)'}${ddbHint}`);
+        }
+        console.log('');
+    }
+}
+
 interface Decision {
     applyFlarm: boolean;
     applyGreg: boolean;
@@ -622,6 +674,7 @@ async function main() {
 
     const matches = buildMatches(devices, pilots, ddb, comp.trackingconsent);
     printAll(matches);
+    reportUnmatched(devices, pilots, matches, ddb);
 
     const decisions = await reviewMatches(matches);
     await applyDecisions(decisions);

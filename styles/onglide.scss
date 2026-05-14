@@ -223,6 +223,27 @@ button {
             font-size: 18px;
         }
 
+        .sidepanel-comp-logo {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+
+            a,
+            img {
+                display: block;
+                max-width: 100%;
+                max-height: 100%;
+            }
+
+            img {
+                object-fit: contain;
+            }
+        }
+
         .sidepanel-title {
             flex: 1;
             min-width: 0;
@@ -294,6 +315,13 @@ button {
         overflow-y: auto;
         padding: 6px 16px;
         border-top: 1px solid var(--panel-border);
+
+        // When the footer shows the sponsor block (no pilot selected), allow
+        // overflow so the language picker dropdown can expand upward without
+        // being clipped by the scroll container.
+        &:has(.sponsor) {
+            overflow: visible;
+        }
     }
 
     // Brand header at the top of the globe home-page side panel.
@@ -373,6 +401,33 @@ button {
         &.highlighted {
             background: var(--panel-hover);
             border-left-color: var(--panel-fg);
+        }
+
+        .entry-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .entry-logo {
+            flex-shrink: 0;
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+
+            img {
+                max-width: 100%;
+                max-height: 100%;
+                object-fit: contain;
+            }
+        }
+
+        .entry-text {
+            flex: 1;
+            min-width: 0;
         }
 
         .entry-title {
@@ -523,6 +578,14 @@ button {
 
 .sidepanel > .sidepanel-classes {
     border-bottom: 1px solid var(--panel-border);
+}
+
+.globe-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 390px;
+    bottom: 0;
 }
 
 // Chrome overlays floating over a full-viewport map or globe.
@@ -731,6 +794,11 @@ button {
         width: auto;
         height: 40vh;
         box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+    }
+
+    .globe-canvas {
+        right: 0;
+        bottom: 40vh;
     }
 
     .map-legend {
@@ -1263,28 +1331,74 @@ ul.status {
 
 .sponsor {
     padding: 0 2px;
-    text-align: center;
 
-    img {
-        display: block;
-        margin: 0 auto;
-        max-height: 130px;
-        max-width: 80%;
-        height: auto;
-        width: auto;
+    .sponsor-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 4px 2px;
     }
 
-    // On short viewports the sidepanel-footer eats too much vertical space
-    // for the sponsor image; cap it so the pilot list above stays usable.
-    @media (max-height: 760px) {
+    .sponsor-logo {
+        flex: 0 0 auto;
+
         img {
-            max-height: 80px;
+            display: block;
         }
     }
 
-    @media (max-height: 600px) {
-        img {
-            max-height: 56px;
+    .sponsor-status {
+        flex: 1 1 auto;
+        min-width: 0;
+        text-align: left;
+        font-size: 13px;
+        line-height: 1.3;
+    }
+
+    .sponsor-status-row {
+        white-space: nowrap;
+    }
+
+    .sponsor-status-grid {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 8px;
+
+        .sponsor-cell-left {
+            text-align: left;
+            white-space: nowrap;
+        }
+        .sponsor-cell-center {
+            text-align: center;
+            white-space: nowrap;
+        }
+        .sponsor-cell-right {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .translation-help-footer {
+            text-align: right !important;
+            padding: 0 !important;
+            display: inline-block;
+        }
+    }
+
+    .sponsor-cell-info-lang {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+    }
+
+    .sponsor-lang {
+        line-height: 1;
+        display: inline-flex;
+
+        .lang-menu {
+            top: auto;
+            bottom: calc(100% + 4px);
         }
     }
 }

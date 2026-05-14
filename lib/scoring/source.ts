@@ -31,6 +31,7 @@ export interface SourceCtx {
     compid: string;
     url: string;
     tz: string; // IANA timezone, mirrored from competition.tz
+    countrycode: string | null; // ISO alpha-2, mirrored from competition.countrycode
     db: any; // serverless-mysql instance
     log: (msg: string, ...args: unknown[]) => void;
     // Per-source row from `scoringsource` — adapters may pluck extra fields

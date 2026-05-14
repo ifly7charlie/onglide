@@ -1,7 +1,6 @@
 import {useMeasure} from './measure';
 import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {cloneDeep as _cloneDeep} from 'lodash';
 
 import {
     faRuler,
@@ -37,13 +36,13 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             nextRadar = 0;
             rainRadar = false;
         }
-        props.setOptions(_cloneDeep({...props.options, rainRadarAdvance: nextRadar, rainRadar}));
+        props.setOptions(structuredClone({...props.options, rainRadarAdvance: nextRadar, rainRadar}));
     };
     const constructionLines = () => {
-        props.setOptions(_cloneDeep({...props.options, constructionLines: !props.options.constructionLines}));
+        props.setOptions(structuredClone({...props.options, constructionLines: !props.options.constructionLines}));
     };
     const toggle2d = () => {
-        const newOptions = _cloneDeep({...props.options, map2d: !props.options.map2d});
+        const newOptions = structuredClone({...props.options, map2d: !props.options.map2d});
         // Save away the current options and
         if (props.options.map2d) {
             Object.assign(newOptions, {options2d: {taskUp: newOptions.taskUp, follow: newOptions.follow, mapType: newOptions.mapType}});
@@ -55,22 +54,22 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
         props.setOptions(newOptions);
     };
     const toggleSatellite = () => {
-        props.setOptions(_cloneDeep({...props.options, mapType: !props.options.mapType}));
+        props.setOptions(structuredClone({...props.options, mapType: !props.options.mapType}));
     };
     const toggleUnits = () => {
-        props.setOptions(_cloneDeep({...props.options, units: !props.options.units}));
+        props.setOptions(structuredClone({...props.options, units: !props.options.units}));
     };
     const toggleTaskUp = () => {
-        props.setOptions(_cloneDeep({...props.options, taskUp: (props.options.taskUp + 1) % 3}));
+        props.setOptions(structuredClone({...props.options, taskUp: (props.options.taskUp + 1) % 3}));
     };
     const toggleFollow = () => {
-        props.setOptions(_cloneDeep({...props.options, follow: !props.options.follow}));
+        props.setOptions(structuredClone({...props.options, follow: !props.options.follow}));
     };
     const toggleFullPaths = () => {
-        props.setOptions(_cloneDeep({...props.options, fullPaths: (props.options.fullPaths + 1) % 3}));
+        props.setOptions(structuredClone({...props.options, fullPaths: (props.options.fullPaths + 1) % 3}));
     };
     const toggleShowOthers = () => {
-        props.setOptions(_cloneDeep({...props.options, showOthers: !props.options.showOthers}));
+        props.setOptions(structuredClone({...props.options, showOthers: !props.options.showOthers}));
     };
 
     return (
@@ -130,12 +129,12 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             )}
             {false ? <br className="smallScreen" /> : null}
             {props.options.mapType ? (
-                <button title={t('satellite_to_road')} onClick={toggleSatellite}>
-                    <FontAwesomeIcon icon={faRoad} />
-                </button>
-            ) : (
                 <button title={t('road_to_satellite')} onClick={toggleSatellite}>
                     <FontAwesomeIcon icon={faSatellite} />
+                </button>
+            ) : (
+                <button title={t('satellite_to_road')} onClick={toggleSatellite}>
+                    <FontAwesomeIcon icon={faRoad} />
                 </button>
             )}
             {

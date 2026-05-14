@@ -11,6 +11,7 @@
 
 import escape from 'sql-template-strings';
 
+import {normalizeClassNameForDisplay} from '../../classid';
 import type {ClassId} from '../source';
 
 //
@@ -18,8 +19,10 @@ import type {ClassId} from '../source';
 // classes row, plus the placeholder compstatus row. Mirrors the inline
 // blocks the old ssscrape.ts ran for every parsed class.
 //
-// `displayName` is the human label (after _ → space conversion); the
-// 30-char `classname` column gets truncated.
+// `displayName` is the human label (after _ → space conversion). It is
+// written verbatim to `description`; the 30-char `classname` column is
+// also passed through normalizeClassNameForDisplay() so e.g. "18 Meter"
+// renders as "18m", and then truncated.
 //
 // `todayDatecode` is always computed in the *competition's* local tz —
 // critical for competitions that straddle UTC midnight (NZ, AU, JP),
@@ -42,7 +45,7 @@ export async function upsertClass(
                 (
                     ${classid},
                     ${compid},
-                    ${displayName.substring(0, 29)},
+                    ${normalizeClassNameForDisplay(displayName).substring(0, 29)},
                     ${displayName},
                     'club'
                 ) ON DUPLICATE KEY
@@ -54,10 +57,7 @@ export async function upsertClass(
                 (classname),
                 description =
             VALUES
-                (description),
-                type =
-            VALUES
-                (type)
+                (description)
         `);
 
         await db.query(escape`

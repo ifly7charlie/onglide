@@ -52,6 +52,43 @@ export function hashDayPayload(day: any): string {
 }
 
 //
+// syncPilotResultRows — make pilotresult for (classid, dateCode) match
+// the current `pilots` membership. Idempotent: INSERT IGNORE seeds a
+// placeholder row for every registered pilot, then DELETE removes any
+// row whose compno is no longer in `pilots` for this class. Both branches
+// of upsertTaskAndLegs call this — the "task changed" path needs it
+// because pilots may have been fetched after the original task install
+// (urgent fetch on a comp added mid-day), and the "task unchanged" early
+// return needs it because that path otherwise leaves pilotresult stale.
+// Scored rows are NOT preserved on dereg: if a pilot is removed from the
+// pilots list, their pilotresult disappears too.
+//
+async function syncPilotResultRows(
+    db: any, //
+    classid: ClassId,
+    dateCode: string
+): Promise<{added: number; removed: number}> {
+    const ins = await db.query(escape`
+        INSERT IGNORE INTO pilotresult (
+            class, datecode, compno, status,
+            start, finish, duration,
+            distance, hdistance, speed, hspeed, igcavailable
+        )
+        SELECT ${classid}, ${dateCode}, compno, '-',
+               '00:00:00', '00:00:00', '00:00:00',
+               0, 0, 0, 0, 'N'
+        FROM pilots
+        WHERE pilots.class = ${classid}
+    `);
+    const del = await db.query(escape`
+        DELETE FROM pilotresult
+        WHERE class = ${classid}
+          AND compno NOT IN (SELECT compno FROM pilots WHERE class = ${classid})
+    `);
+    return {added: ins?.affectedRows ?? 0, removed: del?.affectedRows ?? 0};
+}
+
+//
 // upsertTaskAndLegs — full transactional task install. Mirrors the old
 // `process_day_task()` body verbatim, just parameterised on the parsed
 // `day` object so adapters don't need to know about transaction shape.
@@ -69,11 +106,49 @@ export async function upsertTaskAndLegs(
     const date: string = day.task_date;
     const dateCode = toDateCode(date);
 
-    let tasktype: 'S' | 'A' = 'S';
+    let tasktype: 'S' | 'A' | 'D' | 'E' = 'S';
     let duration = '00:00';
     if (day.task_type == 'assigned_area') {
         tasktype = 'A';
         duration = new Date(day.task_duration * 1000).toISOString().substring(11, 19);
+    }
+
+    // Override tasktype from free-text task notes. Mirrors the OAuth
+    // source (bin/soaringspot.ts). "e-glide" wins over plain distance
+    // handicap because it implies the eglide variant. Regatta and grand
+    // prix don't change tasktype — they flip classes.grandprixstart
+    // below instead, which keeps the distance-handicap signal intact for
+    // tasks that are both regatta-style AND handicapped.
+    const noteText = String(day.notes ?? '');
+    const isRegatta = /regatta/i.test(noteText);
+    const isGrandPrix = /grand[\s-]?prix/i.test(noteText);
+    const isEglide = /e[\s-]?glide/i.test(noteText);
+    if (noteText.match(/distance[\s-]?handicap/i)) {
+        tasktype = 'D';
+    }
+    if (isEglide) {
+        tasktype = 'E';
+    }
+
+    // Regatta, grand prix and e-glide all imply grandprix-start. Flip
+    // classes.grandprixstart='Y' (one-way, matches the start-time
+    // detector and the contest-name detector in soaringspotscrape.ts)
+    // so the in-memory rule reads cleanly from a single source. The
+    // tasktype='E' assignment above is preserved so the UI can still
+    // render the task as an eglide task.
+    if (isRegatta || isGrandPrix || isEglide) {
+        const reason = isEglide ? 'e-glide' : isGrandPrix ? 'grand prix' : 'regatta';
+        const r = await db.query(escape`
+            UPDATE classes
+            SET
+                grandprixstart = 'Y'
+            WHERE
+                class = ${classid}
+                AND grandprixstart <> 'Y'
+        `);
+        if (r?.affectedRows) {
+            log(`${classid}: ${reason} detected in task notes; set grandprixstart=Y`);
+        }
     }
 
     // Promote compstatus to 'B' (briefed) unconditionally whenever we see
@@ -129,7 +204,12 @@ export async function upsertTaskAndLegs(
     `);
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
-        log(`${classid} - ${date}: task unchanged`);
+        const sync = await syncPilotResultRows(db, classid, dateCode);
+        if (sync.added || sync.removed) {
+            log(`${classid} - ${date}: task unchanged; pilotresult +${sync.added}/-${sync.removed}`);
+        } else {
+            log(`${classid} - ${date}: task unchanged`);
+        }
         return false;
     }
     log(`${classid} - ${date}: task changed`);
@@ -255,39 +335,6 @@ export async function upsertTaskAndLegs(
             return ['UPDATE tasks SET task="A", flown="Y" WHERE class=? AND taskid = ?', [classid, taskid]];
         })
         .query(escape`
-            INSERT IGNORE INTO pilotresult (
-                class,
-                datecode,
-                compno,
-                status,
-                start,
-                finish,
-                duration,
-                distance,
-                hdistance,
-                speed,
-                hspeed,
-                igcavailable
-            )
-            SELECT
-                ${classid},
-                ${dateCode},
-                compno,
-                '-',
-                '00:00:00',
-                '00:00:00',
-                '00:00:00',
-                0,
-                0,
-                0,
-                0,
-                'N'
-            FROM
-                pilots
-            WHERE
-                pilots.class = ${classid}
-        `)
-        .query(escape`
             INSERT INTO
                 contestday (
                     class,
@@ -412,6 +459,11 @@ export async function upsertTaskAndLegs(
             log(`task transaction rolled back for ${classid} - ${date}`);
         })
         .commit();
+
+    const sync = await syncPilotResultRows(db, classid, dateCode);
+    if (sync.added || sync.removed) {
+        log(`${classid} - ${date}: pilotresult +${sync.added}/-${sync.removed}`);
+    }
 
     // After the transaction commits, the competition row may have just
     // been backfilled with lt/lg from taskleg. Re-run the IANA tz lookup

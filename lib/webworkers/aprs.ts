@@ -23,18 +23,15 @@ import {getElevationOffset} from '../getelevationoffset';
 //import { getOffset } from '../egm96.mjs';
 
 // Helper function for geometry
-import distance from '@turf/distance';
-import {Coord, point} from '@turf/helpers';
 
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {getNow, d} from '../now';
+import {makeGetNow, d} from '../now';
 
 import {PositionMessage} from '../types';
 interface InterimPositionMessage extends PositionMessage {
     //    aircraft: Aircraft;
-    j?: Coord;
     f: FlarmID; // id
     o: string; // sender
     ad: number; // airfield distance
@@ -42,6 +39,7 @@ interface InterimPositionMessage extends PositionMessage {
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
 import {APRS_MAX_FILTER_BYTES, Bbox, pointInBbox} from '../flightprocessing/taskBbox';
+import {distHaversine} from '../flightprocessing/taskhelper';
 
 // APRS connection
 let connection: ISSocket & {aprsc: string; lastPacketTime: number};
@@ -82,7 +80,7 @@ import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_EN
 import {trackMetric, initialiseInsights} from '../insights';
 //import {pathToFileURL} from 'node:url';
 
-import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
+import {sortedLastIndexBy} from '../util/binarySearch';
 
 export enum AprsCommandEnum {
     none,
@@ -142,6 +140,7 @@ export interface AirfieldSpec {
     compid: string;
     lt: number;
     lg: number;
+    officialDelay?: number; // seconds; per-comp tracking delay (from competition.delayseconds or env fallback). Omitted by test fixtures and treated as 0.
 }
 
 export interface AprsCommandSetAirfields {
@@ -208,12 +207,16 @@ export interface Aircraft {
 
     lastTime?: number;
     lastSent?: InterimPositionMessage;
-    lastMoved?: number;
+    lastMoved: number;
     lastTick: Epoch;
 
     //    kf?: any; // altitude smoothing
     stationary: number; // consecutive stationary fixes
-    ground: boolean;
+    // Capped 0-10 ground-state counter. Saturated to 10 while the
+    // aircraft looks parked (stationary + low AGL) and decremented once
+    // per high-AGL fix. Treated as "on ground" whenever > 0 — debounces
+    // single stray GPS points that briefly read high altitude.
+    ground: number;
 
     channel?: BroadcastChannel; // where to send packets
 
@@ -237,8 +240,17 @@ export interface Tracker {
 // config and updated at runtime via AprsCommandEnum.setAirfields.
 export interface Airfield {
     compid: string;
-    point: Coord;
+    point: {lat: number; lng: number};
     elevation: AltitudeAgl;
+    // Per-comp official delay in seconds and its bound clock.
+    // processMessageQueue calls airfield.getNow() to gate its output, so
+    // packets sit in aircraft.messages long enough that downstream
+    // consumers (main thread → websocket, scoring worker → inordergenerator)
+    // see a delayed stream. The closure is rebuilt in-place by setAirfields
+    // whenever the delay actually changes, so live edits propagate without
+    // restarting any aircraft state.
+    officialDelay: Epoch;
+    getNow: () => Epoch;
     // Expanded task bbox for the comp. Mutated in place by setAirfields when
     // the main thread ships a new bbox via rebuildAprsFilter.
     bbox?: Bbox;
@@ -249,11 +261,11 @@ const airfields: Airfield[] = [];
 // Lazily created on first dispatch; closed when the airfield goes away.
 const unknownChannels: Record<string, BroadcastChannel> = {};
 
-function nearestAirfield(jPoint: Coord): {field: Airfield; distance: number} | null {
+function nearestAirfield(jPoint: {lat: number; lng: number}): {field: Airfield; distance: number} | null {
     let best: Airfield | null = null;
     let bestD = Infinity;
     for (const a of airfields) {
-        const d = distance(jPoint, a.point);
+        const d = distHaversine(jPoint, a.point);
         if (d < bestD) {
             bestD = d;
             best = a;
@@ -291,11 +303,19 @@ export function setAirfields(specs: AirfieldSpec[]) {
     // clobber a bbox that rebuildAprsFilter has already pushed.
     for (const s of specs) {
         const existing = airfields.find((a) => a.compid === s.compid);
-        const p = point([s.lt, s.lg]);
+        const p = {lat: s.lt, lng: s.lg};
+        const delay = (s.officialDelay ?? 0) as Epoch;
         if (existing) {
             existing.point = p;
+            // Only rebuild the bound clock when the delay actually changes;
+            // the hot path (processMessageQueue) reads airfield.getNow on
+            // every iteration so we don't want fresh allocations every tick.
+            if (existing.officialDelay !== delay) {
+                existing.officialDelay = delay;
+                existing.getNow = makeGetNow(delay);
+            }
         } else {
-            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl};
+            const a: Airfield = {compid: s.compid, point: p, elevation: 0 as AltitudeAgl, officialDelay: delay, getNow: makeGetNow(delay)};
             airfields.push(a);
             getElevationOffset(s.lt, s.lg, (e: any) => (a.elevation = e));
         }
@@ -388,7 +408,7 @@ let loadTimer: NodeJS.Timeout | null = null;
 
 // Our persistence
 import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
-import {competitionStartTs} from '../datecode';
+import {competitionStartForDatecode} from '../datecode';
 import {inorderAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
 
 //
@@ -873,8 +893,9 @@ function trackGlider(task: AprsCommandTrack) {
         tzoffset: task.tzoffset,
 
         stationary: 0,
-        ground: false,
+        ground: 0,
         lastTick: 0 as Epoch,
+        lastMoved: 0 as Epoch,
         receiveNewPoints: task.receiveNewPoints,
 
         log:
@@ -890,7 +911,10 @@ function trackGlider(task: AprsCommandTrack) {
     allAircraft[key] = glider;
 
     const interimQueue: InterimPositionMessage[] = [];
-    const since = competitionStartTs(task.tzoffset);
+    // Anchor on the datecode being registered, not wall-clock now: at the
+    // midnight-UTC rollover competitionStartTs(now) still points at yesterday's
+    // 10:00 local, which would backfill yesterday's flight into today's tracker.
+    const since = competitionStartForDatecode(task.datecode, task.tzoffset);
 
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
     const dedupedIds = [...new Set(trackerList)];
@@ -992,10 +1016,6 @@ async function flushLoads() {
             const baseMessage = raw as InterimPositionMessage & {d?: number};
             if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
 
-            // Build the GeoJSON point once per loaded record, share across
-            // any targets that have this flarm ID.
-            const j = point([baseMessage.lat, baseMessage.lng]);
-
             for (const target of targets) {
                 if (raw.t < target.since) continue;
                 // Pre-task comps (no bbox) keep current behaviour; for a comp
@@ -1003,7 +1023,7 @@ async function flushLoads() {
                 // per target, so multi-comp registrations naturally route
                 // each point to whichever comp(s) actually contain it.
                 if (target.airfield.bbox && !pointInBbox(target.airfield.bbox, baseMessage.lat, baseMessage.lng)) continue;
-                target.queue.push({...baseMessage, c: target.compno, j});
+                target.queue.push({...baseMessage, c: target.compno, ad: distHaversine(baseMessage, target.airfield.point)});
                 dispatched++;
             }
         }
@@ -1121,8 +1141,7 @@ export async function processPacket(packet: aprsPacket) {
     // Apply the correction
     let altitude = Math.floor(packet.altitude + aoa);
 
-    // geojson for helper function slater
-    const jPoint = point([packet.latitude, packet.longitude]);
+    const jPoint = {lat: packet.latitude!, lng: packet.longitude!};
 
     statistics.msgsReceived++;
 
@@ -1182,8 +1201,6 @@ export async function processPacket(packet: aprsPacket) {
 
     statistics.knownReceived++;
 
-    message.j = jPoint;
-
     // Per-aircraft bbox prefilter and multi-comp disambiguation. See
     // selectAircraftForPosition for the rules.
     const dispatchTo = selectAircraftForPosition(aircraftList, packet.latitude!, packet.longitude!);
@@ -1199,7 +1216,7 @@ export async function processPacket(packet: aprsPacket) {
         const messageQueue = aircraft.messages;
         if ((messageQueue.at(-1)?.t ?? 0) > perAircraftMessage.t) {
             statistics.outOfOrder++;
-            const insertIndex = _sortedLastIndexBy(messageQueue, perAircraftMessage, messageSortKey);
+            const insertIndex = sortedLastIndexBy(messageQueue, perAircraftMessage, messageSortKey);
             if (insertIndex > 0 && messageQueue[insertIndex - 1].t == perAircraftMessage.t) {
                 statistics.duplicates++;
             }
@@ -1224,9 +1241,12 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     let lastSent = aircraft.lastSent;
     let messages = aircraft.messages;
     const start = (aircraft.lastTime ? aircraft.lastTime + 1 : 0) as Epoch;
-    const realNow = getNow();
+    // Per-comp clock: aircraft.airfield.getNow is rebuilt by setAirfields
+    // whenever officialDelay changes, so live delay edits propagate to the
+    // next call here. makeGetNow honours replay mode.
+    const realNow = aircraft.airfield.getNow();
     const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
-    let position = _sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
+    let position = sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
     if (!log) {
         log = aircraft.log;
@@ -1252,16 +1272,19 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // If we have many we need to reduce this to one
         // we take smallest difference in position, or if the same the smallest vertical difference from
         // previously selected point. If point is the same then don't prefer it.
-        const sorted = lastSent
-            ? duplicates
+        const sortedPoint = !lastSent
+            ? null
+            : duplicates
                   .map((point) => {
-                      const dH = distance(point.j!, lastSent!.j!);
+                      const dH = distHaversine(point, lastSent!);
                       const dV = point.a - lastSent!.a;
+                      const dG = point.g - lastSent!.g;
                       const dT = point.t - lastSent!.t;
                       return {
                           ...point,
                           dH: dH * 1000,
                           dV,
+                          dG,
                           dT,
                           dSH: (3600 * dH) / dT, //km/s
                           dSV: Math.abs(dV / dT) // m/s
@@ -1271,49 +1294,77 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
                   // as they can't possible be correct (point.s is the flarm reported speed)
                   .filter((point) => point.dSH < (point.s || 160) * 2.3 && point.dSV < 30)
                   // Then sort them by amount of change
-                  .sort((a, b) => (a.dH - a.dH > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
-            : duplicates;
-
-        // If it hasn't changed then we will ignore it - this should prevent us getting stuck on the previous
-        // one
-        const filtered = lastSent ? sorted.filter((a) => a.lat != lastSent!.lat || a.lng != lastSent!.lng || a.a != lastSent!.a) : sorted;
-
-        // We haven't picked one because we have had no movement but we have had packets
-        const stationary = lastSent && !filtered.length && sorted.length && realNow - lastSent.t > 30;
+                  .sort((a, b) => (Math.abs(a.dH - b.dH) > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
+                  .at(0);
 
         // Take the first one, if we don't have one then we can just do nothing for now
-        const point = filtered.at(0) ?? (stationary ? sorted[0] : undefined);
+        // don't bypass the filtering for jumps by assuming null sortedPoint means take first point
+        const point = lastSent ? sortedPoint : duplicates.at(0);
         if (!point) {
             continue;
         }
 
-        if (stationary) {
-            aircraft.stationary++;
+        // First packet of the session: seed lastSent so the next packet can produce a
+        // dH/dG against it, but don't emit. Combined with the relaxed stationaryTime
+        // gate below, this lets the on-ground / >3 km filter engage from packet 2
+        // instead of waiting for the ground state machine to arm.
+        if (!lastSent) {
+            aircraft.lastSent = lastSent = point;
+            continue;
+        }
 
+        // If it hasn't really moved we treat it as "no movement" so the stationary
+        // path below can fire. Raw GPS altitude (a) jitters by a few metres even
+        // when parked, so compare g (AGL, rounded to the metre) and allow a small
+        // horizontal tolerance for GPS drift.
+        const noMovement = sortedPoint ? sortedPoint.dH < 5 && Math.abs(sortedPoint.dG) < 3 : false;
+
+        // We haven't picked one because we have had no movement but we have had packets.
+        // Note: aircraft.lastMoved starts at 0 and is only set once the glider actually
+        // moves, so leaving it un-gated lets stationaryTime evaluate to a huge epoch
+        // value on the first stationary detection. That's intentional — it arms the
+        // ground state immediately for gliders that were already parked when the
+        // session started.
+        const stationaryTime = noMovement && sortedPoint ? sortedPoint.t - aircraft.lastMoved : 0;
+
+        if (stationaryTime > 60) {
             // If we had been stationary for a while and we are low enough to be on the ground
-            // then mark it as so
-            if (aircraft.stationary > 5 && point.g < 100 && !aircraft.ground) {
-                console.log(`${point.c}: on ground @ ${point.t}`);
-                aircraft.ground = true;
+            // then mark it as so.
+            if (point.g < 100) {
+                if (aircraft.ground === 0) {
+                    console.log(`${point.c}: on ground @ ${point.t}`);
+                }
+                aircraft.ground = 6;
             }
         }
 
-        // If we have 'taken' off
-        if (aircraft.ground && point.g > 110) {
-            console.log(`${point.c}: left ground @ ${point.t}`);
-            aircraft.ground = false;
+        // If we look like we have 'taken' off, decrement once. A handful of
+        // bad GPS fixes won't clear the on-ground state — we need ~10
+        // consecutive high-AGL points to fully leave ground.
+        if (aircraft.ground > 0) {
+            if (point.g > 110) {
+                aircraft.ground--;
+                if (aircraft.ground === 0) {
+                    console.log(`${point.c}: left ground @ ${point.t}`);
+                }
+            } else if (point.g < 100) {
+                aircraft.ground = 6;
+            }
         }
 
         // If we are on the ground and we are more than 3 km from airfield location then we don't
         // want to report it. This doesn't filter initial points as you are not marked as on the ground
         // till several stationary points have happened
-        if (aircraft.ground && (point.ad ?? 0) > 3) {
+        if (aircraft.ground > 0 && (point.ad ?? 0) > 3) {
             continue;
         }
 
-        // If we are stationary we don't need to report the points
-        if (!stationary) {
-            aircraft.stationary = 0;
+        if (stationaryTime && point.t - (lastSent?.t ?? 0) < 30) {
+            continue;
+        }
+
+        // If we are not stationary record when we moved so we can track ground or not
+        if (!stationaryTime) {
             aircraft.lastMoved = point.t;
         }
 
@@ -1321,9 +1372,13 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         aircraft.lastSent = lastSent = point;
 
         // Send message, if we are sending ALL then by definition this will be 'late' so indicate that
-        // all it does is stop it sending to the front end
-        const live = start != 0 || position == messages.length || (messages[position]?.t ?? Infinity) >= to;
-        aircraft.channel!.postMessage({...point, aircraft: undefined, j: undefined, _: live});
+        // all it does is stop it sending to the front end.
+        // Don't promote the last point of an initial replay (start == 0) to live just because it's
+        // the end of the batch — that lets EPG's tick-based landout fire against the second-to-last
+        // point and then get reverted when the "live" final point lands. The heartbeat tick below
+        // (always _:true) is what signals the replay/live boundary to iog.
+        const live = start != 0 || (position < messages.length && messages[position].t >= to);
+        aircraft.channel!.postMessage({...point, aircraft: undefined, _: live});
         log('sent->', point);
     }
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {

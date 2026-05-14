@@ -16,7 +16,8 @@ import {MeasureContext} from '../../lib/react/measure';
 import {ClassName, Datecode} from '../../lib/types';
 
 import {useSelector} from '../../lib/redux';
-import {selectCompByCompid} from '../../lib/redux/competitionsSlice';
+import {selectCompByCompid, selectCompetitionsList, selectCompetitionsSnapshotReceived, summaryToCompetition} from '../../lib/redux/competitionsSlice';
+import Link from 'next/link';
 
 //
 // Main page rendering :)
@@ -36,10 +37,14 @@ export default function CombinePage(props) {
     }
 
     // Comp metadata + per-class status comes from the /all websocket via
-    // Redux. summary === null means the snapshot hasn't arrived yet OR this
-    // compid isn't in the live list — both render the loading spinner.
+    // Redux. summary === null while the snapshot hasn't arrived; once
+    // snapshotReceived flips true and summary is still null, this compid
+    // isn't in the live list and we surface a "not found" overlay instead
+    // of stranding the user on an empty spinning globe.
     const compByCompid = useMemo(() => selectCompByCompid(compid), [compid]);
     const summary = useSelector(compByCompid);
+    const competitions = useSelector(selectCompetitionsList);
+    const snapshotReceived = useSelector(selectCompetitionsSnapshotReceived);
 
     // And keep track of who is selected
     const [selectedCompno, setSelectedCompno] = useState();
@@ -62,18 +67,75 @@ export default function CombinePage(props) {
     // show the same rotating-globe placeholder the landing page uses
     // instead of a blank screen, so the page reads as loading rather than
     // broken when the connection is unavailable.
-    if (!summary || !props.options) return <CompetitionGlobe competitions={[]} countriesGeoJson={null} />;
+    if (!props.options || (!summary && !snapshotReceived)) return <CompetitionGlobe competitions={[]} countriesGeoJson={null} />;
+
+    // Snapshot has arrived but this compid isn't in it — render the live
+    // globe (so the user can pick another comp) with a small overlay
+    // explaining the situation.
+    if (!summary) {
+        return (
+            <>
+                <Head>
+                    <title>{t('competition.not_found_title')}</title>
+                </Head>
+                <CompetitionGlobe competitions={competitions} countriesGeoJson={null} />
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: '5%',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 10,
+                        background: 'rgba(0,0,0,0.6)',
+                        color: 'white',
+                        padding: '12px 20px',
+                        borderRadius: 6,
+                        textAlign: 'center',
+                        pointerEvents: 'auto'
+                    }}
+                >
+                    <div style={{fontSize: '1.1em', marginBottom: 6}}>{t('competition.not_found')}</div>
+                    <Link href="/" style={{color: '#9cf'}}>
+                        {t('competition.not_found_other')}
+                    </Link>
+                </div>
+            </>
+        );
+    }
 
     // Make sure we have the class object
     const selectedClass = summary.classes.find((c) => c.class === className);
 
     if (!selectedClass) {
+        // displayStatus='upcoming' is the daemon's signal that the comp
+        // window hasn't opened yet (see buildUpcomingSummary in bin/ogn.ts).
+        // In that state the per-class menu is empty/meaningless, so a
+        // "please choose a class" prompt is misleading.
+        const upcoming = summary.displayStatus === 'upcoming';
         return (
             <>
                 <Head>
                     <title>{summary.name}</title>
                 </Head>
-                <h1>{t('competition.no_class_selected')}</h1>
+                <CompetitionGlobe competitions={[summaryToCompetition(summary)]} countriesGeoJson={null} />
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: '5%',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 10,
+                        background: 'rgba(0,0,0,0.6)',
+                        color: 'white',
+                        padding: '12px 20px',
+                        borderRadius: 6,
+                        textAlign: 'center',
+                        pointerEvents: 'auto'
+                    }}
+                >
+                    <div style={{fontSize: '1.1em', marginBottom: 6}}>{summary.name}</div>
+                    <div>{t(upcoming ? 'competition.not_started' : 'competition.no_class_selected')}</div>
+                </div>
             </>
         );
     }

@@ -47,10 +47,12 @@ CREATE TABLE `competition` (
   `tz` char(40) DEFAULT 'Europe/Stockholm' COMMENT 'TZ offset from SoaringSpot',
 
   `mainwebsite` varchar(240) DEFAULT NULL COMMENT 'Used when clicking on comp name to return to primary website',
+  `urllogo` varchar(512) DEFAULT NULL COMMENT 'URL to competition logo image; shown on list & tracking pages',
   `lt` float DEFAULT NULL COMMENT 'launch/landing location',
   `lg` float DEFAULT NULL COMMENT 'launch/landing location',
   `flightstats` char(1) DEFAULT 'N' COMMENT 'Compute per-flight statistics (thermals, wind, etc.) - Y/N',
   `trackingconsent` char(1) DEFAULT 'N' COMMENT 'Y = comp has obtained explicit livetracking consent from pilots; bypass DDB tracked=N block',
+  `delayseconds` int(11) DEFAULT NULL COMMENT 'official tracking delay in seconds; NULL = inherit NEXT_PUBLIC_COMPETITION_DELAY env (default 10)',
   PRIMARY KEY (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 
@@ -354,7 +356,15 @@ CREATE TABLE `trackerhistory` (
   `flarmid` text DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch') DEFAULT 'none'
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch','evidence','startmatch-swap') DEFAULT 'none',
+  `class` char(15) DEFAULT NULL,
+  `datecode` char(3) DEFAULT NULL,
+  `delta_start` smallint DEFAULT NULL,
+  `delta_finish` smallint DEFAULT NULL,
+  `pair_score` float DEFAULT NULL,
+  `margin` float DEFAULT NULL,
+  `ddb_link` enum('none','cn','glider','both') NOT NULL DEFAULT 'none',
+  KEY `idx_class_datecode_method` (`class`, `datecode`, `method`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 

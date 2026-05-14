@@ -1,8 +1,6 @@
 import {query, mysqlEnd} from '../../../lib/react/db';
 import escape from 'sql-template-strings';
 
-import {keyBy as _keyBy} from 'lodash';
-
 export default async function taskHandler(req, res) {
     const {
         query: {className}
@@ -45,7 +43,7 @@ export default async function taskHandler(req, res) {
     res.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=60');
 
     // And we succeeded - here is the json
-    res.status(200).json({pilots: _keyBy(pilots, 'compno')});
+    res.status(200).json({pilots: Object.fromEntries(pilots.map((p: any) => [p.compno, p]))});
     // Done
     mysqlEnd();
 }

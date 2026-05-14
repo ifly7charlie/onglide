@@ -1,6 +1,6 @@
 import {Epoch, Datecode, ClassName, Compno, PositionMessage, InOrderGeneratorFunction, InOrderGenerator} from '../types';
 
-import {sortedLastIndexBy as _sortedLastIndexBy, sortedIndexBy as _sortedIndexBy} from 'lodash';
+import {sortedLastIndexBy, sortedIndexBy} from '../util/binarySearch';
 import {BroadcastChannel} from 'node:worker_threads';
 
 import {d, getNow} from '../now';
@@ -72,7 +72,7 @@ export function bindChannelForInOrderPackets(
         }
 
         // Figure out where to insert (sorted by time)
-        const insertIndex = _sortedLastIndexBy(messageQueue, message, (o) => o.t);
+        const insertIndex = sortedLastIndexBy(messageQueue, message, (o) => o.t);
 
         // Sanity check, this should never happen
         if (messageQueue[insertIndex]?.t == message.t) {
@@ -151,13 +151,13 @@ export function bindChannelForInOrderPackets(
             const bridgeNext = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
             if (messageQueueId !== currentMessageQueueId) return;
             if (bridgeNext) {
-                position = _sortedIndexBy(messageQueue, {t: bridgeNext} as any, (o) => o.t);
+                position = sortedIndexBy(messageQueue, {t: bridgeNext} as any, (o) => o.t);
             }
         }
 
         // Find the position of the message we got up to, should always be increasing but better safe than sorry
         // as we may have had a reset of the message
-        //        let position = _sortedIndexBy(messageQueue, {t: now} as any, (o) => o.t);
+        //        let position = sortedIndexBy(messageQueue, {t: now} as any, (o) => o.t);
 
         // Loop till we are told to stop (an exception on yield)
         while (messageQueueId === currentMessageQueueId) {
@@ -169,7 +169,7 @@ export function bindChannelForInOrderPackets(
                 if (messageQueueId !== currentMessageQueueId) return;
                 if (nextPoint) {
                     // If scoring needs us to rewind we can do that immediately
-                    position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
+                    position = sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
                     continue;
                 }
 
@@ -194,7 +194,7 @@ export function bindChannelForInOrderPackets(
             const nextPoint = yield {...message, _: position == messageQueue.length};
             if (messageQueueId !== currentMessageQueueId) return;
             if (nextPoint) {
-                position = _sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
+                position = sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
             }
         }
 

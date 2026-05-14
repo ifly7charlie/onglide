@@ -47,6 +47,24 @@ function cleanRegistration(reg: string | undefined | null): string {
     return (reg || '').replace(/[^A-Z0-9]/gi, '');
 }
 
+// Forgiving glider-type comparison. Reduces each side to its leading
+// "model key" (alphabetic prefix + first digit run, alphanumerics only,
+// uppercase) and accepts a match when one is a prefix of the other. So
+// "Ventus 3T/18m" ~ "Ventus 3T", "JS3 18m" ~ "JS-3 18M RES",
+// "Ventus 2cxM/18m" ~ "Ventus", "ASG 29E/18m" ~ "ASG-29E", but
+// "JS3 18m" ≠ "UFO" and "ASG 27" ≠ "ASG 29".
+export function gliderEquivalent(a: string | null | undefined, b: string | null | undefined): boolean {
+    const key = (s: string | null | undefined): string => {
+        const norm = (s || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        const m = norm.match(/^[A-Z]+\d*/);
+        return m ? m[0] : norm;
+    };
+    const ka = key(a);
+    const kb = key(b);
+    if (!ka || !kb) return false;
+    return ka.startsWith(kb) || kb.startsWith(ka);
+}
+
 //
 // Merge two device arrays into a keyed map. When a device_id appears
 // in both, fields are merged (FlarmNet fills gaps in OGN), and tracked

@@ -1,4 +1,3 @@
-import {map as _map, reduce as _reduce, find as _find, cloneDeep as _cloneDeep, zip as _zip} from 'lodash';
 import {PositionMessage, DeckData, DisplayPilotTrackData, SortKey} from '../types';
 
 import {PilotPosition} from '../protobuf/onglide';
@@ -20,7 +19,7 @@ const climb = (v: number) => colourMaps[clamp(v + 5)];
 const aheight = (v: number) => colourMaps[clamp(Math.log(Math.max(v >> 5, 0)))];
 //const    height = (v) => colourise(Math.min(255, Math.log2(v >> 5) * 35))
 
-const climbBulk = (deck: DeckData) => _map(deck.climbRate, climb).flat(2);
+const climbBulk = (deck: DeckData) => Array.from(deck.climbRate, climb).flat(2);
 //const aheightBulk = (deck: DeckData) => deck.agl.values().map(aheight).flat(2);
 //const heightBulk = (cf, deck: DeckData) => _map(deck.t, (_v, index) => cf(deck.positions[3 * index + 2])).flat(2);
 

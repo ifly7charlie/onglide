@@ -14,12 +14,17 @@ interface CompetitionsState {
     byCompid: Record<string, CompetitionSummary>;
     order: string[];
     connected: boolean;
+    // True once the daemon has delivered its initial /all snapshot. Lets
+    // pages distinguish "still loading" from "definitely not in the live
+    // list" — without this they look identical.
+    snapshotReceived: boolean;
 }
 
 const initialState: CompetitionsState = {
     byCompid: {},
     order: [],
-    connected: false
+    connected: false,
+    snapshotReceived: false
 };
 
 const reorder = (byCompid: Record<string, CompetitionSummary>): string[] =>
@@ -41,6 +46,7 @@ export const competitionsSlice = createSlice({
             state.byCompid = {};
             for (const s of payload) state.byCompid[s.compid] = s;
             state.order = reorder(state.byCompid);
+            state.snapshotReceived = true;
         },
         competitionsDelta: (state, {payload}: {payload: {summaries: CompetitionSummary[]; removed: string[]}}) => {
             for (const s of payload.summaries) state.byCompid[s.compid] = s;
@@ -51,13 +57,14 @@ export const competitionsSlice = createSlice({
     selectors: {
         selectCompetitionsConnected: (state) => state.connected,
         selectCompetitionsByCompid: (state) => state.byCompid,
-        selectCompetitionsOrder: (state) => state.order
+        selectCompetitionsOrder: (state) => state.order,
+        selectCompetitionsSnapshotReceived: (state) => state.snapshotReceived
     }
 });
 
 export default competitionsSlice.reducer;
 export const {competitionsConnected, competitionsSnapshot, competitionsDelta} = competitionsSlice.actions;
-export const {selectCompetitionsConnected, selectCompetitionsByCompid, selectCompetitionsOrder} = competitionsSlice.selectors;
+export const {selectCompetitionsConnected, selectCompetitionsByCompid, selectCompetitionsOrder, selectCompetitionsSnapshotReceived} = competitionsSlice.selectors;
 
 // Project the raw summary into the lossy `Competition` shape that
 // pages/index.tsx + lib/react/globe.tsx already consume. Memoised so the
@@ -73,7 +80,7 @@ export const selectCompetitionsList = createSelector([selectCompetitionsByCompid
 export const selectCompByCompid = (compid: string | undefined) =>
     createSelector([selectCompetitionsByCompid], (byCompid): CompetitionSummary | null => (compid ? byCompid[compid] ?? null : null));
 
-function summaryToCompetition(s: CompetitionSummary): Competition {
+export function summaryToCompetition(s: CompetitionSummary): Competition {
     return {
         compid: s.compid,
         name: s.name,
@@ -86,6 +93,7 @@ function summaryToCompetition(s: CompetitionSummary): Competition {
         tz: s.tz,
         tzoffset: s.tzoffset,
         mainwebsite: s.mainwebsite ?? null,
+        urllogo: s.urllogo ?? null,
         classCount: s.classCount,
         classes: s.classes.map(
             (c): CompetitionClass => ({

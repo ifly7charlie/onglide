@@ -1,12 +1,14 @@
 import {useState} from 'react';
 
+import {SATELLITE_ATTRIBUTION} from './mapStyle';
+
 // Compact attribution: a small (i) trigger that opens a full-page opaque
 // modal listing tile/data attributions. Replaces maplibre's built-in
 // AttributionControl which expanded into a multi-line strip that overlapped
 // the bottom-left map controls on narrow viewports.
 const STATIC_ATTRIBUTIONS = [
     '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
-    'Imagery © Esri, Maxar, Earthstar Geographics',
+    SATELLITE_ATTRIBUTION,
     'Elevation: AWS Open Data — USGS, NASA, CGIAR, NRCan, GEBCO, EU-DEM'
 ];
 

@@ -6,7 +6,7 @@ import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
 import {loadPoints} from '../lib/webworkers/pointlog';
 
-import {fromDateCode, competitionStartTs} from '../lib/datecode';
+import {fromDateCode, competitionStartForDatecode} from '../lib/datecode';
 
 import escape from 'sql-template-strings';
 import Mysql from 'serverless-mysql';
@@ -79,11 +79,7 @@ async function main() {
     }
 
     const tzoffset = Number(pilots[0].tzoffset) || 0;
-    // Anchor on the datecode's 10am-local-time (via fromDateCode → reference
-    // timestamp that falls inside the desired day). competitionStartTs then
-    // returns the UTC epoch for that 10am boundary.
-    const dayMidday = new Date(fromDateCode(datecode)).getTime() / 1000 + 12 * 3600;
-    const since = competitionStartTs(tzoffset, dayMidday);
+    const since = competitionStartForDatecode(datecode, tzoffset);
     const until = since + 24 * 3600;
     const messageQueue: any[] = [];
 
@@ -91,7 +87,7 @@ async function main() {
     // flushBackfills, so the prefilter never reads this field. Bbox is left
     // undefined (pre-task semantics) so any code that did consult it would
     // fall through to the broadcast fallback.
-    const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any};
+    const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any, officialDelay: 0 as any, getNow: () => 0 as any};
 
     const glider: Aircraft = {
         compno,
@@ -101,8 +97,9 @@ async function main() {
         datecode,
         tzoffset,
         stationary: 0,
-        ground: false,
+        ground: 0,
         lastTick: 0 as Epoch,
+        lastMoved: 0 as Epoch,
         receiveNewPoints: false,
         log: () => {},
         messages: []
@@ -279,7 +276,7 @@ async function getTask(className: ClassName, datecode: Datecode): Promise<Task |
 
     const task: Task = {
         rules: {
-            grandprixstart: taskdetails.type == 'G' || taskdetails.type == 'E' || taskdetails.grandprixstart == 'Y',
+            grandprixstart: taskdetails.grandprixstart == 'Y',
             nostartutc: taskdetails.nostartutc,
             aat: taskdetails.type == 'A',
             dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',

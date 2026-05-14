@@ -7,8 +7,6 @@
 
 import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, isEnrichedTick} from '../types';
 
-import {cloneDeep as _clonedeep} from 'lodash';
-
 import {stripPoints} from '../flightprocessing/taskhelper';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
@@ -37,10 +35,19 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     let relaxedStartCandidate: {crossing: {entered: boolean; left: boolean; at: BasePositionMessage}; beyondM: number; distToTP1: DistanceKM} | null = null;
     let closestDistToStartLine: DistanceKM = Infinity as DistanceKM;
 
+    interface PossibleAdvance {
+        possiblePoints: BasePositionMessage[];
+        rewindTo: Epoch;
+        estimatedTurnType: EstimatedTurnType;
+        ld: number;
+    }
+    let possibleAdvances: PossibleAdvance[] = [];
+
     // Reset everything related to the current task
     function resetStart() {
         relaxedStartCandidate = null;
         closestDistToStartLine = Infinity as DistanceKM;
+        possibleAdvances = [];
         status = {
             compno: status?.compno || ('init' as Compno),
             t: status?.t || (0 as Epoch),
@@ -55,6 +62,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             inSector: false,
             inPenalty: false,
             pointsProcessed: status?.pointsProcessed || 0,
+            lastProcessedPoint: status?.lastProcessedPoint,
             legs: task.legs.map((l) => {
                 return {legno: l.legno, points: [], penaltyPoints: []};
             })
@@ -74,15 +82,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
     // state for the search
     let landedBack = false;
-
-    interface PossibleAdvance {
-        possiblePoints: BasePositionMessage[];
-        rewindTo: Epoch;
-        estimatedTurnType: EstimatedTurnType;
-        ld: number;
-    }
-
-    let possibleAdvances: PossibleAdvance[] = [];
 
     // Shortcut to the startline/finishline which is expected to always be the first/last points
     var startLine = legs[0];
@@ -133,7 +132,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     if (lastTickStatus && !startIsCloseOrPassed && !status._) {
                         continue;
                     }
-                    lastTickStatus = _clonedeep(status);
+                    lastTickStatus = structuredClone(status);
                     yield {...status, tick: true} as any;
                 }
                 continue;
@@ -199,7 +198,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (status.utcStart && point.t < status.utcStart) {
                     if (point._) {
                         yield status;
-
                     }
                     continue;
                 }
@@ -226,7 +224,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                     if (point._) {
                         yield status;
-
                     }
                     continue;
                 }
@@ -245,6 +242,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     if (hc.everInside) {
                         if (!hc.finalInside) {
                             // for starts it's always the last crossing that matters
+                            resetStart();
                             status.legs[0].points = [simplifyPoint(hc.crossings.at(-1)?.at!)];
                             status.startFound = true;
                             status.currentLeg = 1;
@@ -252,7 +250,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             relaxedStartCandidate = null; // strict takes priority
                             if (point._) {
                                 yield status;
-        
                             }
                         } else {
                             // if we are entering then we can reset - this only works for sectors not lines
@@ -292,7 +289,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             relaxedStartCandidate = null;
                             if (point._) {
                                 yield status;
-        
                             }
                         } else if (distToTP1 > relaxedStartCandidate.distToTP1 + 2.0) {
                             // Pilot moving away from TP1 → reject candidate
@@ -307,7 +303,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 if (!status.startFound) {
                     if (point._) {
                         yield status;
-
                     }
                     continue;
                 }
