@@ -526,6 +526,14 @@ async function main() {
         while (checkScoringNotReady()) {
             await setTimeoutPromise(1000);
         }
+
+        // Pre-build the per-channel webPathData snapshot so the first client's
+        // sendCurrentState doesn't pay the encode cost on the connect await.
+        // generateHistoricalTracks is a no-op when mostRecentPosition is 0 or
+        // when the snapshot is still fresh.
+        for (const channel of Object.values(channels)) {
+            await generateHistoricalTracks(channel);
+        }
     }
 
     // Rename the process now that startup is complete — `ps`/`htop` show
@@ -2479,10 +2487,6 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         } else {
             lastPendingChannelsLog = null;
             console.log('all channels scored');
-            if (process?.send) {
-                console.log('*** sent process ready');
-                process.send('ready');
-            }
         }
         return;
     }
