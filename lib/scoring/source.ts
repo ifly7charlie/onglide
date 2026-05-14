@@ -69,6 +69,17 @@ export interface FetchResultsResult {
 export type SkipDayPredicate = (classid: ClassId, datecode: Datecode, dateISO: string) => boolean;
 
 //
+// FetchResultsOptions — additional flags the scheduler can pass to
+// `fetchResultsAndTasks`. `tasksOnly` is set on the fast pre-task
+// cadence: the adapter should still walk the overview page and import
+// any newly-published task, but skip the per-pilot results parsing
+// (no class has a task yet, so there are no results to fetch).
+//
+export interface FetchResultsOptions {
+    tasksOnly?: boolean;
+}
+
+//
 // DiscoverCtx / DiscoveredCompetition — handed to the (optional) daily
 // discovery hook. Each adapter exposing `discoverCompetitions()` returns
 // the (compid, url) pairs it currently sees as "in progress" or
@@ -105,8 +116,10 @@ export interface ScoringSource {
 
     // Fetch tasks + per-day results across all classes. Adapter writes
     // tasks/taskleg/contestday/pilotresult via the shared helpers; the
-    // scheduler hands in a `skipDay` so old days are not refetched.
-    fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate): Promise<FetchResultsResult>;
+    // scheduler hands in a `skipDay` so old days are not refetched, and
+    // optionally a `tasksOnly` flag to suppress the results-parsing
+    // half of the work on pre-task fast ticks.
+    fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult>;
 
     // Optional daily competition discovery. The scheduler calls this at
     // most once per UTC day (at or after 05:00 UTC) and INSERT IGNOREs

@@ -59,7 +59,9 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                             (gapLength > 60 && previousPoint.g < 10) || // acceptable gaps for altitude
                             (gapLength > 120 && previousPoint.g < 25) ||
                             (gapLength > 240 && previousPoint.g < 75) ||
-                            (gapLength > 900 && previousPoint.g < 200)
+                            (gapLength > 900 && previousPoint.g < 200) ||
+                            (gapLength > 2 * 3600 && previousPoint.g < 400) || // 2h silent at modest altitude: assume landed
+                            gapLength > 5 * 3600 // 5h silent at any altitude: assume landed
                         ) {
                             if (distance(previousPoint.geoJSON!, airfield.point!) < 3) {
                                 ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;

@@ -36,7 +36,8 @@ const INTERVAL_RESULTS_SLOW_MS = 30 * 60 * 1000; // after launch+1h until end-of
 const INTERVAL_PILOTS_HOURLY_MS = 60 * 60 * 1000; // task day, before launch
 const INTERVAL_PILOTS_URGENT_MS = 30 * 60 * 1000; // active comp, DB still empty
 
-const STOP_RESULTS_LOCAL_MINUTE = 20 * 60; // 20:00 local — stop results checks
+const STOP_RESULTS_LOCAL_MINUTE = 22 * 60; // 22:00 local — stop results checks
+const RESTART_LOCAL_MINUTE = 8 * 60; // 08:00 local — wake-up after overnight quiet
 const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
 const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: tasks.nostart - 30m
 
@@ -44,7 +45,7 @@ const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: tasks.n
 // hour, plus once on startup regardless of wall-clock time.
 const DISCOVERY_UTC_HOUR = 5;
 
-// "After launch" cadence drops from fast→slow at +1h.
+// Grandprix-only: stay on fast cadence until +1h past first launch.
 const LAUNCH_FAST_TAIL_MS = 60 * 60 * 1000;
 
 // ---------- per-class status helpers ----------
@@ -62,6 +63,8 @@ interface ClassObservation {
     datecode: string | null;
     starttimeMinutes: number | null; // minute-of-day (local), parsed from tasks.nostart for the class's current datecode
     isToday: boolean; // does compstatus.datecode match today's local datecode?
+    grandprix: boolean; // classes.grandprixstart='Y' — keeps fast cadence post-task
+    fullyScored: boolean; // all pilotresult rows for this class/datecode have datafromscoring='Y'
 }
 
 interface CompState {
@@ -128,6 +131,10 @@ interface CompState {
 interface SchedulerDecisions {
     fetchPilots: boolean;
     fetchResults: boolean;
+    // True when fetchResults is set but no class today has a task —
+    // the adapter should walk the overview to import any newly-
+    // published task but skip results-table parsing.
+    tasksOnly: boolean;
     pruneOldDays: boolean;
     dropDeadComp: boolean;
     // rationale (for logging)
@@ -212,15 +219,31 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
 
     // ----- results -----
 
+    // "all today's classes are fully scored" → behave as past cutoff.
+    // pilotresult rows flip datafromscoring='Y' as the scoring source
+    // uploads finalised results, so once every today-class is fully
+    // marked we have no reason to keep hammering upstream.
+    const todaysObs = state.observations.filter((o) => o.isToday);
+    const allTodayScored = todaysObs.length > 0 && todaysObs.every((o) => o.fullyScored);
+
     let fetchResults = false;
-    if (localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
+    if (allTodayScored) {
+        reasons.push('results:all-scored-stop');
+    } else if (localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
         if (nowMs >= state.nextResultsAt) {
             fetchResults = true;
             reasons.push('results:due');
         }
     } else {
-        reasons.push('results:after-20:00-stop');
+        reasons.push('results:after-22:00-stop');
     }
+
+    // tasksOnly: fast pre-task cadence. If every today-class is still
+    // pre-task (status not in TASK_STATES), there are no results to
+    // chase yet — walk the overview to catch a freshly-published task,
+    // but skip the per-pilot results parsing.
+    const tasksOnly = fetchResults && todaysObs.length > 0 && todaysObs.every((o) => !TASK_STATES.has(o.status));
+    if (tasksOnly) reasons.push('results:tasks-only');
 
     // ----- maintenance -----
 
@@ -239,6 +262,7 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
     return {
         fetchPilots,
         fetchResults,
+        tasksOnly,
         pruneOldDays: pruneEligible,
         dropDeadComp: deadCheck,
         reasons
@@ -249,19 +273,20 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
 
 // scheduleNextResults — figure out the right cadence for the next results
 // fetch. Chooses the *fastest* (lowest interval) cadence across all
-// observed classes today, then jitters it. Stops entirely (returns
-// Infinity) once we're past 20:00 local.
+// observed classes today, then jitters it. Wakes at 08:00 local
+// tomorrow once we're past 22:00 local, or once every class today is
+// fully scored.
 function scheduleNextResults(state: CompState, localNow: LocalTime, nowMs: number): number {
-    if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE) {
-        // Wake again at 04:00 local tomorrow — early enough to catch
-        // anything that gets briefed overnight.
-        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, 4 * 60);
+    const todaysObs = state.observations.filter((o) => o.isToday);
+    const allTodayScored = todaysObs.length > 0 && todaysObs.every((o) => o.fullyScored);
+
+    if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE || allTodayScored) {
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, RESTART_LOCAL_MINUTE);
     }
 
     let fastest = INTERVAL_RESULTS_SLOW_MS;
     let anyClassToday = false;
-    for (const obs of state.observations) {
-        if (!obs.isToday) continue;
+    for (const obs of todaysObs) {
         anyClassToday = true;
         const interval = perClassResultsInterval(state, obs, localNow, nowMs);
         if (interval < fastest) fastest = interval;
@@ -277,34 +302,35 @@ function scheduleNextResults(state: CompState, localNow: LocalTime, nowMs: numbe
 // perClassResultsInterval — rule-3 cadence for a single class. Returns
 // the *minimum gap* until the next fetch, NOT an absolute deadline. The
 // caller folds it across all classes via min().
+//
+// Rules:
+//   - no task yet → FAST (10 min). Tasks-only fetch (results parsing
+//     suppressed by the tasksOnly flag in computeDecisions).
+//   - task set, grandprix class → FAST until *either* +1h past first
+//     launch OR past tasks.nostart (start gate has opened), then SLOW.
+//     Grandprix start times can be re-published mid-day so we want to
+//     react quickly while the start is still relevant.
+//   - task set, normal racing class → SLOW (30 min). Once a task is
+//     installed the next interesting event is results upload, and the
+//     extra fast ticks aren't worth the load.
 function perClassResultsInterval(state: CompState, obs: ClassObservation, localNow: LocalTime, nowMs: number): number {
     if (!TASK_STATES.has(obs.status)) {
-        // No task yet — fast cadence so we catch one when it appears.
         return INTERVAL_RESULTS_FAST_MS;
     }
-
-    if (!LAUNCHED_STATES.has(obs.status)) {
-        // Briefed but not launched — fast cadence.
+    if (obs.grandprix) {
+        const anchor = launchAnchorMs(state, obs, localNow);
+        const pastLaunchTail = anchor != null && nowMs >= anchor + LAUNCH_FAST_TAIL_MS;
+        const pastNoStart = obs.starttimeMinutes != null && localNow.minuteOfDay >= obs.starttimeMinutes;
+        if (pastLaunchTail || pastNoStart) return INTERVAL_RESULTS_SLOW_MS;
         return INTERVAL_RESULTS_FAST_MS;
     }
-
-    // Launched. Look up the launch anchor: prefer the in-memory
-    // first-observed-L epoch, fall back to (tasks.nostart - 30 min) if no
-    // OGN coverage ever set status=L.
-    const anchor = launchAnchorMs(state, obs, localNow);
-    if (anchor != null) {
-        const tail = anchor + LAUNCH_FAST_TAIL_MS;
-        if (nowMs < tail) return INTERVAL_RESULTS_FAST_MS;
-        return INTERVAL_RESULTS_SLOW_MS;
-    }
-    // Status is L but we don't know when — assume +1h has passed and
-    // back off. This is the conservative branch.
     return INTERVAL_RESULTS_SLOW_MS;
 }
 
 // launchAnchorMs — when did launching start for this class today, in
 // epoch ms? Either the in-memory first-L observation, or the fallback
-// "tasks.nostart - 30 min" if we never saw L.
+// "tasks.nostart - 30 min" if we never saw L. Only consulted by the
+// grandprix branch of perClassResultsInterval now.
 function launchAnchorMs(state: CompState, obs: ClassObservation, localNow: LocalTime): number | null {
     const seen = state.firstLaunch.get(obs.classid);
     if (seen) return seen;
@@ -380,10 +406,23 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
                 cs.class,
                 cs.status,
                 cs.datecode,
-                TIME_TO_SEC(t.nostart) AS starttimeSecs
+                TIME_TO_SEC(t.nostart) AS starttimeSecs,
+                cl.grandprixstart,
+                (
+                    SELECT
+                        CASE
+                            WHEN COUNT(*) > 0
+                                AND COUNT(*) = SUM(CASE WHEN datafromscoring = 'Y' THEN 1 ELSE 0 END)
+                            THEN 1
+                            ELSE 0
+                        END
+                    FROM pilotresult pr
+                    WHERE pr.class = cs.class
+                      AND pr.datecode = cs.datecode
+                ) AS fullyScored
             FROM compstatus cs
             JOIN classes cl ON cl.class = cs.class
-            LEFT JOIN tasks t ON t.class = cs.class AND t.datecode = cs.datecode AND t.task = 'B'
+            LEFT JOIN tasks t ON t.class = cs.class AND t.datecode = cs.datecode
             WHERE cl.compid = ${ctx.compid}
         `)) as any[];
     } catch (e) {
@@ -442,7 +481,9 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
             status,
             datecode: row.datecode ?? null,
             starttimeMinutes,
-            isToday
+            isToday,
+            grandprix: row.grandprixstart === 'Y',
+            fullyScored: Number(row.fullyScored) === 1
         };
         observations.push(obs);
 
@@ -666,7 +707,7 @@ async function processCompetition(
     if (decisions.fetchResults) {
         const skipDay = makeSkipDayPredicate(st.tz, localNow, anyTaskToday);
         try {
-            const result = await adapter.fetchResultsAndTasks(ctx, skipDay);
+            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {tasksOnly: decisions.tasksOnly});
             // Only prune classes when fetchPilots has given us a trustworthy
             // "these classes are registered" set this process — otherwise a
             // staggered task publish (one class has a task, others don't

@@ -26,7 +26,7 @@ import {toDateCode} from '../../datecode';
 import {getElevationOffset} from '../../getelevationoffset';
 import {processIGC, checkForOGNMatches} from '../../flightprocessing/launchlanding';
 
-import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
+import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsOptions, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
 import {findApproximateContestLocation} from '../shared/contestLocation';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctClassHandicaps, type PilotRecord} from '../shared/pilots';
@@ -237,12 +237,14 @@ async function processDayResults(
     }
 
     const igcRe = /a href=&quot;.(en_gb.download-contest-flight.+=1)&quot;/i;
-    // Strip the outer popover/IGC anchor (if any) so what's left is the
-    // bare CN text — SoaringSpot drops the anchor entirely for pilots
-    // with no IGC available (DNF, no upload), so a regex that requires
-    // </a> at the end can't find them.
-    const stripTags = (s: string) => s.replace(/<[^>]*>/g, '').trim();
+    // Extract the visible CN text via the DOM rather than a naive
+    // <[^>]*> strip. The cell's anchor carries a data-content="..."
+    // popover whose value contains literal '<' and '>' (the inner IGC
+    // link, with only quotes entity-encoded), which broke the regex
+    // approach — '<[^>]*>' would consume the opening <a …> plus part of
+    // the data-content value and never recover the "EBO"/"BN"/… text.
     const cnRe = /^([A-Z0-9]+)/i;
+    const extractCN = (cellHtml: string): string => textContent(htmlparser.parseDocument(cellHtml)).trim();
     const flagRe = /class="flag.*title="([a-z]+)"/i;
 
     const convertHandicap = correctClassHandicaps(
@@ -252,7 +254,7 @@ async function processDayResults(
     );
 
     for (const row of results[0]) {
-        const pilotExtractor = stripTags(row.CN).match(cnRe);
+        const pilotExtractor = extractCN(row.CN).match(cnRe);
         if (!pilotExtractor) {
             log(`${date} ${className} ${row.CN} - no CN found!`);
             continue;
@@ -599,7 +601,8 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         return {observed: accumulator.observed};
     }
 
-    async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate): Promise<FetchResultsResult> {
+    async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {
+        const tasksOnly = options?.tasksOnly === true;
         const observedClasses = new Set<ClassId>();
         const extractTask = /taskNormalize\((\{.+\}), \[.*\)/;
         // Datecode "today in the competition's local tz" — we always
@@ -718,8 +721,12 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                         continue;
                     }
 
-                    // Results fetch
-                    const resultsAnchor = cells[3] ? findOne((x) => x.name == 'a', cells[3].children ?? []) : null;
+                    // Results fetch — skipped on a tasks-only tick: no
+                    // class has a task today on this cadence, so there
+                    // are no results to chase anyway, and we want to
+                    // keep upstream load light while we wait for a
+                    // briefing to publish.
+                    const resultsAnchor = !tasksOnly && cells[3] ? findOne((x) => x.name == 'a', cells[3].children ?? []) : null;
                     const resultUrlAttr = resultsAnchor ? getAttributeValue(resultsAnchor as any, 'href') : null;
                     if (resultUrlAttr) {
                         try {
