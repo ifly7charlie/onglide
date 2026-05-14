@@ -39,6 +39,7 @@ const INTERVAL_PILOTS_URGENT_MS = 30 * 60 * 1000; // active comp, DB still empty
 const STOP_RESULTS_LOCAL_MINUTE = 22 * 60; // 22:00 local — stop results checks
 const RESTART_LOCAL_MINUTE = 8 * 60; // 08:00 local — wake-up after overnight quiet
 const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
+const TASK_MORNING_LOCAL_MINUTE = 12 * 60; // 12:00 local — pre-task cadence escalates from slow→fast at noon
 const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: tasks.nostart - 30m
 
 // Daily SoaringSpot-style index discovery runs at or after this UTC
@@ -75,6 +76,12 @@ interface CompState {
     tz: string;
     countrycode: string | null;
     metadataLoaded: boolean;
+    // Earliest epoch ms at which we'll fire the metadata probe. For
+    // brand-new comps (no DB row yet) this is set to "now + jittered
+    // delay" in initState so a discovery batch spreads its initial
+    // metadata fetches across the jitter window rather than hitting
+    // upstream all at once. 0 means "fire on next heartbeat".
+    metadataDueAt: number;
 
     // last successful fetches (epoch ms)
     lastPilotsFetch: number;
@@ -219,16 +226,19 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
 
     // ----- results -----
 
-    // "all today's classes are fully scored" → behave as past cutoff.
-    // pilotresult rows flip datafromscoring='Y' as the scoring source
-    // uploads finalised results, so once every today-class is fully
-    // marked we have no reason to keep hammering upstream.
     const todaysObs = state.observations.filter((o) => o.isToday);
     const allTodayScored = todaysObs.length > 0 && todaysObs.every((o) => o.fullyScored);
+    const isUpcoming = state.competitionStart != null && localNow.iso < state.competitionStart;
+    // Upcoming comps get a couple of morning ticks for a briefing that
+    // sometimes lands early, then stop until tomorrow — no point
+    // hammering upstream on a day the comp hasn't even started.
+    const upcomingPastMorning = isUpcoming && localNow.minuteOfDay >= TASK_MORNING_LOCAL_MINUTE;
 
     let fetchResults = false;
     if (allTodayScored) {
         reasons.push('results:all-scored-stop');
+    } else if (upcomingPastMorning) {
+        reasons.push('results:upcoming-after-12:00-stop');
     } else if (localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
         if (nowMs >= state.nextResultsAt) {
             fetchResults = true;
@@ -279,9 +289,19 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
 function scheduleNextResults(state: CompState, localNow: LocalTime, nowMs: number): number {
     const todaysObs = state.observations.filter((o) => o.isToday);
     const allTodayScored = todaysObs.length > 0 && todaysObs.every((o) => o.fullyScored);
+    const isUpcoming = state.competitionStart != null && localNow.iso < state.competitionStart;
 
     if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE || allTodayScored) {
         return scheduleAtLocalMinuteTomorrow(state.tz, localNow, RESTART_LOCAL_MINUTE);
+    }
+    if (isUpcoming) {
+        // Pre-12:00 on a not-yet-started comp: 30-min cadence. After
+        // 12:00 give up for the day and wake at the next morning's
+        // RESTART_LOCAL_MINUTE.
+        if (localNow.minuteOfDay >= TASK_MORNING_LOCAL_MINUTE) {
+            return scheduleAtLocalMinuteTomorrow(state.tz, localNow, RESTART_LOCAL_MINUTE);
+        }
+        return nowMs + applyJitter(INTERVAL_RESULTS_SLOW_MS);
     }
 
     let fastest = INTERVAL_RESULTS_SLOW_MS;
@@ -303,16 +323,6 @@ function scheduleNextResults(state: CompState, localNow: LocalTime, nowMs: numbe
 // the *minimum gap* until the next fetch, NOT an absolute deadline. The
 // caller folds it across all classes via min().
 //
-// Rules:
-//   - no task yet → FAST (10 min). Tasks-only fetch (results parsing
-//     suppressed by the tasksOnly flag in computeDecisions).
-//   - task set, grandprix class → FAST until *either* +1h past first
-//     launch OR past tasks.nostart (start gate has opened), then SLOW.
-//     Grandprix start times can be re-published mid-day so we want to
-//     react quickly while the start is still relevant.
-//   - task set, normal racing class → SLOW (30 min). Once a task is
-//     installed the next interesting event is results upload, and the
-//     extra fast ticks aren't worth the load.
 function perClassResultsInterval(state: CompState, obs: ClassObservation, localNow: LocalTime, nowMs: number): number {
     if (!TASK_STATES.has(obs.status)) {
         return INTERVAL_RESULTS_FAST_MS;
@@ -370,19 +380,18 @@ function scheduleNextPilots(state: CompState, localNow: LocalTime, nowMs: number
     // Pre-task. If we're already past 10:00 today, the next chance is
     // 10:00 tomorrow. Otherwise wake at 10:00 today.
     if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
-        return localMinuteToEpochMs(state.tz, localNow, PILOTS_PRETASK_LOCAL_MINUTE);
+        return localMinuteToEpochMsForward(state.tz, localNow, PILOTS_PRETASK_LOCAL_MINUTE);
     }
     return scheduleAtLocalMinuteTomorrow(state.tz, localNow, PILOTS_PRETASK_LOCAL_MINUTE);
 }
 
 // scheduleAtLocalMinuteTomorrow — "wake at HH:MM local tomorrow" with
-// jitter. Coarse-grained: assumes the day after `localNow` is exactly
-// 24h away, which is fine for ±1h DST drift since the heartbeat will
-// re-evaluate once the wakeup fires.
+// forward-only jitter so all comps in the same tz don't land on the
+// same heartbeat at the target minute.
 function scheduleAtLocalMinuteTomorrow(_tz: string, localNow: LocalTime, targetMinute: number): number {
     const minutesIntoDay = localNow.minuteOfDay;
     const minutesUntilTomorrow = 24 * 60 - minutesIntoDay + targetMinute;
-    return localNow.epoch + applyJitter(minutesUntilTomorrow * 60 * 1000);
+    return localNow.epoch + minutesUntilTomorrow * 60 * 1000 + oneSidedJitter();
 }
 
 // localMinuteToEpochMs — convert "minute X today, in this tz" to an
@@ -392,6 +401,27 @@ function localMinuteToEpochMs(_tz: string, localNow: LocalTime, targetMinute: nu
     let delta = targetMinute - localNow.minuteOfDay;
     if (delta <= 0) delta += 24 * 60;
     return localNow.epoch + applyJitter(delta * 60 * 1000);
+}
+
+// Stampede-avoidance window for fixed-time wakeups (e.g. the 10:00
+// local daily pilots fetch). All comps in the same tz that wake at
+// the same target minute will land somewhere in [target, target+WINDOW]
+// when this helper is used in place of localMinuteToEpochMs, so they
+// don't all hit upstream on the same heartbeat.
+const ONE_SIDED_JITTER_MS = 30 * 60 * 1000;
+
+function oneSidedJitter(): number {
+    return Math.floor(Math.random() * ONE_SIDED_JITTER_MS);
+}
+
+// localMinuteToEpochMsForward — like localMinuteToEpochMs but with
+// forward-only jitter, so the returned epoch is always >= the target
+// local minute (never before). Use for wakeups where bunching at the
+// exact target minute would cause a stampede.
+function localMinuteToEpochMsForward(_tz: string, localNow: LocalTime, targetMinute: number): number {
+    let delta = targetMinute - localNow.minuteOfDay;
+    if (delta <= 0) delta += 24 * 60;
+    return localNow.epoch + delta * 60 * 1000 + oneSidedJitter();
 }
 
 // ----- compstatus refresh + first-launch tracking -----
@@ -659,15 +689,37 @@ async function processCompetition(
         raw: src
     };
 
-    // First time: ensure metadata so we have a competition row + tz + countrycode.
+    // First time: ensure metadata so we have a competition row + tz +
+    // countrycode. Skip the HTTP probe entirely if the DB already has
+    // name+sitename for this comp — a restart should not refetch
+    // metadata it already has, since the multi-URL probe is the kind
+    // of batch scan that pushes us into rate-limit territory.
+    //
+    // For brand-new comps, initState set metadataDueAt to a random
+    // future epoch so a discovery batch spreads its initial fetches.
+    // Skip the entire heartbeat for this comp until that timer expires.
     if (!st.metadataLoaded) {
-        await adapter.ensureMetadata(ctx);
-        const fields = await readCompetitionFields(db, src.compid);
-        st.tz = fields.tz ?? st.tz;
-        st.countrycode = fields.countrycode ?? st.countrycode;
-        ctx.tz = st.tz;
-        ctx.countrycode = st.countrycode;
-        st.metadataLoaded = true;
+        const existing = await readCompetitionFields(db, src.compid);
+        if (existing.name && existing.sitename) {
+            st.tz = existing.tz ?? st.tz;
+            st.countrycode = existing.countrycode ?? st.countrycode;
+            ctx.tz = st.tz;
+            ctx.countrycode = st.countrycode;
+            st.metadataLoaded = true;
+        } else {
+            if (Date.now() < st.metadataDueAt) {
+                // Deferred — wait for the jitter window to expire so we
+                // don't blast upstream right after discovery.
+                return;
+            }
+            await adapter.ensureMetadata(ctx);
+            const fields = await readCompetitionFields(db, src.compid);
+            st.tz = fields.tz ?? st.tz;
+            st.countrycode = fields.countrycode ?? st.countrycode;
+            ctx.tz = st.tz;
+            ctx.countrycode = st.countrycode;
+            st.metadataLoaded = true;
+        }
     }
 
     const localNow = nowInTz(st.tz);
@@ -773,6 +825,12 @@ async function processCompetition(
     }
 }
 
+// Jitter window over which a discovery batch's initial metadata
+// fetches are spread. Brand-new comps (no DB row yet) wait a uniform
+// random delay inside this window before their first 3-URL probe so
+// N freshly-discovered comps don't blast upstream in one heartbeat.
+const METADATA_JITTER_MS = 30 * 60 * 1000; // 30 min
+
 async function initState(
     db: any, //
     src: any,
@@ -780,7 +838,11 @@ async function initState(
 ): Promise<CompState> {
     const fields = await readCompetitionFields(db, src.compid);
     const tz = fields.tz ?? 'Europe/London';
-    log(`scheduler: registering compid=${src.compid} type=${src.type} tz=${tz}`);
+    const alreadyKnown = !!(fields.name && fields.sitename);
+    const metadataDueAt = alreadyKnown
+        ? 0
+        : Date.now() + Math.floor(Math.random() * METADATA_JITTER_MS);
+    log(`scheduler: registering compid=${src.compid} type=${src.type} tz=${tz}${alreadyKnown ? '' : ` metadataDueAt=+${Math.round((metadataDueAt - Date.now()) / 1000)}s`}`);
     return {
         compid: src.compid,
         url: src.url,
@@ -789,6 +851,7 @@ async function initState(
         tz,
         countrycode: fields.countrycode,
         metadataLoaded: false,
+        metadataDueAt,
         lastPilotsFetch: 0,
         lastResultsFetch: 0,
         lastPilotsLocalDate: null,
@@ -799,24 +862,31 @@ async function initState(
         tasksInDb: null,
         firstLaunch: new Map(),
         firstLaunchDate: null,
-        nextPilotsAt: 0,
-        nextResultsAt: 0,
+        // Stagger initial fetches with forward jitter so a restart
+        // doesn't fire every comp on the first heartbeat.
+        nextPilotsAt: Date.now() + oneSidedJitter(),
+        nextResultsAt: Date.now() + oneSidedJitter(),
         observations: [],
         lastPruneDay: null,
         nextDeadCheckAt: 0
     };
 }
 
-async function readCompetitionFields(db: any, compid: string): Promise<{tz: string | null; countrycode: string | null}> {
+async function readCompetitionFields(db: any, compid: string): Promise<{tz: string | null; countrycode: string | null; name: string | null; sitename: string | null}> {
     try {
         const row = (
             await db.query(escape`
-                SELECT tz, countrycode FROM competition WHERE compid = ${compid}
+                SELECT tz, countrycode, name, sitename FROM competition WHERE compid = ${compid}
             `)
         )?.[0];
-        return {tz: row?.tz ?? null, countrycode: row?.countrycode ?? null};
+        return {
+            tz: row?.tz ?? null,
+            countrycode: row?.countrycode ?? null,
+            name: row?.name ?? null,
+            sitename: row?.sitename ?? null
+        };
     } catch {
-        return {tz: null, countrycode: null};
+        return {tz: null, countrycode: null, name: null, sitename: null};
     }
 }
 

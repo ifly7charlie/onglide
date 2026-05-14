@@ -121,3 +121,7 @@ Vector basemap is a single self-hosted `.pmtiles` file served over HTTP range re
 - `.aprs` files at the repo root are recorded APRS logs used for replay/testing (large — `476.aprs` is ~230 MB).
 - The Next.js version pinned here **is not safe to expose directly** — always run behind Apache/Cloudflare (see `readme.md`).
 - `readme.md` (lowercase) is the operator's deployment guide. It documents env vars (`NEXT_PUBLIC_PMTILES_URL`, `MYSQL_PASSWORD`, `SOARINGSPOT_*`, `ROBOCONTROL_URL`, etc.), Planetiler invocations for pmtiles, and the docker-compose topology (`mysql`, `soaringspot`, `ogn`, `next`, `apache`).
+
+# IMPORTANT
+
+*DO NOT SPECULATE ABOUT HOW COMPETITIONS WORK IN COMMENTS - include information only if provided in discussion or review of rules*

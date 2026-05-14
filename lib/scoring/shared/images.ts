@@ -102,21 +102,22 @@ export interface PictureContext {
 // and the worker loop logs and moves on.
 //
 export async function downloadPictureCached(
-    db: any, //
-    log: (msg: string, ...args: unknown[]) => void,
-    classid: ClassId,
-    compno: CompNo,
-    context: PictureContext
+    _db: any, //
+    _log: (msg: string, ...args: unknown[]) => void,
+    _classid: ClassId,
+    _compno: CompNo,
+    _context: PictureContext
 ): Promise<void> {
-    // Cheap in-memory short-circuit so a repeat enqueue during the same
-    // process window never even makes it into the queue. The DB and
-    // HTTP layers of the cache are applied inside the worker's handler
-    // so both enqueue paths see a consistent view.
-    const memHit = memCache.get(memKey(classid, compno));
-    if (memHit && Date.now() - memHit < ONE_DAY_MS) {
-        return;
-    }
-    imageQueue.enqueue({db, log, classid, compno, context});
+    // Disabled — pilot-image fetches were hammering SoaringSpot and
+    // contributing to rate-limit blocks. The cache/queue infrastructure
+    // below is preserved so re-enabling is a one-line revert: drop the
+    // early return and restore the enqueue.
+    return;
+    // const memHit = memCache.get(memKey(classid, compno));
+    // if (memHit && Date.now() - memHit < ONE_DAY_MS) {
+    //     return;
+    // }
+    // imageQueue.enqueue({db, log, classid, compno, context});
 }
 
 //
