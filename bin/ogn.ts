@@ -265,6 +265,12 @@ const trackersLoadedEmitted = new Set<string>();
 // set changes, instead of on every score arrival.
 let lastPendingChannelsLog: string | null = null;
 
+// Filter for channels the scoring worker will eventually emit a `_live` for —
+// the wait gate and pendingChannels check must exclude channels that have no
+// task or no configured pilots, otherwise they'd never clear and the gate
+// would spin forever.
+const channelNeedsScoring = (c: Channel) => !!c.task && c.pilotCount > 0;
+
 // Clients connected to the reserved /all channel — landing-page globe.
 // Kept separate from the per-class channels[] so iteration over per-class
 // state (position broadcasts, keepalive, stats) stays untouched.
@@ -502,13 +508,15 @@ async function main() {
     rebuildAprsFilter();
 
     // Optional rescore gate: don't open the listener until every channel
-    // has a `liveScoreId`. Scoring workers populate this asynchronously
-    // after Phase 3 fires their initial task/tracker IPC, so without this
-    // wait a /all snapshot taken right after Phase 3 can advertise comps
-    // that have no scores yet.
+    // that actually has something to score has a `liveScoreId`. Scoring
+    // workers populate this asynchronously after Phase 3 fires their initial
+    // task/tracker IPC, so without this wait a /all snapshot taken right
+    // after Phase 3 can advertise comps that have no scores yet. Channels
+    // without a task or with no configured pilots never receive a `_live`
+    // marker, so they must be excluded from the gate.
     if (process.env.WAIT_FOR_RESCORE) {
         const checkScoringNotReady = () => {
-            const notReady = Object.values(channels).filter((c) => !c.liveScoreId);
+            const notReady = Object.values(channels).filter(channelNeedsScoring).filter((c) => !c.liveScoreId);
             if (notReady.length) {
                 console.log(`still need ${notReady.map((c) => c.className).join(',')} to finish scoring`);
             }
@@ -2458,7 +2466,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
         await primeAndBroadcast(channel, `_live ${channel.displayName}/${channel.datecode}`);
 
-        const pendingChannels = Object.values(channels).filter((c) => !c.liveScoreId);
+        const pendingChannels = Object.values(channels).filter(channelNeedsScoring).filter((c) => !c.liveScoreId);
         if (pendingChannels.length) {
             const pendingLine = pendingChannels.map((c) => `${c.className} (${c.datecode})`).join(', ');
             if (lastPendingChannelsLog !== pendingLine) {
