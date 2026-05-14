@@ -1301,14 +1301,28 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
             continue;
         }
 
+        // First packet of the session: seed lastSent so the next packet can produce a
+        // dH/dG against it, but don't emit. Combined with the relaxed stationaryTime
+        // gate below, this lets the on-ground / >3 km filter engage from packet 2
+        // instead of waiting for the ground state machine to arm.
+        if (!lastSent) {
+            aircraft.lastSent = lastSent = point;
+            continue;
+        }
+
         // If it hasn't really moved we treat it as "no movement" so the stationary
         // path below can fire. Raw GPS altitude (a) jitters by a few metres even
         // when parked, so compare g (AGL, rounded to the metre) and allow a small
         // horizontal tolerance for GPS drift.
         const noMovement = sortedPoint ? sortedPoint.dH < 5 && Math.abs(sortedPoint.dG) < 3 : false;
 
-        // We haven't picked one because we have had no movement but we have had packets
-        const stationaryTime = noMovement && sortedPoint && aircraft.lastMoved ? sortedPoint.t - aircraft.lastMoved : 0;
+        // We haven't picked one because we have had no movement but we have had packets.
+        // Note: aircraft.lastMoved starts at 0 and is only set once the glider actually
+        // moves, so leaving it un-gated lets stationaryTime evaluate to a huge epoch
+        // value on the first stationary detection. That's intentional — it arms the
+        // ground state immediately for gliders that were already parked when the
+        // session started.
+        const stationaryTime = noMovement && sortedPoint ? sortedPoint.t - aircraft.lastMoved : 0;
 
         if (stationaryTime > 60) {
             // If we had been stationary for a while and we are low enough to be on the ground

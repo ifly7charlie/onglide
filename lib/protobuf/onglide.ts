@@ -64,7 +64,7 @@ export interface CompetitionSummary {
   classStatusesDiffer: boolean;
   displayStatus: string;
   classes: CompetitionClassStatus[];
-  /** seconds; resolved from competition.delay_seconds with NEXT_PUBLIC_COMPETITION_DELAY fallback */
+  /** seconds; resolved from competition.delayseconds with NEXT_PUBLIC_COMPETITION_DELAY fallback */
   officialDelay?: number | undefined;
 }
 
