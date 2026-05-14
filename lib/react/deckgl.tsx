@@ -99,7 +99,10 @@ export default function MApp(props: {
 
     // Map display style
     const map2d = options.map2d;
-    const mapStreet = !!options.mapType;
+    // Satellite imagery temporarily disabled — force road/non-light layer styling
+    // regardless of the persisted options.mapType.
+    // const mapStreet = !!options.mapType;
+    const mapStreet = false;
     const mapLight = mapStreet;
 
     // Rules & legs etc
