@@ -10,10 +10,16 @@
 // adapters); this file's job is:
 //
 //   1. Boot: load .env.local, open the mysql pool, register adapters.
-//   2. Daemon mode: run the scheduler heartbeat + roboControl interval.
-//   3. CLI one-shot mode: `node dist/bin/ssscrape.js <url> [compid]`
-//      — upsert the scoringsource row for that URL, run the
-//      SoaringSpotScrape adapter once end-to-end, and exit.
+//   2. Daemon mode (no flags): scheduler heartbeat + roboControl loop.
+//   3. CLI one-shot mode: `node dist/bin/ssscrape.js --url <u> [--compid <c>]`
+//      — upsert the scoringsource row, run the SoaringSpotScrape adapter
+//      end-to-end (metadata + pilots + tasks + results), and exit.
+//   4. CLI filter mode: `--compid <c> --class <classid-or-name> --datecode <dc>`
+//      — narrow scrape: skips scoringsource upsert / ensureMetadata /
+//      fetchPilots, and only re-imports the task + results for that
+//      single (class, datecode). URL is looked up from scoringsource
+//      unless --url is also supplied. Bypasses the today-only safety
+//      check so past datecodes work.
 //
 // All of the parsing/upsert logic that used to live here is now in
 // lib/scoring/sources/soaringspotscrape.ts (parsing) and the shared
@@ -24,6 +30,8 @@
 //
 
 import escape from 'sql-template-strings';
+import yargs from 'yargs';
+import {hideBin} from 'yargs/helpers';
 
 import {runScheduler, SourceRegistry} from '../lib/scoring/scheduler';
 import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape';
@@ -170,48 +178,49 @@ async function main(): Promise<void> {
     // Future: registry.register(new RstSource());
     // Future: registry.register(new SoaringSpotApiSource());
 
-    //
-    // CLI one-shot mode:
-    //   node dist/bin/ssscrape.js <soaringspot-url> [compid]
-    //       [--class=<classid-or-name>] [--datecode=<dc>]
-    //
-    // Bypasses the scheduler. Upserts the scoringsource row and calls
-    // ensureMetadata + fetchPilots + fetchResultsAndTasks once for that
-    // single competition before exiting.
-    //
-    // When both --class and --datecode are supplied, the scrape is
-    // narrowed: scoringsource is left alone, pilots are not refetched,
-    // and only that (class, datecode) row's task + results are
-    // imported (bypassing the adapter's local-today-only safety check).
-    //
-    const argv = process.argv.slice(2);
-    const flagValue = (name: string): string | undefined => {
-        const eq = argv.find((a) => a.startsWith(`--${name}=`));
-        return eq ? eq.slice(name.length + 3) : undefined;
-    };
-    const classArg = flagValue('class');
-    const datecodeArg = flagValue('datecode')?.toUpperCase();
-    const cliArgs = argv.filter((a) => !a.startsWith('-'));
-    const urlArg = cliArgs.find((a) => /^https?:\/\//i.test(a));
-    if (urlArg) {
-        const compidArg = cliArgs.find((a) => a !== urlArg);
-        const compid = compidArg || deriveCompIdFromUrl(urlArg);
+    const args = yargs(hideBin(process.argv))
+        .scriptName('ssscrape')
+        .usage('$0 (daemon)\n$0 --url <u> [--compid <c>]                            # full one-shot scrape\n$0 --compid <c> --class <c> --datecode <d> [--url <u>]   # filter mode: task+results only')
+        .option('url', {type: 'string', describe: 'soaringspot competition URL'})
+        .option('compid', {type: 'string', describe: 'competition id (derived from url if omitted)'})
+        .option('class', {type: 'string', describe: 'filter mode: classid or display name'})
+        .option('datecode', {type: 'string', describe: 'filter mode: 3-char datecode (e.g. 6A5)', coerce: (v?: string) => v?.toUpperCase()})
+        .check((a) => {
+            const filterMode = !!(a.class || a.datecode);
+            if (filterMode && (!a.class || !a.datecode)) throw new Error('--class and --datecode must be supplied together');
+            if (a.datecode && !/^[0-9][0-9A-Z][0-9A-Z]$/.test(a.datecode)) throw new Error(`--datecode=${a.datecode} doesn't look like a datecode (3 chars: digit + base36 month + base36 day)`);
+            if (filterMode && !a.compid && !a.url) throw new Error('filter mode needs --compid (or --url to derive one)');
+            return true;
+        })
+        .strict()
+        .help()
+        .parseSync();
+
+    const filterMode = !!(args.class && args.datecode);
+    if (args.url || filterMode) {
+        let url = args.url;
+        let compid = args.compid || (url ? deriveCompIdFromUrl(url) : null);
         if (!compid) {
-            console.log(`unable to derive a compid from ${urlArg} — pass one explicitly as the second argument`);
+            console.log('unable to derive a compid — pass --compid explicitly');
             process.exit(1);
         }
 
-        const filterMode = !!(classArg && datecodeArg);
-        if ((classArg && !datecodeArg) || (datecodeArg && !classArg)) {
-            console.log('--class and --datecode must be supplied together');
-            process.exit(1);
-        }
-        if (datecodeArg && !/^[0-9][0-9A-Z][0-9A-Z]$/.test(datecodeArg)) {
-            console.log(`--datecode=${datecodeArg} doesn't look like a datecode (3 chars: digit + base36 month + base36 day)`);
-            process.exit(1);
+        if (filterMode && !url) {
+            const row = (
+                await mysql_db.query(escape`
+                    SELECT url FROM scoringsource
+                    WHERE compid = ${compid} AND type = 'soaringspotscrape'
+                    LIMIT 1
+                `)
+            )[0];
+            if (!row?.url) {
+                console.log(`no scoringsource row found for compid=${compid} — pass --url explicitly`);
+                process.exit(1);
+            }
+            url = row.url;
         }
 
-        console.log(`one-shot scrape: compid=${compid} url=${urlArg}${filterMode ? ` filter=class:${classArg} datecode:${datecodeArg}` : ''}`);
+        console.log(`one-shot scrape: compid=${compid} url=${url}${filterMode ? ` filter=class:${args.class} datecode:${args.datecode}` : ''}`);
 
         if (!filterMode) {
             await mysql_db.query(escape`
@@ -220,7 +229,7 @@ async function main(): Promise<void> {
             `);
             await mysql_db.query(escape`
                 INSERT INTO scoringsource (compid, type, url)
-                VALUES (${compid}, 'soaringspotscrape', ${urlArg})
+                VALUES (${compid}, 'soaringspotscrape', ${url})
             `);
         }
 
@@ -228,43 +237,55 @@ async function main(): Promise<void> {
             const adapter = new SoaringSpotScrapeSource();
             const ctx: SourceCtx = {
                 compid,
-                url: urlArg,
-                tz: 'Europe/London', // adapter will refine via metadata + tasks
-                countrycode: null, // refreshed below once ensureMetadata has geocoded
+                url: url!,
+                tz: 'Europe/London', // overridden below from the competition row (filter mode) or by ensureMetadata
+                countrycode: null,
                 db: mysql_db,
-                log: (msg, ...args) => console.log(`[${compid}] ${msg}`, ...args),
-                raw: {compid, url: urlArg, type: 'soaringspotscrape'}
+                log: (msg, ...a) => console.log(`[${compid}] ${msg}`, ...a),
+                raw: {compid, url, type: 'soaringspotscrape'}
             };
-            await adapter.ensureMetadata(ctx);
-            const refreshed = (
-                await mysql_db.query(escape`
-                    SELECT tz, countrycode FROM competition WHERE compid = ${compid}
-                `)
-            )[0];
-            if (refreshed?.tz) ctx.tz = refreshed.tz;
-            ctx.countrycode = refreshed?.countrycode ?? null;
 
             if (filterMode) {
-                // Resolve the class arg against the DB so the user can
-                // pass either the 15-hex classid or the display name
-                // they see in `classes.classname`.
+                // Skip ensureMetadata — the contest row already exists and
+                // hitting /pilots+/results+/ on SoaringSpot adds latency
+                // we don't need here. Pull tz / countrycode straight from
+                // the DB.
+                const refreshed = (
+                    await mysql_db.query(escape`
+                        SELECT tz, countrycode FROM competition WHERE compid = ${compid}
+                    `)
+                )[0];
+                if (refreshed?.tz) ctx.tz = refreshed.tz;
+                ctx.countrycode = refreshed?.countrycode ?? null;
+
+                // Resolve the class arg — either a 15-hex classid or the
+                // display name from `classes.classname`.
                 const classRow = (
                     await mysql_db.query(escape`
                         SELECT class FROM classes
                         WHERE compid = ${compid}
-                          AND (class = ${classArg} OR classname = ${classArg})
+                          AND (class = ${args.class} OR classname = ${args.class})
                         LIMIT 1
                     `)
                 )[0];
                 if (!classRow) {
-                    console.log(`no class matching "${classArg}" found for compid=${compid}`);
+                    console.log(`no class matching "${args.class}" found for compid=${compid}`);
                     process.exit(1);
                 }
                 const targetClass = classRow.class;
-                console.log(`filter resolved: class=${targetClass} datecode=${datecodeArg}`);
-                const filterSkipDay = (classid: string, dateCode: string) => classid !== targetClass || dateCode !== datecodeArg;
+                const targetDatecode = args.datecode!;
+                console.log(`filter resolved: class=${targetClass} datecode=${targetDatecode}`);
+                const filterSkipDay = (classid: string, dateCode: string) => classid !== targetClass || dateCode !== targetDatecode;
                 await adapter.fetchResultsAndTasks(ctx, filterSkipDay, {forceResults: true});
             } else {
+                await adapter.ensureMetadata(ctx);
+                const refreshed = (
+                    await mysql_db.query(escape`
+                        SELECT tz, countrycode FROM competition WHERE compid = ${compid}
+                    `)
+                )[0];
+                if (refreshed?.tz) ctx.tz = refreshed.tz;
+                ctx.countrycode = refreshed?.countrycode ?? null;
                 await adapter.fetchPilots(ctx);
                 await adapter.fetchResultsAndTasks(ctx, () => false);
             }
