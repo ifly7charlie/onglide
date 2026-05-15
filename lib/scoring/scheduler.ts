@@ -37,7 +37,7 @@ const INTERVAL_PILOTS_HOURLY_MS = 60 * 60 * 1000; // task day, before launch
 const INTERVAL_PILOTS_URGENT_MS = 30 * 60 * 1000; // active comp, DB still empty
 
 const STOP_RESULTS_LOCAL_MINUTE = 22 * 60; // 22:00 local — stop results checks
-const RESTART_LOCAL_MINUTE = 8 * 60; // 08:00 local — wake-up after overnight quiet
+const MORNING_RESUME_LOCAL_MINUTE = 8 * 60; // 08:00 local — earliest minute-of-day fetches may run; also the target the scheduler parks to after a 22:00 cutoff
 const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
 const TASK_MORNING_LOCAL_MINUTE = 12 * 60; // 12:00 local — pre-task cadence escalates from slow→fast at noon
 const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: tasks.nostart - 30m
@@ -159,6 +159,25 @@ interface SchedulerDecisions {
 //
 export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: number): SchedulerDecisions {
     const reasons: string[] = [];
+
+    // Hard quiet window: no outbound fetches (pilots or results)
+    // before the morning MORNING_RESUME_LOCAL_MINUTE. Enforced at decision
+    // time so a daemon restart in the small hours can't blast through
+    // it just because `initState` seeded `nextResultsAt` to "now +
+    // jitter". The 22:00 upper bound for results is enforced
+    // separately below.
+    const beforeMorning = localNow.minuteOfDay < MORNING_RESUME_LOCAL_MINUTE;
+    if (beforeMorning) {
+        reasons.push('quiet:before-morning');
+        return {
+            fetchPilots: false,
+            fetchResults: false,
+            tasksOnly: false,
+            pruneOldDays: false,
+            dropDeadComp: false,
+            reasons
+        };
+    }
 
     // ----- pilots -----
 
@@ -292,14 +311,14 @@ function scheduleNextResults(state: CompState, localNow: LocalTime, nowMs: numbe
     const isUpcoming = state.competitionStart != null && localNow.iso < state.competitionStart;
 
     if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE || allTodayScored) {
-        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, RESTART_LOCAL_MINUTE);
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, MORNING_RESUME_LOCAL_MINUTE);
     }
     if (isUpcoming) {
         // Pre-12:00 on a not-yet-started comp: 30-min cadence. After
         // 12:00 give up for the day and wake at the next morning's
-        // RESTART_LOCAL_MINUTE.
+        // MORNING_RESUME_LOCAL_MINUTE.
         if (localNow.minuteOfDay >= TASK_MORNING_LOCAL_MINUTE) {
-            return scheduleAtLocalMinuteTomorrow(state.tz, localNow, RESTART_LOCAL_MINUTE);
+            return scheduleAtLocalMinuteTomorrow(state.tz, localNow, MORNING_RESUME_LOCAL_MINUTE);
         }
         return nowMs + applyJitter(INTERVAL_RESULTS_SLOW_MS);
     }
@@ -843,6 +862,21 @@ async function initState(
         ? 0
         : Date.now() + Math.floor(Math.random() * METADATA_JITTER_MS);
     log(`scheduler: registering compid=${src.compid} type=${src.type} tz=${tz}${alreadyKnown ? '' : ` metadataDueAt=+${Math.round((metadataDueAt - Date.now()) / 1000)}s`}`);
+
+    // Seed first-fetch times with forward jitter so a restart doesn't
+    // fire every comp on the first heartbeat. If the daemon starts in
+    // the night-quiet window (before 08:00 or after 22:00), defer the
+    // first fetch to the next morning's MORNING_RESUME_LOCAL_MINUTE so we
+    // don't queue up fetches the decision-time gate will then refuse.
+    const localNow = nowInTz(tz);
+    const inNightQuiet = localNow.minuteOfDay < MORNING_RESUME_LOCAL_MINUTE || localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE;
+    const initialNextResultsAt = inNightQuiet //
+        ? localMinuteToEpochMsForward(tz, localNow, MORNING_RESUME_LOCAL_MINUTE)
+        : Date.now() + oneSidedJitter();
+    const initialNextPilotsAt = inNightQuiet //
+        ? localMinuteToEpochMsForward(tz, localNow, MORNING_RESUME_LOCAL_MINUTE)
+        : Date.now() + oneSidedJitter();
+
     return {
         compid: src.compid,
         url: src.url,
@@ -862,10 +896,8 @@ async function initState(
         tasksInDb: null,
         firstLaunch: new Map(),
         firstLaunchDate: null,
-        // Stagger initial fetches with forward jitter so a restart
-        // doesn't fire every comp on the first heartbeat.
-        nextPilotsAt: Date.now() + oneSidedJitter(),
-        nextResultsAt: Date.now() + oneSidedJitter(),
+        nextPilotsAt: initialNextPilotsAt,
+        nextResultsAt: initialNextResultsAt,
         observations: [],
         lastPruneDay: null,
         nextDeadCheckAt: 0

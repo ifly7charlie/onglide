@@ -173,12 +173,25 @@ async function main(): Promise<void> {
     //
     // CLI one-shot mode:
     //   node dist/bin/ssscrape.js <soaringspot-url> [compid]
+    //       [--class=<classid-or-name>] [--datecode=<dc>]
     //
     // Bypasses the scheduler. Upserts the scoringsource row and calls
     // ensureMetadata + fetchPilots + fetchResultsAndTasks once for that
     // single competition before exiting.
     //
-    const cliArgs = process.argv.slice(2).filter((a) => !a.startsWith('-'));
+    // When both --class and --datecode are supplied, the scrape is
+    // narrowed: scoringsource is left alone, pilots are not refetched,
+    // and only that (class, datecode) row's task + results are
+    // imported (bypassing the adapter's local-today-only safety check).
+    //
+    const argv = process.argv.slice(2);
+    const flagValue = (name: string): string | undefined => {
+        const eq = argv.find((a) => a.startsWith(`--${name}=`));
+        return eq ? eq.slice(name.length + 3) : undefined;
+    };
+    const classArg = flagValue('class');
+    const datecodeArg = flagValue('datecode')?.toUpperCase();
+    const cliArgs = argv.filter((a) => !a.startsWith('-'));
     const urlArg = cliArgs.find((a) => /^https?:\/\//i.test(a));
     if (urlArg) {
         const compidArg = cliArgs.find((a) => a !== urlArg);
@@ -188,16 +201,28 @@ async function main(): Promise<void> {
             process.exit(1);
         }
 
-        console.log(`one-shot scrape: compid=${compid} url=${urlArg}`);
+        const filterMode = !!(classArg && datecodeArg);
+        if ((classArg && !datecodeArg) || (datecodeArg && !classArg)) {
+            console.log('--class and --datecode must be supplied together');
+            process.exit(1);
+        }
+        if (datecodeArg && !/^[0-9][0-9A-Z][0-9A-Z]$/.test(datecodeArg)) {
+            console.log(`--datecode=${datecodeArg} doesn't look like a datecode (3 chars: digit + base36 month + base36 day)`);
+            process.exit(1);
+        }
 
-        await mysql_db.query(escape`
-            DELETE FROM scoringsource
-            WHERE compid = ${compid} AND type = 'soaringspotscrape'
-        `);
-        await mysql_db.query(escape`
-            INSERT INTO scoringsource (compid, type, url)
-            VALUES (${compid}, 'soaringspotscrape', ${urlArg})
-        `);
+        console.log(`one-shot scrape: compid=${compid} url=${urlArg}${filterMode ? ` filter=class:${classArg} datecode:${datecodeArg}` : ''}`);
+
+        if (!filterMode) {
+            await mysql_db.query(escape`
+                DELETE FROM scoringsource
+                WHERE compid = ${compid} AND type = 'soaringspotscrape'
+            `);
+            await mysql_db.query(escape`
+                INSERT INTO scoringsource (compid, type, url)
+                VALUES (${compid}, 'soaringspotscrape', ${urlArg})
+            `);
+        }
 
         try {
             const adapter = new SoaringSpotScrapeSource();
@@ -218,8 +243,31 @@ async function main(): Promise<void> {
             )[0];
             if (refreshed?.tz) ctx.tz = refreshed.tz;
             ctx.countrycode = refreshed?.countrycode ?? null;
-            await adapter.fetchPilots(ctx);
-            await adapter.fetchResultsAndTasks(ctx, () => false);
+
+            if (filterMode) {
+                // Resolve the class arg against the DB so the user can
+                // pass either the 15-hex classid or the display name
+                // they see in `classes.classname`.
+                const classRow = (
+                    await mysql_db.query(escape`
+                        SELECT class FROM classes
+                        WHERE compid = ${compid}
+                          AND (class = ${classArg} OR classname = ${classArg})
+                        LIMIT 1
+                    `)
+                )[0];
+                if (!classRow) {
+                    console.log(`no class matching "${classArg}" found for compid=${compid}`);
+                    process.exit(1);
+                }
+                const targetClass = classRow.class;
+                console.log(`filter resolved: class=${targetClass} datecode=${datecodeArg}`);
+                const filterSkipDay = (classid: string, dateCode: string) => classid !== targetClass || dateCode !== datecodeArg;
+                await adapter.fetchResultsAndTasks(ctx, filterSkipDay, {forceResults: true});
+            } else {
+                await adapter.fetchPilots(ctx);
+                await adapter.fetchResultsAndTasks(ctx, () => false);
+            }
             console.log(`scrape complete for compid=${compid}`);
         } catch (e) {
             console.log('scrape failed:', e);

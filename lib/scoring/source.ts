@@ -75,8 +75,13 @@ export type SkipDayPredicate = (classid: ClassId, datecode: Datecode, dateISO: s
 // any newly-published task, but skip the per-pilot results parsing
 // (no class has a task yet, so there are no results to fetch).
 //
+// `forceResults` overrides the adapter's "skip results for any day
+// that isn't local today" safety check. Set only by CLI one-shot mode
+// when the user has explicitly asked for a specific (class, datecode).
+//
 export interface FetchResultsOptions {
     tasksOnly?: boolean;
+    forceResults?: boolean;
 }
 
 //

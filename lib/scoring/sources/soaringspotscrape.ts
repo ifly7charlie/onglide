@@ -603,6 +603,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
 
     async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {
         const tasksOnly = options?.tasksOnly === true;
+        const forceResults = options?.forceResults === true;
         const observedClasses = new Set<ClassId>();
         const extractTask = /taskNormalize\((\{.+\}), \[.*\)/;
         // Datecode "today in the competition's local tz" — we always
@@ -724,7 +725,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     // to 'Home' off bogus scoredstatus values. The task fetch
                     // above is unaffected — older days can still install
                     // their tasks; we just don't trust their results page.
-                    if (dateCode !== todayDatecode) {
+                    if (!forceResults && dateCode !== todayDatecode) {
                         ctx.log(`${classid}: ${date}/${dateCode} - skipping results fetch, not local today (${todayDatecode})`);
                         continue;
                     }
