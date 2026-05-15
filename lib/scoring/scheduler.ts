@@ -123,6 +123,13 @@ interface CompState {
     nextPilotsAt: number;
     nextResultsAt: number;
 
+    // Local date (YYYY-MM-DD in comp tz) of the most recent successful
+    // results fetch. Drives the once-per-day "also accept yesterday"
+    // pass so late-settling yesterday results land before the
+    // front-end's datecode rolls over. null = no fetch yet this
+    // process; mismatch with today → next fetch gets acceptYesterday.
+    lastResultsLocalDate: string | null;
+
     // observations from the most recent compstatus snapshot
     observations: ClassObservation[];
 
@@ -777,8 +784,15 @@ async function processCompetition(
 
     if (decisions.fetchResults) {
         const skipDay = makeSkipDayPredicate(st.tz, localNow, anyTaskToday);
+        const past10am = localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE;
+        ctx.log(`skipDay state: today=${localDatecode(st.tz, localNow.epoch)} past10am=${past10am} (minute=${localNow.minuteOfDay}) anyTaskToday=${anyTaskToday}`);
+        // First results fetch of this local day → also accept yesterday's
+        // rows. The front-end keeps showing yesterday's datecode while
+        // it settles, so we want late-arriving yesterday results to land
+        // before the visible datecode rolls over.
+        const acceptYesterday = st.lastResultsLocalDate !== localNow.iso;
         try {
-            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {tasksOnly: decisions.tasksOnly});
+            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {tasksOnly: decisions.tasksOnly, acceptYesterday});
             // Only prune classes when fetchPilots has given us a trustworthy
             // "these classes are registered" set this process — otherwise a
             // staggered task publish (one class has a task, others don't
@@ -799,6 +813,7 @@ async function processCompetition(
             ctx.log('fetchResultsAndTasks threw:', e);
         }
         st.lastResultsFetch = Date.now();
+        st.lastResultsLocalDate = localNow.iso;
         st.nextResultsAt = scheduleNextResults(st, nowInTz(st.tz), Date.now());
     }
 
@@ -889,6 +904,7 @@ async function initState(
         lastPilotsFetch: 0,
         lastResultsFetch: 0,
         lastPilotsLocalDate: null,
+        lastResultsLocalDate: null,
         lastPilotObservedClasses: null,
         competitionStart: null,
         competitionEnd: null,

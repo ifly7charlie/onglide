@@ -34,6 +34,7 @@ import {enqueueFaiLookup} from '../shared/fai';
 import {FAI_SYNTHETIC_FLOOR} from '../shared/faiApi';
 import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
 import {upsertTaskAndLegs} from '../shared/tasks';
+import {fetchSoaringSpot} from '../shared/soaringspotRateLimit';
 
 const https = require('node:https');
 
@@ -330,7 +331,7 @@ async function processDayResults(
         }
         const start = row.Start ? (cDate(row.Start)?.getTime() ?? 0) / 1000 : 0;
         const finish = row.Time != '' ? (cDate(row.Finish)?.getTime() ?? 0) / 1000 : 0;
-        const duration = finish && start ? cHour(row.Time) ?? 0 : 0;
+        const duration = finish && start ? (cHour(row.Time) ?? 0) : 0;
 
         const actuals = parseFloat(row.Speed);
         const actuald = parseFloat(row.Distance);
@@ -382,9 +383,8 @@ async function processDayResults(
             `);
             rows += r.affectedRows ?? 0;
 
-            const pilotInfo =
-                (
-                    await db.query(escape`
+            const pilotInfo = (
+                await db.query(escape`
                         SELECT
                             igcavailable,
                             trackerid
@@ -397,7 +397,7 @@ async function processDayResults(
                             AND pr.compno = ${pilot}
                             AND pr.class = ${classid}
                     `)
-                )[0] || {igcavailable: false, trackerid: 'unknown'};
+            )[0] || {igcavailable: false, trackerid: 'unknown'};
 
             // IGC download checking disabled — leaving the pilotInfo
             // select above in place so re-enabling is a one-block flip.
@@ -474,7 +474,8 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         for (const suffix of candidates) {
             const target = ctx.url + suffix;
             try {
-                const res = await fetch(target);
+                console.log(target);
+                const res = await fetchSoaringSpot(target);
                 if (!res.ok) {
                     ctx.log(`ensureMetadata: ${target} returned ${res.status}`);
                     continue;
@@ -510,7 +511,8 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         const synthetic = {n: 0};
 
         try {
-            const body = await fetch(ctx.url + '/pilots').then((res) => res.text());
+            console.log(ctx.url + '/pilots');
+            const body = await fetchSoaringSpot(ctx.url + '/pilots').then((res) => res.text());
             const dom = htmlparser.parseDocument(body);
 
             // Refresh competition metadata while we have the page in hand.
@@ -604,6 +606,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
     async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {
         const tasksOnly = options?.tasksOnly === true;
         const forceResults = options?.forceResults === true;
+        const acceptYesterday = options?.acceptYesterday === true;
         const observedClasses = new Set<ClassId>();
         const extractTask = /taskNormalize\((\{.+\}), \[.*\)/;
         // Datecode "today in the competition's local tz" — we always
@@ -611,9 +614,15 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         // that straddle UTC midnight don't tag briefings under yesterday's
         // datecode.
         const todayDatecode = localDatecode(ctx.tz);
+        // Yesterday's local datecode — only consulted when the scheduler
+        // sets acceptYesterday (first results fetch of the new local
+        // day) so late-settling results from yesterday land before the
+        // front-end's visible datecode rolls over.
+        const yesterdayDatecode = acceptYesterday ? localDatecode(ctx.tz, Date.now() - 24 * 60 * 60 * 1000) : null;
 
         try {
-            const body = await fetch(ctx.url + '/results').then((res) => res.text());
+            console.log(ctx.url + '/results');
+            const body = await fetchSoaringSpot(ctx.url + '/results').then((res) => res.text());
             const dom = htmlparser.parseDocument(body);
 
             const allresults = findAll((x) => x.name == 'table' && x.attribs?.class == 'result-overview', dom.children);
@@ -675,6 +684,21 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                         continue;
                     }
 
+                    // Hard gate before any per-day fetch: only today (or
+                    // yesterday when the scheduler set acceptYesterday)
+                    // is worth touching. Past days won't have their
+                    // results written (the results-page guard below
+                    // refuses them anyway), and re-installing their
+                    // tasks just burns SoaringSpot bandwidth and churns
+                    // the tasks.hash row on every tick. forceResults
+                    // (CLI one-shot) still bypasses the gate.
+                    const isToday = dateCode === todayDatecode;
+                    const isYesterdayWindow = yesterdayDatecode != null && dateCode === yesterdayDatecode;
+                    if (!forceResults && !isToday && !isYesterdayWindow) {
+                        ctx.log(`${classid}: ${date}/${dateCode} - skipDay returned false but not today/yesterday (today=${todayDatecode}${yesterdayDatecode ? `, yesterday=${yesterdayDatecode}` : ''}) - skipping`);
+                        continue;
+                    }
+
                     // Task fetch. If the cell text mentions "cancelled"
                     // (e.g. the row says "Task 1 cancelled"), we trust that
                     // regardless of whatever result_status the task JSON
@@ -684,7 +708,8 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     const taskUrlAttr = getAttributeValue(taskAnchor as any, 'href');
                     if (taskUrlAttr) {
                         try {
-                            const taskBody = await fetch('https://www.soaringspot.com' + taskUrlAttr).then((res) => res.text());
+                            console.log('https://www.soaringspot.com' + taskUrlAttr);
+                            const taskBody = await fetchSoaringSpot('https://www.soaringspot.com' + taskUrlAttr).then((res) => res.text());
                             const task = taskBody.match(extractTask);
                             if (task) {
                                 const taskJSON = JSON.parse(task[1]);
@@ -716,20 +741,6 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     // try to chase the (usually-missing) results link.
                     if (cancelled) continue;
 
-                    // Skip the results fetch for any day that isn't local
-                    // today. The task often goes in before a real results
-                    // body is published (and SoaringSpot has been observed
-                    // serving stale/other-day content under the daily-results
-                    // URL), so writing those rows under this day's datecode
-                    // would corrupt pilotresult and let ogn.ts flip the class
-                    // to 'Home' off bogus scoredstatus values. The task fetch
-                    // above is unaffected — older days can still install
-                    // their tasks; we just don't trust their results page.
-                    if (!forceResults && dateCode !== todayDatecode) {
-                        ctx.log(`${classid}: ${date}/${dateCode} - skipping results fetch, not local today (${todayDatecode})`);
-                        continue;
-                    }
-
                     // Results fetch — skipped on a tasks-only tick: no
                     // class has a task today on this cadence, so there
                     // are no results to chase anyway, and we want to
@@ -739,7 +750,8 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     const resultUrlAttr = resultsAnchor ? getAttributeValue(resultsAnchor as any, 'href') : null;
                     if (resultUrlAttr) {
                         try {
-                            const resBody = await fetch('https://www.soaringspot.com' + resultUrlAttr).then((res) => res.text());
+                            console.log('https://www.soaringspot.com' + resultUrlAttr);
+                            const resBody = await fetchSoaringSpot('https://www.soaringspot.com' + resultUrlAttr).then((res) => res.text());
                             const resDom = htmlparser.parseDocument(resBody);
                             const classTable = /result-daily/;
                             const resultTableNode = findOne((x) => (x.attribs?.class?.match(classTable) ? true : false), resDom.children);
@@ -778,7 +790,8 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         const seen = new Set<string>();
 
         try {
-            const body = await fetch(INDEX_URL).then((res) => res.text());
+            console.log(INDEX_URL);
+            const body = await fetchSoaringSpot(INDEX_URL).then((res) => res.text());
             const dom = htmlparser.parseDocument(body);
 
             // One <div class="contest-list"> per section; each contains an

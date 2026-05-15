@@ -79,9 +79,15 @@ export type SkipDayPredicate = (classid: ClassId, datecode: Datecode, dateISO: s
 // that isn't local today" safety check. Set only by CLI one-shot mode
 // when the user has explicitly asked for a specific (class, datecode).
 //
+// `acceptYesterday` widens the "today only" gate to also accept the
+// previous local day. The scheduler sets this on the first results
+// fetch of each local day so any late-settling results from yesterday
+// land before the front-end's datecode rolls over.
+//
 export interface FetchResultsOptions {
     tasksOnly?: boolean;
     forceResults?: boolean;
+    acceptYesterday?: boolean;
 }
 
 //

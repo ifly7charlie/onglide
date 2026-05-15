@@ -106,6 +106,17 @@ export async function upsertTaskAndLegs(
     const date: string = day.task_date;
     const dateCode = toDateCode(date);
 
+    // Reject placeholder/empty tasks before we start a transaction.
+    // SoaringSpot occasionally publishes a task row whose task_points
+    // are all `multiple_start != 0` (alternate-start markers, no real
+    // legs) — the taskleg INSERT would produce "INSERT … VALUES" with
+    // no row tuples and ER_PARSE_ERROR the transaction.
+    const realPoints = Array.isArray(day.task_points) ? day.task_points.filter((tp: any) => tp.multiple_start == 0) : [];
+    if (realPoints.length < 2) {
+        log(`${classid} - ${date}: skipping task install — ${realPoints.length} real task_points (need >=2)`);
+        return false;
+    }
+
     let tasktype: 'S' | 'A' | 'D' | 'E' = 'S';
     let duration = '00:00';
     if (day.task_type == 'assigned_area') {
@@ -220,7 +231,8 @@ export async function upsertTaskAndLegs(
         }
         return false;
     }
-    log(`${classid} - ${date}: task changed`);
+    const oldHash = dbhashrow?.[0]?.hash ?? '(none)';
+    log(`${classid} - ${date}: task changed (old=${String(oldHash).substring(0, 16)} new=${hash.substring(0, 16)})`);
 
     for (const tp of day.task_points) {
         tp.altitude = await new Promise((resolve) => getElevationOffset(toDeg(tp.latitude), toDeg(tp.longitude), resolve as any));
