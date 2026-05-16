@@ -40,7 +40,8 @@ import {scoreCollector} from './scoreCollector';
 import {createFlightStatistics} from './flightStatistics';
 
 // Per-glider on-disk scoring log
-import {createGliderLog, GliderLogHandle} from './gliderLog';
+import {createGliderLog} from './gliderLogFile';
+import type {GliderLogHandle} from './gliderLog';
 
 import {makeGetNow, getDelay} from '../now';
 
