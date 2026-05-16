@@ -1,3 +1,9 @@
+CREATE DATABASE ogn;
+USE ogn;
+--
+--
+-- Table structure for table `comprules`
+--
 
 --
 -- Table structure for table `classes`
@@ -378,51 +384,3 @@ CREATE TABLE `movements` (
   KEY `action` (`action`,`type`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
---
--- Table structure for table `trackpoints`
---
-
-DROP TABLE IF EXISTS `trackpoints`;
-CREATE TABLE `trackpoints` (
-  `compno` char(4) NOT NULL,
-  `class` char(15) NOT NULL,
-  `datecode` char(3) NOT NULL,
-  `lat` float NOT NULL,
-  `lng` float NOT NULL,
-  `altitude` int(11) NOT NULL,
-  `agl` int(11) NOT NULL,
-  `t` int(11) NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
-  `bearing` int(11) DEFAULT NULL,
-  `speed` float DEFAULT NULL,
-  `station` char(25) DEFAULT NULL,
-  PRIMARY KEY (`datecode`,`class`,`t`,`compno`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-
-
---
--- Table structure for table `sectortypes`
---
-
-DROP TABLE IF EXISTS `sectortypes`;
-CREATE TABLE `sectortypes` (
-  `countrycode` char(2) DEFAULT NULL,
-  `name` char(20) DEFAULT NULL,
-  `defaults` char(40) DEFAULT NULL,
-  KEY `st` (`countrycode`,`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
---
--- Dumping data for table `sectortypes`
---
-
-INSERT INTO `sectortypes` VALUES ('UK','Start Sector','sector,np,5,90,0,0,0'),('UK','BGA Sector','sector,symmetrical,20,45,0.5,180,0'),('UK','BGA Enhanced Sector','sector,symmetrical,10,90,0.5,180,0'),('UK','AAT','sector,symmetrical,20,180,0,0,2'),('UK','Finish Line','line,pp,2,90,0,0,1'),('UK','Finish Ring','sector,pp,3,180,0,0,1'),('UK','DH Sector','sector,symmetrical,20,45,5,180,0'),('UK','DH Enhanced Sector','sector,symmetrical,10,90,5,180,0'),('CZ','Start Line','line,np,5,90,0,0,1'),('CZ','Sector','sector,symmetrical,0.5,180,0,0,1'),('CZ','Finish Ring','sector,pp,3,180,0,0,1'),('CZ','AAT','sector,symmetrical,20,180,0,0,2'),('CZ','Hack Start','sector,np,5,90,0,0,0'),('SK','Start','sector,np,5,90,0,0,0'),('SK','Finish Ring','sector,np,3,180,0,0,0'),('SK','Barrel','sector,np,0.5,180,0,0,0'),('SK','Finish Line','sector,pp,2,90,0,0,1'),('SK','Start Line','line,pp,5,90,0,0,1');
-
-CREATE TABLE `scores` (
-  `class` char(15) NOT NULL,
-  `datecode` char(3) NOT NULL,
-  `t` int NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
-  `score` blob,
-  `sameAsT` int DEFAULT NULL,
-  PRIMARY KEY (`class`,`datecode`,`t`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
