@@ -16,6 +16,7 @@ import {enrichedPositionGenerator} from '../lib/webworkers/enrichedPositionGener
 import {taskPositionGenerator} from '../lib/webworkers/taskpositiongenerator';
 import {taskScoresGenerator} from '../lib/webworkers/taskScoresGenerator';
 import {createFlightStatistics} from '../lib/webworkers/flightStatistics';
+import {GliderLog, noopGliderLog} from '../lib/webworkers/gliderLog';
 
 import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
@@ -157,11 +158,7 @@ async function run() {
 }
 
 async function runScore(datecode: Datecode, className: ClassName, compno: Compno, trackerDb: string, handicap: number, tzoffset: number = 0) {
-    const log = argv.log
-        ? console.log
-        : () => {
-              /*noop*/
-          };
+    const log: GliderLog = argv.log ? Object.assign((...a: any[]) => console.log(...a), {error: (...a: any[]) => console.log(...a)}) : noopGliderLog;
 
     if (!trackerDb) {
         log(`${className}/${compno}: no trackers found`);
@@ -379,17 +376,13 @@ const getTask = async (className: ClassName, datecode: Datecode, maxHandicap: nu
                 WHEN COALESCE(nostart, '00:00:00') = '00:00:00' THEN 0
                 ELSE UNIX_TIMESTAMP (
                     CONCAT(${fromDateCode(datecode)}, ' ', nostart)
-                ) - (
-                    SELECT
-                        tzoffset
-                    FROM
-                        competition
-                )
+                ) - comp.tzoffset
             END nostartutc
         FROM
             tasks,
             classes c,
-            contestday cd
+            contestday cd,
+            competition comp
         WHERE
             tasks.datecode = ${datecode}
             AND tasks.class = c.class
@@ -397,6 +390,7 @@ const getTask = async (className: ClassName, datecode: Datecode, maxHandicap: nu
             AND cd.datecode = ${datecode}
             AND tasks.class = ${className}
             AND tasks.flown = 'Y'
+            AND comp.compid = c.compid
     `)) || {})[0];
 
     if (!taskdetails || !taskdetails.type) {

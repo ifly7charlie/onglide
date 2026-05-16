@@ -39,6 +39,9 @@ import {scoreCollector} from './scoreCollector';
 // Optional flight statistics (thermals/straights/wind), per competition flag
 import {createFlightStatistics} from './flightStatistics';
 
+// Per-glider on-disk scoring log
+import {createGliderLog, GliderLogHandle} from './gliderLog';
+
 import {makeGetNow, getDelay} from '../now';
 
 // Per-worker clock. Each scoring worker owns one class — and therefore one
@@ -204,6 +207,10 @@ interface GliderState {
     scoring: any;
 
     task: any;
+
+    // Per-glider on-disk log for the current scoring chain instance.
+    // Recreated (and the file truncated) on every rescore.
+    log?: GliderLogHandle;
 }
 
 // What are we scoring - we will register each one when
@@ -443,24 +450,25 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
     } else if (!glider.task) {
         console.log(`${config.className}/${compno}: unable to rescore glider (no task configured) [${scoreId}]`);
     } else {
+        // Flush + close the previous chain's logger before the new chain
+        // (and a fresh, truncated log file) is built in getScoringChain.
+        glider.log?.close();
         scoreUpdater?.collect(compno, (glider.scoring = getScoringChain(glider, config, glider.task)), scoreId);
     }
 }
 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
-    const log =
-        process.env.NEXT_PUBLIC_COMPNO && glider.compno == process.env.NEXT_PUBLIC_COMPNO
-            ? console.log
-            : () => {
-                  /*noop*/
-              };
+    // Per-glider on-disk log: logs/<datecode>/<class>/<compno>.log,
+    // truncated fresh for this chain instance.
+    const log = createGliderLog(config.datecode, glider.className, glider.compno);
+    glider.log = log;
 
     let handicap = glider.handicap;
 
     // Distance handicap
     if (task.rules.dh) {
-        console.log('adjusting for dh task');
+        log('adjusting for dh task');
         task = adjustDistanceHandicapTask(task, glider.handicap);
         //        handicap = 100;
     }

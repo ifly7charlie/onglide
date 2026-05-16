@@ -10,15 +10,14 @@ import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, Airf
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
 
+import {GliderLog, noopGliderLog} from './gliderLog';
+
 //
 // Get a generator to calculate task status
-export const enrichedPositionGenerator = async function* (airfield: AirfieldLocation, pointGenerator: InOrderGenerator, log?: Function): EnrichedPositionGenerator {
+export const enrichedPositionGenerator = async function* (airfield: AirfieldLocation, pointGenerator: InOrderGenerator, _log?: GliderLog): EnrichedPositionGenerator {
     //
     // Make sure we have some logging
-    if (!log)
-        log = (...a) => {
-            console.log(...a);
-        };
+    const log: GliderLog = _log ?? noopGliderLog;
 
     let previousPoint: EnrichedPosition | null = null;
     let point: EnrichedPosition | null = null;
@@ -99,7 +98,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             stationary = false;
 
             if (!point.lng) {
-                console.log(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${JSON.stringify(point)}, prev: ${JSON.stringify(previousPoint)}`);
+                log.error(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${JSON.stringify(point)}, prev: ${JSON.stringify(previousPoint)}`);
                 return;
             }
 
@@ -166,13 +165,11 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
             // If pilot has landed and not at home then we can stop scoring altogether
             if (point.ps == PositionStatus.Landed) {
-                console.log(`Completing scoring for ${point.c} as landed out ${JSON.stringify(point)}`);
+                log(`Completing scoring for ${point.c} as landed out ${JSON.stringify(point)}`);
                 return;
             }
         } catch (e) {
-            console.log('Exception in enrichedPositionGenerator');
-            console.log(e);
-            console.log('current:', JSON.stringify(point), 'previous:', JSON.stringify(previousPoint));
+            log.error('Exception in enrichedPositionGenerator', e, 'current:', JSON.stringify(point), 'previous:', JSON.stringify(previousPoint));
         }
     }
 };

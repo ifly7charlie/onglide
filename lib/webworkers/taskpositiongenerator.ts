@@ -9,6 +9,7 @@ import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskSta
 
 import {stripPoints} from '../flightprocessing/taskhelper';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
+import {GliderLog, noopGliderLog} from './gliderLog';
 
 import {RELAXED_START_TOLERANCE_M} from '../constants';
 
@@ -20,14 +21,10 @@ function simplifyPoint(point: PositionMessage | BasePositionMessage): BasePositi
 
 //
 // Get a generator to calculate task status
-export const taskPositionGenerator = async function* (task: Task, officialStart: Epoch, iterator: EnrichedPositionGenerator, log?: Function): AsyncGenerator<TaskStatus, void, void> {
+export const taskPositionGenerator = async function* (task: Task, officialStart: Epoch, iterator: EnrichedPositionGenerator, _log?: GliderLog): AsyncGenerator<TaskStatus, void, void> {
     //
     // Make sure we have some logging
-    if (!log) {
-        log = () => {
-            /**/
-        };
-    }
+    const log: GliderLog = _log ?? noopGliderLog;
 
     let lastTickStatus: TaskStatus | null = null;
     let status: TaskStatus = null;
@@ -100,7 +97,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     //    let iterator = pointGenerator(log);
     for (let current = await iterator.next(); !current.done; current = await iterator.next()) {
         if (!current.value) {
-            console.log(`TPG: no value received in iterator for ${previousPoint?.c || 'unknown'}`, current);
+            log.error(`TPG: no value received in iterator for ${previousPoint?.c || 'unknown'}`, current);
             break;
         }
 
@@ -169,7 +166,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             if (landedBack) {
                 landedBack = false;
                 resetStart();
-                console.log(`New flight found for ${status.compno} after landback - t:${status.t}`);
+                log(`New flight found for ${status.compno} after landback - t:${status.t}`);
             }
 
             // Can't score with only one point
@@ -214,7 +211,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status.legs[0].points = [{t: status.utcStart, lat: task.legs[0].nlat, lng: task.legs[0].nlng, a: (previousPoint || point).a}];
                     status.legs[0].exitTimeStamp = status.utcStart;
 
-                    console.log(point.c, 'start reached', new Date(point.t * 1000).toISOString());
+                    log(point.c, 'start reached', new Date(point.t * 1000).toISOString());
 
                     // If we were not tracking at the start then we can assume a start point at the
                     // start point... this will allow dog leg etc to calculate and may help with 'recovery'
@@ -615,11 +612,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 yield status;
             }
         } catch (e) {
-            console.log('Exception in taskPositionGenerator');
-            console.log(e);
-            console.log(JSON.stringify(current, stripPoints, 4));
-            console.log(JSON.stringify(status, stripPoints, 4));
-            //            console.log(JSON.stringify(task, null, 4));
+            log.error('Exception in taskPositionGenerator', e, JSON.stringify(current, stripPoints), JSON.stringify(status, stripPoints));
         }
     }
 
