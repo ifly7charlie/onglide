@@ -60,7 +60,8 @@
         "home": "Thuis",
         "no_task": "Nog geen opdracht",
         "upcoming": "Aanstaand",
-        "yesterday": "Gisteren"
+        "yesterday": "Gisteren",
+        "cancelled": "Geannuleerd"
     },
     "pilot": {
         "gridded_waiting": "Op het grid, wacht op start",

@@ -60,7 +60,8 @@
         "home": "Hazaért",
         "no_task": "Még nincs feladat",
         "upcoming": "Közelgő",
-        "yesterday": "Tegnap"
+        "yesterday": "Tegnap",
+        "cancelled": "Törölve"
     },
     "pilot": {
         "gridded_waiting": "Felsorakozva, indulásra kész",

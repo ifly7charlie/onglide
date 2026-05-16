@@ -418,8 +418,9 @@ function CompetitionListPanel({
         task_set: 3,
         home: 4,
         notask: 5,
-        yesterday: 6,
-        upcoming: 7
+        cancelled: 6,
+        yesterday: 7,
+        upcoming: 8
     };
     const pilotCount = (c: Competition) => (c.classes ?? []).reduce((s, cls) => s + (cls.pilotCount || 0), 0);
     const compRank = (c: Competition) => {

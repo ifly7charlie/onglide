@@ -60,7 +60,8 @@
         "home": "Hjemme",
         "no_task": "Ingen oppgave ennå",
         "upcoming": "Kommende",
-        "yesterday": "I går"
+        "yesterday": "I går",
+        "cancelled": "Avlyst"
     },
     "pilot": {
         "gridded_waiting": "På grid, klar til start",

@@ -60,7 +60,8 @@
         "home": "Doma",
         "no_task": "Zatiaľ žiadna úloha",
         "upcoming": "Nadchádzajúce",
-        "yesterday": "Včera"
+        "yesterday": "Včera",
+        "cancelled": "Zrušené"
     },
     "pilot": {
         "gridded_waiting": "Na štartovacom rošte, čaká na vzlet",

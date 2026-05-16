@@ -2,7 +2,7 @@
 // The richer competition-status.tsx (icons, colours, React components) lives
 // alongside this and re-exports the type and function below.
 
-export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'finishing' | 'home' | 'notask' | 'upcoming' | 'yesterday';
+export type CompetitionDisplayStatus = 'task_set' | 'launching' | 'started' | 'finishing' | 'home' | 'notask' | 'upcoming' | 'yesterday' | 'cancelled';
 
 // Derive a displayStatus from a single class's compstatus.status code plus
 // the competition window. Callers must filter out comps whose end date has
@@ -12,6 +12,7 @@ export function classDisplayStatus(status: string, inWindow: boolean): Competiti
     if (status === 'S') return 'started';
     if (status === 'L') return 'launching';
     if (status === 'H') return 'home';
+    if (status === 'Z') return 'cancelled';
     if (status === 'B' || status === 'P' || status === 'G') return 'task_set';
     if (inWindow) return 'notask';
     return 'upcoming';

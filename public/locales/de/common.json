@@ -60,7 +60,8 @@
         "home": "Zu Hause",
         "no_task": "Noch keine Aufgabe",
         "upcoming": "Bevorstehend",
-        "yesterday": "Gestern"
+        "yesterday": "Gestern",
+        "cancelled": "Abgesagt"
     },
     "pilot": {
         "gridded_waiting": "Aufgereiht, Startbereit",

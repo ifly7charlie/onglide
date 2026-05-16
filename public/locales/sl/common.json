@@ -60,7 +60,8 @@
         "home": "Doma",
         "no_task": "Naloga še ni postavljena",
         "upcoming": "Prihajajoče",
-        "yesterday": "Včeraj"
+        "yesterday": "Včeraj",
+        "cancelled": "Odpovedano"
     },
     "pilot": {
         "gridded_waiting": "Na startni mreži, čaka na vzlet",

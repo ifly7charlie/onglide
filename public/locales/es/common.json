@@ -60,7 +60,8 @@
         "home": "Regresado",
         "no_task": "Sin prueba aún",
         "upcoming": "Próximas",
-        "yesterday": "Ayer"
+        "yesterday": "Ayer",
+        "cancelled": "Cancelado"
     },
     "pilot": {
         "gridded_waiting": "En parrilla, listo para despegar",

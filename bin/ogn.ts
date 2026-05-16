@@ -2824,11 +2824,16 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
     const anyLaunching = todaysStatuses.some((s) => s === 'L');
     const allHome = todaysStatuses.length > 0 && todaysStatuses.every((s) => s === 'H');
     const anyTaskReady = todaysStatuses.some((s) => s === 'B' || s === 'P' || s === 'G');
+    // A comp rolls up to 'cancelled' only when every class with a status
+    // from today is cancelled — a mixed day (one class flying, one
+    // scrubbed) keeps the more-active label below.
+    const allCancelled = todaysStatuses.length > 0 && todaysStatuses.every((s) => s === 'Z');
     if (anyFinishing) displayStatus = 'finishing';
     else if (anyStarted) displayStatus = 'started';
     else if (anyLaunching) displayStatus = 'launching';
     else if (allHome) displayStatus = 'home';
     else if (anyTaskReady) displayStatus = 'task_set';
+    else if (allCancelled) displayStatus = 'cancelled';
     else if (inWindow) displayStatus = 'notask';
     else displayStatus = 'upcoming';
     if (todaysStatuses.length === 0 && anyYesterday) displayStatus = 'yesterday';
@@ -3053,7 +3058,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     const flarmId = data.c;
 
     // Check if it's a possible launch
-    capturePossibleLaunchLanding(flarmId, datecode, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm');
+    capturePossibleLaunchLanding(flarmId, datecode, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm', competition.compid);
 
     const firstSighting = !unknownTrackers[flarmId];
 

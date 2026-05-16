@@ -60,7 +60,8 @@
         "home": "Wrócił",
         "no_task": "Brak konkurencji",
         "upcoming": "Nadchodzące",
-        "yesterday": "Wczoraj"
+        "yesterday": "Wczoraj",
+        "cancelled": "Odwołane"
     },
     "pilot": {
         "gridded_waiting": "Na pasie, gotowy do startu",

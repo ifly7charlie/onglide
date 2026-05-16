@@ -60,7 +60,8 @@
         "home": "Home",
         "no_task": "No task yet",
         "upcoming": "Upcoming",
-        "yesterday": "Yesterday"
+        "yesterday": "Yesterday",
+        "cancelled": "Cancelled"
     },
     "pilot": {
         "gridded_waiting": "Gridded, waiting to fly",

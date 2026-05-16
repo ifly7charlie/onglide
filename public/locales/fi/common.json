@@ -60,7 +60,8 @@
         "home": "Kotona",
         "no_task": "Ei vielä tehtävää",
         "upcoming": "Tulossa",
-        "yesterday": "Eilen"
+        "yesterday": "Eilen",
+        "cancelled": "Peruttu"
     },
     "pilot": {
         "gridded_waiting": "Lähtöruudukossa, valmiina lähtöön",

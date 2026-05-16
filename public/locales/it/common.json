@@ -60,7 +60,8 @@
         "home": "Rientrato",
         "no_task": "Nessuna prova ancora",
         "upcoming": "In arrivo",
-        "yesterday": "Ieri"
+        "yesterday": "Ieri",
+        "cancelled": "Annullato"
     },
     "pilot": {
         "gridded_waiting": "In griglia, in attesa di partenza",

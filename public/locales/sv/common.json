@@ -60,7 +60,8 @@
         "home": "Hemma",
         "no_task": "Ingen uppgift än",
         "upcoming": "Kommande",
-        "yesterday": "Igår"
+        "yesterday": "Igår",
+        "cancelled": "Inställd"
     },
     "pilot": {
         "gridded_waiting": "På startlinje, väntar på start",
