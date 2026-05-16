@@ -213,6 +213,18 @@ export function buildMapStyle(): StyleSpecification {
                 paint: {'line-color': '#a87040', 'line-width': 0.5, 'line-opacity': 0.4}
             },
             {
+                // Solar farm extent from the landmarks schema — a large unlandable
+                // surface; the footprint matters for routing, so it is drawn as a
+                // shaded area (the landmark-point layer adds the icon at its centroid).
+                id: 'landmark-solar',
+                type: 'fill',
+                source: LABELS_SOURCE,
+                'source-layer': 'landmark',
+                filter: ['==', 'class', 'solar_farm'],
+                minzoom: 10,
+                paint: {'fill-color': '#33415c', 'fill-opacity': 0.4, 'fill-outline-color': '#1c2535'}
+            },
+            {
                 // High-voltage power lines from the landmarks schema — a cable hazard,
                 // so drawn dashed in a warning colour.
                 id: 'landmark-power-line',
@@ -353,36 +365,28 @@ export function buildMapStyle(): StyleSpecification {
                 paint: {'text-color': '#555', 'text-halo-color': '#fff', 'text-halo-width': 1.5}
             },
             {
-                // Landmark points from the landmarks schema. Obstacles (masts, towers,
-                // turbines, cooling towers, power plants) are flagged red; heritage
-                // landmarks (castles, cathedrals, lighthouses, windmills…) muted gold.
+                // Landmark + obstacle symbols from the landmarks schema, each with its
+                // own icon (drawn in mapIcons.ts): obstacles — turbines, masts, towers,
+                // cooling towers, power/solar plants — in warning red; heritage landmarks
+                // — castles, cathedrals, lighthouses, windmills, monuments — in muted
+                // gold. Power lines and solar-farm extent render in their own layers;
+                // memorials and city gates are dropped upstream in landmarks.yml.
                 id: 'landmark-point',
-                type: 'circle',
-                source: LABELS_SOURCE,
-                'source-layer': 'landmark',
-                filter: ['!=', 'class', 'power_line'],
-                minzoom: 10,
-                paint: {
-                    'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2, 15, 5],
-                    'circle-color': ['match', ['get', 'class'], ['mast', 'tower', 'cooling_tower', 'wind_turbine', 'power_plant'], '#c0392b', '#7d6608'],
-                    'circle-stroke-color': '#fff',
-                    'circle-stroke-width': 1,
-                    'circle-opacity': 0.9
-                }
-            },
-            {
-                id: 'landmark-label',
                 type: 'symbol',
                 source: LABELS_SOURCE,
                 'source-layer': 'landmark',
                 filter: ['!=', 'class', 'power_line'],
-                minzoom: 12,
+                minzoom: 10,
                 layout: {
-                    'text-field': ['get', 'name'],
-                    'text-size': 10,
-                    'text-anchor': 'top',
-                    'text-offset': [0, 0.5],
+                    'icon-image': ['match', ['get', 'class'], 'wind_turbine', 'wind-turbine', 'cooling_tower', 'cooling-tower', 'mast', 'mast', 'tower', 'tower', 'power_plant', 'power-plant', 'solar_farm', 'solar-farm', 'cathedral', 'cathedral', 'lighthouse', 'lighthouse', 'windmill', 'windmill', 'monument', 'monument', ['castle', 'fort', 'manor', 'ruins'], 'castle', 'castle'],
+                    'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 16, 1],
+                    'icon-anchor': 'bottom',
+                    'icon-allow-overlap': false,
+                    'text-field': ['step', ['zoom'], '', 12, ['get', 'name']],
+                    'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 16, 13],
                     'text-font': FONT_REGULAR,
+                    'text-anchor': 'top',
+                    'text-offset': [0, 0.3],
                     'text-optional': true
                 },
                 paint: {'text-color': '#5a3d1e', 'text-halo-color': '#fff', 'text-halo-width': 1.5}

@@ -34,7 +34,6 @@ layers:
           historic:
             - castle
             - fort
-            - city_gate
             - manor
         exclude_when:
           name: ""
@@ -54,7 +53,6 @@ layers:
           historic:
             - castle
             - fort
-            - city_gate
             - manor
         exclude_when:
           name: ""
@@ -143,20 +141,23 @@ layers:
           - key: height
             tag_value: height
 
-      # Memorials and monuments only when named (drops roadside plaques without context)
+      # Monuments - only notable ones, carrying a wikipedia or wikidata tag, so
+      # small village memorials and plaques (historic=memorial) stay off the map.
       - source: osm
         geometry: point
         min_zoom: 13
         include_when:
-          historic:
-            - monument
-            - memorial
+          __all__:
+            historic: monument
+            __any__:
+              wikipedia: __any__
+              wikidata: __any__
         exclude_when:
           name: ""
         attributes:
           - *name_attr
           - key: class
-            value: '${ feature.tags.get("historic") }'
+            value: monument
 
       # Windmills (often visible landmarks in NL/DE/UK)
       - source: osm
@@ -187,18 +188,62 @@ layers:
           - key: height
             tag_value: height
 
-      # Power stations / generating plants - large landmarks and thermal sources
+      # Power stations / generating plants - large landmarks and thermal sources.
+      # Solar is split out below as its own class; battery storage is excluded
+      # entirely - small fenced compounds, not a landmark or an obstacle.
       - source: osm
         geometry: polygon_centroid
         min_zoom: 10
         include_when:
           power: plant
+        exclude_when:
+          plant:source:
+            - solar
+            - battery
         attributes:
           - *name_attr
           - key: class
             value: power_plant
           - key: subclass
             tag_value: plant:source
+
+      # Solar farms - large unlandable areas and a useful navigation feature, so
+      # emitted as polygons (the footprint matters for routing) rather than points.
+      # Captured both as whole-site plants and as generator-tagged panel arrays.
+      # min_size is a tile-pixel threshold: small farms drop out at overview zooms
+      # and reappear as you zoom in (Planetiler has no absolute-area filter).
+      - source: osm
+        geometry: polygon
+        min_zoom: 10
+        min_size: 3
+        include_when:
+          __all__:
+            power: plant
+            plant:source: solar
+        attributes:
+          - *name_attr
+          - key: class
+            value: solar_farm
+
+      # Generator-tagged solar (the panel arrays). Roof-mounted generators are
+      # excluded so rooftop PV does not clutter the map - only ground farms.
+      - source: osm
+        geometry: polygon
+        min_zoom: 11
+        min_size: 3
+        include_when:
+          __all__:
+            power: generator
+            generator:source: solar
+        exclude_when:
+          location:
+            - roof
+            - rooftop
+          generator:place: roof
+        attributes:
+          - *name_attr
+          - key: class
+            value: solar_farm
 
       # Cooling towers - very tall, far-visible (polygons mapped as areas)
       - source: osm
