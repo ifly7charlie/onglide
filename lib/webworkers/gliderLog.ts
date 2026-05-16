@@ -83,8 +83,12 @@ function formatArg(a: any): string {
     return String(a);
 }
 
+// Base directory for the per-glider log tree. Override with SCORING_LOG_DIR
+// (absolute, or relative to the process cwd); defaults to <cwd>/logs.
+const logBaseDir = process.env.SCORING_LOG_DIR || path.join(process.cwd(), 'logs');
+
 export function createGliderLog(datecode: string | number, className: string, compno: string): GliderLogHandle {
-    const dir = path.join(process.cwd(), 'logs', String(datecode), String(className));
+    const dir = path.join(logBaseDir, String(datecode), String(className));
     const filePath = path.join(dir, `${compno}.log`);
     const consolePrefix = `${className}/${compno}:`;
 
