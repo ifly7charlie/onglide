@@ -1677,6 +1677,10 @@ interface PilotData {
     // since the live `gliders` dict has already been overwritten by updatePilots.
     prevGliders: Map<string, {utcStart?: Epoch; handicap?: number; scoredStatus?: string; flarmIdRegex?: RegExp}>;
     initialGliderCount: number;
+    // Same snapshot as initialGliderCount but scoped to this competition's
+    // own gliders — so updateTrackers can report a per-comp "new" delta and
+    // tracked total rather than the global figure.
+    initialCompGliderCount: number;
     removedGlidersCount: number;
 }
 
@@ -1760,6 +1764,7 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
     `);
 
     const initialGliderCount = Object.keys(gliders).length;
+    const initialCompGliderCount = Object.values(gliders).filter((g) => g.compid === compid).length;
 
     // Reconcile removals. Scope to this comp's own gliders — cTrackers only
     // contains rows for this compid, so without the compid guard we'd treat
@@ -1842,7 +1847,7 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
         } as any as Glider);
     }
 
-    return {cTrackers, keyedDb, prevGliders, initialGliderCount, removedGlidersCount: removedGliders.length};
+    return {cTrackers, keyedDb, prevGliders, initialGliderCount, initialCompGliderCount, removedGlidersCount: removedGliders.length};
 }
 
 // First-load DDB block gate. Mirrors the unknown→matched APRS path in
@@ -1899,7 +1904,7 @@ function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, displayName: string, tr
 // before any trackGlider commands fire.
 async function updateTrackers(competition: CompetitionContext, datecode: Datecode, pilotData: PilotData) {
     const location = competition.location;
-    const {cTrackers, prevGliders, initialGliderCount, removedGlidersCount} = pilotData;
+    const {cTrackers, prevGliders, initialCompGliderCount, removedGlidersCount} = pilotData;
 
     let updatedGliderCount = 0;
     let loadedGliderCount = 0;
@@ -2029,11 +2034,18 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         console.log(e);
     }
 
-    const newGlidersCount = Object.keys(gliders).length;
-    if (removedGlidersCount || updatedGliderCount || newGlidersCount != initialGliderCount) {
-        const tag = `${compShort(competition.compid)}/${datecode}`;
+    // Count only this competition's own gliders so the delta and total
+    // match the class(es) this updateTrackers call actually touched —
+    // the global `gliders` dict spans every comp this process runs.
+    const compGliderCount = Object.values(gliders).filter((g) => g.compid === competition.compid).length;
+    if (removedGlidersCount || updatedGliderCount || loadedGliderCount || compGliderCount != initialCompGliderCount) {
+        const classList = Array.from(competition.ownedChannels)
+            .map((cn) => channels[cn]?.className)
+            .filter(Boolean)
+            .join(',');
+        const tag = `${compShort(competition.compid)}/${classList || '?'}/${datecode}`;
         console.log(
-            `${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new — ${newGlidersCount} tracked`
+            `${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${compGliderCount - initialCompGliderCount} new — ${compGliderCount} tracked`
         );
     }
 
