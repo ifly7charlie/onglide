@@ -1283,7 +1283,8 @@ async function process_day_scores(day, classid, classname, keys) {
                             row._links['http://api.soaringspot.com/rel/flight']['href'], // url for the download
                             https,
                             mysql_db,
-                            () => soaringSpotAuthHeaders(keys)
+                            () => soaringSpotAuthHeaders(keys),
+                            keys.compid
                         );
                     },
                     10000 * Math.random() + 0 * randomEarlyMorningTimeDelay()

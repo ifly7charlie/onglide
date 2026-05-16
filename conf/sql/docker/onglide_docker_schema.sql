@@ -380,6 +380,7 @@ CREATE TABLE `movements` (
   `id` char(40) NOT NULL,
   `type` enum('flarm','igc') DEFAULT NULL,
   `datecode` char(3) DEFAULT NULL,
+  `compid` varchar(40) DEFAULT NULL COMMENT 'competition this movement belongs to',
   PRIMARY KEY (`id`,`time`,`action`),
   KEY `action` (`action`,`type`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;

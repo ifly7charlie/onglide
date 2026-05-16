@@ -250,7 +250,7 @@ async function update_class(compid: string, className: string, data: any, dataHt
     await update_pilots(classid, data['Piloter'], hcaps);
 
     // Import the results
-    await process_class_tasks_and_results(classid, className, dataHtml);
+    await process_class_tasks_and_results(classid, className, dataHtml, compid);
 }
 
 //
@@ -389,7 +389,7 @@ async function update_pilots(classid, data, hcaps) {
 
 //
 // for a given class update all the tasks
-async function process_class_tasks_and_results(classid, className, data) {
+async function process_class_tasks_and_results(classid, className, data, compid) {
     let rows = 0;
     //    let date = day.task_date;
     for (const day of Object.keys(data)) {
@@ -414,7 +414,7 @@ async function process_class_tasks_and_results(classid, className, data) {
             const results = day_data[2];
 
             process_class_task(classid, className, date, day_number, day_info, task_info);
-            process_class_results(classid, className, date, day_number, results);
+            process_class_results(classid, className, date, day_number, results, compid);
         }
     }
 }
@@ -755,7 +755,7 @@ async function process_class_task(classid, className, date, day_number, day_info
     }
 }
 
-async function process_class_results(classid, className, date, day_number, results_info) {
+async function process_class_results(classid, className, date, day_number, results_info, compid) {
     let rows = 0;
     let doCheckForOGNMatches = false;
 
@@ -905,7 +905,7 @@ async function process_class_results(classid, className, date, day_number, resul
             )[0] || {igcavailable: false};
             if ((igcavailable || 'Y') == 'N' && url) {
                 console.log(date, pilot, igcavailable);
-                await processIGC(classid, pilot, location, date, url, https, mysql);
+                await processIGC(classid, pilot, location, date, url, https, mysql, undefined, compid);
                 doCheckForOGNMatches = true;
             }
         }
