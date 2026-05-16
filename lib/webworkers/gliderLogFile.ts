@@ -106,7 +106,9 @@ const logBaseDir = process.env.SCORING_LOG_DIR || path.join(process.cwd(), 'logs
 
 export function createGliderLog(datecode: string | number, className: string, compno: string): GliderLogHandle {
     const dir = path.join(logBaseDir, String(datecode), String(className));
-    const filePath = path.join(dir, `${compno}.log`);
+    // pid in the filename so two ogn processes scoring the same comp don't
+    // truncate-and-overwrite each other's file (which leaves NUL-byte holes).
+    const filePath = path.join(dir, `${compno}.${process.pid}.log`);
     const consolePrefix = `${className}/${compno}:`;
 
     let fd = -1;

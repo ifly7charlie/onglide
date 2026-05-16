@@ -2582,7 +2582,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
 
         channel.earliestStart = channelGliders.reduce((min, glider) => Math.min(min, glider.scoredStart ?? Infinity) as Epoch, Infinity as Epoch);
 
-        console.log(`${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
+        console.log(`${channel.className}:${compno}: start time changed from ${d(oldStart)} to ${d(score.utcStart)}, [class earliest start ${d(channel.earliestStart)}] resetting tracks`);
 
         if (channel.task?.rules?.grandprixstart) {
             const mcs = channelGliders.reduce(
@@ -2611,7 +2611,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
     if (glider && glider.scoredFinish != (score.utcFinish as Epoch)) {
         // Reset the glider starting point, but also the channel so we don't use invalid
         // mix of the two
-        console.log(`${compno}: finish time changed from ${glider.scoredFinish} to ${score.utcFinish}`);
+        console.log(`${channel.className}:${compno}: finish time changed from ${glider.scoredFinish} to ${score.utcFinish}`);
         glider.scoredFinish = score.utcFinish as Epoch;
     }
 }

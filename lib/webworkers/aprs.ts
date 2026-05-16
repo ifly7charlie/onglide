@@ -1332,7 +1332,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
             // then mark it as so.
             if (point.g < 100) {
                 if (aircraft.ground === 0) {
-                    console.log(`${point.c}: on ground @ ${point.t}`);
+                    console.log(`${aircraft.className}:${point.c}: on ground @ ${point.t}`);
                 }
                 aircraft.ground = 6;
             }
