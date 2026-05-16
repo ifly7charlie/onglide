@@ -213,6 +213,22 @@ export function buildMapStyle(): StyleSpecification {
                 paint: {'line-color': '#a87040', 'line-width': 0.5, 'line-opacity': 0.4}
             },
             {
+                // High-voltage power lines from the landmarks schema — a cable hazard,
+                // so drawn dashed in a warning colour.
+                id: 'landmark-power-line',
+                type: 'line',
+                source: LABELS_SOURCE,
+                'source-layer': 'landmark',
+                filter: ['==', 'class', 'power_line'],
+                minzoom: 10,
+                paint: {
+                    'line-color': '#b03060',
+                    'line-width': ['interpolate', ['linear'], ['zoom'], 10, 0.6, 16, 2],
+                    'line-dasharray': [3, 2],
+                    'line-opacity': 0.8
+                }
+            },
+            {
                 id: 'road-label-major',
                 type: 'symbol',
                 source: LABELS_SOURCE,
@@ -221,7 +237,7 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['in', 'class', 'motorway', 'trunk', 'primary'],
                 layout: {
                     'symbol-placement': 'line',
-                    'text-field': ['coalesce', ['get', 'ref'], ['get', 'name:latin']],
+                    'text-field': ['coalesce', ['get', 'ref'], ['get', 'name']],
                     'text-size': 11,
                     'text-font': FONT_REGULAR
                 },
@@ -242,7 +258,7 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['==', ['geometry-type'], 'LineString'],
                 minzoom: 8,
                 layout: {
-                    'text-field': ['get', 'name:latin'],
+                    'text-field': ['get', 'name'],
                     'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 13],
                     'text-font': FONT_ITALIC,
                     'symbol-placement': 'line'
@@ -257,7 +273,7 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['==', ['geometry-type'], 'Point'],
                 minzoom: 8,
                 layout: {
-                    'text-field': ['get', 'name:latin'],
+                    'text-field': ['get', 'name'],
                     'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 13],
                     'text-font': FONT_ITALIC,
                     'symbol-placement': 'point'
@@ -274,7 +290,7 @@ export function buildMapStyle(): StyleSpecification {
                     'icon-image': 'airport',
                     'icon-anchor': 'bottom',
                     'icon-allow-overlap': true,
-                    'text-field': ['case', ['has', 'icao'], ['concat', ['get', 'name:latin'], ' (', ['get', 'icao'], ')'], ['get', 'name:latin']],
+                    'text-field': ['case', ['has', 'icao'], ['concat', ['get', 'name'], ' (', ['get', 'icao'], ')'], ['get', 'name']],
                     'text-size': 11,
                     'text-anchor': 'top',
                     'text-offset': [0, 0.4],
@@ -294,11 +310,11 @@ export function buildMapStyle(): StyleSpecification {
                     'icon-allow-overlap': false,
                     'text-field': [
                         'case',
-                        ['all', ['has', 'ele'], ['!=', ['coalesce', ['get', 'name:latin'], ''], '']],
-                        ['concat', ['get', 'name:latin'], '\n', ['get', 'ele'], 'm'],
+                        ['all', ['has', 'ele'], ['!=', ['coalesce', ['get', 'name'], ''], '']],
+                        ['concat', ['get', 'name'], '\n', ['get', 'ele'], 'm'],
                         ['has', 'ele'],
                         ['concat', ['get', 'ele'], 'm'],
-                        ['coalesce', ['get', 'name:latin'], '']
+                        ['coalesce', ['get', 'name'], '']
                     ],
                     'text-size': 10,
                     'text-anchor': 'top',
@@ -314,7 +330,7 @@ export function buildMapStyle(): StyleSpecification {
                 'source-layer': 'place',
                 filter: ['in', 'class', 'city', 'town'],
                 layout: {
-                    'text-field': '{name:latin}',
+                    'text-field': '{name}',
                     'text-size': ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 16],
                     'text-anchor': 'center',
                     'text-font': FONT_BOLD
@@ -329,12 +345,47 @@ export function buildMapStyle(): StyleSpecification {
                 minzoom: 10,
                 filter: ['in', 'class', 'village', 'suburb', 'hamlet'],
                 layout: {
-                    'text-field': '{name:latin}',
+                    'text-field': '{name}',
                     'text-size': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13],
                     'text-anchor': 'center',
                     'text-font': FONT_REGULAR
                 },
                 paint: {'text-color': '#555', 'text-halo-color': '#fff', 'text-halo-width': 1.5}
+            },
+            {
+                // Landmark points from the landmarks schema. Obstacles (masts, towers,
+                // turbines, cooling towers, power plants) are flagged red; heritage
+                // landmarks (castles, cathedrals, lighthouses, windmills…) muted gold.
+                id: 'landmark-point',
+                type: 'circle',
+                source: LABELS_SOURCE,
+                'source-layer': 'landmark',
+                filter: ['!=', 'class', 'power_line'],
+                minzoom: 10,
+                paint: {
+                    'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2, 15, 5],
+                    'circle-color': ['match', ['get', 'class'], ['mast', 'tower', 'cooling_tower', 'wind_turbine', 'power_plant'], '#c0392b', '#7d6608'],
+                    'circle-stroke-color': '#fff',
+                    'circle-stroke-width': 1,
+                    'circle-opacity': 0.9
+                }
+            },
+            {
+                id: 'landmark-label',
+                type: 'symbol',
+                source: LABELS_SOURCE,
+                'source-layer': 'landmark',
+                filter: ['!=', 'class', 'power_line'],
+                minzoom: 12,
+                layout: {
+                    'text-field': ['get', 'name'],
+                    'text-size': 10,
+                    'text-anchor': 'top',
+                    'text-offset': [0, 0.5],
+                    'text-font': FONT_REGULAR,
+                    'text-optional': true
+                },
+                paint: {'text-color': '#5a3d1e', 'text-halo-color': '#fff', 'text-halo-width': 1.5}
             }
         ]
     };

@@ -1,5 +1,5 @@
-schema_name: European Landmarks
-schema_description: Castles, lighthouses, cathedrals, and other large landmarks
+schema_name: Onglide Map Overlay
+schema_description: Map labels (places, roads, water, peaks, aerodromes) plus landmarks and obstacles, drawn over satellite imagery and supplying the labels in street-view mode
 attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>
 
 args:
@@ -9,27 +9,16 @@ args:
   osm_url:
     description: OSM URL
     default: '${ args.area == "planet" ? "aws:latest" : ("geofabrik:" + args.area) }'
-  languages:
-    description: Languages to include in name attributes
-    default: en,de,fr,es,it,pl,cs,nl,sv,fi
-  minzoom:
-    default: 6
-  maxzoom:
-    default: 14
 
 sources:
   osm:
     type: osm
     url: '${ args.osm_url }'
 
+# Glider pilots navigate by the local-language name of a feature, so every label
+# carries the raw OSM `name` tag only — no transliteration or per-language variants.
 tag_mappings:
   name:
-    type: string
-  name_en:
-    key: name:en
-    type: string
-  name_de:
-    key: name:de
     type: string
 
 layers:
@@ -52,10 +41,6 @@ layers:
         attributes:
           - &name_attr
             key: name
-          - &name_en_attr
-            key: name_en
-          - &name_de_attr
-            key: name_de
           - key: class
             value: '${ feature.tags.get("historic") }'
           - key: subclass
@@ -75,8 +60,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: '${ feature.tags.get("historic") }'
           - key: subclass
@@ -92,8 +75,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: ruins
 
@@ -108,8 +89,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: cathedral
 
@@ -123,8 +102,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: lighthouse
 
@@ -142,10 +119,25 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: tower
+          - key: subclass
+            tag_value: tower:type
+          - key: height
+            tag_value: height
+
+      # Tall guyed masts (radio/TV) - the tallest obstacles. man_made=mast is by
+      # definition a tall structure, so no height filter is needed. Most are unnamed,
+      # so the name exclusion is dropped here.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          man_made: mast
+        attributes:
+          - *name_attr
+          - key: class
+            value: mast
           - key: subclass
             tag_value: tower:type
           - key: height
@@ -163,8 +155,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: '${ feature.tags.get("historic") }'
 
@@ -178,7 +168,191 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: windmill
+
+      # Wind turbines - tall obstacles that cluster over the open country flown on XC.
+      # Rarely named, so no name exclusion.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          __all__:
+            power: generator
+            generator:source: wind
+        attributes:
+          - *name_attr
+          - key: class
+            value: wind_turbine
+          - key: height
+            tag_value: height
+
+      # Power stations / generating plants - large landmarks and thermal sources
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 10
+        include_when:
+          power: plant
+        attributes:
+          - *name_attr
+          - key: class
+            value: power_plant
+          - key: subclass
+            tag_value: plant:source
+
+      # Cooling towers - very tall, far-visible (polygons mapped as areas)
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          man_made: cooling_tower
+        attributes:
+          - *name_attr
+          - key: class
+            value: cooling_tower
+          - key: height
+            tag_value: height
+
+      # Cooling towers tagged on nodes
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          man_made: cooling_tower
+        attributes:
+          - *name_attr
+          - key: class
+            value: cooling_tower
+          - key: height
+            tag_value: height
+
+      # High-voltage power lines - a cable hazard on low approaches and outlandings.
+      # No name exclusion: power lines are almost never named.
+      - source: osm
+        geometry: line
+        min_zoom: 11
+        include_when:
+          power: line
+        attributes:
+          - key: class
+            value: power_line
+          - key: voltage
+            tag_value: voltage
+
+  # --- Label layers -------------------------------------------------------------
+  # These reproduce the OpenMapTiles label source-layers the map style reads, so the
+  # overlay file carries every label as well as the landmarks.
+
+  - id: place
+    features:
+      - source: osm
+        geometry: point
+        min_zoom: 6
+        include_when:
+          place:
+            - city
+            - town
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: class
+            tag_value: place
+      - source: osm
+        geometry: point
+        min_zoom: 10
+        include_when:
+          place:
+            - village
+            - suburb
+            - hamlet
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: class
+            tag_value: place
+
+  - id: transportation_name
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 10
+        include_when:
+          highway:
+            - motorway
+            - trunk
+            - primary
+        attributes:
+          - *name_attr
+          - key: class
+            tag_value: highway
+          - key: ref
+            tag_value: ref
+
+  - id: water_name
+    features:
+      # Lakes / reservoirs - point label at the centroid
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 8
+        include_when:
+          natural: water
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+      # Rivers / canals - line label
+      - source: osm
+        geometry: line
+        min_zoom: 8
+        include_when:
+          waterway:
+            - river
+            - canal
+            - stream
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+
+  - id: aerodrome_label
+    features:
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 9
+        include_when:
+          aeroway: aerodrome
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: icao
+            tag_value: icao
+      - source: osm
+        geometry: point
+        min_zoom: 9
+        include_when:
+          aeroway: aerodrome
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: icao
+            tag_value: icao
+
+  - id: mountain_peak
+    features:
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          natural:
+            - peak
+            - volcano
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: ele
+            tag_value: ele

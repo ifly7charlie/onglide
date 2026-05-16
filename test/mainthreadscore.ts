@@ -171,7 +171,7 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     // Stub airfield: mainthread-score is a replay/test harness that never
     // invokes the worker prefilter. Bbox absent → pre-task semantics if any
     // path ever did consult it.
-    const stubAirfield: Airfield = {compid: '', point: {lat: 0, lng: 0}, elevation: 0 as any, officialDelay: 0 as any, getNow: () => 0 as any};
+    const stubAirfield: Airfield = {compid: '', point: {lat: 0, lng: 0}, elevation: 0 as any, officialDelay: 0 as any, getNow: () => Date.now() as any};
 
     const glider: Aircraft = {
         compno,
