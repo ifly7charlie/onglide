@@ -275,3 +275,17 @@ UPDATE competition SET delayseconds = 600 WHERE compid = 'mychamps2026';
 UPDATE competition SET delayseconds = NULL WHERE compid = 'leagueround3'; -- back to env-var default
 ```
 
+### Per-glider scoring logs
+
+The scoring worker writes a diagnostic log per glider for the lifetime of its
+current scoring chain to `<datecode>/<class>/<compno>.log` — the file is
+truncated whenever the glider is rescored. Writes are batched in memory and
+flushed every few seconds, so they don't sit on the scoring hot path.
+
+By default these go under `logs/` in the process working directory. Override
+the base directory with `SCORING_LOG_DIR` (absolute, or relative to the cwd):
+
+```
+SCORING_LOG_DIR=/var/log/onglide
+```
+

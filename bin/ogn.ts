@@ -257,11 +257,6 @@ let channels: Record<ChannelName, Channel> = {};
 // the inventory line when it actually changes.
 const lastChannelsLog = new Map<string, string>();
 
-// Compids that have emitted their full trackers-loaded roster at least once.
-// Subsequent updateTrackers cycles only dump the full list on real growth
-// (loadedGliderCount > 0); pure rescore/removal churn stays summary-only.
-const trackersLoadedEmitted = new Set<string>();
-
 // Last-emitted "Channels not yet scored" string so we only log when the pending
 // set changes, instead of on every score arrival.
 let lastPendingChannelsLog: string | null = null;
@@ -2037,13 +2032,9 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
     const newGlidersCount = Object.keys(gliders).length;
     if (removedGlidersCount || updatedGliderCount || newGlidersCount != initialGliderCount) {
         const tag = `${compShort(competition.compid)}/${datecode}`;
-        console.log(`${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new`);
-        // Full key dump only on first emit per comp or when new gliders were loaded —
-        // routine churn (rescore/remove) doesn't need to repeat the whole roster.
-        if (loadedGliderCount > 0 || !trackersLoadedEmitted.has(competition.compid)) {
-            console.log(`${tag}: ${newGlidersCount} trackers loaded: ${Object.keys(gliders).join(',')}`);
-            trackersLoadedEmitted.add(competition.compid);
-        }
+        console.log(
+            `${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${newGlidersCount - initialGliderCount} new — ${newGlidersCount} tracked`
+        );
     }
 
     // Refresh per-class pilotCount from the configured glider set. This is

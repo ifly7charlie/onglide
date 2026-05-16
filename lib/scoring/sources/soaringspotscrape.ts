@@ -699,12 +699,15 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                         continue;
                     }
 
-                    // Task fetch. If the cell text mentions "cancelled"
-                    // (e.g. the row says "Task 1 cancelled"), we trust that
+                    // Task fetch. A cancelled day is flagged two ways on
+                    // the overview row: either the cell text mentions
+                    // "cancelled" (e.g. "Task 1 cancelled"), or the task
+                    // <td> carries class="cancelled" while its text is
+                    // still a plain "Task N". Trust either signal,
                     // regardless of whatever result_status the task JSON
                     // ships — some sources show cancelled on the overview
                     // row but still serve a normal task JSON.
-                    const cancelled = /cancell?ed|scrubbed/i.test(daynumber);
+                    const cancelled = /cancell?ed|scrubbed/i.test(daynumber) || /cancell?ed|scrubbed/i.test(getAttributeValue(cells[1] as any, 'class') ?? '');
                     const taskUrlAttr = getAttributeValue(taskAnchor as any, 'href');
                     if (taskUrlAttr) {
                         try {

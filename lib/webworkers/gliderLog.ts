@@ -20,6 +20,7 @@ import * as path from 'node:path';
 import {inspect} from 'node:util';
 
 import {stripPoints} from '../flightprocessing/taskhelper';
+import {fromDateCode} from '../datecode';
 
 // What the generators receive: callable for normal logging plus .error
 // for exceptions (file + console).
@@ -45,14 +46,51 @@ export const noopGliderLog: GliderLog = Object.assign(
 
 const FLUSH_INTERVAL_MS = 3000;
 
+// A datecode whose competition day is more than this far in the past is
+// dead — its whole log subtree is removed. 37h leaves a margin past the
+// end of the comp day before the previous day's logs are reaped.
+const STALE_AFTER_MS = 37 * 60 * 60 * 1000;
+const PURGE_INTERVAL_MS = 60 * 60 * 1000; // rescan for stale datecodes at most hourly
+
 // Every live logger — flushed together by the shared timer / exit hook.
 const loggers = new Set<GliderLogHandle & {flush(): void}>();
 let flushTimer: NodeJS.Timeout | null = null;
 let exitHooked = false;
+let lastPurge = 0;
+
+// Remove log directories for datecodes that are no longer valid. Each
+// top-level entry under logBaseDir is a datecode; once fromDateCode()
+// puts its competition day >37h in the past the whole subtree is deleted.
+// Non-datecode entries parse to an invalid date and are left alone.
+function purgeStaleLogs() {
+    const now = Date.now();
+    if (now - lastPurge < PURGE_INTERVAL_MS) return;
+    lastPurge = now;
+
+    let entries: string[];
+    try {
+        entries = fs.readdirSync(logBaseDir);
+    } catch {
+        return; // base dir not created yet
+    }
+
+    const cutoff = now - STALE_AFTER_MS;
+    for (const entry of entries) {
+        const dayMs = new Date(fromDateCode(entry)).getTime();
+        if (isFinite(dayMs) && dayMs < cutoff) {
+            try {
+                fs.rmSync(path.join(logBaseDir, entry), {recursive: true, force: true});
+            } catch (e) {
+                console.log(`gliderLog: unable to remove stale log dir ${entry}: ${e}`);
+            }
+        }
+    }
+}
 
 function ensureFlusher() {
     if (!flushTimer) {
         flushTimer = setInterval(() => {
+            purgeStaleLogs();
             for (const l of loggers) l.flush();
         }, FLUSH_INTERVAL_MS);
         // Never keep the worker alive purely for the flush timer.
