@@ -1384,7 +1384,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {
         aircraft.channel!.postMessage({
             c: aircraft.compno, //
-            t: (messages.length && position > 0 ? messages[Math.min(position, messages.length) - 1]?.t : undefined) || (2 as Epoch),
+            t: to,
             _: true,
             tick: true
         } as any);

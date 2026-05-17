@@ -512,7 +512,9 @@ async function main() {
     // marker, so they must be excluded from the gate.
     if (process.env.WAIT_FOR_RESCORE) {
         const checkScoringNotReady = () => {
-            const notReady = Object.values(channels).filter(channelNeedsScoring).filter((c) => !c.liveScoreId);
+            const notReady = Object.values(channels)
+                .filter(channelNeedsScoring)
+                .filter((c) => !c.liveScoreId);
             if (notReady.length) {
                 console.log(`still need ${notReady.map((c) => c.className).join(',')} to finish scoring`);
             }
@@ -2044,9 +2046,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             .filter(Boolean)
             .join(',');
         const tag = `${compShort(competition.compid)}/${classList || '?'}/${datecode}`;
-        console.log(
-            `${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${compGliderCount - initialCompGliderCount} new — ${compGliderCount} tracked`
-        );
+        console.log(`${tag}: updatedTrackers: ${removedGlidersCount} removed, ${updatedGliderCount} rescored, ${loadedGliderCount} loaded, ${compGliderCount - initialCompGliderCount} new — ${compGliderCount} tracked`);
     }
 
     // Refresh per-class pilotCount from the configured glider set. This is
@@ -2090,6 +2090,8 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             const totalScored = totalScoredByClass.get(className) || 0;
             const trackerCoverage = totalScored > 0 ? scored.length / totalScored : 0;
 
+            console.log(className, 'hmm', JSON.stringify(channel?.allScores));
+
             // Strict per-pilot home check. Every tracked pilot must satisfy
             // one of:
             //   - officially finalised by the scorer (scoredStatus F or H), OR
@@ -2102,8 +2104,11 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             const isHome = (p: CTrackerRow) => {
                 if (isTerminalScored(p)) return true;
                 const score = channel?.allScores[p.compno];
-                if (!score) return false;
-                if ((score.utcStart ?? 0) === 0) return false;
+                if (!score) {
+                    console.log('hmmm', p.compno);
+                    return false;
+                }
+                //if ((score.utcStart ?? 0) === 0) return false;
                 const fs = score.flightStatus;
                 return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
             };
@@ -2150,6 +2155,12 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
             // official scorer to finalise everyone before recovering a
             // class stuck at B/G.
             const ognDeterminedHome = allLanded && trackerCoverage >= HOME_OGN_COVERAGE;
+
+            console.log(
+                `${className}: allLanded ${allLanded}, trackerCoverage ${trackerCoverage}, allOfficiallyFinalised ${allOfficiallyFinalised}, ognDeterminedHome ${ognDeterminedHome}`,
+                `finishingCount: ${finishingCount}, startedCount ${startedCount}, scored.length ${scored.length}, airborneCount: ${airborneCount}, griddedCount: ${griddedCount} homeCount ${homeCount}`
+            );
+
             if (allLanded && trackerCoverage >= 0.1) {
                 nextStatus = 'H';
                 allowFrom = allOfficiallyFinalised || ognDeterminedHome ? ['B', 'G', 'L', 'S', 'F'] : ['L', 'S', 'F'];
@@ -2477,7 +2488,9 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
         await primeAndBroadcast(channel, `_live ${channel.displayName}/${channel.datecode}`);
 
-        const pendingChannels = Object.values(channels).filter(channelNeedsScoring).filter((c) => !c.liveScoreId);
+        const pendingChannels = Object.values(channels)
+            .filter(channelNeedsScoring)
+            .filter((c) => !c.liveScoreId);
         if (pendingChannels.length) {
             const pendingLine = pendingChannels.map((c) => `${c.className} (${c.datecode})`).join(', ');
             if (lastPendingChannelsLog !== pendingLine) {
@@ -2781,11 +2794,11 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         let winner: ClassWinner | undefined;
         if (displayStatus === 'home' || displayStatus === 'yesterday') {
             const scores = Object.values(ch.allScores);
-            const bySpeed = scores.filter((s) => (s.handicapped?.taskSpeed ?? 0) > 0).sort((a, b) => (b.handicapped!.taskSpeed! - a.handicapped!.taskSpeed!))[0];
+            const bySpeed = scores.filter((s) => (s.handicapped?.taskSpeed ?? 0) > 0).sort((a, b) => b.handicapped!.taskSpeed! - a.handicapped!.taskSpeed!)[0];
             if (bySpeed) {
                 winner = {compno: bySpeed.compno, taskSpeed: bySpeed.handicapped!.taskSpeed};
             } else {
-                const byDistance = scores.filter((s) => (s.handicapped?.taskDistance ?? 0) > 0).sort((a, b) => (b.handicapped!.taskDistance - a.handicapped!.taskDistance))[0];
+                const byDistance = scores.filter((s) => (s.handicapped?.taskDistance ?? 0) > 0).sort((a, b) => b.handicapped!.taskDistance - a.handicapped!.taskDistance)[0];
                 if (byDistance) winner = {compno: byDistance.compno, taskDistance: byDistance.handicapped!.taskDistance};
             }
         }
