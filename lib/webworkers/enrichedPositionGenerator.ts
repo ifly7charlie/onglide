@@ -66,7 +66,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                                 ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
                                 log(`epg: ${previousPoint.c} home/grid: ${ps}`);
                                 stationary = true;
-                            } else if (ridgeRunningDistance < 2.5) {
+                            } else if (ridgeRunningDistance < 2.5 || gapLength > 2 * 3600) {
                                 log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance}`);
                                 ps = PositionStatus.Landed;
                                 stationary = true;
