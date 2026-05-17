@@ -205,6 +205,16 @@ export function buildMapStyle(): StyleSpecification {
                 paint: {'line-color': '#aaa', 'line-width': 0.5, 'line-dasharray': [2, 2]}
             },
             {
+                // Satellite raster sits here so the overlay layers below it —
+                // contours, landmark fills/lines, road and other labels — paint
+                // on top of the imagery rather than being hidden behind it.
+                id: 'satellite',
+                type: 'raster',
+                source: 'satellite',
+                layout: {visibility: 'none'},
+                paint: {'raster-opacity': 1}
+            },
+            {
                 id: 'contour-line',
                 type: 'line',
                 source: 'openmaptiles',
@@ -223,6 +233,22 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['==', 'class', 'solar_farm'],
                 minzoom: 10,
                 paint: {'fill-color': '#33415c', 'fill-opacity': 0.4, 'fill-outline-color': '#1c2535'}
+            },
+            {
+                // White casing under the power line so the dark warning colour stays
+                // visible against dark satellite imagery. On the light street basemap
+                // the casing is effectively invisible, so that view is unchanged.
+                id: 'landmark-power-line-casing',
+                type: 'line',
+                source: LABELS_SOURCE,
+                'source-layer': 'landmark',
+                filter: ['==', 'class', 'power_line'],
+                minzoom: 10,
+                paint: {
+                    'line-color': '#ffffff',
+                    'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2.4, 16, 5],
+                    'line-opacity': 0.55
+                }
             },
             {
                 // High-voltage power lines from the landmarks schema — a cable hazard,
@@ -254,13 +280,6 @@ export function buildMapStyle(): StyleSpecification {
                     'text-font': FONT_REGULAR
                 },
                 paint: {'text-color': '#333', 'text-halo-color': '#fff', 'text-halo-width': 2}
-            },
-            {
-                id: 'satellite',
-                type: 'raster',
-                source: 'satellite',
-                layout: {visibility: 'none'},
-                paint: {'raster-opacity': 1}
             },
             {
                 id: 'water-label-line',
@@ -379,7 +398,7 @@ export function buildMapStyle(): StyleSpecification {
                 minzoom: 10,
                 layout: {
                     'icon-image': ['match', ['get', 'class'], 'wind_turbine', 'wind-turbine', 'cooling_tower', 'cooling-tower', 'mast', 'mast', 'tower', 'tower', 'power_plant', 'power-plant', 'solar_farm', 'solar-farm', 'cathedral', 'cathedral', 'lighthouse', 'lighthouse', 'windmill', 'windmill', 'monument', 'monument', ['castle', 'fort', 'manor', 'ruins'], 'castle', 'castle'],
-                    'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.5, 16, 1],
+                    'icon-size': ['interpolate', ['linear'], ['zoom'], 10, ['match', ['get', 'class'], 'wind_turbine', 0.7, 0.5], 16, ['match', ['get', 'class'], 'wind_turbine', 1.4, 1]],
                     'icon-anchor': 'bottom',
                     'icon-allow-overlap': false,
                     'text-field': ['step', ['zoom'], '', 12, ['get', 'name']],

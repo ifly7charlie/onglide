@@ -24,6 +24,16 @@ tag_mappings:
 layers:
 
   - id: landmark
+    # Solar farms are sometimes mapped as thousands of individual panel polygons,
+    # which can bloat a single tile to megabytes. merge_polygons combines touching
+    # panels into one shape; min_area then drops the small fragments, at the max
+    # zoom too (plain min_size does not apply at max zoom). Planetiler cannot bridge
+    # gaps between non-touching polygons, so raise min_area_at_max_zoom if a
+    # specific panel-mapped farm still comes through heavy.
+    tile_post_process:
+      merge_polygons:
+        min_area: 6
+        min_area_at_max_zoom: 12
     features:
 
       # Castles, forts, named historic structures - polygons (most are mapped as areas)
@@ -176,7 +186,7 @@ layers:
       # Rarely named, so no name exclusion.
       - source: osm
         geometry: point
-        min_zoom: 11
+        min_zoom: 10
         include_when:
           __all__:
             power: generator
@@ -209,13 +219,11 @@ layers:
 
       # Solar farms - large unlandable areas and a useful navigation feature, so
       # emitted as polygons (the footprint matters for routing) rather than points.
-      # Captured both as whole-site plants and as generator-tagged panel arrays.
-      # min_size is a tile-pixel threshold: small farms drop out at overview zooms
-      # and reappear as you zoom in (Planetiler has no absolute-area filter).
+      # Captured both as whole-site plants and as generator-tagged panel arrays;
+      # the layer-level merge_polygons/min_area above collapses panel-level mapping.
       - source: osm
         geometry: polygon
         min_zoom: 10
-        min_size: 3
         include_when:
           __all__:
             power: plant
@@ -230,7 +238,6 @@ layers:
       - source: osm
         geometry: polygon
         min_zoom: 11
-        min_size: 3
         include_when:
           __all__:
             power: generator
@@ -340,22 +347,40 @@ layers:
       # Lakes / reservoirs - point label at the centroid
       - source: osm
         geometry: polygon_centroid
-        min_zoom: 8
+        min_zoom: 9
         include_when:
           natural: water
         exclude_when:
           name: ""
         attributes:
           - *name_attr
-      # Rivers / canals - line label
+      # Waterways are split by type and staged by zoom: a named stream is useless
+      # at overview zoom and there are vast numbers of them, so each type only
+      # enters the tiles once it is worth labelling. Rivers first, then canals,
+      # then streams - this keeps low-zoom water_name tiles small.
       - source: osm
         geometry: line
-        min_zoom: 8
+        min_zoom: 9
         include_when:
-          waterway:
-            - river
-            - canal
-            - stream
+          waterway: river
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+      - source: osm
+        geometry: line
+        min_zoom: 11
+        include_when:
+          waterway: canal
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+      - source: osm
+        geometry: line
+        min_zoom: 13
+        include_when:
+          waterway: stream
         exclude_when:
           name: ""
         attributes:

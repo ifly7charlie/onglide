@@ -156,24 +156,24 @@ function strokeKeyed(ctx: CanvasRenderingContext2D, color: string, width: number
 function makeWindTurbineIcon(): ImageData {
     const ctx = icon32();
     ctx.beginPath(); // tower
-    ctx.moveTo(15, 11);
-    ctx.lineTo(17, 11);
-    ctx.lineTo(18.2, 30);
-    ctx.lineTo(13.8, 30);
+    ctx.moveTo(14.2, 12);
+    ctx.lineTo(17.8, 12);
+    ctx.lineTo(19.4, 30);
+    ctx.lineTo(12.6, 30);
     ctx.closePath();
     fillKeyed(ctx, OBSTACLE_COLOR);
     ctx.save(); // three blades from the hub
-    ctx.translate(16, 11);
+    ctx.translate(16, 12);
     for (let i = 0; i < 3; i++) {
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(0, -11);
-        strokeKeyed(ctx, OBSTACLE_COLOR, 2.4);
+        ctx.lineTo(0, -10);
+        strokeKeyed(ctx, OBSTACLE_COLOR, 3.6);
         ctx.rotate((2 * Math.PI) / 3);
     }
     ctx.restore();
     ctx.beginPath(); // hub covers the blade roots
-    ctx.arc(16, 11, 2.4, 0, 2 * Math.PI);
+    ctx.arc(16, 12, 3, 0, 2 * Math.PI);
     fillKeyed(ctx, OBSTACLE_COLOR);
     return ctx.getImageData(0, 0, 32, 32);
 }
