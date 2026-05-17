@@ -115,25 +115,41 @@ export function bindChannelForInOrderPackets(
                 continue;
             }
 
-            const message = messageQueue[position++];
+            const message = messageQueue[position];
+
+            // Anchor the tick clock to the first message so we don't backfill from epoch 0.
+            if (!hiccup) {
+                hiccup = message.t;
+            }
+
+            // Emit a synthetic tick for every ~60s of gap between messages, before
+            // yielding the position, so the EPG's gap-based landout/home detection runs
+            // at the live tick cadence and stamps the Landed status (and its score) at
+            // the time it occurred rather than at the next received position.
+            let rewound = false;
+            while (message.t - hiccup > 60) {
+                hiccup = (hiccup + 60) as Epoch;
+                const tickRewind = yield {c: compno, _: false, tick: true, t: hiccup};
+                if (messageQueueId !== currentMessageQueueId) return;
+                if (tickRewind) {
+                    log(`${className}/${compno}: rewind to ${tickRewind} (hiccup)`);
+                    for (; tickRewind && position > 0 && position < messageQueue.length && tickRewind < messageQueue[position].t; position--) {}
+                    rewound = true;
+                    break;
+                }
+            }
+            if (rewound) {
+                continue;
+            }
+
+            // Now yield the actual position message
+            position++;
             const nextPoint = yield message;
             if (messageQueueId !== currentMessageQueueId) return;
 
             // If we need to go backwards then do so
             if (nextPoint) {
                 for (position--; nextPoint && position > 0 && position < messageQueue.length && nextPoint < messageQueue[position].t; position--) {}
-            } else {
-                if (message.t - hiccup > 60) {
-                    hiccup = message.t;
-                    const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
-                    if (messageQueueId !== currentMessageQueueId) return;
-                    if (nextPoint) {
-                        log(`${className}/${compno}: rewind to ${nextPoint} (hiccup)`);
-
-                        for (position--; nextPoint && position > 0 && position < messageQueue.length && nextPoint < messageQueue[position].t; position--) {}
-                        continue;
-                    }
-                }
             }
         }
 
