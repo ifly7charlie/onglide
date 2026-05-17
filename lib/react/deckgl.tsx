@@ -9,7 +9,7 @@ import Map, {Source, Layer, useControl, NavigationControl, ScaleControl, MapRef}
 import maplibregl from 'maplibre-gl';
 import {Protocol as PMTilesProtocol} from 'pmtiles';
 
-import {buildMapStyle} from './mapStyle';
+import {buildMapStyle, prefersDarkMode} from './mapStyle';
 
 // Register the pmtiles:// protocol once, client-side only
 if (typeof window !== 'undefined' && !(maplibregl as any).__onglidePmtilesRegistered) {
@@ -99,12 +99,13 @@ export default function MApp(props: {
 
     // Map display style. MapType.street=0, MapType.satellite=1, so the road
     // basemap is active when options.mapType is falsy. mapLight tracks whether
-    // the basemap is light-coloured (true on road, false on satellite) and is
+    // the basemap is light-coloured — true only on the road basemap in light
+    // mode, false on satellite and on the dark-mode road basemap — and is
     // consumed by layer style helpers to pick dark-on-light vs light-on-dark
-    // variants. The earlier `!!options.mapType` was inverted on both flags.
+    // variants.
     const map2d = options.map2d;
     const mapStreet = !options.mapType;
-    const mapLight = mapStreet;
+    const mapLight = mapStreet && !prefersDarkMode();
 
     // Rules & legs etc
     const task = useSelector((state) => selectTask(state, vc));
