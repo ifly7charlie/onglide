@@ -522,6 +522,9 @@ export default function MApp(props: {
             for (const layer of style.layers) {
                 if (layer.id === 'contour-line') {
                     map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'none' : 'visible');
+                } else if (layer.id.startsWith('landmark-power-line')) {
+                    // Power lines clutter satellite imagery — street basemap only.
+                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
                 } else if ((layer as any).source === 'openmaptiles' && layer.type !== 'symbol') {
                     map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
                 }
