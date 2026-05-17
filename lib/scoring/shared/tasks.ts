@@ -307,6 +307,33 @@ export async function upsertTaskAndLegs(
                 const bearingDeg = previousPoint ? (bearing(previousPoint, currentPoint) + 360) % 360 : 0;
                 const hi = 0;
 
+                // Observation-zone geometry.
+                const ozLine = !!tp.oz_line;
+                let r1 = tp.oz_radius1 / 1000;
+                let r2 = tp.oz_radius2 / 1000;
+                let a1 = ozLine ? 90 : toDeg(tp.oz_angle1);
+                // SoaringSpot/SeeYou encode "full inner cylinder" as
+                // oz_angle2 = π/2 (apex 180°); the renderer treats
+                // a2 = 180 as the full-circle marker.
+                let a2 = toDeg(tp.oz_angle2) >= 90 - 1e-6 ? 180 : toDeg(tp.oz_angle2);
+
+                // An observation zone with no radius is degenerate — there is
+                // nothing to cross or measure distance to, which crashes the
+                // scoring chain. Fall back to a sane default: a 3km line, or a
+                // 500m barrel for a sector.
+                if (!(r1 > 0) && !(r2 > 0)) {
+                    if (ozLine) {
+                        log(`${classid} - ${date}: turnpoint ${tp.point_index} (${tpname}) line has no length — substituting a 3km line`);
+                        r1 = 3;
+                    } else {
+                        log(`${classid} - ${date}: turnpoint ${tp.point_index} (${tpname}) sector has no radius — substituting a 500m barrel`);
+                        r1 = 0.5;
+                        a1 = 180;
+                    }
+                    r2 = 0;
+                    a2 = 0;
+                }
+
                 query += '( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,? ),';
 
                 values = values.concat([
@@ -321,15 +348,12 @@ export async function upsertTaskAndLegs(
                     hi,
                     trigraph,
                     tpname,
-                    tp.oz_line ? 'line' : 'sector',
+                    ozLine ? 'line' : 'sector',
                     oz_types[tp.oz_type],
-                    tp.oz_radius1 / 1000,
-                    tp.oz_line ? 90 : toDeg(tp.oz_angle1),
-                    tp.oz_radius2 / 1000,
-                    // SoaringSpot/SeeYou encode "full inner cylinder" as
-                    // oz_angle2 = π/2 (apex 180°); the renderer treats
-                    // a2 = 180 as the full-circle marker.
-                    toDeg(tp.oz_angle2) >= 90 - 1e-6 ? 180 : toDeg(tp.oz_angle2),
+                    r1,
+                    a1,
+                    r2,
+                    a2,
                     tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0,
                     tp.altitude
                 ]);
