@@ -2106,9 +2106,9 @@ function updateCompStatus(channel: Channel) {
     const result = computeCompStatus(scored, totalScored, channel.className, ctx.getNow());
     if (!result) return;
 
-    const placeholders = result.allowFrom.map(() => '?').join(', ');
+    const placeholders = result.allowFrom.join(', ');
     db.query(
-        `UPDATE compstatus SET status = ${result.status}
+        escape`UPDATE compstatus SET status = ${result.status}
           WHERE class = ${channel.className} AND status IN (${placeholders}) AND datecode = ${channel.datecode}`
     )
         .then((r: any) => {
