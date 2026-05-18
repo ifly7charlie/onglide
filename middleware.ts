@@ -11,6 +11,10 @@ const domains = {
     'sgp.onglide.com': 'sgp'
 };
 
+// To restrict a domain's landing-page globe to a subset of competitions,
+// configure a hostname -> group mapping in lib/react/domainGroups.ts (consulted
+// client-side when opening the /all/<group> websocket feed).
+
 export async function middleware(request: NextRequest) {
     const host = request.headers.get('host')?.toLowerCase().split(':')[0];
     const pathname = request.nextUrl.pathname;

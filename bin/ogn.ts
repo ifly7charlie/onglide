@@ -139,6 +139,7 @@ interface CompetitionMetadata {
     tz: string;
     tzoffset: number;
     officialDelay: number; // seconds; resolved from competition.delayseconds or env-var fallback
+    compgroup: string | null; // optional group key; restricts visibility on the /all/<group> feed
 }
 
 interface CompetitionContext {
@@ -345,6 +346,8 @@ let ddb: Record<string, DDBEntry> = {};
 interface OgnWebSocket extends WebSocket {
     ognChannel: ChannelName;
     ognPeer: string;
+    // Group filter for /all/<group> listeners; null = bare /all (sees every comp).
+    ognGroup?: string | null;
     isValid: boolean;
     isAlive: boolean;
     isClosed?: boolean;
@@ -853,7 +856,7 @@ async function discoverCompetitions(): Promise<{active: any[]; upcoming: any[]}>
     // current scoring datecode (the "pre-comp practice day" escape hatch
     // on the start side). Date window filtering is done in TypeScript
     // below so replay mode can bypass it.
-    const base = `SELECT c.compid, c.name, c.sitename, c.countrycode, c.mainwebsite, c.urllogo,
+    const base = `SELECT c.compid, c.compgroup, c.name, c.sitename, c.countrycode, c.mainwebsite, c.urllogo,
                          c.lt as lat, c.lg as lng, c.tz, c.tzoffset, c.start, c.end, c.flightstats, c.trackingconsent, c.delayseconds,
                          (SELECT COUNT(*)
                           FROM tasks t
@@ -947,6 +950,7 @@ async function reconcileContexts() {
             const ctx = contexts[compid];
             // Keep summary fields in sync — these are read by buildCompetitionSummary().
             ctx.summary.name = row.name;
+            ctx.summary.compgroup = row.compgroup ?? null;
             ctx.summary.sitename = row.sitename ?? null;
             ctx.summary.countrycode = row.countrycode || '';
             ctx.summary.mainwebsite = row.mainwebsite ?? null;
@@ -1048,7 +1052,8 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
             end: ymd(row.end),
             tz: row.tz || '',
             tzoffset: parseInt(row.tzoffset as unknown as string) || 0,
-            officialDelay: location.officialDelay
+            officialDelay: location.officialDelay,
+            compgroup: row.compgroup ?? null
         }
     };
 
@@ -2597,6 +2602,7 @@ async function refreshUpcomingCompetitions(rows: any[]) {
             tz: row.tz || '',
             tzoffset,
             officialDelay,
+            compgroup: row.compgroup ?? null,
             classnames
         };
         const prev = upcomingComps[compid];
@@ -2794,30 +2800,51 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
     };
 }
 
+// Resolve a comp's group whether it's active (context) or upcoming.
+function groupForCompid(compid: string): string | null {
+    return contexts[compid]?.summary.compgroup ?? upcomingComps[compid]?.compgroup ?? null;
+}
+
+// Strict match for the /all/<group> feed: a null listener group (bare /all)
+// sees every comp; a grouped listener sees only an exact, case-insensitive
+// match. An ungrouped comp (null compgroup) is visible only on bare /all.
+function listenerWantsComp(listenerGroup: string | null | undefined, compGroup: string | null): boolean {
+    if (!listenerGroup) return true;
+    return (compGroup ?? '').toLowerCase() === listenerGroup;
+}
+
 // Send the full snapshot to a single client (used on connect). Always
-// `full=true` so the client can populate its cache from cold.
+// `full=true` so the client can populate its cache from cold. A grouped
+// listener (/all/<group>) only receives comps in its group; the fingerprint
+// cache is still seeded for every comp since it is global per-comp.
 function broadcastCompetitionsSnapshot(client: OgnWebSocket) {
     const summaries: CompetitionSummary[] = [];
+    let considered = 0;
     for (const ctx of Object.values(contexts)) {
         const s = buildCompetitionSummary(ctx);
         if (s) {
-            summaries.push(s);
-            // Seed the cache so the next delta correctly suppresses no-ops
-            // for compids the new client just received.
+            considered++;
+            // Seed the cache so the next delta correctly suppresses no-ops.
             lastCompetitionSummaryBytes.set(ctx.compid, summaryFingerprint(s));
+            const wanted = listenerWantsComp(client.ognGroup, ctx.summary.compgroup);
+            console.log(`  snapshot[${client.ognGroup ?? 'all'}] active ${ctx.compid} compgroup=${ctx.summary.compgroup ?? 'null'} -> ${wanted ? 'INCLUDE' : 'skip'}`);
+            if (wanted) summaries.push(s);
         }
     }
     for (const compid of Object.keys(upcomingComps)) {
         const s = buildUpcomingSummary(compid);
         if (s) {
-            summaries.push(s);
+            considered++;
             lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
+            const wanted = listenerWantsComp(client.ognGroup, upcomingComps[compid].compgroup);
+            console.log(`  snapshot[${client.ognGroup ?? 'all'}] upcoming ${compid} compgroup=${upcomingComps[compid].compgroup ?? 'null'} -> ${wanted ? 'INCLUDE' : 'skip'}`);
+            if (wanted) summaries.push(s);
         }
     }
     const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}}, 'competitions full snapshot');
     if (msg && client.readyState === WebSocket.OPEN) {
         client.send(msg, {binary: true});
-        console.log('broadcastCompetitionsSnapshot', client.ognPeer);
+        console.log(`broadcastCompetitionsSnapshot peer=${client.ognPeer} group=${client.ognGroup ?? '(none)'} sent ${summaries.length}/${considered} comps`);
     }
 }
 
@@ -2851,11 +2878,24 @@ function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: st
 
     if (dirty.length === 0 && removedCompids.length === 0) return;
 
-    const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: dirty, generatedAt: Math.floor(getNow()), full: false, removed: removedCompids}}, 'competitions delta');
-    if (!msg) return;
-
     competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
-    competitionsListeners.forEach((client) => client.send(msg, {binary: true}));
+
+    // Partition listeners by group and encode one message per distinct group:
+    // a grouped listener only receives dirty comps in its group. `removed` is
+    // sent to every group unchanged — a removed compid the client never had
+    // is a harmless no-op, and the comp's group is no longer resolvable.
+    const generatedAt = Math.floor(getNow());
+    const groups = new Set(competitionsListeners.map((c) => c.ognGroup ?? ''));
+    for (const group of groups) {
+        const listenerGroup = group || null;
+        const groupDirty = listenerGroup ? dirty.filter((s) => listenerWantsComp(listenerGroup, groupForCompid(s.compid))) : dirty;
+        if (groupDirty.length === 0 && removedCompids.length === 0) continue;
+        const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: groupDirty, generatedAt, full: false, removed: removedCompids}}, 'competitions delta');
+        if (!msg) continue;
+        const recipients = competitionsListeners.filter((c) => (c.ognGroup ?? '') === group);
+        console.log(`broadcastCompetitionsDelta group=${listenerGroup ?? '(none)'}: ${groupDirty.length}/${dirty.length} dirty + ${removedCompids.length} removed -> ${recipients.length} listener(s)`);
+        recipients.forEach((client) => client.send(msg, {binary: true}));
+    }
 }
 
 // Stable string fingerprint of a CompetitionSummary for delta suppression.
@@ -2869,6 +2909,7 @@ function summaryFingerprint(s: CompetitionSummary): string {
 // watchdog on each frame, so this keeps NAT-timed-out / silently-dead
 // connections from sitting idle until the OS gives up.
 function broadcastCompetitionsKeepalive() {
+    console.log(competitionsListeners.map((c) => `${c.ognPeer}:${c.readyState}/${c.readyState === WebSocket.OPEN}`).slice(0, 20));
     competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
     if (!competitionsListeners.length) return;
 
@@ -3185,7 +3226,11 @@ function setupWebSocketServer(server) {
         // Reserved /all channel: landing-page listener gets a CompetitionsList
         // snapshot and is added to the dedicated competitionsListeners array.
         // It does not subscribe to any per-class scoring/track stream.
-        if (channelName === COMPETITIONS_CHANNEL) {
+        // /all/<group> restricts the feed to comps with a matching compgroup;
+        // bare /all (ognGroup = null) sees every competition.
+        if (channelName === COMPETITIONS_CHANNEL || channelName.startsWith(COMPETITIONS_CHANNEL + '/')) {
+            ws.ognGroup = channelName === COMPETITIONS_CHANNEL ? null : channelName.slice(COMPETITIONS_CHANNEL.length + 1).toLowerCase() || null;
+            console.log(`/all listener connected: channel='${channelName}' group=${ws.ognGroup === null ? '(none — sees all comps)' : `'${ws.ognGroup}'`} peer=${ws.ognPeer}`);
             ws.sendBinary = (data: Uint8Array) => {
                 if (ws.readyState === WebSocket.OPEN && ws.isAlive) {
                     return ws.send(data, {binary: true});

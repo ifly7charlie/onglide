@@ -41,6 +41,7 @@ CREATE TABLE `compdayshelper` (
 DROP TABLE IF EXISTS `competition`;
 CREATE TABLE `competition` (
   `compid` varchar(40) NOT NULL COMMENT 'url-safe competition identifier, used in routing',
+  `compgroup` varchar(40) DEFAULT NULL COMMENT 'optional group key; restricts visibility on the /all/<group> feed',
   `name` varchar(60) DEFAULT NULL COMMENT 'Competition name',
   `sitename` varchar(100) DEFAULT NULL COMMENT 'Site name',
 
