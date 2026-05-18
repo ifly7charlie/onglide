@@ -60,6 +60,7 @@ let db: ReturnType<typeof mysql>;
 
 import {sortedIndexBy, sortedIndexNumber} from '../lib/util/binarySearch';
 import {roundedUint32, safeEncode} from '../lib/util/proto';
+import {computeCompStatus} from '../lib/util/computeCompStatus';
 import {scoreChanged} from '../lib/flightprocessing/scoreChanged';
 import equal from 'fast-deep-equal';
 
@@ -2063,154 +2064,64 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
         }
         ch.pilotCount = count;
     }
+}
 
-    if (!readOnly) {
-        // Group all scored pilots by class and note how many of those have trackers —
-        // sparse tracker coverage can't justify a "landed" verdict for the whole class.
-        const trackedByClass = new Map<ClassName, CTrackerRow[]>();
-        const totalScoredByClass = new Map<ClassName, number>();
-        for (const t of cTrackers) {
-            // Include pilots the official scorer has finalised (F/H) as well
-            // as those still being scored ('S'). Excluding F/H meant that a
-            // class where every tracked pilot was already finalised dropped
-            // out of the per-class loop entirely, leaving compstatus stuck.
-            totalScoredByClass.set(t.className, (totalScoredByClass.get(t.className) || 0) + 1);
-            if (t.dbTrackerId && t.dbTrackerId !== 'unknown' && t.dbTrackerId !== 'blocked') {
-                const list = trackedByClass.get(t.className) || [];
-                list.push(t);
-                trackedByClass.set(t.className, list);
-            }
-        }
-        // Derive the highest applicable compstatus state for each class from the live
-        // scoring state. Forward-only: each target only overwrites earlier states, so
-        // a single pilot returning to L doesn't drag a class back from S/H.
-        for (const [className, scored] of trackedByClass) {
-            if (scored.length === 0) continue;
-            const channel = channels[channelName(className, datecode)];
-            const totalScored = totalScoredByClass.get(className) || 0;
-            const trackerCoverage = totalScored > 0 ? scored.length / totalScored : 0;
+// Re-derive a class's compstatus from live scoring state and push any forward
+// transition to the DB. Driven by live scoring events — invoked from sendScore
+// on the _live marker and on steady-state live per-pilot scores (never during a
+// rescore/replay). The state-machine logic lives in lib/util/computeCompStatus;
+// this wrapper assembles the inputs and owns the DB write + channel mirror.
+function updateCompStatus(channel: Channel) {
+    if (readOnly) return;
 
-            console.log(className, 'hmm', JSON.stringify(channel?.allScores));
+    const ctx = contexts[channel.compid];
 
-            // Strict per-pilot home check. Every tracked pilot must satisfy
-            // one of:
-            //   - officially finalised by the scorer (scoredStatus F or H), OR
-            //   - has utcStart populated AND live flightStatus is
-            //     Landed / Home / Finished.
-            // APRS evidence on its own (Grid, Stationary, stale tracking) no
-            // longer counts — those heuristics produced false positives, so
-            // we'd rather lag reality than declare H prematurely.
-            const isTerminalScored = (p: CTrackerRow) => p.scoredStatus === 'F' || p.scoredStatus === 'H';
-            const isHome = (p: CTrackerRow) => {
-                if (isTerminalScored(p)) return true;
-                const score = channel?.allScores[p.compno];
-                if (!score) {
-                    console.log('hmmm', p.compno);
-                    return false;
-                }
-                //if ((score.utcStart ?? 0) === 0) return false;
-                const fs = score.flightStatus;
-                return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
+    // This class's pilots from the global gliders dict. Blocked pilots are
+    // excluded outright — they can never produce OGN data (consent/DDB block),
+    // so counting them in totalScored would permanently cap trackerCoverage and
+    // stop a class stuck at B/G ever reaching H/F on OGN evidence alone.
+    // totalScored is then the trackable field; the scored subset is pilots
+    // actually loaded into the scoring worker. Excludes dbTrackerId 'unknown'
+    // (no FLARM match -> no points, would never read as home and so would wedge
+    // the class out of 'H').
+    const classGliders = Object.values(gliders).filter((g) => g.compid === channel.compid && g.className === channel.className && g.datecode === channel.datecode && !g.blocked);
+    const totalScored = classGliders.length;
+    const scored = classGliders
+        .filter((g) => g.scoringConfigured && g.dbTrackerId !== 'unknown')
+        .map((g) => {
+            const score = channel.allScores[g.compno];
+            return {
+                compno: g.compno,
+                scoredStatus: g.scoredStatus,
+                flightStatus: score?.flightStatus,
+                started: (score?.utcStart ?? 0) !== 0,
+                distanceRemaining: score?.actual?.distanceRemaining ?? 0,
+                taskDistance: score?.actual?.taskDistance ?? 0,
+                taskSpeed: score?.actual?.taskSpeed ?? 0,
+                t: score?.t as Epoch
             };
-            const homeCount = scored.filter(isHome).length;
-            const allLanded = scored.length > 0 && homeCount === scored.length;
-            const startedCount = scored.filter((p) => (channel?.allScores[p.compno]?.utcStart ?? 0) > 0).length;
-            const airborneCount = scored.filter((p) => {
-                const fs = channel?.allScores[p.compno]?.flightStatus;
-                return fs !== undefined && fs >= PositionStatus.Airborne;
-            }).length;
-            const griddedCount = scored.filter((p) => channel?.allScores[p.compno]?.flightStatus === PositionStatus.Grid).length;
-            // 'finishing' = at least one still-flying, started pilot whose
-            // distanceRemaining / taskSpeed puts them within FINISHING_ETA_MINUTES of home,
-            // AND who is past the halfway point of the task — otherwise a pilot near home
-            // on the first leg (or a short out-and-back AAT sample) would flip the class to F.
-            const finishingCount = scored.filter((p) => {
-                const score = channel?.allScores[p.compno];
-                if (!score) return false;
-                const fs = score.flightStatus;
-                if (fs === PositionStatus.Finished || fs === PositionStatus.Home || fs === PositionStatus.Landed) return false;
-                if ((score.utcStart ?? 0) === 0) return false;
-                const distRemaining = score.actual?.distanceRemaining ?? 0;
-                const distFlown = score.actual?.taskDistance ?? 0;
-                const speed = score.actual?.taskSpeed ?? 0;
-                if (distRemaining <= 0 || speed <= 0) return false;
-                if (distFlown <= distRemaining) return false;
-                return (distRemaining / speed) * 60 < FINISHING_ETA_MINUTES;
-            }).length;
+        });
+    if (scored.length === 0) return;
 
-            let nextStatus: string | null = null;
-            let allowFrom: string[] = [];
-            let reason = '';
-            // Only promote to H when we can see most of the field — otherwise a class
-            // with 5% tracker coverage would land as soon as those 5% touched down.
-            // L and S can overwrite H so a class that all-landed and then relaunches
-            // (weather hold, regrid, fresh launch) climbs back through the states.
-            // If every tracked pilot has been finalised by the official scorer
-            // (F/H), the class is unambiguously done — widen allowFrom so we
-            // can recover from a class that never progressed past B/G in the
-            // live loop (sparse tracker coverage, late OGN pickup, etc.).
-            const allOfficiallyFinalised = scored.length > 0 && scored.every(isTerminalScored);
-            // OGN evidence on its own can drive the widening once we've got
-            // decent tracker coverage — we don't need to wait for the
-            // official scorer to finalise everyone before recovering a
-            // class stuck at B/G.
-            const ognDeterminedHome = allLanded && trackerCoverage >= HOME_OGN_COVERAGE;
+    const result = computeCompStatus(scored, totalScored, channel.className, ctx.getNow());
+    if (!result) return;
 
-            console.log(
-                `${className}: allLanded ${allLanded}, trackerCoverage ${trackerCoverage}, allOfficiallyFinalised ${allOfficiallyFinalised}, ognDeterminedHome ${ognDeterminedHome}`,
-                `finishingCount: ${finishingCount}, startedCount ${startedCount}, scored.length ${scored.length}, airborneCount: ${airborneCount}, griddedCount: ${griddedCount} homeCount ${homeCount}`
-            );
-
-            if (allLanded && trackerCoverage >= 0.1) {
-                nextStatus = 'H';
-                allowFrom = allOfficiallyFinalised || ognDeterminedHome ? ['B', 'G', 'L', 'S', 'F'] : ['L', 'S', 'F'];
-                const homeBy = allOfficiallyFinalised ? ' (officially finalised)' : ognDeterminedHome ? ' (OGN coverage)' : '';
-                reason = `${homeCount}/${scored.length} of ${totalScored} tracked gliders home${homeBy}`;
-            } else if (finishingCount > 0) {
-                nextStatus = 'F';
-                allowFrom = ['L', 'S'];
-                reason = `${finishingCount}/${scored.length} tracked gliders finishing (< ${FINISHING_ETA_MINUTES} min to home)`;
-            } else if (startedCount / scored.length > 0.1) {
-                nextStatus = 'S';
-                allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'L', 'H'];
-                reason = `${startedCount}/${scored.length} tracked gliders started`;
-            } else if (airborneCount > Math.max(LAUNCHING_TRACKED_FRACTION * scored.length, LAUNCHING_TOTAL_FRACTION * totalScored)) {
-                // Require enough of the field to be airborne before declaring 'launching'.
-                // One ferry/training/test flight on a non-task day shouldn't flip the
-                // whole class to 'L' — and in that situation `resetStaleCompStatus`
-                // can't undo it because the row's datecode is already today's. Compare
-                // against both the tracked subset (so a class with 5 trackers needs
-                // ≥2 airborne, not just 1) and the full field (so a 40-pilot class
-                // doesn't go 'L' on the back of 1 tracked pilot).
-                nextStatus = 'L';
-                allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'H'];
-                reason = `${airborneCount}/${scored.length} tracked gliders airborne (of ${totalScored} total)`;
-            } else if (griddedCount > 0) {
-                nextStatus = 'G';
-                allowFrom = [':', '?', 'P', 'B', 'X'];
-                reason = `${griddedCount}/${scored.length} tracked gliders on grid`;
+    const placeholders = result.allowFrom.map(() => '?').join(', ');
+    db.query(
+        `UPDATE compstatus SET status = ${result.status}
+          WHERE class = ${channel.className} AND status IN (${placeholders}) AND datecode = ${channel.datecode}`
+    )
+        .then((r: any) => {
+            if (r?.affectedRows) {
+                console.log(`compstatus -> ${result.status} for ${channel.className}/${channel.datecode}: ${result.reason}`);
+                // Mirror the live status onto the channel so the
+                // /all feed reflects the change without a tick.
+                channel.compStatus = result.status;
+                channel.statusDatecode = channel.datecode;
+                broadcastCompetitionsDelta([channel.compid], []);
             }
-
-            if (nextStatus) {
-                const placeholders = allowFrom.map(() => '?').join(', ');
-                db.query(`UPDATE compstatus SET status = ? WHERE class = ? AND status IN (${placeholders})`, [nextStatus, className, ...allowFrom])
-                    .then((r: any) => {
-                        if (r?.affectedRows) {
-                            console.log(`compstatus -> ${nextStatus} for ${className}: ${reason}`);
-                            // Mirror the live status onto the channel so the
-                            // /all feed reflects the change without a tick.
-                            const ch = channels[channelName(className, datecode)];
-                            if (ch) {
-                                ch.compStatus = nextStatus!;
-                                ch.statusDatecode = datecode;
-                            }
-                            broadcastCompetitionsDelta([competition.compid], []);
-                        }
-                    })
-                    .catch((e: any) => console.log(`compstatus ${nextStatus} update failed:`, e));
-            }
-        }
-    }
+        })
+        .catch((e: any) => console.log(`compstatus ${result.status}/${channel.datecode} update failed:`, e));
 }
 
 async function finaliseScoreId(competition: CompetitionContext) {
@@ -2484,6 +2395,8 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         }
         channel.liveScoreId = scoreId;
         channel.webPathBaseTime = 0 as Epoch; // we rescored so probably all the tracks have changed
+        // _live is the "live scoring is ready" signal — re-derive compstatus now.
+        updateCompStatus(channel);
         sendIdentifiersToAll(channel, true);
         console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
         await primeAndBroadcast(channel, `_live ${channel.displayName}/${channel.datecode}`);
@@ -2579,6 +2492,13 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                     ? {...score, optimalGrid: prior.optimalGrid}
                     : score;
             channel.allScores[compno] = stored;
+
+            // Re-derive compstatus from genuine live scoring only — skip while a
+            // rescore is in flight (those scores carry the proposed scoreId, not
+            // liveScoreId, and channel.scoreId !== channel.liveScoreId).
+            if (channel.scoreId === channel.liveScoreId && scoreId === channel.liveScoreId) {
+                updateCompStatus(channel);
+            }
         }
     }
 
@@ -2897,6 +2817,7 @@ function broadcastCompetitionsSnapshot(client: OgnWebSocket) {
     const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}}, 'competitions full snapshot');
     if (msg && client.readyState === WebSocket.OPEN) {
         client.send(msg, {binary: true});
+        console.log('broadcastCompetitionsSnapshot', client.ognPeer);
     }
 }
 
