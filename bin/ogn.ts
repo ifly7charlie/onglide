@@ -281,10 +281,19 @@ let competitionsListeners: OgnWebSocket[] = [];
 // staring at an empty "can't find competition" overlay.
 let shuttingDown = false;
 
-// Last-broadcast cache, keyed by compid. Used by broadcastCompetitionsDelta
-// to suppress no-op frames: a tick that rebuilds an identical summary skips
-// the wire altogether. Stores the encoded CompetitionSummary bytes.
-const lastCompetitionSummaryBytes = new Map<string, string>();
+// Maintained set of current per-comp CompetitionSummary objects, keyed by
+// compid. broadcastCompetitionsDelta rebuilds an entry whenever a comp
+// changes; the /all snapshot sent to a joining client is built straight from
+// this map (see encodeCompetitionsSnapshot) instead of re-walking contexts on
+// every connect. It also drives no-op suppression — an identical rebuilt
+// summary never reaches the wire.
+const competitionSummaries = new Map<string, CompetitionSummary>();
+
+// Encoded /all snapshot, keyed by listener group ('' = bare /all). Built on
+// first connect for a group, then rebuilt in place by broadcastCompetitionsDelta
+// on every comp change — so a joining client always reads a ready, current
+// frame and a burst of connects right after a delta never each re-encode.
+const competitionsSnapshotCache = new Map<string, Uint8Array | null>();
 
 // Comps that exist in the DB but haven't started yet (and have no task wired
 // up). They get no scoring/tracker infrastructure, but the landing-page
@@ -2627,6 +2636,15 @@ async function refreshUpcomingCompetitions(rows: any[]) {
     }
 }
 
+// Clamp a value into a protobuf uint32 wire slot. @bufbuild/protobuf rejects
+// NaN / negative / fractional input synchronously, which would fail the encode
+// of the whole CompetitionsList — so summary numerics are coerced defensively.
+const clampUint32 = (v: number | undefined | null): number => roundedUint32(v) ?? 0;
+
+// As clampUint32 but for a signed int32 slot (tzoffset is legitimately
+// negative for west-of-UTC sites, which roundedUint32 would reject).
+const clampInt32 = (v: number | undefined | null): number => (typeof v === 'number' && isFinite(v) ? Math.round(v) : 0);
+
 // Build a CompetitionSummary for one comp from in-memory state. Mirrors
 // the aggregation that pages/api/competitions.ts used to do in JS, but
 // reads compstatus mirrors directly off the per-class Channel objects so
@@ -2652,14 +2670,14 @@ function buildUpcomingSummary(compid: string): CompetitionSummary | null {
         end: meta.end,
         countrycode: meta.countrycode,
         tz: meta.tz,
-        tzoffset: meta.tzoffset,
+        tzoffset: clampInt32(meta.tzoffset),
         mainwebsite: meta.mainwebsite ?? undefined,
         urllogo: meta.urllogo ?? undefined,
         classCount: classes.length,
         classStatusesDiffer: false,
         displayStatus: 'upcoming',
         classes,
-        officialDelay: meta.officialDelay
+        officialDelay: clampUint32(meta.officialDelay)
     };
 }
 
@@ -2732,7 +2750,7 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
             class: ch.className,
             classname: ch.classname || ch.className,
             status: ch.compStatus,
-            pilotCount: ch.pilotCount,
+            pilotCount: clampUint32(ch.pilotCount),
             statusDatecode: sdc ?? undefined,
             displayStatus,
             taskRules,
@@ -2788,14 +2806,14 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         end: sum.end,
         countrycode: sum.countrycode,
         tz: sum.tz,
-        tzoffset: sum.tzoffset,
+        tzoffset: clampInt32(sum.tzoffset),
         mainwebsite: sum.mainwebsite ?? undefined,
         urllogo: sum.urllogo ?? undefined,
         classCount: classes.length,
         classStatusesDiffer,
         displayStatus,
         classes,
-        officialDelay: sum.officialDelay
+        officialDelay: clampUint32(sum.officialDelay)
     };
 }
 
@@ -2812,77 +2830,98 @@ function listenerWantsComp(listenerGroup: string | null | undefined, compGroup: 
     return (compGroup ?? '').toLowerCase() === listenerGroup;
 }
 
-// Send the full snapshot to a single client (used on connect). Always
-// `full=true` so the client can populate its cache from cold. A grouped
-// listener (/all/<group>) only receives comps in its group; the fingerprint
-// cache is still seeded for every comp since it is global per-comp.
-function broadcastCompetitionsSnapshot(client: OgnWebSocket) {
+// Encode a CompetitionsList frame. A single comp carrying a value protobuf
+// rejects would otherwise fail the whole batch and take the entire /all feed
+// off the wire — so on a batch failure we probe each comp individually, drop
+// and log the offender(s), and re-encode the survivors. With the summary
+// numerics clamped at build time this fallback should never run; it is the
+// last line of defence. Returns null only if even the cleaned frame fails.
+function encodeCompetitionsList(summaries: CompetitionSummary[], removed: string[], full: boolean, context: string): Uint8Array | null {
+    const generatedAt = Math.floor(getNow());
+    const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: summaries, generatedAt, full, removed}}, context);
+    if (msg) return msg;
+    const good: CompetitionSummary[] = [];
+    for (const s of summaries) {
+        const probe = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: [s], generatedAt, full: false, removed: []}}, `${context} probe`);
+        if (probe) good.push(s);
+        else console.error(`competitions: dropping comp ${s.compid} (${s.name}) from ${context} — summary failed to encode, fix upstream data`);
+    }
+    return safeEncode(OnglideWebSocketMessage, {competitions: {competitions: good, generatedAt, full, removed}}, `${context} recovered`);
+}
+
+// Build the encoded full snapshot for one listener group from the maintained
+// competitionSummaries map. A grouped listener (/all/<group>) sees only comps
+// in its group; bare /all (group === null) sees every comp.
+function encodeCompetitionsSnapshot(group: string | null): Uint8Array | null {
     const summaries: CompetitionSummary[] = [];
-    for (const ctx of Object.values(contexts)) {
-        const s = buildCompetitionSummary(ctx);
-        if (s) {
-            // Seed the cache so the next delta correctly suppresses no-ops.
-            lastCompetitionSummaryBytes.set(ctx.compid, summaryFingerprint(s));
-            if (listenerWantsComp(client.ognGroup, ctx.summary.compgroup)) summaries.push(s);
-        }
+    for (const [compid, s] of competitionSummaries) {
+        if (listenerWantsComp(group, groupForCompid(compid))) summaries.push(s);
     }
-    for (const compid of Object.keys(upcomingComps)) {
-        const s = buildUpcomingSummary(compid);
-        if (s) {
-            lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
-            if (listenerWantsComp(client.ognGroup, upcomingComps[compid].compgroup)) summaries.push(s);
-        }
+    return encodeCompetitionsList(summaries, [], true, `competitions snapshot ${group || 'all'}`);
+}
+
+// Send the current full snapshot to a joining client. The encoded frame is
+// cached per group and reused for every later joiner — comps change rarely,
+// and broadcastCompetitionsDelta keeps the cache rebuilt — so a connect never
+// re-walks or re-encodes the list.
+function sendCompetitionsSnapshot(client: OgnWebSocket) {
+    const groupKey = client.ognGroup ?? '';
+    let msg = competitionsSnapshotCache.get(groupKey);
+    if (msg === undefined) {
+        msg = encodeCompetitionsSnapshot(client.ognGroup);
+        competitionsSnapshotCache.set(groupKey, msg);
     }
-    const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}}, 'competitions full snapshot');
     if (msg && client.readyState === WebSocket.OPEN) {
         client.send(msg, {binary: true});
-        console.log('broadcastCompetitionsSnapshot', client.ognPeer);
+        console.log('sendCompetitionsSnapshot', client.ognPeer, groupKey || 'all');
     }
 }
 
-// Broadcast a delta to every /all listener. Only comps whose summary has
-// actually changed (vs lastCompetitionSummaryBytes) end up on the wire.
-// `removedCompids` is for comps that have just dropped off the active
-// list (end date passed).
+// Rebuild the affected per-comp summaries, then broadcast a delta to every
+// /all listener. A comp whose rebuilt summary is byte-identical to the one
+// already held is skipped — a no-op tick never reaches the wire. Any real
+// change also rebuilds every cached snapshot in place so the next joiner
+// reads a current frame without re-encoding. `removedCompids` covers comps
+// that have dropped off the live list (end date passed, or became active).
 function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: string[]) {
-    if (!competitionsListeners.length) {
-        // Still update the cache so a future client sees correct deltas
-        for (const compid of changedCompids) {
-            const ctx = contexts[compid];
-            const s = ctx ? buildCompetitionSummary(ctx) : buildUpcomingSummary(compid);
-            if (s) lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
-        }
-        for (const compid of removedCompids) lastCompetitionSummaryBytes.delete(compid);
-        return;
-    }
-
     const dirty: CompetitionSummary[] = [];
     for (const compid of changedCompids) {
         const ctx = contexts[compid];
         const s = ctx ? buildCompetitionSummary(ctx) : buildUpcomingSummary(compid);
         if (!s) continue;
-        const fp = summaryFingerprint(s);
-        if (lastCompetitionSummaryBytes.get(compid) === fp) continue;
-        lastCompetitionSummaryBytes.set(compid, fp);
+        const prev = competitionSummaries.get(compid);
+        if (prev && summaryFingerprint(prev) === summaryFingerprint(s)) continue;
+        competitionSummaries.set(compid, s);
         dirty.push(s);
     }
-    for (const compid of removedCompids) lastCompetitionSummaryBytes.delete(compid);
+    // Only treat a removal as real if the comp was actually being published —
+    // a removed compid the client never had is a no-op not worth a frame.
+    const removed: string[] = [];
+    for (const compid of removedCompids) {
+        if (competitionSummaries.delete(compid)) removed.push(compid);
+    }
 
-    if (dirty.length === 0 && removedCompids.length === 0) return;
+    if (dirty.length === 0 && removed.length === 0) return;
 
+    // The maintained set changed — rebuild every cached snapshot in place so a
+    // joining client (and a post-delta connect burst) reads a ready frame.
+    for (const groupKey of competitionsSnapshotCache.keys()) {
+        competitionsSnapshotCache.set(groupKey, encodeCompetitionsSnapshot(groupKey || null));
+    }
+
+    if (!competitionsListeners.length) return;
     competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
 
     // Partition listeners by group and encode one message per distinct group:
     // a grouped listener only receives dirty comps in its group. `removed` is
     // sent to every group unchanged — a removed compid the client never had
     // is a harmless no-op, and the comp's group is no longer resolvable.
-    const generatedAt = Math.floor(getNow());
     const groups = new Set(competitionsListeners.map((c) => c.ognGroup ?? ''));
     for (const group of groups) {
         const listenerGroup = group || null;
         const groupDirty = listenerGroup ? dirty.filter((s) => listenerWantsComp(listenerGroup, groupForCompid(s.compid))) : dirty;
-        if (groupDirty.length === 0 && removedCompids.length === 0) continue;
-        const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: groupDirty, generatedAt, full: false, removed: removedCompids}}, 'competitions delta');
+        if (groupDirty.length === 0 && removed.length === 0) continue;
+        const msg = encodeCompetitionsList(groupDirty, removed, false, `competitions delta ${group || 'all'}`);
         if (!msg) continue;
         competitionsListeners.filter((c) => (c.ognGroup ?? '') === group).forEach((client) => client.send(msg, {binary: true}));
     }
@@ -3235,7 +3274,7 @@ function setupWebSocketServer(server) {
                 ws.isClosed = true;
             });
             ws.on('error', console.error);
-            broadcastCompetitionsSnapshot(ws);
+            sendCompetitionsSnapshot(ws);
             return;
         }
 
