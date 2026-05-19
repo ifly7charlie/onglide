@@ -152,7 +152,7 @@ async function updateTrackers(compno: string, trackerIds: string, feedType: 'rob
     }
     await mysql_db.query(escape`
         INSERT INTO
-            trackerhistory
+            trackerhistory (compno, changed, flarmid, greg, launchtime, method)
         VALUES
             (
                 ${compno},

@@ -2819,32 +2819,25 @@ function listenerWantsComp(listenerGroup: string | null | undefined, compGroup: 
 // cache is still seeded for every comp since it is global per-comp.
 function broadcastCompetitionsSnapshot(client: OgnWebSocket) {
     const summaries: CompetitionSummary[] = [];
-    let considered = 0;
     for (const ctx of Object.values(contexts)) {
         const s = buildCompetitionSummary(ctx);
         if (s) {
-            considered++;
             // Seed the cache so the next delta correctly suppresses no-ops.
             lastCompetitionSummaryBytes.set(ctx.compid, summaryFingerprint(s));
-            const wanted = listenerWantsComp(client.ognGroup, ctx.summary.compgroup);
-            console.log(`  snapshot[${client.ognGroup ?? 'all'}] active ${ctx.compid} compgroup=${ctx.summary.compgroup ?? 'null'} -> ${wanted ? 'INCLUDE' : 'skip'}`);
-            if (wanted) summaries.push(s);
+            if (listenerWantsComp(client.ognGroup, ctx.summary.compgroup)) summaries.push(s);
         }
     }
     for (const compid of Object.keys(upcomingComps)) {
         const s = buildUpcomingSummary(compid);
         if (s) {
-            considered++;
             lastCompetitionSummaryBytes.set(compid, summaryFingerprint(s));
-            const wanted = listenerWantsComp(client.ognGroup, upcomingComps[compid].compgroup);
-            console.log(`  snapshot[${client.ognGroup ?? 'all'}] upcoming ${compid} compgroup=${upcomingComps[compid].compgroup ?? 'null'} -> ${wanted ? 'INCLUDE' : 'skip'}`);
-            if (wanted) summaries.push(s);
+            if (listenerWantsComp(client.ognGroup, upcomingComps[compid].compgroup)) summaries.push(s);
         }
     }
     const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: summaries, generatedAt: Math.floor(getNow()), full: true, removed: []}}, 'competitions full snapshot');
     if (msg && client.readyState === WebSocket.OPEN) {
         client.send(msg, {binary: true});
-        console.log(`broadcastCompetitionsSnapshot peer=${client.ognPeer} group=${client.ognGroup ?? '(none)'} sent ${summaries.length}/${considered} comps`);
+        console.log('broadcastCompetitionsSnapshot', client.ognPeer);
     }
 }
 
@@ -2892,9 +2885,7 @@ function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: st
         if (groupDirty.length === 0 && removedCompids.length === 0) continue;
         const msg = safeEncode(OnglideWebSocketMessage, {competitions: {competitions: groupDirty, generatedAt, full: false, removed: removedCompids}}, 'competitions delta');
         if (!msg) continue;
-        const recipients = competitionsListeners.filter((c) => (c.ognGroup ?? '') === group);
-        console.log(`broadcastCompetitionsDelta group=${listenerGroup ?? '(none)'}: ${groupDirty.length}/${dirty.length} dirty + ${removedCompids.length} removed -> ${recipients.length} listener(s)`);
-        recipients.forEach((client) => client.send(msg, {binary: true}));
+        competitionsListeners.filter((c) => (c.ognGroup ?? '') === group).forEach((client) => client.send(msg, {binary: true}));
     }
 }
 
@@ -3230,7 +3221,6 @@ function setupWebSocketServer(server) {
         // bare /all (ognGroup = null) sees every competition.
         if (channelName === COMPETITIONS_CHANNEL || channelName.startsWith(COMPETITIONS_CHANNEL + '/')) {
             ws.ognGroup = channelName === COMPETITIONS_CHANNEL ? null : channelName.slice(COMPETITIONS_CHANNEL.length + 1).toLowerCase() || null;
-            console.log(`/all listener connected: channel='${channelName}' group=${ws.ognGroup === null ? '(none — sees all comps)' : `'${ws.ognGroup}'`} peer=${ws.ognPeer}`);
             ws.sendBinary = (data: Uint8Array) => {
                 if (ws.readyState === WebSocket.OPEN && ws.isAlive) {
                     return ws.send(data, {binary: true});

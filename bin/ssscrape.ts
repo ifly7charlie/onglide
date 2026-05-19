@@ -139,7 +139,7 @@ async function roboControl(): Promise<void> {
                     }
                     mysql_db.query(escape`
                         INSERT INTO
-                            trackerhistory
+                            trackerhistory (compno, changed, flarmid, greg, launchtime, method)
                         VALUES
                             (
                                 ${p.cn},
