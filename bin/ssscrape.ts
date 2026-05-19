@@ -38,6 +38,7 @@ import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape'
 import {SgpSource} from '../lib/scoring/sources/sgp';
 import type {SourceCtx} from '../lib/scoring/source';
 import {regeocodeMissingCompetitions} from '../lib/scoring/shared/contestLocation';
+import {fetchRobocontrol} from '../lib/scoring/shared/robocontrol';
 
 const mysql = require('serverless-mysql');
 const dotenv = require('dotenv');
@@ -71,89 +72,6 @@ function deriveCompIdFromUrl(urlString: string): string | null {
     } catch {
         return null;
     }
-}
-
-//
-// roboControl — independent side-channel for tracker-id updates from
-// the robocontrol HTTP feed. Not part of any scoring source so it stays
-// here as its own loop. Lifted unchanged from the old ssscrape.ts.
-//
-async function roboControl(): Promise<void> {
-    let url: string | null = null;
-    let overwrite = false;
-    if (process.env.ROBOCONTROL_URL) {
-        url = process.env.ROBOCONTROL_URL;
-    }
-
-    if (!url) {
-        const row = (
-            await mysql_db.query(escape`
-                SELECT
-                    url,
-                    overwrite
-                FROM
-                    scoringsource
-                WHERE
-                    type = 'robocontrol'
-            `)
-        )[0] ?? {url: null, overwrite: true};
-        url = row.url;
-        overwrite = row.overwrite ?? true;
-    }
-
-    if (!url) return;
-
-    console.log(`robocontrol url ${url} configured`);
-
-    fetch(url)
-        .then((res) => {
-            if (res.status != 200) {
-                console.log(` ${url}: ${res.status}`);
-                return {};
-            }
-            return res.json();
-        })
-        .then((data: any) => {
-            let location = data;
-            if (data?.message) location = data.message;
-            for (const p of location || []) {
-                if (p.flarm?.length) {
-                    console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    if (overwrite) {
-                        mysql_db.query(escape`
-                            UPDATE tracker
-                            SET
-                                trackerid = ${p.flarm.join(',')}
-                            WHERE
-                                compno = ${p.cn}
-                        `);
-                    } else {
-                        mysql_db.query(escape`
-                            UPDATE tracker
-                            SET
-                                trackerid = ${p.flarm.join(',')}
-                            WHERE
-                                compno = ${p.cn}
-                                AND trackerid = 'unknown'
-                        `);
-                    }
-                    mysql_db.query(escape`
-                        INSERT INTO
-                            trackerhistory (compno, changed, flarmid, greg, launchtime, method)
-                        VALUES
-                            (
-                                ${p.cn},
-                                now(),
-                                ${p.flarm.join(',')},
-                                '',
-                                NULL,
-                                'robocontrol'
-                            )
-                    `);
-                }
-            }
-        })
-        .catch((e) => console.log('robocontrol fetch failed:', e));
 }
 
 async function main(): Promise<void> {
@@ -300,7 +218,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    // Daemon mode: scheduler heartbeat + roboControl loop.
+    // Daemon mode: scheduler heartbeat + robocontrol loop.
     console.log('Background scoring scraper enabled');
 
     // One-shot sweep at boot: any competition rows whose lt/lg are still
@@ -313,9 +231,9 @@ async function main(): Promise<void> {
         registry
     }).catch((e) => console.log('runScheduler failed:', e));
 
-    roboControl();
+    fetchRobocontrol(mysql_db, (msg, ...args) => console.log(msg, ...args));
     setInterval(() => {
-        roboControl();
+        fetchRobocontrol(mysql_db, (msg, ...args) => console.log(msg, ...args));
     }, 3 * 60 * 60 * 1000);
 }
 

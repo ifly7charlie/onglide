@@ -22,6 +22,7 @@ import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchland
 import {toDateCode} from '../lib/datecode';
 import {makeClassId, normalizeClassNameForDisplay} from '../lib/classid';
 import {updateTracker} from '../lib/scoring/shared/trackers';
+import {fetchRobocontrol} from '../lib/scoring/shared/robocontrol';
 
 // DB access
 //const db = require('../db')
@@ -62,7 +63,7 @@ async function main() {
 
     // Now get data from soaringspot
     soaringSpotAll();
-    roboControl();
+    fetchRobocontrol(mysql_db, console.log);
 
     console.log('Background api download from soaring spot enabled');
     setInterval(
@@ -73,103 +74,13 @@ async function main() {
     );
     setInterval(
         function () {
-            roboControl();
+            fetchRobocontrol(mysql_db, console.log);
         },
         3 * 60 * 60 * 1000
     );
 }
 
 main();
-
-async function roboControl() {
-    // robocontrol is a competition-scoped feed: each scoringsource row
-    // carries the compid it belongs to. Allow an env override for
-    // dev/testing, which then needs COMP_ID to know which competition the
-    // feed describes.
-    let sources: {compid: string; url: string}[] = [];
-    if (process.env.ROBOCONTROL_URL) {
-        sources = [{compid: process.env.COMP_ID ?? '', url: process.env.ROBOCONTROL_URL}];
-    } else {
-        const rows = (await mysql_db.query(escape`
-            SELECT
-                compid,
-                url
-            FROM
-                scoringsource
-            WHERE
-                type = 'robocontrol'
-        `)) as {compid: string; url: string}[];
-        sources = (rows ?? []).filter((r) => r.url);
-    }
-
-    for (const source of sources) {
-        if (!source.compid) {
-            console.log(`robocontrol: skipping ${source.url} — no compid (set COMP_ID for env mode)`);
-            continue;
-        }
-        try {
-            await roboControlOne(source.compid, source.url);
-        } catch (e) {
-            console.log(`robocontrol failed for compid=${source.compid}:`, e);
-        }
-    }
-}
-
-async function roboControlOne(compid: string, robocontrol_url: string) {
-    console.log(`robocontrol url ${robocontrol_url} configured for compid=${compid}`);
-
-    await fetch(robocontrol_url)
-        .then((res) => {
-            if (res.status != 200) {
-                console.log(` ${robocontrol_url}: ${res}`);
-                return {};
-            } else {
-                return res.json();
-            }
-        })
-        .then(async (data: any[] | any) => {
-            let location = data;
-            if (data?.message) {
-                location = data.message;
-            }
-            for (const p of location || []) {
-                if (p.flarm?.length) {
-                    // The feed only carries a CN, not a class. A pilot is
-                    // unique within a competition, so resolve the class
-                    // via compid + compno.
-                    const classid = await classIdForCompno(compid, p.cn);
-                    if (!classid) {
-                        console.log(`robocontrol: no pilot "${p.cn}" in compid=${compid}, skipping`);
-                        continue;
-                    }
-                    await updateTracker(mysql_db, console.log, classid, p.cn, p.flarm.join(','), 'robocontrol');
-                }
-            }
-        });
-}
-
-//
-// Resolve a competition number to its globally-unique classid within one
-// competition. Returns null when the pilot isn't registered.
-//
-async function classIdForCompno(compid: string, compno: string): Promise<string | null> {
-    if (!compid || !compno) return null;
-    const row = (
-        await mysql_db.query(escape`
-            SELECT
-                p.class
-            FROM
-                pilots p
-                JOIN classes c ON c.class = p.class
-            WHERE
-                c.compid = ${compid}
-                AND p.compno = ${compno}
-            LIMIT
-                1
-        `)
-    )?.[0];
-    return row?.class ?? null;
-}
 
 //
 // Iterate every soaringspotkey row in scoringsource and process each competition.
@@ -933,10 +844,37 @@ async function process_day_task(day, classid, classname, keys) {
                     console.log(tp.point_index, ':theta=', theta, ',radbear=', radbear, ',hi=', hi, ',dist=', leglength, ',wdirrad', WdirRAD);
                 }
 
+                // Observation-zone geometry.
+                const ozLine = !!tp.oz_line;
+                let r1 = tp.oz_radius1 / 1000;
+                let r2 = tp.oz_radius2 / 1000;
+                let a1 = ozLine ? 90 : toDeg(tp.oz_angle1);
+                // SoaringSpot/SeeYou encode "full inner cylinder" as
+                // oz_angle2 = π/2 (apex 180°); the renderer treats
+                // a2 = 180 as the full-circle marker.
+                let a2 = toDeg(tp.oz_angle2) >= 90 - 1e-6 ? 180 : toDeg(tp.oz_angle2);
+
+                // An observation zone with no radius is degenerate — there is
+                // nothing to cross or measure distance to, which crashes the
+                // scoring chain. Fall back to a sane default: a 3km line, or a
+                // 500m barrel for a sector.
+                if (!(r1 > 0) && !(r2 > 0)) {
+                    if (ozLine) {
+                        console.log(`${classid} - ${date}: turnpoint ${tp.point_index} (${tpname}) line has no length — substituting a 3km line`);
+                        r1 = 3;
+                    } else {
+                        console.log(`${classid} - ${date}: turnpoint ${tp.point_index} (${tpname}) sector has no radius — substituting a 500m barrel`);
+                        r1 = 0.5;
+                        a1 = 180;
+                    }
+                    r2 = 0;
+                    a2 = 0;
+                }
+
                 //            let query = "INSERT INTO taskleg ( class, datecode, taskid, legno, "+
                 //              "length, bearing, nlat, nlng, Hi, ntrigraph, nname, type, direction, r1, a1, r2, a2, a12 ) "+
                 //            "VALUES ";
-                query = query + "( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sector', ?, ?, ?, ?, ?, ?, ? ),";
+                query = query + '( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ),';
                 values = values.concat([
                     classid, //
                     toDateCode(date),
@@ -949,11 +887,12 @@ async function process_day_task(day, classid, classname, keys) {
                     hi,
                     trigraph,
                     tpname,
+                    ozLine ? 'line' : 'sector',
                     oz_types[tp.oz_type],
-                    tp.oz_radius1 / 1000,
-                    tp.oz_line ? 90 : toDeg(tp.oz_angle1),
-                    tp.oz_radius2 / 1000,
-                    toDeg(tp.oz_angle2),
+                    r1,
+                    a1,
+                    r2,
+                    a2,
                     tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0,
                     tp.altitude
                 ]);
