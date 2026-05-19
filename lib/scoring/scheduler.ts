@@ -49,6 +49,14 @@ const DISCOVERY_UTC_HOUR = 5;
 // Grandprix-only: stay on fast cadence until +1h past first launch.
 const LAUNCH_FAST_TAIL_MS = 60 * 60 * 1000;
 
+// Authoritative scoring-source override. A competition with a
+// `soaringspotkey` row is fed by the SoaringSpot OAuth API daemon
+// (bin/soaringspot.ts), which is authoritative over an HTML scrape of
+// the same data. When such a row exists this scheduler skips its own
+// sources for that compid — so an operator can switch a competition
+// onto the API by adding a key row, without deleting the scrape row.
+const OVERRIDE_SOURCE_TYPE = 'soaringspotkey';
+
 // ---------- per-class status helpers ----------
 
 // compstatus.status values that mean "we have a task for this date".
@@ -613,10 +621,28 @@ async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, .
         return;
     }
 
+    // Override gate: collect every compid that has an authoritative
+    // `soaringspotkey` row. Any registered source for one of those
+    // compids is skipped below — see OVERRIDE_SOURCE_TYPE. A failed scan
+    // degrades to "no overrides" rather than stalling the heartbeat.
+    const overriddenComps = new Set<string>();
+    try {
+        const rows = (await db.query(escape`SELECT DISTINCT compid FROM scoringsource WHERE type = ${OVERRIDE_SOURCE_TYPE}`)) as any[];
+        for (const r of rows ?? []) {
+            if (r.compid) overriddenComps.add(r.compid);
+        }
+    } catch (e) {
+        log('scheduler: override scan failed:', e);
+    }
+
     for (const src of sources ?? []) {
         if (!src.compid || !src.url) continue;
         const adapter = registry.get(src.type);
         if (!adapter) continue;
+        if (overriddenComps.has(src.compid)) {
+            log(`scheduler: skipping ${src.compid} (${src.type}) — overridden by '${OVERRIDE_SOURCE_TYPE}' source`);
+            continue;
+        }
         try {
             await processCompetition(db, adapter, src, log);
         } catch (e) {
