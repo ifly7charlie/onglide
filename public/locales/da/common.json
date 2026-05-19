@@ -57,10 +57,10 @@
         "launching": "Starter",
         "racing": "I luften",
         "finishing": "Lander snart",
-        "home": "Hjemme",
+        "home": "Genafspil",
         "no_task": "Ingen opgave endnu",
         "upcoming": "Kommende",
-        "yesterday": "I går",
+        "yesterday": "Genafspil i går",
         "cancelled": "Aflyst"
     },
     "pilot": {

@@ -57,10 +57,10 @@
         "launching": "Despegando",
         "racing": "En carrera",
         "finishing": "Finalizando",
-        "home": "Regresado",
+        "home": "Reproducir",
         "no_task": "Sin prueba aún",
         "upcoming": "Próximas",
-        "yesterday": "Ayer",
+        "yesterday": "Reproducir ayer",
         "cancelled": "Cancelado"
     },
     "pilot": {

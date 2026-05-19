@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faPlane, faPlaneDeparture, faFlagCheckered, faHouse, faCalendar, faClockRotateLeft, faHourglass, faRoute, faBan} from '@fortawesome/free-solid-svg-icons';
+import {faPlane, faPlaneDeparture, faFlagCheckered, faBackwardStep, faCalendar, faClockRotateLeft, faHourglass, faRoute, faBan} from '@fortawesome/free-solid-svg-icons';
 import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 
 // Lifecycle of a soaring competition's display state through the day:
@@ -59,7 +59,7 @@ export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
     launching: faPlaneDeparture,
     started: faPlane,
     finishing: faFlagCheckered,
-    home: faHouse,
+    home: faBackwardStep,
     notask: faHourglass,
     upcoming: faCalendar,
     yesterday: faClockRotateLeft,

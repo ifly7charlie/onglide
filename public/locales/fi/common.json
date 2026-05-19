@@ -57,10 +57,10 @@
         "launching": "Lähdössä",
         "racing": "Kilpailussa",
         "finishing": "Maaliin tulossa",
-        "home": "Kotona",
+        "home": "Toisto",
         "no_task": "Ei vielä tehtävää",
         "upcoming": "Tulossa",
-        "yesterday": "Eilen",
+        "yesterday": "Eilisen toisto",
         "cancelled": "Peruttu"
     },
     "pilot": {

@@ -57,10 +57,10 @@
         "launching": "Felszálláson",
         "racing": "Versenyzik",
         "finishing": "Befejezés",
-        "home": "Hazaért",
+        "home": "Visszajátszás",
         "no_task": "Még nincs feladat",
         "upcoming": "Közelgő",
-        "yesterday": "Tegnap",
+        "yesterday": "Tegnapi visszajátszás",
         "cancelled": "Törölve"
     },
     "pilot": {

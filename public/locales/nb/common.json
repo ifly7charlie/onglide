@@ -57,10 +57,10 @@
         "launching": "Starter",
         "racing": "I lufta",
         "finishing": "Lander snart",
-        "home": "Hjemme",
+        "home": "Spill av",
         "no_task": "Ingen oppgave ennå",
         "upcoming": "Kommende",
-        "yesterday": "I går",
+        "yesterday": "Spill av i går",
         "cancelled": "Avlyst"
     },
     "pilot": {

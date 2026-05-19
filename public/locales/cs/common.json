@@ -57,10 +57,10 @@
         "launching": "Vzlet",
         "racing": "V závodě",
         "finishing": "Dokončují",
-        "home": "Doma",
+        "home": "Přehrát",
         "no_task": "Zatím žádná úloha",
         "upcoming": "Nadcházející",
-        "yesterday": "Včera",
+        "yesterday": "Přehrát včerejšek",
         "cancelled": "Zrušeno"
     },
     "pilot": {

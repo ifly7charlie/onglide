@@ -57,10 +57,10 @@
         "launching": "Startar",
         "racing": "Tävlar",
         "finishing": "I mål snart",
-        "home": "Hemma",
+        "home": "Repris",
         "no_task": "Ingen uppgift än",
         "upcoming": "Kommande",
-        "yesterday": "Igår",
+        "yesterday": "Repris igår",
         "cancelled": "Inställd"
     },
     "pilot": {

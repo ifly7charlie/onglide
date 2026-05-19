@@ -57,10 +57,10 @@
         "launching": "Vzletanje",
         "racing": "Tekmovanje",
         "finishing": "Zaključujejo",
-        "home": "Doma",
+        "home": "Ponovi",
         "no_task": "Naloga še ni postavljena",
         "upcoming": "Prihajajoče",
-        "yesterday": "Včeraj",
+        "yesterday": "Ponovi včerajšnji dan",
         "cancelled": "Odpovedano"
     },
     "pilot": {

@@ -57,10 +57,10 @@
         "launching": "Starten",
         "racing": "Onderweg",
         "finishing": "Finishen",
-        "home": "Thuis",
+        "home": "Herhaling",
         "no_task": "Nog geen opdracht",
         "upcoming": "Aanstaand",
-        "yesterday": "Gisteren",
+        "yesterday": "Herhaling gisteren",
         "cancelled": "Geannuleerd"
     },
     "pilot": {

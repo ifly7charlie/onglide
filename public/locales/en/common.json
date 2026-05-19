@@ -57,10 +57,10 @@
         "launching": "Launching",
         "racing": "Racing",
         "finishing": "Finishing",
-        "home": "Home",
+        "home": "Replay",
         "no_task": "No task yet",
         "upcoming": "Upcoming",
-        "yesterday": "Yesterday",
+        "yesterday": "Replay yesterday",
         "cancelled": "Cancelled"
     },
     "pilot": {
