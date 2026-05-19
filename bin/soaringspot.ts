@@ -21,6 +21,7 @@ import {processIGC, checkForOGNMatches} from '../lib/flightprocessing/launchland
 
 import {toDateCode} from '../lib/datecode';
 import {makeClassId, normalizeClassNameForDisplay} from '../lib/classid';
+import {updateTracker} from '../lib/scoring/shared/trackers';
 
 // DB access
 //const db = require('../db')
@@ -81,34 +82,41 @@ async function main() {
 main();
 
 async function roboControl() {
-    // Allow the use of environment variables to configure the soaring spot endpoint
-    // rather than it being in the database
-    let robocontrol_url: string | null = null;
-    let overwrite = false;
+    // robocontrol is a competition-scoped feed: each scoringsource row
+    // carries the compid it belongs to. Allow an env override for
+    // dev/testing, which then needs COMP_ID to know which competition the
+    // feed describes.
+    let sources: {compid: string; url: string}[] = [];
     if (process.env.ROBOCONTROL_URL) {
-        robocontrol_url = process.env.ROBOCONTROL_URL;
+        sources = [{compid: process.env.COMP_ID ?? '', url: process.env.ROBOCONTROL_URL}];
+    } else {
+        const rows = (await mysql_db.query(escape`
+            SELECT
+                compid,
+                url
+            FROM
+                scoringsource
+            WHERE
+                type = 'robocontrol'
+        `)) as {compid: string; url: string}[];
+        sources = (rows ?? []).filter((r) => r.url);
     }
 
-    if (!robocontrol_url) {
-        // Get the soaring spot keys from database
-        const row = (
-            await mysql_db.query(escape`
-                SELECT
-                    url
-                FROM
-                    scoringsource
-                WHERE
-                    type = 'robocontrol'
-            `)
-        )[0] ?? {url: null, overwrite: true};
-        robocontrol_url = row.url;
+    for (const source of sources) {
+        if (!source.compid) {
+            console.log(`robocontrol: skipping ${source.url} — no compid (set COMP_ID for env mode)`);
+            continue;
+        }
+        try {
+            await roboControlOne(source.compid, source.url);
+        } catch (e) {
+            console.log(`robocontrol failed for compid=${source.compid}:`, e);
+        }
     }
+}
 
-    if (!robocontrol_url) {
-        return;
-    }
-
-    console.log(`robocontrol url ${robocontrol_url} configured`);
+async function roboControlOne(compid: string, robocontrol_url: string) {
+    console.log(`robocontrol url ${robocontrol_url} configured for compid=${compid}`);
 
     await fetch(robocontrol_url)
         .then((res) => {
@@ -126,43 +134,41 @@ async function roboControl() {
             }
             for (const p of location || []) {
                 if (p.flarm?.length) {
-                    updateTrackers(p.cn, p.flarm.join(','), 'robocontrol');
+                    // The feed only carries a CN, not a class. A pilot is
+                    // unique within a competition, so resolve the class
+                    // via compid + compno.
+                    const classid = await classIdForCompno(compid, p.cn);
+                    if (!classid) {
+                        console.log(`robocontrol: no pilot "${p.cn}" in compid=${compid}, skipping`);
+                        continue;
+                    }
+                    await updateTracker(mysql_db, console.log, classid, p.cn, p.flarm.join(','), 'robocontrol');
                 }
             }
         });
 }
 
-async function updateTrackers(compno: string, trackerIds: string, feedType: 'robocontrol' | 'soaringspot') {
-    let success = !!(
+//
+// Resolve a competition number to its globally-unique classid within one
+// competition. Returns null when the pilot isn't registered.
+//
+async function classIdForCompno(compid: string, compno: string): Promise<string | null> {
+    if (!compid || !compno) return null;
+    const row = (
         await mysql_db.query(escape`
-            UPDATE tracker
-            SET
-                trackerid = ${trackerIds},
-                feedid = ${feedType}
+            SELECT
+                p.class
+            FROM
+                pilots p
+                JOIN classes c ON c.class = p.class
             WHERE
-                compno = ${compno}
-                AND (
-                    feedid = ${feedType}
-                    OR feedid IS NULL
-                )
+                c.compid = ${compid}
+                AND p.compno = ${compno}
+            LIMIT
+                1
         `)
-    ).affectedRows;
-    if (success) {
-        console.log(`${feedType}: updated tracker ${compno} to ${trackerIds}`);
-    }
-    await mysql_db.query(escape`
-        INSERT INTO
-            trackerhistory (compno, changed, flarmid, greg, launchtime, method)
-        VALUES
-            (
-                ${compno},
-                now(),
-                ${trackerIds},
-                '',
-                NULL,
-                ${feedType}
-            )
-    `);
+    )?.[0];
+    return row?.class ?? null;
 }
 
 //
@@ -478,7 +484,7 @@ async function update_pilots(class_url, classid, classname, keys) {
             .filter((id) => !!id);
 
         if (flarms.length) {
-            updateTrackers(compno, flarms.join(','), 'soaringspot');
+            await updateTracker(mysql_db, console.log, classid, compno, flarms.join(','), 'soaringspot');
         }
 
         // Download pictures, sometime in the next 2 minutes
@@ -507,12 +513,12 @@ async function update_pilots(class_url, classid, classname, keys) {
         `)
 
         // Trackers needs a row for each pilot so fill any missing, perhaps we should
-        // also remove unwanted ones
-        .query('INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) select class, compno, "flarm", "unknown" from pilots')
-        //  .query( 'DELETE FROM tracker where concat(class,compno) not in (select concat(class,compno) from pilots)' );
+        // also remove unwanted ones. Scoped to this class so we don't scan/insert
+        // for other competitions sharing the DB.
+        .query(escape`INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) SELECT class, compno, "flarm", "unknown" FROM pilots WHERE class = ${classid}`)
 
         // And update the pilots picture to the latest one in the image table - this should be set by download_picture
-        .query('UPDATE pilots SET image=CASE ' + '   WHEN (SELECT count(*) FROM images i WHERE i.compno=pilots.compno AND i.class = pilots.class AND i.image IS NOT NULL) > 0 THEN "Y" ' + '   ELSE "N" END')
+        .query(escape`UPDATE pilots SET image=CASE    WHEN (SELECT count(*) FROM images i WHERE i.compno=pilots.compno AND i.class = pilots.class AND i.image IS NOT NULL) > 0 THEN "Y"    ELSE "N" END WHERE class = ${classid}`)
 
         // Remove any old trackers
         .query(escape`

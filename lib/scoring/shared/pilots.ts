@@ -327,12 +327,14 @@ export async function pruneUnseenPilots(
             const label = accumulator.classNames.get(classid) ?? classid;
             log(`pruneUnseenPilots failed for class ${label}:`, e);
         }
-    }
 
-    // Trackers needs a row for each pilot so fill any missing.
-    try {
-        await db.query('INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) select class, compno, "flarm", "unknown" from pilots');
-    } catch (e) {
-        log(`tracker backfill failed:`, e);
+        // Trackers needs a row for each pilot so fill any missing. Scoped to
+        // this class so we don't backfill for other competitions sharing the DB.
+        try {
+            await db.query('INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) SELECT class, compno, "flarm", "unknown" FROM pilots WHERE class = ?', [classid]);
+        } catch (e) {
+            const label = accumulator.classNames.get(classid) ?? classid;
+            log(`tracker backfill failed for class ${label}:`, e);
+        }
     }
 }

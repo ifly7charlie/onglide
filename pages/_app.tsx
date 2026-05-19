@@ -23,7 +23,7 @@ const defaultOptions: Options = {
     rainRadar: false,
     rainRadarAdvance: 0,
     units: Units.metric,
-    mapType: MapType.satellite,
+    mapType: MapType.street,
     map2d: true,
     taskUp: TaskUp.north,
     follow: true,
