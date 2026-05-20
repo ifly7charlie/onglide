@@ -170,7 +170,9 @@
         "show_other_classes": "Más osztályok vitorlázói láthatóak, kattints csak az aktuális osztály mutatásához",
         "show_only_current": "Csak a kiválasztott osztály látszik, kattints a többi mutatásához is",
         "switch_to_metric": "Váltás metrikus mértékegységekre",
-        "switch_to_imperial": "Váltás brit mértékegységekre"
+        "switch_to_imperial": "Váltás brit mértékegységekre",
+        "map_attribution": "Térkép-hivatkozás",
+        "close": "Bezárás"
     },
     "drawer": {
         "class": "Osztály",

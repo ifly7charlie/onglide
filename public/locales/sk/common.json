@@ -170,7 +170,9 @@
         "show_other_classes": "Zobrazuje vetrone z iných tried, kliknite na zobrazenie len aktuálnej triedy",
         "show_only_current": "Zobraziť iba vybranú triedu, kliknite na zobrazenie iných tried",
         "switch_to_metric": "Prepnúť na metrické jednotky",
-        "switch_to_imperial": "Prepnúť na imperiálne jednotky"
+        "switch_to_imperial": "Prepnúť na imperiálne jednotky",
+        "map_attribution": "Atribúcia mapy",
+        "close": "Zavrieť"
     },
     "drawer": {
         "class": "Trieda",

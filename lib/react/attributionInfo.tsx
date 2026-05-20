@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {useTranslation} from 'next-i18next/pages';
 
 import {SATELLITE_ATTRIBUTION} from './mapStyle';
 
@@ -13,6 +14,7 @@ const STATIC_ATTRIBUTIONS = [
 ];
 
 export function AttributionInfo({customParts}: {customParts: (string | undefined | null | false)[]}) {
+    const {t} = useTranslation('common');
     const [open, setOpen] = useState(false);
     const items = [...STATIC_ATTRIBUTIONS, ...customParts.filter((p): p is string => Boolean(p))];
 
@@ -21,8 +23,8 @@ export function AttributionInfo({customParts}: {customParts: (string | undefined
             <button //
                 className="attribution-info-toggle"
                 onClick={() => setOpen(true)}
-                aria-label="Map attribution"
-                title="Map attribution"
+                aria-label={t('options.map_attribution')}
+                title={t('options.map_attribution')}
                 type="button"
             >
                 i
@@ -33,7 +35,7 @@ export function AttributionInfo({customParts}: {customParts: (string | undefined
                         <button //
                             className="attribution-info-close"
                             onClick={() => setOpen(false)}
-                            aria-label="Close"
+                            aria-label={t('options.close')}
                             type="button"
                         >
                             ×

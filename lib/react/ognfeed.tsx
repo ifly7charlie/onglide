@@ -32,6 +32,7 @@ import {Options as OptionsPanel} from './options';
 import {getValidSortOrder} from './pilot-sorting';
 
 import Sponsors from './sponsors';
+import {groupForHost} from './domainGroups';
 
 import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
 import {LanguageSwitcher} from './language-switcher';
@@ -113,7 +114,7 @@ export const OgnFeed = memo(
         handicapped: any;
     }) {
         const {pilots, isPLoading} = usePilots(vc);
-        const {t} = useTranslation('common');
+        const {t, i18n} = useTranslation('common');
         //        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
@@ -222,12 +223,11 @@ export const OgnFeed = memo(
 
         // Cache the calculated times and only refresh every 60 seconds
         const status = useMemo(() => {
-            const lang = router.locale ?? 'en';
             return (
-                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, lang, officialDelay)}) + ' | ' : '') + //
+                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, i18n.language, officialDelay, t)}) + ' | ' : '') + //
                 ` <a href='#' title='${t('connection.viewers')}'>${wsStatus.listeners} 👥</a> | <a href='#' title='${t('connection.tracked_planes')}'>${wsStatus.airborne} ✈️  </a>`
             );
-        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, router.locale, officialDelay]);
+        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, i18n.language, officialDelay]);
 
         // Scale map to fit the bounds
         const fitBounds = useCallback(() => {
@@ -314,12 +314,7 @@ export const OgnFeed = memo(
                                 <FontAwesomeIcon icon={faGlobe} />
                             </Link>
                             <div className="mobile-comp-name">{compShortName(comp)}</div>
-                            <button
-                                className="drawer-toggle"
-                                onClick={() => setDrawerOpen((o) => !o)}
-                                aria-expanded={drawerOpen}
-                                title={drawerOpen ? t('drawer.hide_menu') : t('drawer.show_menu')}
-                            >
+                            <button className="drawer-toggle" onClick={() => setDrawerOpen((o) => !o)} aria-expanded={drawerOpen} title={drawerOpen ? t('drawer.hide_menu') : t('drawer.show_menu')}>
                                 <FontAwesomeIcon icon={drawerOpen ? faCaretUp : faCaretDown} />
                             </button>
                         </div>
@@ -415,7 +410,7 @@ export const OgnFeed = memo(
                         effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? ( //
                             <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} officialDelay={officialDelay} />
                         ) : (
-                            <Sponsors wsStatus={wsStatus} tz={tz} lang={router.locale ?? 'en'} officialDelay={officialDelay} />
+                            <Sponsors wsStatus={wsStatus} tz={tz} lang={i18n.language} officialDelay={officialDelay} />
                         )
                     }
                 >
@@ -452,10 +447,10 @@ export const OgnFeed = memo(
         o.handicapped === n.handicapped
 );
 
-function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) {
+function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number, t: (k: string) => string) {
     const showDelay = officialDelay > 10;
     const competitionDelay = showDelay
-        ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
+        ? `<a href="#" title="${t('pilot.view_delayed_official')}" className="tooltipicon">
                 <span style={{color: 'grey'}}>
                  &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', officialDelay as Epoch, 'm')}
             </span>
@@ -465,9 +460,9 @@ function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) 
     const dt = new Date(time * 1000);
     const compTime = dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'});
     const yourTime = dt.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
-    const compPart = `<a href='#' title='competition time'>${compTime} ${competitionDelay} ✈️ </a>`;
+    const compPart = `<a href='#' title='${t('connection.competition_time')}'>${compTime} ${competitionDelay} ✈️ </a>`;
     if (yourTime === compTime) {
         return compPart;
     }
-    return `${compPart} | <a href='#' title='your time'>${yourTime} ⌚️</a>`;
+    return `${compPart} | <a href='#' title='${t('connection.your_time')}'>${yourTime} ⌚️</a>`;
 }

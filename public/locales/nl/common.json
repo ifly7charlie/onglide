@@ -170,7 +170,9 @@
         "show_other_classes": "Toont zwevers van andere klassen, klik om alleen de huidige klasse te tonen",
         "show_only_current": "Toon alleen geselecteerde klasse, klik om andere klassen ook te tonen",
         "switch_to_metric": "Schakel naar metrische eenheden",
-        "switch_to_imperial": "Schakel naar imperiale eenheden"
+        "switch_to_imperial": "Schakel naar imperiale eenheden",
+        "map_attribution": "Kaartattributie",
+        "close": "Sluiten"
     },
     "drawer": {
         "class": "Klasse",

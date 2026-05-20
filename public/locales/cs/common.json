@@ -170,7 +170,9 @@
         "show_other_classes": "Zobrazuje větroně z jiných tříd, klikněte pro zobrazení pouze aktuální třídy",
         "show_only_current": "Zobrazit pouze vybranou třídu, klikněte pro zobrazení i jiných tříd",
         "switch_to_metric": "Přepnout na metrické jednotky",
-        "switch_to_imperial": "Přepnout na imperiální jednotky"
+        "switch_to_imperial": "Přepnout na imperiální jednotky",
+        "map_attribution": "Atribuce mapy",
+        "close": "Zavřít"
     },
     "drawer": {
         "class": "Třída",

@@ -582,10 +582,10 @@ function CompetitionListEntry({
                     {' · '}
                     <FontAwesomeIcon icon={faHourglassStart} /> {openTime}
                     {delayed ? (
-                        <>
+                        <span title={t('pilot.view_delayed_official')}>
                             {' '}
-                            <FontAwesomeIcon icon={faClockRotateLeft} title={`Broadcast delayed ${OptionalDurationMM('', (comp.officialDelay ?? 0) as Epoch, 'm')}`} />
-                        </>
+                            <FontAwesomeIcon icon={faClockRotateLeft} /> {OptionalDurationMM('', (comp.officialDelay ?? 0) as Epoch, 'm')}
+                        </span>
                     ) : null}
                 </>
             ) : null;

@@ -41,7 +41,7 @@ export default function Sponsor({wsStatus, tz, lang, officialDelay}: SponsorProp
                 <span className="sponsor-cell-left">
                     {t('connection.updated_at', {time: compTime})}
                     {showDelay ? (
-                        <span style={{color: 'grey'}} title="Tracking is officially delayed for this competition">
+                        <span style={{color: 'grey'}} title={t('pilot.view_delayed_official')}>
                             &nbsp;+&nbsp;↺&nbsp;{delayLabel}
                         </span>
                     ) : null}

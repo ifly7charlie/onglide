@@ -118,7 +118,7 @@ export default function MApp(props: {
 
     // Rain Radar
     const router = useRouter();
-    const {t} = useTranslation('common');
+    const {t, i18n} = useTranslation('common');
 
     // Unmount the deck overlay around any route change. The deck.gl
     // MapboxOverlay/MapLibre teardown is racy: when the route changes (e.g.
@@ -147,7 +147,7 @@ export default function MApp(props: {
         };
     }, [router]);
 
-    const lang = router.locale ?? (typeof navigator !== 'undefined' ? (navigator.languages?.[0] ?? navigator.language) : 'en');
+    const lang = i18n.language;
     const radarOverlay = RadarOverlay({options, tz});
 
     // What task are we using on display

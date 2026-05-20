@@ -170,7 +170,9 @@
         "show_other_classes": "Pokazuje szybowce z innych klas, kliknij, aby pokazać tylko bieżącą klasę",
         "show_only_current": "Pokaż tylko wybraną klasę, kliknij, aby pokazać też inne klasy",
         "switch_to_metric": "Przełącz na jednostki metryczne",
-        "switch_to_imperial": "Przełącz na jednostki imperialne"
+        "switch_to_imperial": "Przełącz na jednostki imperialne",
+        "map_attribution": "Atrybucja mapy",
+        "close": "Zamknij"
     },
     "drawer": {
         "class": "Klasa",

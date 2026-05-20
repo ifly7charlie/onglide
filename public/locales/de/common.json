@@ -170,7 +170,9 @@
         "show_other_classes": "Segelflugzeuge anderer Klassen werden angezeigt, klicken um nur aktuelle Klasse anzuzeigen",
         "show_only_current": "Nur ausgewählte Klasse anzeigen, klicken um andere Klassen ebenfalls anzuzeigen",
         "switch_to_metric": "Auf metrisch umschalten",
-        "switch_to_imperial": "Auf imperial umschalten"
+        "switch_to_imperial": "Auf imperial umschalten",
+        "map_attribution": "Kartenattribution",
+        "close": "Schließen"
     },
     "drawer": {
         "class": "Klasse",

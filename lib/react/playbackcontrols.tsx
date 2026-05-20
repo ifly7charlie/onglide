@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {useTranslation} from 'next-i18next/pages';
-import {useRouter} from 'next/router';
 import {styled} from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -103,9 +102,8 @@ const PlaybackControls = ({
     setReplayTime: (t: Epoch | undefined) => void;
     tz: TZ;
 }) => {
-    const {t} = useTranslation('common');
-    const router = useRouter();
-    const lang = router.locale ?? 'en';
+    const {t, i18n} = useTranslation('common');
+    const lang = i18n.language;
     function formatDuration(value: number) {
         const minute = Math.floor(value / 60);
         const secondLeft = value - minute * 60;

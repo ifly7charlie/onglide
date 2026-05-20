@@ -170,7 +170,9 @@
         "show_other_classes": "Mostra alianti di altre classi, clicca per mostrare solo la classe corrente",
         "show_only_current": "Mostra solo la classe selezionata, clicca per mostrare anche le altre",
         "switch_to_metric": "Passa alle unità metriche",
-        "switch_to_imperial": "Passa alle unità imperiali"
+        "switch_to_imperial": "Passa alle unità imperiali",
+        "map_attribution": "Attribuzione della mappa",
+        "close": "Chiudi"
     },
     "drawer": {
         "class": "Classe",

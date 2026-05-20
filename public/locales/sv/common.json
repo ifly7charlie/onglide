@@ -170,7 +170,9 @@
         "show_other_classes": "Visar segelflygplan från andra klasser, klicka för att bara visa nuvarande klass",
         "show_only_current": "Visa endast vald klass, klicka för att visa andra klasser också",
         "switch_to_metric": "Byt till metriska enheter",
-        "switch_to_imperial": "Byt till imperiska enheter"
+        "switch_to_imperial": "Byt till imperiska enheter",
+        "map_attribution": "Kartattribution",
+        "close": "Stäng"
     },
     "drawer": {
         "class": "Klass",

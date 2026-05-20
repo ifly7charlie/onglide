@@ -5,6 +5,7 @@
 import {createSlice, createSelector} from '@reduxjs/toolkit';
 
 import {updateClassAction} from './actions';
+import {selectCompetitionsByCompid} from './competitionsSlice';
 
 //const updateTracksAction = createAction<PilotTracks>('updateTracks');
 
@@ -76,3 +77,13 @@ export const selectAvailableScoreTimes = createSelector(
     [selectEarliestScore, selectLatestScore, selectScoreId],
     (earliestScore, latestScore, liveScoreId) => ({earliestScore, latestScore, live: !!liveScoreId})
 );
+
+// Broadcast delay (seconds) for the comp owning the current className.
+// Joins nowSlice.className → competitionsSlice; returns 0 until the /all
+// snapshot lands or when the class isn't found.
+export const selectOfficialDelay = createSelector([selectClassName, selectCompetitionsByCompid], (className, byCompid): Epoch => {
+    for (const comp of Object.values(byCompid)) {
+        if (comp.classes.some((c) => c.class === className)) return (comp.officialDelay ?? 0) as Epoch;
+    }
+    return 0 as Epoch;
+});

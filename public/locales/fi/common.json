@@ -170,7 +170,9 @@
         "show_other_classes": "Näytetään muiden luokkien purjekoneita, klikkaa näyttääksesi vain nykyisen luokan",
         "show_only_current": "Näytä vain valittu luokka, klikkaa näyttääksesi muutkin luokat",
         "switch_to_metric": "Vaihda metrisiin yksiköihin",
-        "switch_to_imperial": "Vaihda brittiläisiin yksiköihin"
+        "switch_to_imperial": "Vaihda brittiläisiin yksiköihin",
+        "map_attribution": "Karttatiedot",
+        "close": "Sulje"
     },
     "drawer": {
         "class": "Luokka",

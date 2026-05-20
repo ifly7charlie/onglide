@@ -170,7 +170,9 @@
         "show_other_classes": "Viser svæveplaner fra andre klasser, klik for kun at vise nuværende klasse",
         "show_only_current": "Vis kun valgt klasse, klik for også at vise andre klasser",
         "switch_to_metric": "Skift til metriske enheder",
-        "switch_to_imperial": "Skift til imperiale enheder"
+        "switch_to_imperial": "Skift til imperiale enheder",
+        "map_attribution": "Kortattribution",
+        "close": "Luk"
     },
     "drawer": {
         "class": "Klasse",

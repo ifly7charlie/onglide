@@ -5,16 +5,17 @@ import {memo, useMemo} from 'react';
 import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
-import {faMagnifyingGlassLocation, faCaretUp, faCaretDown, faHourglassStart} from '@fortawesome/free-solid-svg-icons';
+import {faMagnifyingGlassLocation, faCaretUp, faCaretDown, faHourglassStart, faClockRotateLeft} from '@fortawesome/free-solid-svg-icons';
 
 import {useState} from 'react';
 import {Spinner} from './loaders';
+import {OptionalDurationMM} from './optional';
 
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
 import {selectTask, selectHasTask} from '../redux/taskSlice';
 import {selectCompByCompid} from '../redux/competitionsSlice';
-import {selectNow} from '../redux/nowSlice';
+import {selectNow, selectOfficialDelay} from '../redux/nowSlice';
 import {useSelector} from '../redux';
 
 import type {TaskLeg, ClassName, TZ, Epoch} from '../types';
@@ -39,14 +40,14 @@ export const TaskDetails = memo(function TaskDetails({
     replayTime: Epoch;
     defaultOpen?: boolean;
 }) {
-    const {t} = useTranslation('common');
+    const {t, i18n} = useTranslation('common');
     const task = useSelector((state) => selectTask(state, vc));
     const hasTask = useSelector((state) => selectHasTask(state, vc));
     const compByCompid = useMemo(() => selectCompByCompid(compid), [compid]);
     const summary = useSelector(compByCompid);
     const [open, setOpen] = useState(!!defaultOpen);
 
-    const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
+    const lang = i18n.language;
     // `summary` is null until the /all snapshot lands; guard the lookup.
     const fClass = summary?.classes?.find((c) => c.class == vc);
     const dateString = useMemo(() => {
@@ -120,7 +121,17 @@ export const TaskDetails = memo(function TaskDetails({
             {showPreviousDayNote ? <p className="task-previous-day-note">{t('task.previous_day_note')}</p> : null}
             {open ? (
                 <div id="task-collapse">
-                    <p>{task?.details?.nostart != '00:00:00' ? t('task.start_open', {time: task.details.nostart.substring(0, 5)}) : ''}</p>
+                    {task?.details?.nostart != '00:00:00' ? (
+                        <p>
+                            {t('task.start_open', {time: task.details.nostart.substring(0, 5)})}
+                            {(summary.officialDelay ?? 0) > 10 ? (
+                                <span title={t('pilot.view_delayed_official')}>
+                                    {' '}
+                                    <FontAwesomeIcon icon={faClockRotateLeft} /> {OptionalDurationMM('', summary.officialDelay as Epoch, 'm')}
+                                </span>
+                            ) : null}
+                        </p>
+                    ) : null}
                     <Tasklegs legs={task.legs} onSelect={zoomToTurnpoint} />
 
                     {task.details.info && (
@@ -143,22 +154,28 @@ export const TaskDetails = memo(function TaskDetails({
 // classes without a nostartutc).
 //
 export function StartlineNotice({vc, tz, replayTime}: {vc: ClassName; tz: TZ; replayTime: Epoch}) {
-    const {t} = useTranslation('common');
+    const {t, i18n} = useTranslation('common');
     const task = useSelector((state) => selectTask(state, vc));
     const liveNow = useSelector(selectNow);
+    const officialDelay = useSelector(selectOfficialDelay);
 
     const noStart = useMemo(() => {
         if (!task?.rules?.nostartutc) return '';
         const nowSec = replayTime || liveNow || getNow();
         if (task.rules.nostartutc <= nowSec) return '';
-        const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
-        return t('task.start_opens_at', {time: new Date(task.rules.nostartutc * 1000).toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'})});
-    }, [tz, task?.rules?.nostartutc, replayTime, liveNow, t]);
+        return t('task.start_opens_at', {time: new Date(task.rules.nostartutc * 1000).toLocaleTimeString(i18n.language, {timeZone: tz, hour: '2-digit', minute: '2-digit'})});
+    }, [tz, task?.rules?.nostartutc, replayTime, liveNow, t, i18n.language]);
 
     if (!noStart) return null;
     return (
         <p className="startline-opens-notice">
             <FontAwesomeIcon icon={faHourglassStart} /> {noStart}
+            {officialDelay > 10 ? (
+                <span title={t('pilot.view_delayed_official')}>
+                    {' '}
+                    <FontAwesomeIcon icon={faClockRotateLeft} /> {OptionalDurationMM('', officialDelay, 'm')}
+                </span>
+            ) : null}
         </p>
     );
 }

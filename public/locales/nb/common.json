@@ -170,7 +170,9 @@
         "show_other_classes": "Viser seilfly fra andre klasser, klikk for kun å vise nåværende klasse",
         "show_only_current": "Vis kun valgt klasse, klikk for også å vise andre klasser",
         "switch_to_metric": "Bytt til metriske enheter",
-        "switch_to_imperial": "Bytt til imperiale enheter"
+        "switch_to_imperial": "Bytt til imperiale enheter",
+        "map_attribution": "Kartattribusjon",
+        "close": "Lukk"
     },
     "drawer": {
         "class": "Klasse",

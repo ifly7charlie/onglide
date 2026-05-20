@@ -170,7 +170,9 @@
         "show_other_classes": "Prikazuje jadralna letala drugih razredov, klikni za prikaz le trenutnega razreda",
         "show_only_current": "Prikaži le izbrani razred, klikni za prikaz tudi drugih razredov",
         "switch_to_metric": "Preklopi na metrične enote",
-        "switch_to_imperial": "Preklopi na imperialne enote"
+        "switch_to_imperial": "Preklopi na imperialne enote",
+        "map_attribution": "Atribucija zemljevida",
+        "close": "Zapri"
     },
     "drawer": {
         "class": "Razred",

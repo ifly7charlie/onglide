@@ -170,7 +170,9 @@
         "show_other_classes": "Affiche les planeurs des autres classes, cliquer pour n'afficher que la classe courante",
         "show_only_current": "Afficher uniquement la classe sélectionnée, cliquer pour afficher les autres",
         "switch_to_metric": "Passer en unités métriques",
-        "switch_to_imperial": "Passer en unités impériales"
+        "switch_to_imperial": "Passer en unités impériales",
+        "map_attribution": "Attribution de la carte",
+        "close": "Fermer"
     },
     "drawer": {
         "class": "Classe",

@@ -170,7 +170,9 @@
         "show_other_classes": "Showing gliders from other classes, click to only show current class",
         "show_only_current": "Show selected class only, click to show other classes as well",
         "switch_to_metric": "Switch to metric units",
-        "switch_to_imperial": "Switch to imperial units"
+        "switch_to_imperial": "Switch to imperial units",
+        "map_attribution": "Map attribution",
+        "close": "Close"
     },
     "drawer": {
         "class": "Class",
