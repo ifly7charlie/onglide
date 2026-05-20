@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} piloter · {{flying}} i luften · {{landed}} landat",
         "viewers_short": "tittare",
         "land_data": "Landdata:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Officiella resultat"
     },
     "task": {
         "speed": "Hastighetsuppgift",

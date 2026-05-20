@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} piloter · {{flying}} flyver · {{landed}} landet",
         "viewers_short": "seere",
         "land_data": "Landdata:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Officielle resultater"
     },
     "task": {
         "speed": "Hastighedsopgave",

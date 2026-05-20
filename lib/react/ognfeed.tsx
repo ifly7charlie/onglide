@@ -22,7 +22,7 @@ import equal from 'fast-deep-equal';
 import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faLinkSlash, faSpinner, faCaretDown, faCaretUp} from '@fortawesome/free-solid-svg-icons';
+import {faLinkSlash, faSpinner, faCaretDown, faCaretUp, faTrophy} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails, StartlineNotice} from './taskdetails';
@@ -268,6 +268,14 @@ export const OgnFeed = memo(
             [options, setOptions]
         );
 
+        const selectedClassDisplayStatus = comp?.classes?.find((c: any) => c.class === vc)?.displayStatus;
+        const officialScoresLink =
+            (selectedClassDisplayStatus === 'home' || selectedClassDisplayStatus === 'yesterday') && comp?.mainwebsite ? (
+                <a href={comp.mainwebsite} target="_blank" rel="noopener" className="official-scores-link">
+                    <FontAwesomeIcon icon={faTrophy} /> {t('competition.official_scores')}
+                </a>
+            ) : null;
+
         const map = (
             <div className={'resizingMap'}>
                 <MApp //
@@ -320,18 +328,21 @@ export const OgnFeed = memo(
                         </div>
                         <StartlineNotice vc={vc} tz={tz} replayTime={replayTime} />
                         {valid && connected ? (
-                            <PilotList //
-                                key="pilotList"
-                                pilots={pilots}
-                                selectedPilot={effectiveSelectedCompno}
-                                setSelectedCompno={setCompno}
-                                now={replayTime}
-                                live={availableScores.live}
-                                tz={tz}
-                                options={options}
-                                sortOrder={sortOrder}
-                                horizontal
-                            />
+                            <>
+                                {officialScoresLink}
+                                <PilotList //
+                                    key="pilotList"
+                                    pilots={pilots}
+                                    selectedPilot={effectiveSelectedCompno}
+                                    setSelectedCompno={setCompno}
+                                    now={replayTime}
+                                    live={availableScores.live}
+                                    tz={tz}
+                                    options={options}
+                                    sortOrder={sortOrder}
+                                    horizontal
+                                />
+                            </>
                         ) : (
                             <div className="mobile-strip-placeholder">{connectionStatus}</div>
                         )}
@@ -417,6 +428,7 @@ export const OgnFeed = memo(
                     {valid && connected ? (
                         <div className="sidepanel-section">
                             <StartlineNotice vc={vc} tz={tz} replayTime={replayTime} />
+                            {officialScoresLink}
                             <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
                             <PilotList //
                                 key="pilotList"

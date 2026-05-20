@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} pilotov · {{flying}} v zraku · {{landed}} pristali",
         "viewers_short": "gledalcev",
         "land_data": "Zemljiški podatki:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Uradni rezultati"
     },
     "task": {
         "speed": "Hitrostna naloga",

@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} pilots · {{flying}} flying · {{landed}} landed",
         "viewers_short": "viewers",
         "land_data": "Land data:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Official scores"
     },
     "task": {
         "speed": "Speed Task",

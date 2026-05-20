@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} pilotů · {{flying}} ve vzduchu · {{landed}} přistáli",
         "viewers_short": "diváků",
         "land_data": "Data o pevnině:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Oficiální výsledky"
     },
     "task": {
         "speed": "Rychlostní úloha",

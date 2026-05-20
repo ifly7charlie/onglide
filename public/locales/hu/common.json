@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} pilóta · {{flying}} levegőben · {{landed}} leszállt",
         "viewers_short": "néző",
         "land_data": "Földadatok:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Hivatalos eredmények"
     },
     "task": {
         "speed": "Sebességi feladat",

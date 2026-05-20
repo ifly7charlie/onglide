@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} piloten · {{flying}} in de lucht · {{landed}} geland",
         "viewers_short": "kijkers",
         "land_data": "Landdata:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Officiële uitslagen"
     },
     "task": {
         "speed": "Snelheidsopdracht",

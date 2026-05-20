@@ -27,7 +27,8 @@
         "live_stats": " · {{tracked}}/{{registered}} lentäjää · {{flying}} ilmassa · {{landed}} laskeutunut",
         "viewers_short": "katsojaa",
         "land_data": "Maa-aineisto:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Viralliset tulokset"
     },
     "task": {
         "speed": "Nopeustehtävä",
