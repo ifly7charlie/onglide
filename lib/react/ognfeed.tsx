@@ -310,7 +310,7 @@ export const OgnFeed = memo(
                     {map}
                     <div className="mobile-top-strip">
                         <div className="mobile-strip-header">
-                            <Link href="/" className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+                            <Link href={groupForHost(window.location.host) ? '/' : 'https://www.onglide.com/'} className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                                 <FontAwesomeIcon icon={faGlobe} />
                             </Link>
                             <div className="mobile-comp-name">{compShortName(comp)}</div>
