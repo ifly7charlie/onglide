@@ -666,7 +666,7 @@ function startAprsListener(config: AprsListenerConfig) {
     let unstableCount = 0;
 
     // Connect to the APRS server
-    connection = new ISSocket(`onglide/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
+    connection = new ISSocket(`onglide ${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
     let parser = new aprsParser();
     // Seed liveness: the first kaInterval fires up to a full grace period
     // after this point. Without seeding, an early tick before any packet
