@@ -460,6 +460,30 @@ export default function MApp(props: {
         registerMapIcons(map);
     }, []);
 
+    // MapLibre fires a bare `error` event for tile/sprite/glyph/image
+    // failures — react-map-gl's default handler just console.errors the
+    // Error, so "Failed to Decode Data." arrives with no clue which
+    // resource failed. Pull the source/tile context off the ErrorEvent so
+    // the failing URL is identifiable.
+    const onMapError = useCallback((e: any) => {
+        const err: Error | undefined = e?.error;
+        const tileID = e?.tile?.tileID?.canonical;
+        const source = e?.source ?? (e?.sourceId && mapRef?.current?.getMap?.()?.getSource?.(e.sourceId));
+        // eslint-disable-next-line no-console
+        console.error('[maplibre-error]', err?.message ?? 'unknown map error', {
+            message: err?.message,
+            sourceId: e?.sourceId,
+            sourceType: source?.type,
+            // raster/image sources expose `url`/`tiles`; the failing image
+            // resource is usually one of these.
+            url: (err as any)?.url ?? source?.url,
+            tiles: source?.tiles,
+            tile: tileID ? `${tileID.z}/${tileID.x}/${tileID.y}` : undefined,
+            status: (err as any)?.status,
+            error: err
+        });
+    }, []);
+
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
@@ -612,6 +636,7 @@ export default function MApp(props: {
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}
                 onLoad={onMapLoad}
+                onError={onMapError}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
                 mapStyle={ONGLIDE_MAP_STYLE}
                 ref={mapRef}
