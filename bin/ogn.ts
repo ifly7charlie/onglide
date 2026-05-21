@@ -2707,9 +2707,12 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         // matches today; older datecodes get demoted to 'yesterday' or
         // 'notask' so a missed landing report from two days ago doesn't
         // look like 'racing'. See the original /api/competitions logic.
+        // 'yesterday' is reserved for a day that actually had a task — a
+        // no-task day stamped with yesterday's datecode stays 'notask'.
         let displayStatus: CompetitionDisplayStatus;
         if (sdc && sdc < todayDatecode) {
-            displayStatus = sdc === yesterdayDatecode ? 'yesterday' : 'notask';
+            const yesterdayHadTask = sdc === yesterdayDatecode && classDisplayStatus(ch.compStatus, true) !== 'notask';
+            displayStatus = yesterdayHadTask ? 'yesterday' : 'notask';
         } else {
             displayStatus = classDisplayStatus(ch.compStatus, inWindow);
         }
@@ -2766,14 +2769,15 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
     // above and shouldn't drag the comp marker into 'started' just
     // because nobody updated them.
     const todaysStatuses: string[] = [];
-    let anyYesterday = false;
     for (const cname of competition.ownedChannels) {
         const ch = channels[cname];
         if (!ch) continue;
         const sdc = ch.statusDatecode ? String(ch.statusDatecode).toUpperCase() : null;
         if (sdc === todayDatecode && ch.compStatus) todaysStatuses.push(ch.compStatus);
-        if (sdc === yesterdayDatecode) anyYesterday = true;
     }
+    // Roll up to 'yesterday' only when a class genuinely resolved to
+    // 'yesterday' above — a no-task day never counts (see per-class logic).
+    const anyYesterday = classes.some((c) => c.displayStatus === 'yesterday');
     let displayStatus: CompetitionDisplayStatus;
     const anyFinishing = todaysStatuses.some((s) => s === 'F');
     const anyStarted = todaysStatuses.some((s) => s === 'S');
