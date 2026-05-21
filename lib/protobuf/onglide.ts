@@ -443,7 +443,9 @@ export interface PilotPosition {
   c: string;
   lat: number;
   lng: number;
+  /** AMSL — can be negative near sea level */
   a: number;
+  /** AGL — terrain-model imprecision can push below 0 */
   g: number;
   t: number;
   b: number;
@@ -4873,10 +4875,10 @@ export const PilotPosition: MessageFns<PilotPosition> = {
       writer.uint32(25).double(message.lng);
     }
     if (message.a !== 0) {
-      writer.uint32(32).uint32(message.a);
+      writer.uint32(32).sint32(message.a);
     }
     if (message.g !== 0) {
-      writer.uint32(40).uint32(message.g);
+      writer.uint32(40).sint32(message.g);
     }
     if (message.t !== 0) {
       writer.uint32(48).uint32(message.t);
@@ -4926,7 +4928,7 @@ export const PilotPosition: MessageFns<PilotPosition> = {
             break;
           }
 
-          message.a = reader.uint32();
+          message.a = reader.sint32();
           continue;
         }
         case 5: {
@@ -4934,7 +4936,7 @@ export const PilotPosition: MessageFns<PilotPosition> = {
             break;
           }
 
-          message.g = reader.uint32();
+          message.g = reader.sint32();
           continue;
         }
         case 6: {

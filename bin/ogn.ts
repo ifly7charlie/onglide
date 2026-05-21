@@ -628,9 +628,9 @@ async function main() {
                                     lng: p.lng,
                                     a: Math.trunc(p.a),
                                     g: Math.trunc(p.g),
-                                    t: Math.trunc(p.t),
-                                    b: Math.trunc(p.b ?? 0),
-                                    s: Math.trunc(p.s ?? 0)
+                                    t: Math.max(0, Math.trunc(p.t)),
+                                    b: Math.max(0, Math.trunc(p.b ?? 0)),
+                                    s: Math.max(0, Math.trunc(p.s ?? 0))
                                 })
                             )
                         };

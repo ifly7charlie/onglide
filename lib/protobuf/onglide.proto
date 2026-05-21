@@ -329,8 +329,8 @@ message PilotPosition {
     string c = 1;
     double lat = 2;
     double lng = 3;
-    uint32 a = 4;
-    uint32 g = 5;
+    sint32 a = 4; // AMSL — can be negative near sea level
+    sint32 g = 5; // AGL — terrain-model imprecision can push below 0
     uint32 t = 6;
     uint32 b = 7;
     uint32 s = 8;
