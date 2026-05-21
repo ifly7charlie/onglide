@@ -168,9 +168,44 @@ interface NominatimResult {
     lat: string;
     lon: string;
     display_name: string;
+    class?: string;
+    type?: string;
     address?: {
         country_code?: string;
     };
+}
+
+// Nominatim sorts hits by query-string relevance, not feature type, so a
+// street or waterway whose name *exactly* equals the sitename can float
+// above the aerodrome that merely *contains* it — e.g. "Mönchsheide" the
+// residential road in Overath beats "Segelfluggelände Mönchsheide" 45 km
+// south. That gap exceeds the Overpass refinement radius, so the row
+// would lock at the wrong street. Pick by feature type, not Nominatim's
+// order:
+//   1. an aeroway feature                — the airfield itself;
+//   2. a place feature (town/village/…)  — a settlement point near the
+//      site, good enough to seed the Overpass refinement sweep;
+//   3. any non-street/waterway/railway hit;
+//   4. Nominatim's raw top hit as a last resort.
+const GEOCODE_DEMOTED_CLASSES = new Set(['highway', 'waterway', 'railway']);
+
+function pickBestNominatimResult(results: NominatimResult[], log: Logger): NominatimResult {
+    const aeroway = results.find((r) => r.class === 'aeroway');
+    if (aeroway) {
+        if (aeroway !== results[0]) log(`nominatim: preferring aeroway hit "${aeroway.display_name}" over top hit "${results[0].display_name}"`);
+        return aeroway;
+    }
+    const place = results.find((r) => r.class === 'place');
+    if (place && place !== results[0]) {
+        log(`nominatim: demoting ${results[0].class} top hit "${results[0].display_name}"; using place "${place.display_name}"`);
+        return place;
+    }
+    const nonStreet = results.find((r) => !r.class || !GEOCODE_DEMOTED_CLASSES.has(r.class));
+    if (nonStreet && nonStreet !== results[0]) {
+        log(`nominatim: demoting ${results[0].class} top hit "${results[0].display_name}"; using "${nonStreet.display_name}"`);
+        return nonStreet;
+    }
+    return results[0];
 }
 
 interface OverpassElement {
@@ -199,7 +234,7 @@ function tokenize(s: string): string[] {
 }
 
 export async function geocodeNominatim(name: string, log: Logger = noopLogger): Promise<NominatimGeocode | null> {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=1&addressdetails=1`;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=10&addressdetails=1`;
     let resp: Response;
     try {
         resp = await fetch(url, {headers: {'User-Agent': HTTP_UA}});
@@ -216,7 +251,7 @@ export async function geocodeNominatim(name: string, log: Logger = noopLogger): 
         log(`nominatim: no match for "${name}"`);
         return null;
     }
-    const r = json[0];
+    const r = pickBestNominatimResult(json, log);
     return {
         lat: parseFloat(r.lat),
         lon: parseFloat(r.lon),
