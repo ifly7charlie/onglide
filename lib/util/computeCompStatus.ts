@@ -1,4 +1,4 @@
-import {PositionStatus, type Compno, type Epoch} from '../types';
+import {CompStatus, PositionStatus, type Compno, type Epoch} from '../types';
 import {FINISHING_ETA_MINUTES, HOME_OGN_COVERAGE, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION} from '../constants';
 
 // One tracked pilot's inputs to the compstatus state machine — the minimal set
@@ -94,17 +94,20 @@ export function computeCompStatus(scored: PartialPilotScoredStatus[], totalScore
     const ognDeterminedHome = allLanded && trackerCoverage >= HOME_OGN_COVERAGE;
 
     if (allLanded && (trackerCoverage >= 0.1 || airborneCount === homeCount)) {
-        nextStatus = 'H';
-        allowFrom = allOfficiallyFinalised || ognDeterminedHome ? ['B', 'G', 'L', 'S', 'F'] : ['L', 'S', 'F'];
+        nextStatus = CompStatus.AllHome;
+        allowFrom =
+            allOfficiallyFinalised || ognDeterminedHome
+                ? [CompStatus.AfterBrief, CompStatus.Gridded, CompStatus.Launched, CompStatus.StartOpen, CompStatus.FirstFinisher]
+                : [CompStatus.Launched, CompStatus.StartOpen, CompStatus.FirstFinisher];
         const homeBy = allOfficiallyFinalised ? ' (officially finalised)' : ognDeterminedHome ? ' (OGN coverage)' : '';
         reason = `${homeCount}/${scored.length} of ${totalScored} tracked gliders home${homeBy}`;
     } else if (finishingCount > 0) {
-        nextStatus = 'F';
-        allowFrom = ['L', 'S'];
+        nextStatus = CompStatus.FirstFinisher;
+        allowFrom = [CompStatus.Launched, CompStatus.StartOpen];
         reason = `${finishingCount}/${scored.length} tracked gliders finishing (< ${FINISHING_ETA_MINUTES} min to home)`;
     } else if (startedCount / scored.length > 0.1) {
-        nextStatus = 'S';
-        allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'L', 'H'];
+        nextStatus = CompStatus.StartOpen;
+        allowFrom = [CompStatus.NoTask, CompStatus.PreReg, CompStatus.AfterBrief, CompStatus.Gridded, CompStatus.Launched, CompStatus.AllHome];
         reason = `${startedCount}/${scored.length} tracked gliders started`;
     } else if (airborneCount > Math.max(LAUNCHING_TRACKED_FRACTION * scored.length, LAUNCHING_TOTAL_FRACTION * totalScored)) {
         // Require enough of the field to be airborne before declaring 'launching'.
@@ -114,19 +117,14 @@ export function computeCompStatus(scored: PartialPilotScoredStatus[], totalScore
         // against both the tracked subset (so a class with 5 trackers needs
         // ≥2 airborne, not just 1) and the full field (so a 40-pilot class
         // doesn't go 'L' on the back of 1 tracked pilot).
-        nextStatus = 'L';
-        allowFrom = [':', '?', 'P', 'B', 'X', 'G', 'H'];
+        nextStatus = CompStatus.Launched;
+        allowFrom = [CompStatus.NoTask, CompStatus.PreReg, CompStatus.AfterBrief, CompStatus.Gridded, CompStatus.AllHome];
         reason = `${airborneCount}/${scored.length} tracked gliders airborne (of ${totalScored} total)`;
     } else if (griddedCount > 0) {
-        nextStatus = 'G';
-        allowFrom = [':', '?', 'P', 'B', 'X'];
+        nextStatus = CompStatus.Gridded;
+        allowFrom = [CompStatus.NoTask, CompStatus.PreReg, CompStatus.AfterBrief];
         reason = `${griddedCount}/${scored.length} tracked gliders on grid`;
     }
-
-    console.log(
-        `${className}: allLanded ${allLanded}, trackerCoverage ${trackerCoverage}, allOfficiallyFinalised ${allOfficiallyFinalised}, ognDeterminedHome ${ognDeterminedHome}`,
-        `finishingCount: ${finishingCount}, startedCount ${startedCount}, scored.length ${scored.length}, airborneCount: ${airborneCount}, griddedCount: ${griddedCount} homeCount ${homeCount}, nextStatus ${nextStatus}/${reason}`
-    );
 
     return nextStatus ? {status: nextStatus, allowFrom, reason} : null;
 }

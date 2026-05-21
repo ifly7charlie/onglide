@@ -27,6 +27,7 @@ import {fetchRobocontrol} from '../lib/scoring/shared/robocontrol';
 // DB access
 //const db = require('../db')
 import escape from 'sql-template-strings';
+import {CompStatus} from '../lib/types';
 const mysql = require('serverless-mysql');
 
 let mysql_db;
@@ -734,7 +735,7 @@ async function process_day_task(day, classid, classname, keys) {
         .transaction()
 
         // Advance the datecode and clear the status on day rollover.
-        // Yesterday's L/S/R/F/H is meaningless to today's state machine,
+        // Yesterday's L/S/F/H is meaningless to today's state machine,
         // and the status='B' update further down (or the 'Z' cancelled
         // path) will set the correct value if there's a task — ':' isn't
         // in its preserve list so it'll be overwritten cleanly. If no task
@@ -743,7 +744,7 @@ async function process_day_task(day, classid, classname, keys) {
             UPDATE compstatus
             SET
                 datecode = ${toDateCode(date)},
-                status = ':'
+                status = ${CompStatus.NoTask}
             WHERE
                 (
                     datecode < ${toDateCode(date)}
@@ -1030,8 +1031,10 @@ async function process_day_task(day, classid, classname, keys) {
         // if they are marked as flying etc. If the day is cancelled we want that updated here as well
         // Status not used at present but a way of keeping track of if they are flying etc.
         .query(() => {
-            if (day.result_status != 'cancelled') return ["UPDATE compstatus SET status='B' WHERE class=? AND datecode=? AND status NOT IN ( 'L', 'S', 'R', 'F', 'H', 'Z' )", [classid, toDateCode(date)]];
-            else return ["UPDATE compstatus SET status='Z' WHERE class=? AND datecode=?", [classid, toDateCode(date)]];
+            // Don't demote a class that has already launched/finished/scrubbed today.
+            const preserved = [CompStatus.Launched, CompStatus.StartOpen, CompStatus.FirstFinisher, CompStatus.AllHome, CompStatus.Scrubbed].map((s) => `'${s}'`).join(',');
+            if (day.result_status != 'cancelled') return [`UPDATE compstatus SET status='${CompStatus.AfterBrief}' WHERE class=? AND datecode=? AND status NOT IN (${preserved})`, [classid, toDateCode(date)]];
+            else return [`UPDATE compstatus SET status='${CompStatus.Scrubbed}' WHERE class=? AND datecode=?`, [classid, toDateCode(date)]];
         })
 
         // If it was cancelled then mark it as not flown, this will stop the UI from displaying it

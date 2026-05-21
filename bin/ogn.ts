@@ -52,7 +52,7 @@ const COMPETITIONS_CHANNEL = 'all';
 import {loadMergedDDB, isBlocked, blockedMethod, gliderEquivalent, DDBEntry as SharedDDBEntry} from '../lib/ddb';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM} from '../lib/types';
+import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM, FLEW_STATES, CompStatus} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
 console.log('dev mode', dev);
 
@@ -2712,12 +2712,17 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         // matches today; older datecodes get demoted to 'yesterday' or
         // 'notask' so a missed landing report from two days ago doesn't
         // look like 'racing'. See the original /api/competitions logic.
-        // 'yesterday' is reserved for a day that actually had a task — a
-        // no-task day stamped with yesterday's datecode stays 'notask'.
+        //
+        // 'yesterday' is reserved for a day the class actually flew.
+        // compstatus is one sticky row per class and its datecode advances
+        // onto a day as soon as a task is *briefed* — so a briefed-then-
+        // scrubbed (status stalls at 'B'/'G') or cancelled ('Z') day also
+        // carries yesterday's datecode. Only the launched/flying codes count
+        // (FLEW_STATES); any other status demotes to 'notask'.
         let displayStatus: CompetitionDisplayStatus;
         if (sdc && sdc < todayDatecode) {
-            const yesterdayHadTask = sdc === yesterdayDatecode && classDisplayStatus(ch.compStatus, true) !== 'notask';
-            displayStatus = yesterdayHadTask ? 'yesterday' : 'notask';
+            const flewYesterday = sdc === yesterdayDatecode && FLEW_STATES.has(ch.compStatus);
+            displayStatus = flewYesterday ? 'yesterday' : 'notask';
         } else {
             displayStatus = classDisplayStatus(ch.compStatus, inWindow);
         }
@@ -2784,15 +2789,15 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
     // 'yesterday' above — a no-task day never counts (see per-class logic).
     const anyYesterday = classes.some((c) => c.displayStatus === 'yesterday');
     let displayStatus: CompetitionDisplayStatus;
-    const anyFinishing = todaysStatuses.some((s) => s === 'F');
-    const anyStarted = todaysStatuses.some((s) => s === 'S');
-    const anyLaunching = todaysStatuses.some((s) => s === 'L');
-    const allHome = todaysStatuses.length > 0 && todaysStatuses.every((s) => s === 'H');
-    const anyTaskReady = todaysStatuses.some((s) => s === 'B' || s === 'P' || s === 'G');
+    const anyFinishing = todaysStatuses.some((s) => s === CompStatus.FirstFinisher);
+    const anyStarted = todaysStatuses.some((s) => s === CompStatus.StartOpen);
+    const anyLaunching = todaysStatuses.some((s) => s === CompStatus.Launched);
+    const allHome = todaysStatuses.length > 0 && todaysStatuses.every((s) => s === CompStatus.AllHome);
+    const anyTaskReady = todaysStatuses.some((s) => s === CompStatus.AfterBrief || s === CompStatus.Gridded);
     // A comp rolls up to 'cancelled' only when every class with a status
     // from today is cancelled — a mixed day (one class flying, one
     // scrubbed) keeps the more-active label below.
-    const allCancelled = todaysStatuses.length > 0 && todaysStatuses.every((s) => s === 'Z');
+    const allCancelled = todaysStatuses.length > 0 && todaysStatuses.every((s) => s === CompStatus.Scrubbed);
     if (anyFinishing) displayStatus = 'finishing';
     else if (anyStarted) displayStatus = 'started';
     else if (anyLaunching) displayStatus = 'launching';

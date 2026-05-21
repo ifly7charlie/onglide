@@ -17,6 +17,7 @@ import {getElevationOffset} from '../../getelevationoffset';
 import type {ClassId} from '../source';
 import {findTimezoneFromLocation, getTzOffset} from './timezone';
 import {cascadeDeleteClass} from './classes';
+import {CompStatus, LAUNCHED_STATES} from '../../types';
 
 import {point, Coord} from '@turf/helpers';
 import distance from '@turf/distance';
@@ -168,8 +169,8 @@ export async function upsertTaskAndLegs(
     // standalone query (rather than inside the chain) to side-step the
     // flaky transaction-chain commit behaviour. The status NOT IN guard
     // protects airborne/landed classes from being demoted, but only when
-    // the locked state belongs to *this* dateCode — a stale L/S/R/H from
-    // a previous day must yield to the new task's 'B'. 'Z' (scrubbed) is
+    // the locked state belongs to *this* dateCode — a stale LAUNCHED_STATES
+    // code from a previous day must yield to the new task's 'B'. 'Z' (scrubbed) is
     // intentionally allowed so a new task on a later day overrides a
     // stale scrubbed status from a previous datecode.
     //
@@ -180,13 +181,13 @@ export async function upsertTaskAndLegs(
         await db.query(escape`
             UPDATE compstatus
             SET
-                status = 'B',
+                status = ${CompStatus.AfterBrief},
                 datecode = ${dateCode}
             WHERE
                 class = ${classid}
                 AND (datecode IS NULL OR ${dateCode} >= datecode)
                 AND (
-                    status NOT IN ('L', 'S', 'R', 'H')
+                    status NOT IN (${[...LAUNCHED_STATES]})
                     OR datecode IS NULL
                     OR datecode <> ${dateCode}
                 )
@@ -195,7 +196,7 @@ export async function upsertTaskAndLegs(
         await db.query(escape`
             UPDATE compstatus
             SET
-                status = 'Z',
+                status = ${CompStatus.Scrubbed},
                 datecode = ${dateCode}
             WHERE
                 class = ${classid}

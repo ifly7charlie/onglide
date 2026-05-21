@@ -26,6 +26,7 @@ import {SourceRegistry} from './source';
 import {applyJitter, localDateISO, localDatecode, nowInTz, type LocalTime} from './shared/timezone';
 import {diffAndRemoveClasses, resetStaleCompStatus} from './shared/classes';
 import {pruneOldDays, dropDeadCompetition} from './shared/tasks';
+import {TASK_STATES, LAUNCHED_STATES} from '../types';
 
 // ---------- intervals (rules 2/3/4) ----------
 
@@ -56,13 +57,6 @@ const LAUNCH_FAST_TAIL_MS = 60 * 60 * 1000;
 // sources for that compid — so an operator can switch a competition
 // onto the API by adding a key row, without deleting the scrape row.
 const OVERRIDE_SOURCE_TYPE = 'soaringspotkey';
-
-// ---------- per-class status helpers ----------
-
-// compstatus.status values that mean "we have a task for this date".
-const TASK_STATES = new Set<string>(['B', 'L', 'S', 'R', 'H', 'Z']);
-// compstatus.status values that mean "launching has begun".
-const LAUNCHED_STATES = new Set<string>(['L', 'S', 'R', 'H']);
 
 // ---------- in-memory state ----------
 
