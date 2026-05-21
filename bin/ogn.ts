@@ -103,7 +103,7 @@ function setAirfields(airfields: AirfieldSpec[]) {
 import * as dotenv from 'dotenv';
 
 // Handle fetching elevation and confirming size of the cache for tiles
-import {getElevationOffset, getCacheSize} from '../lib/getelevationoffset';
+import {getElevationOffset, getCacheSize, shutdownElevationCache} from '../lib/getelevationoffset';
 
 // handle unkownn gliders
 import {capturePossibleLaunchLanding} from '../lib/flightprocessing/launchlanding';
@@ -845,6 +845,11 @@ async function handleExit(signal: string) {
         userLogStream?.end();
     } catch (e) {
         /**/
+    }
+    try {
+        shutdownElevationCache();
+    } catch (e) {
+        console.error('elevation cache shutdown during exit:', e);
     }
     // Give any flushing I/O a last beat then go.
     setTimeout(() => process.exit(0), 200);
