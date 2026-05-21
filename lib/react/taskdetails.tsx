@@ -7,9 +7,9 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
 import {faMagnifyingGlassLocation, faCaretUp, faCaretDown, faHourglassStart, faClockRotateLeft} from '@fortawesome/free-solid-svg-icons';
 
-import {useState} from 'react';
+import {useState, useEffect} from 'react';
 import {Spinner} from './loaders';
-import {OptionalDurationMM} from './optional';
+import {OptionalDurationMM, OptionalDuration} from './optional';
 
 const matchWords = /(^\w{1}|\.\s*\w{1})/gi;
 
@@ -159,14 +159,24 @@ export function StartlineNotice({vc, tz, replayTime}: {vc: ClassName; tz: TZ; re
     const liveNow = useSelector(selectNow);
     const officialDelay = useSelector(selectOfficialDelay);
 
-    const noStart = useMemo(() => {
-        if (!task?.rules?.nostartutc) return '';
-        const nowSec = replayTime || liveNow || getNow();
-        if (task.rules.nostartutc <= nowSec) return '';
-        return t('task.start_opens_at', {time: new Date(task.rules.nostartutc * 1000).toLocaleTimeString(i18n.language, {timeZone: tz, hour: '2-digit', minute: '2-digit'})});
-    }, [tz, task?.rules?.nostartutc, replayTime, liveNow, t, i18n.language]);
+    // Local 1s ticker so the countdown advances smoothly between the
+    // (irregular) websocket `now` updates that drive liveNow.
+    const [, setTick] = useState(0);
+    useEffect(() => {
+        const i = setInterval(() => setTick((v) => v + 1), 1000);
+        return () => clearInterval(i);
+    }, []);
 
-    if (!noStart) return null;
+    const nostartutc = task?.rules?.nostartutc;
+    const nowSec = replayTime || liveNow || getNow();
+    const remaining = (nostartutc ?? 0) - nowSec;
+
+    const noStart = useMemo(() => {
+        if (!nostartutc) return '';
+        return t('task.start_opens_at', {time: new Date(nostartutc * 1000).toLocaleTimeString(i18n.language, {timeZone: tz, hour: '2-digit', minute: '2-digit'})});
+    }, [tz, nostartutc, t, i18n.language]);
+
+    if (!nostartutc || remaining <= 0) return null;
     return (
         <p className="startline-opens-notice">
             <FontAwesomeIcon icon={faHourglassStart} /> {noStart}
@@ -176,6 +186,7 @@ export function StartlineNotice({vc, tz, replayTime}: {vc: ClassName; tz: TZ; re
                     <FontAwesomeIcon icon={faClockRotateLeft} /> {OptionalDurationMM('', officialDelay, 'm')}
                 </span>
             ) : null}
+            <span className="startline-opens-countdown">{OptionalDuration('', remaining as Epoch)}</span>
         </p>
     );
 }
