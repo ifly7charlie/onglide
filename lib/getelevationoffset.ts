@@ -73,7 +73,8 @@ export async function getElevationOffset(lat: number, lng: number, cb: Function 
 
 async function _getElevationOffset(lat, lng, cb) {
     // Figure out what tile it is (obvs same order as geojson)
-    // zoom 12 gives ~9.5m/px at 40° — plenty for a per-point elevation query
+    // zoom 12 gives ~29m/px at 40° — plenty for a per-point elevation query,
+    // and roughly matches the native SRTM (~30m) resolution of the DEM source
     let tf = tilebelt.pointToTileFraction(lng, lat, 12);
     let tile = tf.map(Math.floor);
     let url = DEM_TILE_URL.replace('{z}', String(tile[2])).replace('{x}', String(tile[0])).replace('{y}', String(tile[1]));
