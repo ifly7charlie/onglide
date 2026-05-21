@@ -60,6 +60,39 @@ export function scoreChanged(oldScore: PilotScore | undefined, newScore: PilotSc
         return false;
     }
 
-    // Otherwise check positional movement when the caller cares about it
-    return checkActual && !equal(oldScore.actual, newScore.actual);
+    if (!checkActual) {
+        return true;
+    }
+
+    const oa = oldScore.actual;
+    const na = newScore.actual;
+
+    // Makew sure we have both, if one is missing it's changed
+    if (!oa || !na) {
+        return oa !== na;
+    }
+
+    // We never emit more than ever 30 seconds due to score changed
+    // unless it's close to the finish
+    // the previous conditions cover major task changes
+    if ((na.distanceRemaining ?? Infinity) > 10 && newScore.t - oldScore.t < 20) {
+        return false;
+    }
+
+    // moved more than 1km
+    if (Math.abs((oa.distance ?? 0) - (na.distance ?? 0)) > 1) {
+        return true;
+    }
+
+    // Speed changed by more than 1.5kph
+    if (Math.abs((oa.taskSpeed ?? 0) - (na.taskSpeed ?? 0)) > 1.5) {
+        return true;
+    }
+
+    // ld change of 3 or more don't want it to change too often in a good climb
+    if (Math.abs((oa.grRemaining ?? 0) - (na.grRemaining ?? 0)) > 3) {
+        return true;
+    }
+
+    return false;
 }
