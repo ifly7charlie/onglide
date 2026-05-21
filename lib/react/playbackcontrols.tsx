@@ -115,7 +115,7 @@ const PlaybackControls = ({
     const datecode = useSelector(selectDatecode);
     const scoreId = useSelector(selectScoreId);
     const latestTrackUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4); // from tracks
-    const replayEndTime = !live ? latestTrackUpdate : latestScore;
+    const replayEndTime = live ? latestTrackUpdate : latestScore;
 
     const online = useSelector(selectOnline);
 
