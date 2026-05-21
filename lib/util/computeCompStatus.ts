@@ -48,14 +48,19 @@ export function computeCompStatus(scored: PartialPilotScoredStatus[], totalScore
         return fs === PositionStatus.Landed || fs === PositionStatus.Home || fs === PositionStatus.Finished;
     };
     const strictHomeCount = scored.filter(isStrictHome).length;
+    // A pilot still reading a pre-flight status — Unknown (the tracker never
+    // produced a position at all — DNS or a device that stayed silent) or Grid
+    // (tracker came online on the grid). 'Stationary' is intentionally not
+    // listed: the position pipeline never emits it.
+    const neverFlew = (p: PartialPilotScoredStatus) => p.flightStatus === PositionStatus.Unknown || p.flightStatus === PositionStatus.Grid;
     // Once a majority of the class is strictly home the day is clearly winding
-    // down: a tracked pilot still on the grid who never started never launched
-    // (DNS, or the tracker went offline on the grid). Count those home too, so a
+    // down: a tracked pilot who never started and never launched is a no-show
+    // (DNS, or the tracker never came online). Count those home too, so a
     // handful of no-shows can't wedge the class out of H. Requiring a majority
     // (not just one starter) keeps a pre-launch / mid-launch field — where the
     // racers aren't home yet — from reading as "all home".
     const majorityHome = strictHomeCount > scored.length / 2;
-    const isHome = (p: PartialPilotScoredStatus) => isStrictHome(p) || (majorityHome && !p.started && p.flightStatus === PositionStatus.Grid);
+    const isHome = (p: PartialPilotScoredStatus) => isStrictHome(p) || (majorityHome && !p.started && neverFlew(p));
     const homeCount = scored.filter(isHome).length;
     const allLanded = scored.length > 0 && homeCount === scored.length;
     const startedCount = scored.filter((p) => p.started).length;
