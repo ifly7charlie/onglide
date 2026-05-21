@@ -674,10 +674,10 @@ export const ClassWinner: MessageFns<ClassWinner> = {
       writer.uint32(10).string(message.compno);
     }
     if (message.taskSpeed !== undefined) {
-      writer.uint32(17).double(message.taskSpeed);
+      writer.uint32(21).float(message.taskSpeed);
     }
     if (message.taskDistance !== undefined) {
-      writer.uint32(25).double(message.taskDistance);
+      writer.uint32(29).float(message.taskDistance);
     }
     return writer;
   },
@@ -698,19 +698,19 @@ export const ClassWinner: MessageFns<ClassWinner> = {
           continue;
         }
         case 2: {
-          if (tag !== 17) {
+          if (tag !== 21) {
             break;
           }
 
-          message.taskSpeed = reader.double();
+          message.taskSpeed = reader.float();
           continue;
         }
         case 3: {
-          if (tag !== 25) {
+          if (tag !== 29) {
             break;
           }
 
-          message.taskDistance = reader.double();
+          message.taskDistance = reader.float();
           continue;
         }
       }
@@ -1011,10 +1011,10 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
       writer.uint32(26).string(message.sitename);
     }
     if (message.lat !== 0) {
-      writer.uint32(33).double(message.lat);
+      writer.uint32(37).float(message.lat);
     }
     if (message.lng !== 0) {
-      writer.uint32(41).double(message.lng);
+      writer.uint32(45).float(message.lng);
     }
     if (message.start !== "") {
       writer.uint32(50).string(message.start);
@@ -1087,19 +1087,19 @@ export const CompetitionSummary: MessageFns<CompetitionSummary> = {
           continue;
         }
         case 4: {
-          if (tag !== 33) {
+          if (tag !== 37) {
             break;
           }
 
-          message.lat = reader.double();
+          message.lat = reader.float();
           continue;
         }
         case 5: {
-          if (tag !== 41) {
+          if (tag !== 45) {
             break;
           }
 
-          message.lng = reader.double();
+          message.lng = reader.float();
           continue;
         }
         case 6: {
@@ -1651,10 +1651,10 @@ export const TaskRules: MessageFns<TaskRules> = {
       writer.uint32(40).bool(message.handicapped);
     }
     if (message.dm !== undefined) {
-      writer.uint32(49).double(message.dm);
+      writer.uint32(48).uint32(message.dm);
     }
     if (message.maxHandicap !== 0) {
-      writer.uint32(57).double(message.maxHandicap);
+      writer.uint32(61).float(message.maxHandicap);
     }
     return writer;
   },
@@ -1707,19 +1707,19 @@ export const TaskRules: MessageFns<TaskRules> = {
           continue;
         }
         case 6: {
-          if (tag !== 49) {
+          if (tag !== 48) {
             break;
           }
 
-          message.dm = reader.double();
+          message.dm = reader.uint32();
           continue;
         }
         case 7: {
-          if (tag !== 57) {
+          if (tag !== 61) {
             break;
           }
 
-          message.maxHandicap = reader.double();
+          message.maxHandicap = reader.float();
           continue;
         }
       }
@@ -1761,7 +1761,7 @@ export const TaskRules: MessageFns<TaskRules> = {
       obj.handicapped = message.handicapped;
     }
     if (message.dm !== undefined) {
-      obj.dm = message.dm;
+      obj.dm = Math.round(message.dm);
     }
     if (message.maxHandicap !== 0) {
       obj.maxHandicap = message.maxHandicap;
@@ -1805,7 +1805,7 @@ export const TaskDetails: MessageFns<TaskDetails> = {
       writer.uint32(10).string(message.type);
     }
     if (message.distance !== 0) {
-      writer.uint32(17).double(message.distance);
+      writer.uint32(21).float(message.distance);
     }
     if (message.duration !== "") {
       writer.uint32(26).string(message.duration);
@@ -1847,11 +1847,11 @@ export const TaskDetails: MessageFns<TaskDetails> = {
           continue;
         }
         case 2: {
-          if (tag !== 17) {
+          if (tag !== 21) {
             break;
           }
 
-          message.distance = reader.double();
+          message.distance = reader.float();
           continue;
         }
         case 3: {
@@ -2018,37 +2018,37 @@ export const TaskLeg: MessageFns<TaskLeg> = {
       writer.uint32(34).string(message.name);
     }
     if (message.bearing !== 0) {
-      writer.uint32(41).double(message.bearing);
+      writer.uint32(45).float(message.bearing);
     }
     if (message.length !== 0) {
-      writer.uint32(49).double(message.length);
+      writer.uint32(53).float(message.length);
     }
     if (message.nlat !== 0) {
-      writer.uint32(57).double(message.nlat);
+      writer.uint32(61).float(message.nlat);
     }
     if (message.nlng !== 0) {
-      writer.uint32(65).double(message.nlng);
+      writer.uint32(69).float(message.nlng);
     }
     if (message.r1 !== 0) {
-      writer.uint32(73).double(message.r1);
+      writer.uint32(77).float(message.r1);
     }
     if (message.r2 !== 0) {
-      writer.uint32(81).double(message.r2);
+      writer.uint32(85).float(message.r2);
     }
     if (message.a1 !== 0) {
-      writer.uint32(89).double(message.a1);
+      writer.uint32(93).float(message.a1);
     }
     if (message.a2 !== 0) {
-      writer.uint32(97).double(message.a2);
+      writer.uint32(101).float(message.a2);
     }
     if (message.a12 !== 0) {
-      writer.uint32(105).double(message.a12);
+      writer.uint32(109).float(message.a12);
     }
     if (message.direction !== "") {
       writer.uint32(114).string(message.direction);
     }
     if (message.altitude !== undefined) {
-      writer.uint32(121).double(message.altitude);
+      writer.uint32(125).float(message.altitude);
     }
     return writer;
   },
@@ -2093,75 +2093,75 @@ export const TaskLeg: MessageFns<TaskLeg> = {
           continue;
         }
         case 5: {
-          if (tag !== 41) {
+          if (tag !== 45) {
             break;
           }
 
-          message.bearing = reader.double();
+          message.bearing = reader.float();
           continue;
         }
         case 6: {
-          if (tag !== 49) {
+          if (tag !== 53) {
             break;
           }
 
-          message.length = reader.double();
+          message.length = reader.float();
           continue;
         }
         case 7: {
-          if (tag !== 57) {
+          if (tag !== 61) {
             break;
           }
 
-          message.nlat = reader.double();
+          message.nlat = reader.float();
           continue;
         }
         case 8: {
-          if (tag !== 65) {
+          if (tag !== 69) {
             break;
           }
 
-          message.nlng = reader.double();
+          message.nlng = reader.float();
           continue;
         }
         case 9: {
-          if (tag !== 73) {
+          if (tag !== 77) {
             break;
           }
 
-          message.r1 = reader.double();
+          message.r1 = reader.float();
           continue;
         }
         case 10: {
-          if (tag !== 81) {
+          if (tag !== 85) {
             break;
           }
 
-          message.r2 = reader.double();
+          message.r2 = reader.float();
           continue;
         }
         case 11: {
-          if (tag !== 89) {
+          if (tag !== 93) {
             break;
           }
 
-          message.a1 = reader.double();
+          message.a1 = reader.float();
           continue;
         }
         case 12: {
-          if (tag !== 97) {
+          if (tag !== 101) {
             break;
           }
 
-          message.a2 = reader.double();
+          message.a2 = reader.float();
           continue;
         }
         case 13: {
-          if (tag !== 105) {
+          if (tag !== 109) {
             break;
           }
 
-          message.a12 = reader.double();
+          message.a12 = reader.float();
           continue;
         }
         case 14: {
@@ -2173,11 +2173,11 @@ export const TaskLeg: MessageFns<TaskLeg> = {
           continue;
         }
         case 15: {
-          if (tag !== 121) {
+          if (tag !== 125) {
             break;
           }
 
-          message.altitude = reader.double();
+          message.altitude = reader.float();
           continue;
         }
       }
@@ -3206,28 +3206,28 @@ function createBaseSpeedDist(): SpeedDist {
 export const SpeedDist: MessageFns<SpeedDist> = {
   encode(message: SpeedDist, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.distance !== undefined) {
-      writer.uint32(9).double(message.distance);
+      writer.uint32(13).float(message.distance);
     }
     if (message.taskDistance !== 0) {
-      writer.uint32(17).double(message.taskDistance);
+      writer.uint32(21).float(message.taskDistance);
     }
     if (message.distanceRemaining !== undefined) {
-      writer.uint32(89).double(message.distanceRemaining);
+      writer.uint32(93).float(message.distanceRemaining);
     }
     if (message.maxPossible !== undefined) {
-      writer.uint32(97).double(message.maxPossible);
+      writer.uint32(101).float(message.maxPossible);
     }
     if (message.minPossible !== undefined) {
-      writer.uint32(105).double(message.minPossible);
+      writer.uint32(109).float(message.minPossible);
     }
     if (message.grRemaining !== undefined) {
       writer.uint32(160).uint32(message.grRemaining);
     }
     if (message.legSpeed !== undefined) {
-      writer.uint32(241).double(message.legSpeed);
+      writer.uint32(245).float(message.legSpeed);
     }
     if (message.taskSpeed !== undefined) {
-      writer.uint32(249).double(message.taskSpeed);
+      writer.uint32(253).float(message.taskSpeed);
     }
     return writer;
   },
@@ -3240,43 +3240,43 @@ export const SpeedDist: MessageFns<SpeedDist> = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1: {
-          if (tag !== 9) {
+          if (tag !== 13) {
             break;
           }
 
-          message.distance = reader.double();
+          message.distance = reader.float();
           continue;
         }
         case 2: {
-          if (tag !== 17) {
+          if (tag !== 21) {
             break;
           }
 
-          message.taskDistance = reader.double();
+          message.taskDistance = reader.float();
           continue;
         }
         case 11: {
-          if (tag !== 89) {
+          if (tag !== 93) {
             break;
           }
 
-          message.distanceRemaining = reader.double();
+          message.distanceRemaining = reader.float();
           continue;
         }
         case 12: {
-          if (tag !== 97) {
+          if (tag !== 101) {
             break;
           }
 
-          message.maxPossible = reader.double();
+          message.maxPossible = reader.float();
           continue;
         }
         case 13: {
-          if (tag !== 105) {
+          if (tag !== 109) {
             break;
           }
 
-          message.minPossible = reader.double();
+          message.minPossible = reader.float();
           continue;
         }
         case 20: {
@@ -3288,19 +3288,19 @@ export const SpeedDist: MessageFns<SpeedDist> = {
           continue;
         }
         case 30: {
-          if (tag !== 241) {
+          if (tag !== 245) {
             break;
           }
 
-          message.legSpeed = reader.double();
+          message.legSpeed = reader.float();
           continue;
         }
         case 31: {
-          if (tag !== 249) {
+          if (tag !== 253) {
             break;
           }
 
-          message.taskSpeed = reader.double();
+          message.taskSpeed = reader.float();
           continue;
         }
       }
@@ -3768,16 +3768,16 @@ export const StatSegment: MessageFns<StatSegment> = {
       writer.uint32(40).uint32(message.turncount);
     }
     if (message.distance !== 0) {
-      writer.uint32(49).double(message.distance);
+      writer.uint32(53).float(message.distance);
     }
     if (message.achievedDistance !== 0) {
-      writer.uint32(57).double(message.achievedDistance);
+      writer.uint32(61).float(message.achievedDistance);
     }
     if (message.delta !== 0) {
       writer.uint32(64).int32(message.delta);
     }
     if (message.avgDelta !== 0) {
-      writer.uint32(73).double(message.avgDelta);
+      writer.uint32(77).float(message.avgDelta);
     }
     if (message.direction !== 0) {
       writer.uint32(80).uint32(message.direction);
@@ -3839,19 +3839,19 @@ export const StatSegment: MessageFns<StatSegment> = {
           continue;
         }
         case 6: {
-          if (tag !== 49) {
+          if (tag !== 53) {
             break;
           }
 
-          message.distance = reader.double();
+          message.distance = reader.float();
           continue;
         }
         case 7: {
-          if (tag !== 57) {
+          if (tag !== 61) {
             break;
           }
 
-          message.achievedDistance = reader.double();
+          message.achievedDistance = reader.float();
           continue;
         }
         case 8: {
@@ -3863,11 +3863,11 @@ export const StatSegment: MessageFns<StatSegment> = {
           continue;
         }
         case 9: {
-          if (tag !== 73) {
+          if (tag !== 77) {
             break;
           }
 
-          message.avgDelta = reader.double();
+          message.avgDelta = reader.float();
           continue;
         }
         case 10: {
@@ -4869,10 +4869,10 @@ export const PilotPosition: MessageFns<PilotPosition> = {
       writer.uint32(10).string(message.c);
     }
     if (message.lat !== 0) {
-      writer.uint32(17).double(message.lat);
+      writer.uint32(21).float(message.lat);
     }
     if (message.lng !== 0) {
-      writer.uint32(25).double(message.lng);
+      writer.uint32(29).float(message.lng);
     }
     if (message.a !== 0) {
       writer.uint32(32).sint32(message.a);
@@ -4908,19 +4908,19 @@ export const PilotPosition: MessageFns<PilotPosition> = {
           continue;
         }
         case 2: {
-          if (tag !== 17) {
+          if (tag !== 21) {
             break;
           }
 
-          message.lat = reader.double();
+          message.lat = reader.float();
           continue;
         }
         case 3: {
-          if (tag !== 25) {
+          if (tag !== 29) {
             break;
           }
 
-          message.lng = reader.double();
+          message.lng = reader.float();
           continue;
         }
         case 4: {

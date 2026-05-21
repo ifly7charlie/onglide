@@ -18,8 +18,8 @@ message OnglideWebSocketMessage {
 // score: taskSpeed if any pilot has one, otherwise taskDistance.
 message ClassWinner {
 	string compno = 1;
-	optional double taskSpeed = 2;     // km/h, handicapped (preferred for display)
-	optional double taskDistance = 3;  // km, handicapped (shown when no speed)
+	optional float taskSpeed = 2;      // km/h, handicapped (preferred for display)
+	optional float taskDistance = 3;   // km, handicapped (shown when no speed)
 }
 
 // Per-class status row shown on the globe landing page; mirrors the JSON
@@ -41,8 +41,8 @@ message CompetitionSummary {
 	string compid = 1;
 	string name = 2;
 	optional string sitename = 3;
-	double lat = 4;
-	double lng = 5;
+	float lat = 4;
+	float lng = 5;
 	string start = 6;            // YYYY-MM-DD
 	string end = 7;              // YYYY-MM-DD
 	string countrycode = 8;
@@ -86,13 +86,13 @@ message TaskRules {
 	optional bool aat = 3;
 	optional bool dh = 4;            // distance handicap
 	optional bool handicapped = 5;
-	optional double dm = 6;          // minimum distance for non-AAT speed tasks
-	double maxHandicap = 7; // highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps
+	optional uint32 dm = 6;          // minimum distance for non-AAT speed tasks
+	float maxHandicap = 7; // highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps
 }
 
 message TaskDetails {
 	string type = 1;                 // 'S' | 'D' | 'E' | 'A'
-	double distance = 2;             // task distance in km
+	float distance = 2;              // task distance in km
 	string duration = 3;             // 'HH:MM:SS' (AAT)
 	string status = 4;               // 'Z' = scrubbed, etc
 	string nostart = 5;              // 'HH:MM:SS' start-open string
@@ -113,17 +113,17 @@ message TaskLeg {
 	string type = 2;                 // 'line' | 'sector'
 	string ntrigraph = 3;
 	string name = 4;
-	double bearing = 5;
-	double length = 6;               // km
-	double nlat = 7;
-	double nlng = 8;
-	double r1 = 9;                   // km
-	double r2 = 10;                  // km
-	double a1 = 11;                  // degrees (half-angle)
-	double a2 = 12;                  // degrees
-	double a12 = 13;                 // bearing
+	float bearing = 5;
+	float length = 6;               // km
+	float nlat = 7;
+	float nlng = 8;
+	float r1 = 9;                   // km
+	float r2 = 10;                  // km
+	float a1 = 11;                  // degrees (half-angle)
+	float a2 = 12;                  // degrees
+	float a12 = 13;                 // bearing
 	string direction = 14;           // 'symmetrical' | 'np' | 'pp' | 'fixed'
-	optional double altitude = 15;
+	optional float altitude = 15;
 }
 
 message Task {
@@ -185,17 +185,17 @@ message Scores {
 }
 
 message SpeedDist {
-    optional double distance = 1; // done distance on this leg
-	double taskDistance = 2; // done distance on whole task
+    optional float distance = 1; // done distance on this leg
+	float taskDistance = 2; // done distance on whole task
 
-    optional double distanceRemaining = 11; // Speed
-    optional double maxPossible = 12; // AAT
-    optional double minPossible = 13;
+    optional float distanceRemaining = 11; // Speed
+    optional float maxPossible = 12; // AAT
+    optional float minPossible = 13;
 
     optional uint32 grRemaining = 20;
 
-    optional double legSpeed = 30; // speed on this leg
-    optional double taskSpeed = 31; // speed on task to end of leg
+    optional float legSpeed = 30; // speed on this leg
+    optional float taskSpeed = 31; // speed on task to end of leg
 }
 
 message PilotScoreLeg {
@@ -234,10 +234,10 @@ message StatSegment {
     string state = 3; // Type of segment
     Wind wind = 4; // Wind for segment
     uint32 turncount = 5; // Number of turns
-    double distance = 6; // Distance (ground not task)
-    double achievedDistance = 7; // From first point to last point - straight
+    float distance = 6; // Distance (ground not task)
+    float achievedDistance = 7; // From first point to last point - straight
     int32 delta = 8; // height delta?
-    double avgDelta = 9;
+    float avgDelta = 9;
     uint32 direction = 10; // left or right
     uint32 heightgain = 11; // gain m
     uint32 heightloss = 12; // loss m
@@ -327,8 +327,8 @@ message PilotScore {
 // This message is generate position updates for the pilots
 message PilotPosition {
     string c = 1;
-    double lat = 2;
-    double lng = 3;
+    float lat = 2;
+    float lng = 3;
     sint32 a = 4; // AMSL — can be negative near sea level
     sint32 g = 5; // AGL — terrain-model imprecision can push below 0
     uint32 t = 6;
