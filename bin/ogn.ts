@@ -228,6 +228,11 @@ interface Channel {
     // Sticky once true — sunset only happens once per channel lifetime (new datecode = new channel)
     afterSunset: boolean;
 
+    // True while we are actively listening to APRS for at least one glider on
+    // this channel (not after sunset, day still being scored). Recomputed each
+    // updateTrackers tick and shipped to the frontend via getIdentifiers.
+    live: boolean;
+
     // Tasks we are working on or have had
 
     earliestScore: Epoch;
@@ -1361,6 +1366,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 },
                 heightStatistics: new Stats(),
                 afterSunset: false,
+                live: false,
                 // Info on what has been sent via https
                 webPathBaseTime: 0 as Epoch,
                 mostRecentPosition: getNow(),
@@ -1977,7 +1983,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                         });
                         channel.scoreIdUpdateRequired = true;
                     }
-                    return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: true, listening: false};
+                    return {compno: t.compno, channelName: glider.channelName, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: true, listening: false};
                 }
 
                 // Pilot transitioned from blocked back to tracked: force
@@ -2027,13 +2033,30 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                     );
                 }
 
-                return {compno: t.compno, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: glider.scoringConfigured, listening};
+                return {compno: t.compno, channelName: glider.channelName, startUtcChanged, handicapChanged, scoredStatusChanged, hadTracker, scoringConfigured: glider.scoringConfigured, listening};
             })
     );
 
     try {
         const successfulFilter = <G>(r: PromiseSettledResult<G>): r is PromiseFulfilledResult<G> => r.status == 'fulfilled';
         const success = results.filter(successfulFilter).map((f) => f.value);
+
+        // Per-channel live flag: true while at least one glider on the channel
+        // is being listened to — same `s.listening` predicate as the log line
+        // below. Reset across all owned channels first so a channel that lost
+        // its last listening glider drops back to false. Shipped to the
+        // frontend via getIdentifiers.
+        for (const cname of competition.ownedChannels) {
+            const ch = channels[cname];
+            if (ch) ch.live = false;
+        }
+        for (const s of success) {
+            if (s.listening) {
+                const ch = channels[s.channelName];
+                if (ch) ch.live = true;
+            }
+        }
+
         const fr = (f) => {
             const filtered = success.filter(f);
             return filtered.length == success.length ? 'all' : filtered.length == 0 ? 'none' : `${filtered.map((c) => c.compno).join(',')} (${filtered.length}/${results.length})`;
@@ -2351,6 +2374,7 @@ function getIdentifiers(channel: Channel) {
         earliestScore: channel.earliestStart < Infinity ? channel.earliestStart - 60 : channel.earliestScore < Infinity ? channel.earliestScore : getNow(),
         latestScore: channel.latestScore,
         scoreId: channel.liveScoreId,
+        live: channel.live,
         meanAgl: roundedUint32(channel.heightStatistics.mean),
         highestAgl: roundedUint32(channel.heightStatistics.max),
         deviationAgl: roundedUint32(channel.heightStatistics.standard_deviation)

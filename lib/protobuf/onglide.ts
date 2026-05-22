@@ -116,6 +116,7 @@ export interface Identifiers {
   meanAgl?: number | undefined;
   highestAgl?: number | undefined;
   deviationAgl?: number | undefined;
+  live?: boolean | undefined;
 }
 
 export interface TaskRules {
@@ -1434,6 +1435,7 @@ function createBaseIdentifiers(): Identifiers {
     meanAgl: undefined,
     highestAgl: undefined,
     deviationAgl: undefined,
+    live: undefined,
   };
 }
 
@@ -1465,6 +1467,9 @@ export const Identifiers: MessageFns<Identifiers> = {
     }
     if (message.deviationAgl !== undefined) {
       writer.uint32(72).uint32(message.deviationAgl);
+    }
+    if (message.live !== undefined) {
+      writer.uint32(80).bool(message.live);
     }
     return writer;
   },
@@ -1548,6 +1553,14 @@ export const Identifiers: MessageFns<Identifiers> = {
           message.deviationAgl = reader.uint32();
           continue;
         }
+        case 10: {
+          if (tag !== 80) {
+            break;
+          }
+
+          message.live = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1568,6 +1581,7 @@ export const Identifiers: MessageFns<Identifiers> = {
       meanAgl: isSet(object.meanAgl) ? globalThis.Number(object.meanAgl) : undefined,
       highestAgl: isSet(object.highestAgl) ? globalThis.Number(object.highestAgl) : undefined,
       deviationAgl: isSet(object.deviationAgl) ? globalThis.Number(object.deviationAgl) : undefined,
+      live: isSet(object.live) ? globalThis.Boolean(object.live) : undefined,
     };
   },
 
@@ -1600,6 +1614,9 @@ export const Identifiers: MessageFns<Identifiers> = {
     if (message.deviationAgl !== undefined) {
       obj.deviationAgl = Math.round(message.deviationAgl);
     }
+    if (message.live !== undefined) {
+      obj.live = message.live;
+    }
     return obj;
   },
 
@@ -1617,6 +1634,7 @@ export const Identifiers: MessageFns<Identifiers> = {
     message.meanAgl = object.meanAgl ?? undefined;
     message.highestAgl = object.highestAgl ?? undefined;
     message.deviationAgl = object.deviationAgl ?? undefined;
+    message.live = object.live ?? undefined;
     return message;
   },
 };

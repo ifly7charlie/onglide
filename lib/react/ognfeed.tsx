@@ -58,7 +58,7 @@ import {useWebsocketDecoder} from './useWebsocketDecoder';
 import PlaybackControls from './playbackcontrols';
 
 import dynamic from 'next/dynamic';
-import {selectAvailableScoreTimes} from '../redux/nowSlice';
+import {selectAvailableScoreTimes, selectLive} from '../redux/nowSlice';
 import {useSelector, useDispatch} from '../redux';
 import {offline} from '../redux/nowSlice';
 import {selectCompByCompid} from '../redux/competitionsSlice';
@@ -132,6 +132,7 @@ export const OgnFeed = memo(
         const dispatch = useDispatch();
 
         const availableScores = useSelector(selectAvailableScoreTimes);
+        const live = useSelector(selectLive);
         const compSummary = useSelector(selectCompByCompid(compid));
         const officialDelay = compSummary?.officialDelay ?? 0;
 
@@ -309,6 +310,7 @@ export const OgnFeed = memo(
                 {valid && connected ? (
                     <PlaybackControls //
                         {...availableScores}
+                        live={live}
                         replayTime={replayTime}
                         setReplayTime={setReplayTime}
                         tz={tz}
@@ -341,7 +343,7 @@ export const OgnFeed = memo(
                                     selectedPilot={effectiveSelectedCompno}
                                     setSelectedCompno={setCompno}
                                     now={replayTime}
-                                    live={availableScores.live}
+                                    live={live}
                                     tz={tz}
                                     options={options}
                                     sortOrder={sortOrder}
@@ -441,7 +443,7 @@ export const OgnFeed = memo(
                                 selectedPilot={effectiveSelectedCompno}
                                 setSelectedCompno={setCompno}
                                 now={replayTime}
-                                live={availableScores.live}
+                                live={live}
                                 tz={tz}
                                 options={options}
                                 sortOrder={sortOrder}

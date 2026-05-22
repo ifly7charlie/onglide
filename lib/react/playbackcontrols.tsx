@@ -165,7 +165,11 @@ const PlaybackControls = ({
                     sx={replayTime ? sliderSxReplay : !online ? sliderOffline : undefined}
                 />
                 <BoxAfter>
-                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>{online ? t('connection.live') : t('connection.offline')}</TinyText>}
+                    {replayTime ? (
+                        <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText>
+                    ) : (
+                        <TinyText sx={{opacity: 1}}>{!live ? t('connection.replay') : online ? t('connection.live') : t('connection.offline')}</TinyText>
+                    )}
                     <TinyText>+{formatDuration(replayEndTime - earliestScore)}</TinyText>
                 </BoxAfter>
             </Widget>

@@ -20,6 +20,7 @@ interface NowSliceState {
     now: Epoch;
     onlineStart: Epoch;
     liveScoreId: string;
+    live: boolean;
 }
 
 // Define the initial state using that type
@@ -30,7 +31,8 @@ const initialState: NowSliceState = {
     earliestScore: Infinity as Epoch,
     latestScore: 0 as Epoch,
     onlineStart: 0 as Epoch,
-    liveScoreId: ''
+    liveScoreId: '',
+    live: false
 };
 
 export const nowSlice = createSlice({
@@ -56,6 +58,7 @@ export const nowSlice = createSlice({
             state.latestScore = payload.latestScore as Epoch;
             state.onlineStart = payload.t as Epoch;
             state.liveScoreId = payload.scoreId ?? '';
+            state.live = payload.live ?? false;
         });
     },
     selectors: {
@@ -65,22 +68,19 @@ export const nowSlice = createSlice({
         selectScoreId: (state) => state.liveScoreId,
         selectEarliestScore: (state) => state.earliestScore,
         selectLatestScore: (state) => state.latestScore,
-        selectOnline: (state) => state.onlineStart
+        selectOnline: (state) => state.onlineStart,
+        selectLive: (state) => state.live
     }
 });
 
 export default nowSlice.reducer;
 export const {updateNow, offline} = nowSlice.actions;
-export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectEarliestScore, selectLatestScore, selectOnline} = nowSlice.selectors;
+export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectEarliestScore, selectLatestScore, selectOnline, selectLive} = nowSlice.selectors;
 
 export const selectAvailableScoreTimes = createSelector(
     [selectEarliestScore, selectLatestScore, selectScoreId],
     (earliestScore, latestScore, liveScoreId) => ({earliestScore, latestScore, scoringInProgress: !!liveScoreId})
 );
-
-// Placeholder: `live` will be derived in ognfeed.tsx from keepalive vs latest
-// packet (next step). For now this just returns true.
-export const selectLive = (): boolean => true;
 
 // Broadcast delay (seconds) for the comp owning the current className.
 // Joins nowSlice.className → competitionsSlice; returns 0 until the /all
