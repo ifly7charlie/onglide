@@ -30,11 +30,11 @@ export interface OnglideWebSocketMessage {
  */
 export interface ClassWinner {
   compno: string;
-  /** km/h, handicapped (preferred for display) */
+  /** km/h ×10, handicapped (preferred for display) */
   taskSpeed?:
     | number
     | undefined;
-  /** km, handicapped (shown when no speed) */
+  /** km ×10, handicapped (shown when no speed) */
   taskDistance?: number | undefined;
 }
 
@@ -135,14 +135,14 @@ export interface TaskRules {
   dm?:
     | number
     | undefined;
-  /** highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps */
+  /** ×10; highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps */
   maxHandicap: number;
 }
 
 export interface TaskDetails {
   /** 'S' | 'D' | 'E' | 'A' */
   type: string;
-  /** task distance in km */
+  /** task distance in km ×10 */
   distance: number;
   /** 'HH:MM:SS' (AAT) */
   duration: string;
@@ -176,20 +176,21 @@ export interface TaskLeg {
   type: string;
   ntrigraph: string;
   name: string;
+  /** degrees ×10 */
   bearing: number;
-  /** km */
+  /** km ×10 */
   length: number;
   nlat: number;
   nlng: number;
-  /** km */
+  /** km ×10 */
   r1: number;
-  /** km */
+  /** km ×10 */
   r2: number;
-  /** degrees (half-angle) */
+  /** degrees ×10 (half-angle) */
   a1: number;
-  /** degrees */
+  /** degrees ×10 */
   a2: number;
-  /** bearing */
+  /** bearing ×10 */
   a12: number;
   /** 'symmetrical' | 'np' | 'pp' | 'fixed' */
   direction: string;
@@ -269,7 +270,7 @@ export interface Scores_PilotsEntry {
 }
 
 export interface SpeedDist {
-  /** done distance on this leg */
+  /** distance/speed fields are km(/h) ×10 on the wire (see lib/protobuf/wireScaling.ts) */
   distance?:
     | number
     | undefined;
@@ -338,12 +339,13 @@ export interface StatSegment {
     | undefined;
   /** Number of turns */
   turncount: number;
-  /** Distance (ground not task) */
+  /** km ×10 (ground not task) */
   distance: number;
-  /** From first point to last point - straight */
+  /** km ×10, first point to last point - straight */
   achievedDistance: number;
   /** height delta? */
   delta: number;
+  /** ×10 (signed — climb or sink) */
   avgDelta: number;
   /** left or right */
   direction: number;
@@ -675,10 +677,10 @@ export const ClassWinner: MessageFns<ClassWinner> = {
       writer.uint32(10).string(message.compno);
     }
     if (message.taskSpeed !== undefined) {
-      writer.uint32(21).float(message.taskSpeed);
+      writer.uint32(16).uint32(message.taskSpeed);
     }
     if (message.taskDistance !== undefined) {
-      writer.uint32(29).float(message.taskDistance);
+      writer.uint32(24).uint32(message.taskDistance);
     }
     return writer;
   },
@@ -699,19 +701,19 @@ export const ClassWinner: MessageFns<ClassWinner> = {
           continue;
         }
         case 2: {
-          if (tag !== 21) {
+          if (tag !== 16) {
             break;
           }
 
-          message.taskSpeed = reader.float();
+          message.taskSpeed = reader.uint32();
           continue;
         }
         case 3: {
-          if (tag !== 29) {
+          if (tag !== 24) {
             break;
           }
 
-          message.taskDistance = reader.float();
+          message.taskDistance = reader.uint32();
           continue;
         }
       }
@@ -737,10 +739,10 @@ export const ClassWinner: MessageFns<ClassWinner> = {
       obj.compno = message.compno;
     }
     if (message.taskSpeed !== undefined) {
-      obj.taskSpeed = message.taskSpeed;
+      obj.taskSpeed = Math.round(message.taskSpeed);
     }
     if (message.taskDistance !== undefined) {
-      obj.taskDistance = message.taskDistance;
+      obj.taskDistance = Math.round(message.taskDistance);
     }
     return obj;
   },
@@ -1672,7 +1674,7 @@ export const TaskRules: MessageFns<TaskRules> = {
       writer.uint32(48).uint32(message.dm);
     }
     if (message.maxHandicap !== 0) {
-      writer.uint32(61).float(message.maxHandicap);
+      writer.uint32(56).uint32(message.maxHandicap);
     }
     return writer;
   },
@@ -1733,11 +1735,11 @@ export const TaskRules: MessageFns<TaskRules> = {
           continue;
         }
         case 7: {
-          if (tag !== 61) {
+          if (tag !== 56) {
             break;
           }
 
-          message.maxHandicap = reader.float();
+          message.maxHandicap = reader.uint32();
           continue;
         }
       }
@@ -1782,7 +1784,7 @@ export const TaskRules: MessageFns<TaskRules> = {
       obj.dm = Math.round(message.dm);
     }
     if (message.maxHandicap !== 0) {
-      obj.maxHandicap = message.maxHandicap;
+      obj.maxHandicap = Math.round(message.maxHandicap);
     }
     return obj;
   },
@@ -1823,7 +1825,7 @@ export const TaskDetails: MessageFns<TaskDetails> = {
       writer.uint32(10).string(message.type);
     }
     if (message.distance !== 0) {
-      writer.uint32(21).float(message.distance);
+      writer.uint32(16).uint32(message.distance);
     }
     if (message.duration !== "") {
       writer.uint32(26).string(message.duration);
@@ -1865,11 +1867,11 @@ export const TaskDetails: MessageFns<TaskDetails> = {
           continue;
         }
         case 2: {
-          if (tag !== 21) {
+          if (tag !== 16) {
             break;
           }
 
-          message.distance = reader.float();
+          message.distance = reader.uint32();
           continue;
         }
         case 3: {
@@ -1957,7 +1959,7 @@ export const TaskDetails: MessageFns<TaskDetails> = {
       obj.type = message.type;
     }
     if (message.distance !== 0) {
-      obj.distance = message.distance;
+      obj.distance = Math.round(message.distance);
     }
     if (message.duration !== "") {
       obj.duration = message.duration;
@@ -2036,10 +2038,10 @@ export const TaskLeg: MessageFns<TaskLeg> = {
       writer.uint32(34).string(message.name);
     }
     if (message.bearing !== 0) {
-      writer.uint32(45).float(message.bearing);
+      writer.uint32(40).uint32(message.bearing);
     }
     if (message.length !== 0) {
-      writer.uint32(53).float(message.length);
+      writer.uint32(48).uint32(message.length);
     }
     if (message.nlat !== 0) {
       writer.uint32(61).float(message.nlat);
@@ -2048,19 +2050,19 @@ export const TaskLeg: MessageFns<TaskLeg> = {
       writer.uint32(69).float(message.nlng);
     }
     if (message.r1 !== 0) {
-      writer.uint32(77).float(message.r1);
+      writer.uint32(72).uint32(message.r1);
     }
     if (message.r2 !== 0) {
-      writer.uint32(85).float(message.r2);
+      writer.uint32(80).uint32(message.r2);
     }
     if (message.a1 !== 0) {
-      writer.uint32(93).float(message.a1);
+      writer.uint32(88).uint32(message.a1);
     }
     if (message.a2 !== 0) {
-      writer.uint32(101).float(message.a2);
+      writer.uint32(96).uint32(message.a2);
     }
     if (message.a12 !== 0) {
-      writer.uint32(109).float(message.a12);
+      writer.uint32(104).uint32(message.a12);
     }
     if (message.direction !== "") {
       writer.uint32(114).string(message.direction);
@@ -2111,19 +2113,19 @@ export const TaskLeg: MessageFns<TaskLeg> = {
           continue;
         }
         case 5: {
-          if (tag !== 45) {
+          if (tag !== 40) {
             break;
           }
 
-          message.bearing = reader.float();
+          message.bearing = reader.uint32();
           continue;
         }
         case 6: {
-          if (tag !== 53) {
+          if (tag !== 48) {
             break;
           }
 
-          message.length = reader.float();
+          message.length = reader.uint32();
           continue;
         }
         case 7: {
@@ -2143,43 +2145,43 @@ export const TaskLeg: MessageFns<TaskLeg> = {
           continue;
         }
         case 9: {
-          if (tag !== 77) {
+          if (tag !== 72) {
             break;
           }
 
-          message.r1 = reader.float();
+          message.r1 = reader.uint32();
           continue;
         }
         case 10: {
-          if (tag !== 85) {
+          if (tag !== 80) {
             break;
           }
 
-          message.r2 = reader.float();
+          message.r2 = reader.uint32();
           continue;
         }
         case 11: {
-          if (tag !== 93) {
+          if (tag !== 88) {
             break;
           }
 
-          message.a1 = reader.float();
+          message.a1 = reader.uint32();
           continue;
         }
         case 12: {
-          if (tag !== 101) {
+          if (tag !== 96) {
             break;
           }
 
-          message.a2 = reader.float();
+          message.a2 = reader.uint32();
           continue;
         }
         case 13: {
-          if (tag !== 109) {
+          if (tag !== 104) {
             break;
           }
 
-          message.a12 = reader.float();
+          message.a12 = reader.uint32();
           continue;
         }
         case 14: {
@@ -2242,10 +2244,10 @@ export const TaskLeg: MessageFns<TaskLeg> = {
       obj.name = message.name;
     }
     if (message.bearing !== 0) {
-      obj.bearing = message.bearing;
+      obj.bearing = Math.round(message.bearing);
     }
     if (message.length !== 0) {
-      obj.length = message.length;
+      obj.length = Math.round(message.length);
     }
     if (message.nlat !== 0) {
       obj.nlat = message.nlat;
@@ -2254,19 +2256,19 @@ export const TaskLeg: MessageFns<TaskLeg> = {
       obj.nlng = message.nlng;
     }
     if (message.r1 !== 0) {
-      obj.r1 = message.r1;
+      obj.r1 = Math.round(message.r1);
     }
     if (message.r2 !== 0) {
-      obj.r2 = message.r2;
+      obj.r2 = Math.round(message.r2);
     }
     if (message.a1 !== 0) {
-      obj.a1 = message.a1;
+      obj.a1 = Math.round(message.a1);
     }
     if (message.a2 !== 0) {
-      obj.a2 = message.a2;
+      obj.a2 = Math.round(message.a2);
     }
     if (message.a12 !== 0) {
-      obj.a12 = message.a12;
+      obj.a12 = Math.round(message.a12);
     }
     if (message.direction !== "") {
       obj.direction = message.direction;
@@ -3224,28 +3226,28 @@ function createBaseSpeedDist(): SpeedDist {
 export const SpeedDist: MessageFns<SpeedDist> = {
   encode(message: SpeedDist, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
     if (message.distance !== undefined) {
-      writer.uint32(13).float(message.distance);
+      writer.uint32(8).uint32(message.distance);
     }
     if (message.taskDistance !== 0) {
-      writer.uint32(21).float(message.taskDistance);
+      writer.uint32(16).uint32(message.taskDistance);
     }
     if (message.distanceRemaining !== undefined) {
-      writer.uint32(93).float(message.distanceRemaining);
+      writer.uint32(88).uint32(message.distanceRemaining);
     }
     if (message.maxPossible !== undefined) {
-      writer.uint32(101).float(message.maxPossible);
+      writer.uint32(96).uint32(message.maxPossible);
     }
     if (message.minPossible !== undefined) {
-      writer.uint32(109).float(message.minPossible);
+      writer.uint32(104).uint32(message.minPossible);
     }
     if (message.grRemaining !== undefined) {
       writer.uint32(160).uint32(message.grRemaining);
     }
     if (message.legSpeed !== undefined) {
-      writer.uint32(245).float(message.legSpeed);
+      writer.uint32(240).uint32(message.legSpeed);
     }
     if (message.taskSpeed !== undefined) {
-      writer.uint32(253).float(message.taskSpeed);
+      writer.uint32(248).uint32(message.taskSpeed);
     }
     return writer;
   },
@@ -3258,43 +3260,43 @@ export const SpeedDist: MessageFns<SpeedDist> = {
       const tag = reader.uint32();
       switch (tag >>> 3) {
         case 1: {
-          if (tag !== 13) {
+          if (tag !== 8) {
             break;
           }
 
-          message.distance = reader.float();
+          message.distance = reader.uint32();
           continue;
         }
         case 2: {
-          if (tag !== 21) {
+          if (tag !== 16) {
             break;
           }
 
-          message.taskDistance = reader.float();
+          message.taskDistance = reader.uint32();
           continue;
         }
         case 11: {
-          if (tag !== 93) {
+          if (tag !== 88) {
             break;
           }
 
-          message.distanceRemaining = reader.float();
+          message.distanceRemaining = reader.uint32();
           continue;
         }
         case 12: {
-          if (tag !== 101) {
+          if (tag !== 96) {
             break;
           }
 
-          message.maxPossible = reader.float();
+          message.maxPossible = reader.uint32();
           continue;
         }
         case 13: {
-          if (tag !== 109) {
+          if (tag !== 104) {
             break;
           }
 
-          message.minPossible = reader.float();
+          message.minPossible = reader.uint32();
           continue;
         }
         case 20: {
@@ -3306,19 +3308,19 @@ export const SpeedDist: MessageFns<SpeedDist> = {
           continue;
         }
         case 30: {
-          if (tag !== 245) {
+          if (tag !== 240) {
             break;
           }
 
-          message.legSpeed = reader.float();
+          message.legSpeed = reader.uint32();
           continue;
         }
         case 31: {
-          if (tag !== 253) {
+          if (tag !== 248) {
             break;
           }
 
-          message.taskSpeed = reader.float();
+          message.taskSpeed = reader.uint32();
           continue;
         }
       }
@@ -3346,28 +3348,28 @@ export const SpeedDist: MessageFns<SpeedDist> = {
   toJSON(message: SpeedDist): unknown {
     const obj: any = {};
     if (message.distance !== undefined) {
-      obj.distance = message.distance;
+      obj.distance = Math.round(message.distance);
     }
     if (message.taskDistance !== 0) {
-      obj.taskDistance = message.taskDistance;
+      obj.taskDistance = Math.round(message.taskDistance);
     }
     if (message.distanceRemaining !== undefined) {
-      obj.distanceRemaining = message.distanceRemaining;
+      obj.distanceRemaining = Math.round(message.distanceRemaining);
     }
     if (message.maxPossible !== undefined) {
-      obj.maxPossible = message.maxPossible;
+      obj.maxPossible = Math.round(message.maxPossible);
     }
     if (message.minPossible !== undefined) {
-      obj.minPossible = message.minPossible;
+      obj.minPossible = Math.round(message.minPossible);
     }
     if (message.grRemaining !== undefined) {
       obj.grRemaining = Math.round(message.grRemaining);
     }
     if (message.legSpeed !== undefined) {
-      obj.legSpeed = message.legSpeed;
+      obj.legSpeed = Math.round(message.legSpeed);
     }
     if (message.taskSpeed !== undefined) {
-      obj.taskSpeed = message.taskSpeed;
+      obj.taskSpeed = Math.round(message.taskSpeed);
     }
     return obj;
   },
@@ -3786,16 +3788,16 @@ export const StatSegment: MessageFns<StatSegment> = {
       writer.uint32(40).uint32(message.turncount);
     }
     if (message.distance !== 0) {
-      writer.uint32(53).float(message.distance);
+      writer.uint32(48).uint32(message.distance);
     }
     if (message.achievedDistance !== 0) {
-      writer.uint32(61).float(message.achievedDistance);
+      writer.uint32(56).uint32(message.achievedDistance);
     }
     if (message.delta !== 0) {
       writer.uint32(64).int32(message.delta);
     }
     if (message.avgDelta !== 0) {
-      writer.uint32(77).float(message.avgDelta);
+      writer.uint32(72).sint32(message.avgDelta);
     }
     if (message.direction !== 0) {
       writer.uint32(80).uint32(message.direction);
@@ -3857,19 +3859,19 @@ export const StatSegment: MessageFns<StatSegment> = {
           continue;
         }
         case 6: {
-          if (tag !== 53) {
+          if (tag !== 48) {
             break;
           }
 
-          message.distance = reader.float();
+          message.distance = reader.uint32();
           continue;
         }
         case 7: {
-          if (tag !== 61) {
+          if (tag !== 56) {
             break;
           }
 
-          message.achievedDistance = reader.float();
+          message.achievedDistance = reader.uint32();
           continue;
         }
         case 8: {
@@ -3881,11 +3883,11 @@ export const StatSegment: MessageFns<StatSegment> = {
           continue;
         }
         case 9: {
-          if (tag !== 77) {
+          if (tag !== 72) {
             break;
           }
 
-          message.avgDelta = reader.float();
+          message.avgDelta = reader.sint32();
           continue;
         }
         case 10: {
@@ -3956,16 +3958,16 @@ export const StatSegment: MessageFns<StatSegment> = {
       obj.turncount = Math.round(message.turncount);
     }
     if (message.distance !== 0) {
-      obj.distance = message.distance;
+      obj.distance = Math.round(message.distance);
     }
     if (message.achievedDistance !== 0) {
-      obj.achievedDistance = message.achievedDistance;
+      obj.achievedDistance = Math.round(message.achievedDistance);
     }
     if (message.delta !== 0) {
       obj.delta = Math.round(message.delta);
     }
     if (message.avgDelta !== 0) {
-      obj.avgDelta = message.avgDelta;
+      obj.avgDelta = Math.round(message.avgDelta);
     }
     if (message.direction !== 0) {
       obj.direction = Math.round(message.direction);

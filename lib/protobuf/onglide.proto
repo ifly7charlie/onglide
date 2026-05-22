@@ -18,8 +18,8 @@ message OnglideWebSocketMessage {
 // score: taskSpeed if any pilot has one, otherwise taskDistance.
 message ClassWinner {
 	string compno = 1;
-	optional float taskSpeed = 2;      // km/h, handicapped (preferred for display)
-	optional float taskDistance = 3;   // km, handicapped (shown when no speed)
+	optional uint32 taskSpeed = 2;      // km/h ×10, handicapped (preferred for display)
+	optional uint32 taskDistance = 3;   // km ×10, handicapped (shown when no speed)
 }
 
 // Per-class status row shown on the globe landing page; mirrors the JSON
@@ -88,12 +88,12 @@ message TaskRules {
 	optional bool dh = 4;            // distance handicap
 	optional bool handicapped = 5;
 	optional uint32 dm = 6;          // minimum distance for non-AAT speed tasks
-	float maxHandicap = 7; // highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps
+	uint32 maxHandicap = 7; // ×10; highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps
 }
 
 message TaskDetails {
 	string type = 1;                 // 'S' | 'D' | 'E' | 'A'
-	float distance = 2;              // task distance in km
+	uint32 distance = 2;             // task distance in km ×10
 	string duration = 3;             // 'HH:MM:SS' (AAT)
 	string status = 4;               // 'Z' = scrubbed, etc
 	string nostart = 5;              // 'HH:MM:SS' start-open string
@@ -114,15 +114,15 @@ message TaskLeg {
 	string type = 2;                 // 'line' | 'sector'
 	string ntrigraph = 3;
 	string name = 4;
-	float bearing = 5;
-	float length = 6;               // km
+	uint32 bearing = 5;             // degrees ×10
+	uint32 length = 6;              // km ×10
 	float nlat = 7;
 	float nlng = 8;
-	float r1 = 9;                   // km
-	float r2 = 10;                  // km
-	float a1 = 11;                  // degrees (half-angle)
-	float a2 = 12;                  // degrees
-	float a12 = 13;                 // bearing
+	uint32 r1 = 9;                  // km ×10
+	uint32 r2 = 10;                 // km ×10
+	uint32 a1 = 11;                 // degrees ×10 (half-angle)
+	uint32 a2 = 12;                 // degrees ×10
+	uint32 a12 = 13;                // bearing ×10
 	string direction = 14;           // 'symmetrical' | 'np' | 'pp' | 'fixed'
 	optional float altitude = 15;
 }
@@ -186,17 +186,18 @@ message Scores {
 }
 
 message SpeedDist {
-    optional float distance = 1; // done distance on this leg
-	float taskDistance = 2; // done distance on whole task
+    // distance/speed fields are km(/h) ×10 on the wire (see lib/protobuf/wireScaling.ts)
+    optional uint32 distance = 1; // done distance on this leg
+	uint32 taskDistance = 2; // done distance on whole task
 
-    optional float distanceRemaining = 11; // Speed
-    optional float maxPossible = 12; // AAT
-    optional float minPossible = 13;
+    optional uint32 distanceRemaining = 11; // Speed
+    optional uint32 maxPossible = 12; // AAT
+    optional uint32 minPossible = 13;
 
     optional uint32 grRemaining = 20;
 
-    optional float legSpeed = 30; // speed on this leg
-    optional float taskSpeed = 31; // speed on task to end of leg
+    optional uint32 legSpeed = 30; // speed on this leg
+    optional uint32 taskSpeed = 31; // speed on task to end of leg
 }
 
 message PilotScoreLeg {
@@ -235,10 +236,10 @@ message StatSegment {
     string state = 3; // Type of segment
     Wind wind = 4; // Wind for segment
     uint32 turncount = 5; // Number of turns
-    float distance = 6; // Distance (ground not task)
-    float achievedDistance = 7; // From first point to last point - straight
+    uint32 distance = 6; // km ×10 (ground not task)
+    uint32 achievedDistance = 7; // km ×10, first point to last point - straight
     int32 delta = 8; // height delta?
-    float avgDelta = 9;
+    sint32 avgDelta = 9; // ×10 (signed — climb or sink)
     uint32 direction = 10; // left or right
     uint32 heightgain = 11; // gain m
     uint32 heightloss = 12; // loss m

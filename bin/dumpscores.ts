@@ -12,6 +12,7 @@ import {d} from '../lib/now';
 import {scoreChunkSize} from '../lib/constants';
 import type {Epoch} from '../lib/types';
 import {ClassScoreHistory, type PilotScore, type ScoreHistory} from '../lib/protobuf/onglide';
+import {unscaleClassScoreHistoryFromWire} from '../lib/protobuf/wireScaling';
 
 async function run() {
     const args = await yargs(process.argv.slice(2)) //
@@ -43,7 +44,9 @@ async function run() {
         process.exit(2);
     }
 
-    const msg = file ? ClassScoreHistory.decode(new Uint8Array(readFileSync(file))) : await fetchChannel({url: url!, channel: channel!, scoreId: args['score-id'], from: args.from, until: args.until, emptyStop: args['empty-stop']});
+    const msg = file
+        ? unscaleClassScoreHistoryFromWire(ClassScoreHistory.decode(new Uint8Array(readFileSync(file))))
+        : await fetchChannel({url: url!, channel: channel!, scoreId: args['score-id'], from: args.from, until: args.until, emptyStop: args['empty-stop']});
 
     const sourceLabel = file ? `file: ${file}` : `channel: ${channel} from ${url}`;
 
@@ -207,7 +210,7 @@ async function fetchChannel(opts: FetchOpts): Promise<ClassScoreHistory> {
         }
         if (!r.ok) throw new Error(`GET ${chunkUrl} -> ${r.status} ${r.statusText}`);
         const buf = new Uint8Array(await r.arrayBuffer());
-        const decoded = ClassScoreHistory.decode(buf);
+        const decoded = unscaleClassScoreHistoryFromWire(ClassScoreHistory.decode(buf));
         if (decoded.className) className = decoded.className;
         const totalScores = Object.values(decoded.pilots ?? {}).reduce((n, sh) => n + (sh.history?.length ?? 0), 0);
         process.stderr.write(`  ${d(t as Epoch)} -> ${buf.length} bytes, ${totalScores} scores\n`);

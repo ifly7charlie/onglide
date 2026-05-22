@@ -16,6 +16,7 @@ import yargs from 'yargs';
 import WebSocket from 'ws';
 
 import {OnglideWebSocketMessage} from '../lib/protobuf/onglide';
+import {unscaleFromWire} from '../lib/protobuf/wireScaling';
 
 async function run() {
     const args = await yargs(process.argv.slice(2))
@@ -61,7 +62,7 @@ async function run() {
         }
         try {
             const buf = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as Buffer);
-            const decoded = OnglideWebSocketMessage.decode(buf);
+            const decoded = unscaleFromWire(OnglideWebSocketMessage.decode(buf));
             console.log(`${ts} ${buf.byteLength}b ${summarise(decoded)}`);
             if (args.details) {
                 // toJSON gives us the protobuf-friendly representation (bytes

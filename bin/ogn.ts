@@ -59,7 +59,8 @@ console.log('dev mode', dev);
 let db: ReturnType<typeof mysql>;
 
 import {sortedIndexBy, sortedIndexNumber} from '../lib/util/binarySearch';
-import {roundedUint32, safeEncode} from '../lib/util/proto';
+import {safeEncode} from '../lib/util/proto';
+import {roundedUint32, clampUint32, clampInt32} from '../lib/protobuf/wireScaling';
 import {computeCompStatus} from '../lib/util/computeCompStatus';
 import {scoreChanged} from '../lib/flightprocessing/scoreChanged';
 import equal from 'fast-deep-equal';
@@ -2651,14 +2652,6 @@ async function refreshUpcomingCompetitions(rows: any[]) {
     }
 }
 
-// Clamp a value into a protobuf uint32 wire slot. @bufbuild/protobuf rejects
-// NaN / negative / fractional input synchronously, which would fail the encode
-// of the whole CompetitionsList — so summary numerics are coerced defensively.
-const clampUint32 = (v: number | undefined | null): number => roundedUint32(v) ?? 0;
-
-// As clampUint32 but for a signed int32 slot (tzoffset is legitimately
-// negative for west-of-UTC sites, which roundedUint32 would reject).
-const clampInt32 = (v: number | undefined | null): number => (typeof v === 'number' && isFinite(v) ? Math.round(v) : 0);
 
 // Build a CompetitionSummary for one comp from in-memory state. Mirrors
 // the aggregation that pages/api/competitions.ts used to do in JS, but

@@ -12,6 +12,7 @@ import {updatePilotStartTimeAction, updateClassAction, updateSortKeyAction} from
 
 import {PilotScore, Scores, Scores_PilotsEntry} from '../protobuf/onglide';
 import {ClassScoreHistory, OnglideWebSocketMessage} from '../protobuf/onglide';
+import {unscaleClassScoreHistoryFromWire} from '../protobuf/wireScaling';
 
 //const updateScoresAction = createAction<PilotScores>('updateScores');
 import {assembleLabeledLine} from '../react/distanceLine';
@@ -275,7 +276,7 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
                 const res = await fetch(url, {signal});
                 if (res.ok) {
                     const ab = await res.arrayBuffer();
-                    return {data: ClassScoreHistory.decode(new Uint8Array(ab)), chunkId};
+                    return {data: unscaleClassScoreHistoryFromWire(ClassScoreHistory.decode(new Uint8Array(ab))), chunkId};
                 }
                 // 503 = daemon's not ready, retry; anything else, give up
                 if (res.status !== 503) {

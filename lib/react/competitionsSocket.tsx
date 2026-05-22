@@ -9,6 +9,7 @@ import {useEffect} from 'react';
 import {useDispatch} from '../redux';
 import {competitionsConnected, competitionsSnapshot, competitionsDelta} from '../redux/competitionsSlice';
 import {OnglideWebSocketMessage} from '../protobuf/onglide';
+import {unscaleFromWire} from '../protobuf/wireScaling';
 import {competitionsWebsocketUrl} from './fixupUrls';
 
 // Server pushes a `ka` packet every 15s on /all. If we hear nothing for
@@ -91,7 +92,7 @@ export function CompetitionsSocket() {
                 }
                 try {
                     const buf = new Uint8Array(ev.data as ArrayBuffer);
-                    const decoded = OnglideWebSocketMessage.decode(buf);
+                    const decoded = unscaleFromWire(OnglideWebSocketMessage.decode(buf));
                     if (decoded.competitions) {
                         const {competitions, removed, full} = decoded.competitions;
                         if (full) {

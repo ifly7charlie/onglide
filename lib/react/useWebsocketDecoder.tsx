@@ -11,6 +11,7 @@ import {updateNow} from '../redux/nowSlice';
 import {updateClassAction} from '../redux/actions';
 
 import {OnglideWebSocketMessage} from '../protobuf/onglide';
+import {unscaleFromWire} from '../protobuf/wireScaling';
 
 export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {mergeWsStatus?: Function; className: ClassName; datecode: Datecode}) {
     const dispatch = useDispatch();
@@ -18,7 +19,8 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
 
     const decoder = async (data: Buffer): Promise<void> => {
         return new Response(data as unknown as BodyInit).arrayBuffer().then(async (ab) => {
-            const decoded = OnglideWebSocketMessage.decode(new Uint8Array(ab));
+            // unscaleFromWire reverses the ×10 integer scaling applied by safeEncode
+            const decoded = unscaleFromWire(OnglideWebSocketMessage.decode(new Uint8Array(ab)));
             if (!decoded) {
                 console.log('unable to decode websocket message');
             }
