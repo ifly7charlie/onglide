@@ -23,6 +23,7 @@ import {toDateCode} from '../lib/datecode';
 import {makeClassId, normalizeClassNameForDisplay} from '../lib/classid';
 import {updateTracker} from '../lib/scoring/shared/trackers';
 import {fetchRobocontrol} from '../lib/scoring/shared/robocontrol';
+import {findApproximateContestLocation} from '../lib/scoring/shared/contestLocation';
 
 // DB access
 //const db = require('../db')
@@ -1367,6 +1368,42 @@ async function update_contest(contest, keys) {
             location.altitude = agl;
             console.log('SITE Altitude:' + agl);
         });
+    } else if (ssLocation?.name) {
+        // SoaringSpot's API embeds a location name but, for some
+        // contests, no latitude/longitude. Geocode the name so the
+        // competition still gets an approximate lt/lg — same fallback
+        // the scrape source uses. Only run when the row has no lt/lg
+        // yet, to stay polite to the public Nominatim/Overpass endpoints.
+        const existing = (
+            await mysql_db.query(escape`
+                SELECT lt, lg FROM competition WHERE compid = ${compid}
+            `)
+        )[0];
+        if (!existing?.lt || !existing?.lg) {
+            console.log(`location "${ssLocation.name}" has no coordinates from SoaringSpot — geocoding`);
+            const acl = await findApproximateContestLocation(console.log, ssLocation.name);
+            if (acl.lt && acl.lg) {
+                await mysql_db.query(escape`
+                    UPDATE competition
+                    SET
+                        lt = ${acl.lt},
+                        lg = ${acl.lg},
+                        sitename = ${ssLocation.name}
+                    WHERE compid = ${compid}
+                `);
+                location = {
+                    lt: acl.lt,
+                    lg: acl.lg,
+                    point: point([acl.lg, acl.lt])
+                };
+                getElevationOffset(location.lt, location.lg, (agl) => {
+                    location.altitude = agl;
+                    console.log('SITE Altitude:' + agl);
+                });
+            } else {
+                console.log(`geocode of "${ssLocation.name}" returned no result — leaving competition.lt/lg unset`);
+            }
+        }
     }
 
     //
