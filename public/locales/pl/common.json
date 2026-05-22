@@ -28,7 +28,8 @@
         "viewers_short": "obserwatorów",
         "land_data": "Dane lądowe:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Wyniki oficjalne"
+        "official_scores": "Wyniki oficjalne",
+        "official_scores_hint": "Wyniki poniżej pochodzą ze śledzenia na żywo — dotknij, aby zobaczyć wyniki oficjalne"
     },
     "task": {
         "speed": "Konkurencja prędkościowa",
@@ -191,6 +192,7 @@
         "competition_time": "czas zawodów",
         "your_time": "twój czas",
         "live": "Na żywo",
+        "replay": "Powtórka",
         "offline": "Offline",
         "end": "Koniec"
     },

@@ -28,7 +28,8 @@
         "viewers_short": "divákov",
         "land_data": "Údaje o pevnine:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Oficiálne výsledky"
+        "official_scores": "Oficiálne výsledky",
+        "official_scores_hint": "Výsledky nižšie pochádzajú zo živého sledovania — ťuknutím zobrazíte oficiálne výsledky"
     },
     "task": {
         "speed": "Rýchlostná úloha",
@@ -191,6 +192,7 @@
         "competition_time": "čas súťaže",
         "your_time": "tvoj čas",
         "live": "Naživo",
+        "replay": "Prehrávanie",
         "offline": "Offline",
         "end": "Koniec"
     },

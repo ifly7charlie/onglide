@@ -1133,11 +1133,10 @@ ul.task-legs {
 .official-scores-link {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     margin: 6px 0 10px 0;
-    padding: 6px 10px;
+    padding: 8px 10px;
     font-size: 14px;
-    font-weight: 600;
     background: rgba(120, 170, 220, 0.15);
     border-left: 3px solid rgba(120, 170, 220, 0.85);
     border-radius: 3px;
@@ -1147,9 +1146,41 @@ ul.task-legs {
     &:hover,
     &:focus {
         background: rgba(120, 170, 220, 0.25);
-        text-decoration: underline;
         color: inherit;
     }
+}
+
+.official-scores-icon {
+    flex: none;
+    font-size: 18px;
+}
+
+.official-scores-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+    min-width: 0;
+}
+
+.official-scores-title {
+    font-weight: 700;
+}
+
+.official-scores-hint {
+    font-weight: 400;
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.official-scores-external {
+    flex: none;
+    margin-left: auto;
+    opacity: 0.7;
+}
+
+.official-scores-link:hover .official-scores-external,
+.official-scores-link:focus .official-scores-external {
+    opacity: 1;
 }
 
 .task-heading {

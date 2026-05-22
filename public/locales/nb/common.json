@@ -28,7 +28,8 @@
         "viewers_short": "seere",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Offisielle resultater"
+        "official_scores": "Offisielle resultater",
+        "official_scores_hint": "Resultatene nedenfor er fra sanntidssporing — trykk for offisielle resultater"
     },
     "task": {
         "speed": "Hastighetsoppgave",
@@ -191,6 +192,7 @@
         "competition_time": "konkurransetid",
         "your_time": "din tid",
         "live": "Direkte",
+        "replay": "Avspilling",
         "offline": "Frakoblet",
         "end": "Slutt"
     },

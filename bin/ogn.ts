@@ -2952,7 +2952,6 @@ function summaryFingerprint(s: CompetitionSummary): string {
 // watchdog on each frame, so this keeps NAT-timed-out / silently-dead
 // connections from sitting idle until the OS gives up.
 function broadcastCompetitionsKeepalive() {
-    console.log(competitionsListeners.map((c) => `${c.ognPeer}:${c.readyState}/${c.readyState === WebSocket.OPEN}`).slice(0, 20));
     competitionsListeners = competitionsListeners.filter((c) => c.readyState === WebSocket.OPEN);
     if (!competitionsListeners.length) return;
 
@@ -2964,16 +2963,12 @@ function broadcastCompetitionsKeepalive() {
 }
 
 async function sendKeepalive(channel: Channel) {
-    // Wall-clock for the viewing-time log — `connectedAt` is set with the
-    // global getNow at WebSocket accept time, so we have to match it here
-    // or the per-client delta would be off by the comp's delay.
-    const now = getNow();
     // Per-comp clock for the `at` field that the frontend reads as its
     // current-time reference. Without this, wsStatus.at runs ahead of the
     // delayed position stream and every info box gets greyed out.
     const compNow = channelNow(channel);
 
-    const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (now - c.connectedAt), 0);
+    const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (compNow - c.connectedAt), 0);
 
     if (channel.clients.length) {
         console.log(`${channel.displayName}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
@@ -3264,7 +3259,6 @@ function setupWebSocketServer(server) {
         ws.isValid = true;
         ws.isClosed = false;
         ws.isInteracting = false;
-        ws.connectedAt = getNow();
 
         // Reserved /all channel: landing-page listener gets a CompetitionsList
         // snapshot and is added to the dedicated competitionsListeners array.
@@ -3292,9 +3286,7 @@ function setupWebSocketServer(server) {
             return;
         }
 
-        if (channelName in channels) {
-            channels[channelName].clients.push(ws);
-        } else {
+        if (!(channelName in channels)) {
             ws.send('reload');
             ws.isAlive = false;
             ws.isValid = false;
@@ -3302,13 +3294,11 @@ function setupWebSocketServer(server) {
         }
 
         ws.on('pong', () => {
-            //            console.log('pong');
             ws.isAlive = true;
         });
         ws.on('close', () => {
             ws.isAlive = false;
             ws.isClosed = true;
-            //            console.log(`close received from ${ws.ognPeer} ${ws.ognChannel}`);
         });
         ws.on('error', console.error);
         ws.on('message', (cx) => {
@@ -3326,6 +3316,7 @@ function setupWebSocketServer(server) {
         });
 
         const channel = channels[channelName];
+        ws.connectedAt = channelNow(channel);
         ws.sendBinary = (data: Uint8Array) => {
             if (ws.readyState == WebSocket.OPEN && ws.isAlive && channel) {
                 channel.statistics.bytesSent += data.byteLength;
@@ -3333,6 +3324,7 @@ function setupWebSocketServer(server) {
             }
             return undefined;
         };
+        channel.clients.push(ws);
 
         // Send vario etc for all gliders we are tracking
         sendCurrentState(ws);

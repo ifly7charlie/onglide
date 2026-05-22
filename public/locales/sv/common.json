@@ -28,7 +28,8 @@
         "viewers_short": "tittare",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Officiella resultat"
+        "official_scores": "Officiella resultat",
+        "official_scores_hint": "Resultaten nedan kommer från livespårning — tryck för officiella resultat"
     },
     "task": {
         "speed": "Hastighetsuppgift",
@@ -191,6 +192,7 @@
         "competition_time": "tävlingstid",
         "your_time": "din tid",
         "live": "Direkt",
+        "replay": "Uppspelning",
         "offline": "Offline",
         "end": "Slut"
     },

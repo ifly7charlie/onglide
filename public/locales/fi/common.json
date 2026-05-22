@@ -28,7 +28,8 @@
         "viewers_short": "katsojaa",
         "land_data": "Maa-aineisto:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Viralliset tulokset"
+        "official_scores": "Viralliset tulokset",
+        "official_scores_hint": "Alla olevat tulokset ovat live-seurannasta — napauta nähdäksesi viralliset tulokset"
     },
     "task": {
         "speed": "Nopeustehtävä",
@@ -191,6 +192,7 @@
         "competition_time": "kilpailuaika",
         "your_time": "oma aikasi",
         "live": "Suorana",
+        "replay": "Toisto",
         "offline": "Offline",
         "end": "Loppu"
     },

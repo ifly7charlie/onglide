@@ -28,7 +28,8 @@
         "viewers_short": "viewers",
         "land_data": "Land data:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Official scores"
+        "official_scores": "Official scores",
+        "official_scores_hint": "Scores below are from live tracking — tap for official results"
     },
     "task": {
         "speed": "Speed Task",
@@ -191,6 +192,7 @@
         "competition_time": "competition time",
         "your_time": "your time",
         "live": "Live",
+        "replay": "Replay",
         "offline": "Offline",
         "end": "End"
     },

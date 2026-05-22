@@ -22,7 +22,7 @@ import equal from 'fast-deep-equal';
 import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faLinkSlash, faSpinner, faCaretDown, faCaretUp, faTrophy} from '@fortawesome/free-solid-svg-icons';
+import {faLinkSlash, faSpinner, faCaretDown, faCaretUp, faTrophy, faArrowUpRightFromSquare} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails, StartlineNotice} from './taskdetails';
@@ -270,9 +270,14 @@ export const OgnFeed = memo(
 
         const selectedClassDisplayStatus = comp?.classes?.find((c: any) => c.class === vc)?.displayStatus;
         const officialScoresLink =
-            (selectedClassDisplayStatus === 'home' || selectedClassDisplayStatus === 'yesterday') && comp?.mainwebsite ? (
-                <a href={comp.mainwebsite} target="_blank" rel="noopener" className="official-scores-link">
-                    <FontAwesomeIcon icon={faTrophy} /> {t('competition.official_scores')}
+            !replayTime && (selectedClassDisplayStatus === 'home' || selectedClassDisplayStatus === 'yesterday') && comp?.mainwebsite ? (
+                <a href={comp.mainwebsite} target="_blank" rel="noopener" className="official-scores-link" title={t('competition.official_scores')}>
+                    <FontAwesomeIcon icon={faTrophy} className="official-scores-icon" />
+                    <span className="official-scores-text">
+                        <span className="official-scores-title">{t('competition.official_scores')}</span>
+                        <span className="official-scores-hint">{t('competition.official_scores_hint')}</span>
+                    </span>
+                    <FontAwesomeIcon icon={faArrowUpRightFromSquare} className="official-scores-external" />
                 </a>
             ) : null;
 

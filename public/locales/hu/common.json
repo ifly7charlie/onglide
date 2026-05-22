@@ -28,7 +28,8 @@
         "viewers_short": "néző",
         "land_data": "Földadatok:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Hivatalos eredmények"
+        "official_scores": "Hivatalos eredmények",
+        "official_scores_hint": "Az alábbi eredmények élő követésből származnak — koppintson a hivatalos eredményekért"
     },
     "task": {
         "speed": "Sebességi feladat",
@@ -191,6 +192,7 @@
         "competition_time": "versenyidő",
         "your_time": "saját idő",
         "live": "Élő",
+        "replay": "Visszajátszás",
         "offline": "Offline",
         "end": "Vége"
     },

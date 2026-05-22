@@ -28,7 +28,8 @@
         "viewers_short": "gledalcev",
         "land_data": "Zemljiški podatki:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Uradni rezultati"
+        "official_scores": "Uradni rezultati",
+        "official_scores_hint": "Spodnji rezultati so iz sledenja v živo — tapnite za uradne rezultate"
     },
     "task": {
         "speed": "Hitrostna naloga",
@@ -191,6 +192,7 @@
         "competition_time": "tekmovalni čas",
         "your_time": "tvoj čas",
         "live": "V živo",
+        "replay": "Ponovno predvajanje",
         "offline": "Brez povezave",
         "end": "Konec"
     },

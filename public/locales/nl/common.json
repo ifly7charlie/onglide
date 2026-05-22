@@ -28,7 +28,8 @@
         "viewers_short": "kijkers",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Officiële uitslagen"
+        "official_scores": "Officiële uitslagen",
+        "official_scores_hint": "De scores hieronder komen van live tracking — tik voor officiële uitslagen"
     },
     "task": {
         "speed": "Snelheidsopdracht",
@@ -191,6 +192,7 @@
         "competition_time": "wedstrijdtijd",
         "your_time": "jouw tijd",
         "live": "Live",
+        "replay": "Herhaling",
         "offline": "Offline",
         "end": "Einde"
     },

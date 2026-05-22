@@ -75,8 +75,12 @@ export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectE
 
 export const selectAvailableScoreTimes = createSelector(
     [selectEarliestScore, selectLatestScore, selectScoreId],
-    (earliestScore, latestScore, liveScoreId) => ({earliestScore, latestScore, live: !!liveScoreId})
+    (earliestScore, latestScore, liveScoreId) => ({earliestScore, latestScore, scoringInProgress: !!liveScoreId})
 );
+
+// Placeholder: `live` will be derived in ognfeed.tsx from keepalive vs latest
+// packet (next step). For now this just returns true.
+export const selectLive = (): boolean => true;
 
 // Broadcast delay (seconds) for the comp owning the current className.
 // Joins nowSlice.className → competitionsSlice; returns 0 until the /all
