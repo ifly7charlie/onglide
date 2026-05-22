@@ -168,17 +168,26 @@ RAM for disk, a bit slower):
 Regional variants: swap `--area=europe` for `--area=north-america`, `--area=australia-oceania`,
 or `--osm-path=/data/your.osm.pbf` for a custom Geofabrik extract.
 
-For monthly refreshes, wrap in a shell script with atomic rename so live clients don't
-see a partial file:
-
-```
-docker run ... --output=/data/europe.pmtiles.new
-mv /data/europe.pmtiles.new /srv/tiles/europe.pmtiles
-```
+For monthly refreshes, do **not** replace the file in place under the same URL.
+A range-caching CDN (Cloudflare) caches individual byte ranges; after an in-place
+swap it stitches ranges from the old and new build together, which the client
+decodes as corrupt tiles. Give every build a unique, immutable URL instead —
+`bin/build-tiles.sh` names each archive with a short content hash
+(`world-overlay.<hash>.pmtiles`) and writes the new URLs to
+`~/pmtiles/pmtiles-manifest.env`. Source that into the deploy, point
+`NEXT_PUBLIC_PMTILES_URL` / `NEXT_PUBLIC_PMTILES_LABELS_URL` at the new URLs, and
+rebuild the Next.js app (the `NEXT_PUBLIC_*` values are inlined at build time).
 
 Serve the file from any HTTP host that honours byte-range requests (nginx static file
-serving with `add_header Accept-Ranges bytes;` works) and point `NEXT_PUBLIC_PMTILES_URL`
-at the public URL. Cloudflare in front caches the ranges and handles public egress.
+serving with `add_header Accept-Ranges bytes;` works). Because each URL is content-
+hashed and never reused, it is served `Cache-Control: immutable` with a one-year
+max-age, and the browser cache does the work.
+
+Do **not** put the tiles host behind Cloudflare. pmtiles is read entirely via HTTP
+Range requests, and Cloudflare does not cache range responses (a multi-GB archive
+also exceeds its cacheable object size) — so it adds no caching benefit, and a
+partially-cached object can return byte ranges from different builds, which decodes
+as corrupt tiles. Serve `tiles.onglide.com` directly from the range-capable origin.
 
 ### Optional: split label layers into a separate pmtiles
 

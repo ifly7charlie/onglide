@@ -13,6 +13,8 @@ services:
             app-net:
                 aliases:
                     - mysql
+        ports:
+            - 3306:3306
         volumes:
             - ./conf/sql/docker:/docker-entrypoint-initdb.d
             - ./mariadb/${DOCKER_TAG}:/var/lib/mysql
