@@ -38,7 +38,7 @@ import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
 import {taskBbox, unionBboxes, expandBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
-import {fromDateCode, toDateCode} from '../lib/datecode';
+import {fromDateCode, toDateCode, competitionStartTs} from '../lib/datecode';
 
 // Display-status derivation shared with the front-end (JSX-free entry point).
 import {classDisplayStatus, type CompetitionDisplayStatus} from '../lib/competition-display-status';
@@ -1251,24 +1251,10 @@ async function getDCode(competition: CompetitionContext): Promise<Datecode> {
         return getReplayDatecode();
     }
 
-    const tzoffset = competition.location.tzoffset;
-    const now = new Date();
-    const nowLocalMs = now.getTime() + tzoffset * 1000;
-
-    const local10am = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        10,
-        0,
-        0,
-        0 // 10:00:00.000 local time
-    );
-    if (nowLocalMs < local10am.getTime()) {
-        local10am.setDate(local10am.getDate() - 1);
-    }
-    const utcTime = local10am.getTime() - tzoffset * 1000;
-    return toDateCode(new Date(utcTime));
+    // competitionStartTs resolves the most recent 10:00 competition-local time
+    // purely from UTC + tzoffset, so the datecode is independent of the
+    // timezone the OGN process itself happens to run in.
+    return toDateCode(new Date(competitionStartTs(competition.location.tzoffset) * 1000));
 }
 
 import {WriteStream} from 'node:fs';
