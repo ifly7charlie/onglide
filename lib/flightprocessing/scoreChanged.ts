@@ -1,7 +1,5 @@
 import {PilotScore} from '../protobuf/onglide';
 
-import equal from 'fast-deep-equal';
-
 //
 // Compare two scores. Returns true when the new score is materially different
 // from the old. Used in two places:
@@ -72,15 +70,8 @@ export function scoreChanged(oldScore: PilotScore | undefined, newScore: PilotSc
         return oa !== na;
     }
 
-    // We never emit more than ever 30 seconds due to score changed
-    // unless it's close to the finish
-    // the previous conditions cover major task changes
-    if ((na.distanceRemaining ?? Infinity) > 10 && newScore.t - oldScore.t < 20) {
-        return false;
-    }
-
-    // moved more than 1km
-    if (Math.abs((oa.distance ?? 0) - (na.distance ?? 0)) > 1) {
+    // moved more than 1.5km
+    if (Math.abs((oa.distance ?? 0) - (na.distance ?? 0)) > 1.5) {
         return true;
     }
 
@@ -90,7 +81,7 @@ export function scoreChanged(oldScore: PilotScore | undefined, newScore: PilotSc
     }
 
     // ld change of 3 or more don't want it to change too often in a good climb
-    if (Math.abs((oa.grRemaining ?? 0) - (na.grRemaining ?? 0)) > 3) {
+    if (Math.abs((oa.grRemaining ?? 0) - (na.grRemaining ?? 0)) > 2) {
         return true;
     }
 
