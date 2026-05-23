@@ -6,7 +6,8 @@
         "loading_map": "Térkép betöltése...",
         "loading_competitions": "Versenyek betöltése...",
         "back_to_globe": "Vissza a földgömbhöz",
-        "language": "Nyelv"
+        "language": "Nyelv",
+        "update_available": "Frissítés érhető el — koppintson az újratöltéshez"
     },
     "competition": {
         "live": "Élő",

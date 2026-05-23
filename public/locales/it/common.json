@@ -6,7 +6,8 @@
         "loading_map": "Caricamento mappa...",
         "loading_competitions": "Caricamento gare...",
         "back_to_globe": "Torna al globo",
-        "language": "Lingua"
+        "language": "Lingua",
+        "update_available": "Aggiornamento disponibile — tocca per ricaricare"
     },
     "competition": {
         "live": "In diretta",

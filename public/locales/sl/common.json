@@ -6,7 +6,8 @@
         "loading_map": "Nalaganje zemljevida...",
         "loading_competitions": "Nalaganje tekem...",
         "back_to_globe": "Nazaj na globus",
-        "language": "Jezik"
+        "language": "Jezik",
+        "update_available": "Na voljo je posodobitev — tapnite za ponovno nalaganje"
     },
     "competition": {
         "live": "V živo",

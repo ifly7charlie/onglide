@@ -6,7 +6,8 @@
         "loading_map": "Načítava sa mapa...",
         "loading_competitions": "Načítavajú sa súťaže...",
         "back_to_globe": "Späť na glóbus",
-        "language": "Jazyk"
+        "language": "Jazyk",
+        "update_available": "Dostupná aktualizácia — ťuknite na znovunačítanie"
     },
     "competition": {
         "live": "Naživo",

@@ -6,7 +6,8 @@
         "loading_map": "Ładowanie mapy...",
         "loading_competitions": "Ładowanie zawodów...",
         "back_to_globe": "Powrót do globu",
-        "language": "Język"
+        "language": "Język",
+        "update_available": "Dostępna aktualizacja — dotknij, aby przeładować"
     },
     "competition": {
         "live": "Na żywo",

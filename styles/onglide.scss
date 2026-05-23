@@ -716,6 +716,35 @@ button {
 
 // Custom map attribution: a small (i) button in the bottom-right corner
 // that opens an opaque full-page modal listing tile/data attributions.
+// Auto-update prompt — floats centered along the top edge while a new build
+// is detected but the user hasn't backgrounded the app yet. The reload also
+// fires automatically on the next visibility-hidden, so this is just a
+// "tap to reload right now" affordance.
+.autoupdate-banner {
+    position: fixed;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    max-width: calc(100% - 16px);
+
+    &:hover {
+        background: var(--panel-hover);
+    }
+}
+
 .attribution-info-toggle {
     position: fixed;
     right: 398px;

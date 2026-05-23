@@ -6,7 +6,8 @@
         "loading_map": "Indlæser kort...",
         "loading_competitions": "Indlæser konkurrencer...",
         "back_to_globe": "Tilbage til globus",
-        "language": "Sprog"
+        "language": "Sprog",
+        "update_available": "Opdatering tilgængelig — tryk for at genindlæse"
     },
     "competition": {
         "live": "Live",

@@ -6,7 +6,8 @@
         "loading_map": "Laddar karta...",
         "loading_competitions": "Laddar tävlingar...",
         "back_to_globe": "Tillbaka till glob",
-        "language": "Språk"
+        "language": "Språk",
+        "update_available": "Uppdatering tillgänglig — tryck för att läsa in på nytt"
     },
     "competition": {
         "live": "Direkt",

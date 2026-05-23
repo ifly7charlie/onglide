@@ -6,7 +6,8 @@
         "loading_map": "Ladataan karttaa...",
         "loading_competitions": "Ladataan kilpailuja...",
         "back_to_globe": "Takaisin maapallolle",
-        "language": "Kieli"
+        "language": "Kieli",
+        "update_available": "Päivitys saatavilla — napauta päivittääksesi"
     },
     "competition": {
         "live": "Suorana",

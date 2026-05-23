@@ -55,6 +55,7 @@ function useIsMobile() {
 import {proposedUrl} from './fixupUrls';
 
 import {useWebsocketDecoder} from './useWebsocketDecoder';
+import {triggerVersionCheck} from './autoUpdate';
 
 import PlaybackControls from './playbackcontrols';
 
@@ -153,6 +154,9 @@ export const OgnFeed = memo(
             shouldReconnect: () => true,
             onOpen: (_a) => {
                 mergeWsStatus({state: 'open', retry: 0});
+                // Daemon (re)connect is our strongest deploy signal — check
+                // if the frontend bundle is now stale relative to the server.
+                triggerVersionCheck();
             },
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {

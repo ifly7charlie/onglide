@@ -6,7 +6,8 @@
         "loading_map": "Laster kart...",
         "loading_competitions": "Laster konkurranser...",
         "back_to_globe": "Tilbake til globus",
-        "language": "Språk"
+        "language": "Språk",
+        "update_available": "Oppdatering tilgjengelig — trykk for å laste på nytt"
     },
     "competition": {
         "live": "Direkte",

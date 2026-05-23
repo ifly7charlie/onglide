@@ -6,7 +6,8 @@
         "loading_map": "Kaart wordt geladen...",
         "loading_competitions": "Wedstrijden worden geladen...",
         "back_to_globe": "Terug naar globe",
-        "language": "Taal"
+        "language": "Taal",
+        "update_available": "Update beschikbaar — tik om opnieuw te laden"
     },
     "competition": {
         "live": "Live",

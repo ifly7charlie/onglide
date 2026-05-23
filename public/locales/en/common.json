@@ -6,7 +6,8 @@
         "loading_map": "Loading map...",
         "loading_competitions": "Loading competitions...",
         "back_to_globe": "Back to globe",
-        "language": "Language"
+        "language": "Language",
+        "update_available": "Update available — tap to reload"
     },
     "competition": {
         "live": "Live",
