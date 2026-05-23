@@ -292,6 +292,32 @@ button {
         }
     }
 
+    // Labeled bell button used in the mobile drawer — fills the drawer row
+    // so the touch target is the whole strip, not just the icon.
+    .sidepanel-bell-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-size: 15px;
+        text-align: left;
+        padding: 10px 0;
+        cursor: pointer;
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: default;
+        }
+
+        &.subscribed {
+            color: var(--panel-accent);
+        }
+    }
+
     .sidepanel-tools {
         padding: 4px 14px;
         border-bottom: 1px solid var(--panel-border);

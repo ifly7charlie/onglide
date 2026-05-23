@@ -35,6 +35,7 @@ import Sponsors from './sponsors';
 import {groupForHost} from './domainGroups';
 
 import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {SubscribeBellMenuItem} from './subscribeBell';
 import {LanguageSwitcher} from './language-switcher';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
@@ -388,6 +389,7 @@ export const OgnFeed = memo(
                                     {connectionStatus}
                                 </div>
                             </div>
+                            <SubscribeBellMenuItem compid={comp?.compid} />
                         </div>
                     ) : null}
                     {effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? (
