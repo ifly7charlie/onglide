@@ -292,29 +292,38 @@ button {
         }
     }
 
-    // Labeled bell button used in the mobile drawer — fills the drawer row
-    // so the touch target is the whole strip, not just the icon.
+    // Labeled bell button used in the mobile drawer — visually matches the
+    // class-selector pill buttons (.sidepanel-classes button) so the drawer
+    // reads as a single consistent set of controls.
     .sidepanel-bell-row {
-        display: flex;
+        display: inline-flex;
         align-items: center;
-        gap: 10px;
-        width: 100%;
-        border: 0;
+        gap: 8px;
         background: transparent;
+        border: 2px solid var(--panel-border);
+        border-radius: 4px;
         color: inherit;
         font: inherit;
-        font-size: 15px;
-        text-align: left;
-        padding: 10px 0;
+        font-size: 16px;
+        padding: 3px 13px;
         cursor: pointer;
+
+        &:hover {
+            background: var(--panel-hover);
+        }
 
         &:disabled {
             opacity: 0.4;
             cursor: default;
+
+            &:hover {
+                background: transparent;
+            }
         }
 
         &.subscribed {
-            color: var(--panel-accent);
+            background: var(--panel-accent);
+            color: #fff;
         }
     }
 
