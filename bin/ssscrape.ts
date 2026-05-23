@@ -36,7 +36,8 @@ import {hideBin} from 'yargs/helpers';
 import {runScheduler, SourceRegistry} from '../lib/scoring/scheduler';
 import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape';
 import {SgpSource} from '../lib/scoring/sources/sgp';
-import type {SourceCtx} from '../lib/scoring/source';
+import {SoaringSpotApiSource} from '../lib/scoring/sources/soaringspot';
+import type {ScoringSource, SourceCtx} from '../lib/scoring/source';
 import {regeocodeMissingCompetitions} from '../lib/scoring/shared/contestLocation';
 import {fetchRobocontrol} from '../lib/scoring/shared/robocontrol';
 
@@ -93,26 +94,34 @@ async function main(): Promise<void> {
     const registry = new SourceRegistry();
     registry.register(new SoaringSpotScrapeSource());
     registry.register(new SgpSource());
+    registry.register(new SoaringSpotApiSource());
     // Future: registry.register(new RstSource());
-    // Future: registry.register(new SoaringSpotApiSource());
 
     const args = yargs(hideBin(process.argv))
         .scriptName('ssscrape')
-        .usage('$0 (daemon)\n$0 --url <u> [--compid <c>]                            # full one-shot scrape\n$0 --compid <c> --class <c> --datecode <d> [--url <u>]   # filter mode: task+results only')
+        .usage('$0 (daemon)\n$0 --url <u> [--compid <c>]                            # full one-shot scrape (soaringspotscrape)\n$0 --compid <c> --class <c> --datecode <d> [--url <u>]   # filter mode: task+results only\n$0 --refetch <compid>                                    # one-shot end-to-end refetch using the configured source type')
         .option('url', {type: 'string', describe: 'soaringspot competition URL'})
         .option('compid', {type: 'string', describe: 'competition id (derived from url if omitted)'})
         .option('class', {type: 'string', describe: 'filter mode: classid or display name'})
         .option('datecode', {type: 'string', describe: 'filter mode: 3-char datecode (e.g. 6A5)', coerce: (v?: string) => v?.toUpperCase()})
+        .option('refetch', {type: 'string', describe: 'compid to refetch using whatever source type is configured for it'})
         .check((a) => {
             const filterMode = !!(a.class || a.datecode);
             if (filterMode && (!a.class || !a.datecode)) throw new Error('--class and --datecode must be supplied together');
             if (a.datecode && !/^[0-9][0-9A-Z][0-9A-Z]$/.test(a.datecode)) throw new Error(`--datecode=${a.datecode} doesn't look like a datecode (3 chars: digit + base36 month + base36 day)`);
             if (filterMode && !a.compid && !a.url) throw new Error('filter mode needs --compid (or --url to derive one)');
+            if (a.refetch && (a.url || a.class || a.datecode)) throw new Error('--refetch cannot be combined with --url/--class/--datecode');
             return true;
         })
         .strict()
         .help()
         .parseSync();
+
+    if (args.refetch) {
+        await runOneShotRefetch(args.refetch, registry, mysql_db);
+        setTimeout(() => process.exit(0), 5000);
+        return;
+    }
 
     const filterMode = !!(args.class && args.datecode);
     if (args.url || filterMode) {
@@ -235,6 +244,69 @@ async function main(): Promise<void> {
     setInterval(() => {
         fetchRobocontrol(mysql_db, (msg, ...args) => console.log(msg, ...args));
     }, 3 * 60 * 60 * 1000);
+}
+
+//
+// runOneShotRefetch — `--refetch <compid>` end-to-end pass. Picks the
+// adapter from whatever scoringsource row exists for the compid:
+// when both a 'soaringspotkey' and 'soaringspotscrape' row exist, the
+// API wins (matches the scheduler's OVERRIDE_SOURCE_TYPE behaviour).
+// Runs ensureMetadata → fetchPilots → fetchResultsAndTasks once, with
+// `forceResults` so a manual refetch can also reimport an off-cycle day.
+//
+async function runOneShotRefetch(compid: string, registry: SourceRegistry, db: any): Promise<void> {
+    const rows = (await db.query(escape`
+        SELECT * FROM scoringsource WHERE compid = ${compid}
+    `)) as any[];
+    if (!rows?.length) {
+        console.log(`no scoringsource rows for compid=${compid}`);
+        process.exit(1);
+    }
+
+    // Prefer the OAuth API row when present — same precedence the
+    // scheduler enforces via OVERRIDE_SOURCE_TYPE.
+    const order = ['soaringspotkey', 'soaringspotscrape', 'sgp'];
+    const sorted = [...rows].sort((a, b) => {
+        const ai = order.indexOf(a.type);
+        const bi = order.indexOf(b.type);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+
+    const src = sorted.find((r) => !!registry.get(r.type));
+    if (!src) {
+        console.log(`no registered adapter for any of: ${sorted.map((r) => r.type).join(', ')}`);
+        process.exit(1);
+    }
+
+    const adapter: ScoringSource = registry.get(src.type)!;
+    const refreshed = (
+        await db.query(escape`SELECT tz, countrycode FROM competition WHERE compid = ${compid}`)
+    )[0];
+    const ctx: SourceCtx = {
+        compid,
+        url: src.url ?? '',
+        tz: refreshed?.tz ?? 'Europe/London',
+        countrycode: refreshed?.countrycode ?? null,
+        db,
+        log: (msg, ...a) => console.log(`[${compid}] ${msg}`, ...a),
+        raw: src
+    };
+
+    console.log(`one-shot refetch: compid=${compid} type=${src.type}`);
+    try {
+        await adapter.ensureMetadata(ctx);
+        const post = (
+            await db.query(escape`SELECT tz, countrycode FROM competition WHERE compid = ${compid}`)
+        )[0];
+        if (post?.tz) ctx.tz = post.tz;
+        ctx.countrycode = post?.countrycode ?? ctx.countrycode;
+        await adapter.fetchPilots(ctx);
+        await adapter.fetchResultsAndTasks(ctx, () => false, {forceResults: true});
+        console.log(`refetch complete for compid=${compid}`);
+    } catch (e) {
+        console.log('refetch failed:', e);
+        process.exit(1);
+    }
 }
 
 main().then(() => {

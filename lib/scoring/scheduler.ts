@@ -51,11 +51,12 @@ const DISCOVERY_UTC_HOUR = 5;
 const LAUNCH_FAST_TAIL_MS = 60 * 60 * 1000;
 
 // Authoritative scoring-source override. A competition with a
-// `soaringspotkey` row is fed by the SoaringSpot OAuth API daemon
-// (bin/soaringspot.ts), which is authoritative over an HTML scrape of
-// the same data. When such a row exists this scheduler skips its own
-// sources for that compid — so an operator can switch a competition
-// onto the API by adding a key row, without deleting the scrape row.
+// `soaringspotkey` row is fed by the SoaringSpot OAuth API adapter
+// (lib/scoring/sources/soaringspot.ts), which is authoritative over an
+// HTML scrape of the same data. When such a row exists this scheduler
+// skips its own scrape source for that compid — so an operator can
+// switch a competition onto the API by adding a key row, without
+// deleting the scrape row.
 const OVERRIDE_SOURCE_TYPE = 'soaringspotkey';
 
 // ---------- in-memory state ----------

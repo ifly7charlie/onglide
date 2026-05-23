@@ -114,7 +114,12 @@ services:
             target: soaringspot
             args:
                 ENV_FILE: '.env${DOCKER_TAG:+.${DOCKER_TAG}}'
-        command: node bin/soaringspot
+        # bin/soaringspot.ts was replaced by the scoring scheduler in
+        # bin/ssscrape.ts (lib/scoring/sources/soaringspot.ts is the
+        # adapter that does the OAuth API work). Container name kept
+        # for back-compat; credentials now live in the `scoringsource`
+        # table per competition, not in SOARINGSPOT_* env vars.
+        command: node bin/ssscrape
         platform: 'linux/amd64'
         depends_on:
             mysql:

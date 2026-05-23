@@ -16,11 +16,10 @@ yarn build              # protobuf + tsc for daemons (run before bin/* scripts)
 yarn build:protobuf     # only the .proto -> ts regen
 yarn dev                # next dev (webpack mode)
 yarn ogn                # OGN/APRS daemon (frontends connect via its websocket)
-yarn soaringspot        # data sync from SoaringSpot (OAuth API)
-yarn ssscrape           # data sync via HTML scrape; also drives SGP sources
+yarn ssscrape           # data sync daemon: drives SoaringSpot OAuth API, HTML scrape, and SGP sources
 yarn rst                # RST Online sync
 yarn ogn:dev            # tsc-watch + node --inspect (auto-restarts on rebuild)
-yarn soaringspot:dev    # same pattern for the scraper
+yarn ssscrape:dev       # same pattern for the scoring scraper
 yarn test               # vitest run (test/**/*.test.ts)
 yarn test:watch         # vitest watch
 ```
@@ -39,7 +38,7 @@ Prettier: 4-space, **225-char print width**, single quotes, no bracket spacing, 
 This is a soaring-competition tracking platform. The repo runs as **two cooperating processes** that share a MySQL DB:
 
 1. **`bin/ogn.ts`** — long-running daemon that subscribes to the OGN APRS feed, scores every pilot in real time, and exposes a websocket (`ws://…:8080`) to browsers. Owns all scoring state in-process.
-2. **`bin/{soaringspot,ssscrape,rst,sgp}.ts`** — one of these runs alongside `ogn.ts` to pull pilots / tasks / results from the contest's upstream system into the DB. Choice depends on the contest (see `readme.md`).
+2. **`bin/ssscrape.ts`** — the scoring scraper daemon. Runs the scheduler in `lib/scoring/scheduler.ts`, which drives every registered `ScoringSource` adapter (SoaringSpot OAuth API, SoaringSpot HTML scrape, SGP) plus the robocontrol tracker feed. The choice of upstream is per-competition via a row in `scoringsource`. **`bin/rst.ts`** is the legacy RST sync (still its own daemon).
 3. **Next.js (`pages/`)** — front-end. Reads competition metadata via `getServerSideProps` (direct DB), then connects to the OGN daemon's websocket for live tracks + scores. Almost no API routes; live state flows over the websocket, not REST.
 
 ### Front-end → daemon channel

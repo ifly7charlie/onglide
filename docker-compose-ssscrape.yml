@@ -82,7 +82,9 @@ services:
         build:
             dockerfile: ./conf/Dockerfile
             target: ogn-soaringspot
-        command: node bin/soaringspot
+        # bin/soaringspot.ts was replaced by the scoring scheduler in
+        # bin/ssscrape.ts. Service name kept for back-compat.
+        command: node bin/ssscrape
         platform: 'linux/amd64'
         depends_on:
             mysql:

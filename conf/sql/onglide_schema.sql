@@ -74,13 +74,32 @@ CREATE TABLE `compstatus` (
   `datecode` char(3) DEFAULT NULL COMMENT 'current contest date code for this class',
   
   `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,:=no task this day,B=afterbrief,G=gridded,L=launched,S=startopen/flying,F=first finisher imminent,H=all home,Z=scrubbed,O=comp over',
+  `laststatuschange` datetime DEFAULT NULL COMMENT 'UTC time the status column last transitioned to a new value (maintained by triggers below)',
   `resultsdatecode` char(3) DEFAULT NULL COMMENT 'what date is scoring up to with uploading, results after this date wont be displayed',
   `task` char(1) DEFAULT 'A' COMMENT 'selected task',
 
   `startheight` int(11) DEFAULT '0',
-  `notes` text  COMMENT 'Headline message to display', 
+  `notes` text  COMMENT 'Headline message to display',
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Current competition status, one row per class';
+
+--
+-- Triggers maintain compstatus.laststatuschange. The column is bumped only when
+-- the status value actually changes — other UPDATEs (resultsdatecode, task,
+-- notes, etc.) leave it alone. Defined here so a fresh schema install gets
+-- them; the matching migration installs the same triggers on existing DBs.
+--
+DROP TRIGGER IF EXISTS `compstatus_laststatuschange_ins`;
+CREATE TRIGGER `compstatus_laststatuschange_ins`
+BEFORE INSERT ON `compstatus`
+FOR EACH ROW
+SET NEW.laststatuschange = UTC_TIMESTAMP();
+
+DROP TRIGGER IF EXISTS `compstatus_laststatuschange_upd`;
+CREATE TRIGGER `compstatus_laststatuschange_upd`
+BEFORE UPDATE ON `compstatus`
+FOR EACH ROW
+SET NEW.laststatuschange = IF(NOT (NEW.status <=> OLD.status), UTC_TIMESTAMP(), OLD.laststatuschange);
 
 --
 -- Table structure for table `contestday`

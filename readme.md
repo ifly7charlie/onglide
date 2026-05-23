@@ -300,13 +300,13 @@ Atkinson Hyperlegible Next OTFs are a free download from Braille Institute, or f
 the [Google Fonts repo](https://github.com/googlefonts/atkinson-hyperlegible-next).
 The `.woff2` files in `public/fonts/` are for the UI (CSS only) and not usable here.
 
-You can also use it to specify the soaring spot credentials, or you
-can pass then in through your service provider environment variables.
-
-```
-SOARINGSPOT_CLIENT_ID=
-SOARINGSPOT_SECRET=
-```
+SoaringSpot OAuth API credentials no longer come from `.env` — they live
+in the `scoringsource` table per competition. Insert one row of
+`type = 'soaringspotkey'` with `client_id`, `secret` and the local
+`compid`, and the scoring scraper (`yarn ssscrape`) picks it up on the
+next heartbeat. Optional columns:
+  - `contest_name` to disambiguate when the key has access to multiple contests
+  - `actuals`: `1` (FAI/IGC actuals — default), `0` (handicapped speeds), `-1` (BGA decimal-encoded)
 
 To enable SSL add ONGLIDE_SSL to the .env file
 
