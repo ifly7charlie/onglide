@@ -28,8 +28,8 @@
         "viewers_short": "néző",
         "land_data": "Földadatok:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Hivatalos eredmények",
-        "official_scores_hint": "Az alábbi eredmények élő követésből származnak — koppintson a hivatalos eredményekért",
+        "official_scores": "Koppintson a hivatalos eredményekért",
+        "official_scores_hint": "Az alábbi információk élő követésből származnak",
         "notify_subscribe": "Értesítés erről a versenyről",
         "notify_unsubscribe": "Értesítések leállítása",
         "notify_denied": "Az értesítések le vannak tiltva a böngészőben"

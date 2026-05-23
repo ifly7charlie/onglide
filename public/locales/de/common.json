@@ -28,8 +28,8 @@
         "viewers_short": "Zuschauer",
         "land_data": "Landdaten:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Offizielle Ergebnisse",
-        "official_scores_hint": "Die Ergebnisse unten stammen aus dem Live-Tracking — für offizielle Ergebnisse tippen",
+        "official_scores": "Für offizielle Ergebnisse tippen",
+        "official_scores_hint": "Die Informationen unten stammen aus dem Live-Tracking",
         "notify_subscribe": "Über diesen Wettbewerb benachrichtigen",
         "notify_unsubscribe": "Benachrichtigungen beenden",
         "notify_denied": "Benachrichtigungen sind in Ihrem Browser blockiert"

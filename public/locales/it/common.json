@@ -28,8 +28,8 @@
         "viewers_short": "spettatori",
         "land_data": "Dati terrestri:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Risultati ufficiali",
-        "official_scores_hint": "I punteggi seguenti provengono dal tracciamento in tempo reale — tocca per i risultati ufficiali",
+        "official_scores": "Tocca per i risultati ufficiali",
+        "official_scores_hint": "Le informazioni seguenti provengono dal tracciamento in tempo reale",
         "notify_subscribe": "Avvisami su questa competizione",
         "notify_unsubscribe": "Smetti di avvisarmi",
         "notify_denied": "Le notifiche sono bloccate nel browser"

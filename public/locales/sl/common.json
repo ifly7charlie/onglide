@@ -28,8 +28,8 @@
         "viewers_short": "gledalcev",
         "land_data": "Zemljiški podatki:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Uradni rezultati",
-        "official_scores_hint": "Spodnji rezultati so iz sledenja v živo — tapnite za uradne rezultate",
+        "official_scores": "Tapnite za uradne rezultate",
+        "official_scores_hint": "Spodnji podatki so iz sledenja v živo",
         "notify_subscribe": "Obveščaj me o tem tekmovanju",
         "notify_unsubscribe": "Prenehaj obveščati",
         "notify_denied": "Obvestila so v vašem brskalniku blokirana"

@@ -28,8 +28,8 @@
         "viewers_short": "kijkers",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Officiële uitslagen",
-        "official_scores_hint": "De scores hieronder komen van live tracking — tik voor officiële uitslagen",
+        "official_scores": "Tik voor officiële uitslagen",
+        "official_scores_hint": "De informatie hieronder komt van live tracking",
         "notify_subscribe": "Mij op de hoogte houden van deze wedstrijd",
         "notify_unsubscribe": "Stop met meldingen",
         "notify_denied": "Meldingen zijn geblokkeerd in je browser"

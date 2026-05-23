@@ -28,8 +28,8 @@
         "viewers_short": "tittare",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Officiella resultat",
-        "official_scores_hint": "Resultaten nedan kommer från livespårning — tryck för officiella resultat",
+        "official_scores": "Tryck för officiella resultat",
+        "official_scores_hint": "Informationen nedan kommer från livespårning",
         "notify_subscribe": "Meddela mig om denna tävling",
         "notify_unsubscribe": "Sluta meddela mig",
         "notify_denied": "Aviseringar är blockerade i din webbläsare"

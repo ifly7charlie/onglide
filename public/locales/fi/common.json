@@ -28,8 +28,8 @@
         "viewers_short": "katsojaa",
         "land_data": "Maa-aineisto:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Viralliset tulokset",
-        "official_scores_hint": "Alla olevat tulokset ovat live-seurannasta — napauta nähdäksesi viralliset tulokset",
+        "official_scores": "Napauta nähdäksesi viralliset tulokset",
+        "official_scores_hint": "Alla olevat tiedot ovat live-seurannasta",
         "notify_subscribe": "Ilmoita minulle tästä kilpailusta",
         "notify_unsubscribe": "Lopeta ilmoitukset",
         "notify_denied": "Ilmoitukset on estetty selaimessasi"

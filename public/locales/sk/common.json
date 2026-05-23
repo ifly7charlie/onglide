@@ -28,8 +28,8 @@
         "viewers_short": "divákov",
         "land_data": "Údaje o pevnine:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Oficiálne výsledky",
-        "official_scores_hint": "Výsledky nižšie pochádzajú zo živého sledovania — ťuknutím zobrazíte oficiálne výsledky",
+        "official_scores": "Ťuknite pre oficiálne výsledky",
+        "official_scores_hint": "Informácie nižšie pochádzajú zo živého sledovania",
         "notify_subscribe": "Upozorňovať na túto súťaž",
         "notify_unsubscribe": "Prestať upozorňovať",
         "notify_denied": "Oznámenia sú vo vašom prehliadači blokované"

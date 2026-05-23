@@ -28,8 +28,8 @@
         "viewers_short": "seere",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Officielle resultater",
-        "official_scores_hint": "Resultaterne nedenfor er fra live-sporing — tryk for officielle resultater",
+        "official_scores": "Tryk for officielle resultater",
+        "official_scores_hint": "Oplysningerne nedenfor er fra live-sporing",
         "notify_subscribe": "Giv mig besked om denne konkurrence",
         "notify_unsubscribe": "Stop med at give besked",
         "notify_denied": "Notifikationer er blokeret i din browser"

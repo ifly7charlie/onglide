@@ -28,8 +28,8 @@
         "viewers_short": "spectateurs",
         "land_data": "Données terrestres :",
         "natural_earth": "Natural Earth",
-        "official_scores": "Résultats officiels",
-        "official_scores_hint": "Les scores ci-dessous proviennent du suivi en direct — appuyez pour les résultats officiels",
+        "official_scores": "Appuyez pour les résultats officiels",
+        "official_scores_hint": "Les informations ci-dessous proviennent du suivi en direct",
         "notify_subscribe": "M'avertir de cette compétition",
         "notify_unsubscribe": "Ne plus m’avertir",
         "notify_denied": "Les notifications sont bloquées dans votre navigateur"

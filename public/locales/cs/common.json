@@ -28,8 +28,8 @@
         "viewers_short": "diváků",
         "land_data": "Data o pevnině:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Oficiální výsledky",
-        "official_scores_hint": "Výsledky níže pocházejí z živého sledování — klepnutím zobrazíte oficiální výsledky",
+        "official_scores": "Klepněte pro oficiální výsledky",
+        "official_scores_hint": "Informace níže pocházejí z živého sledování",
         "notify_subscribe": "Upozorňovat na tuto soutěž",
         "notify_unsubscribe": "Přestat upozorňovat",
         "notify_denied": "Oznámení jsou ve vašem prohlížeči blokována"

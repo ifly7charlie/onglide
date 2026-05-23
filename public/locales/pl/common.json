@@ -28,8 +28,8 @@
         "viewers_short": "obserwatorów",
         "land_data": "Dane lądowe:",
         "natural_earth": "Natural Earth",
-        "official_scores": "Wyniki oficjalne",
-        "official_scores_hint": "Wyniki poniżej pochodzą ze śledzenia na żywo — dotknij, aby zobaczyć wyniki oficjalne",
+        "official_scores": "Dotknij, aby zobaczyć wyniki oficjalne",
+        "official_scores_hint": "Informacje poniżej pochodzą ze śledzenia na żywo",
         "notify_subscribe": "Powiadamiaj mnie o tych zawodach",
         "notify_unsubscribe": "Przestań powiadamiać",
         "notify_denied": "Powiadomienia są zablokowane w przeglądarce"
