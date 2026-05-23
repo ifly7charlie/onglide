@@ -66,7 +66,7 @@ export async function fetchRobocontrol(db: any, log: Log): Promise<void> {
     }
 }
 
-async function fetchRobocontrolOne(db: any, log: Log, compid: string, url: string): Promise<void> {
+export async function fetchRobocontrolOne(db: any, log: Log, compid: string, url: string): Promise<void> {
     log(`robocontrol: polling ${url} for compid=${compid}`);
 
     const res = await fetch(url);

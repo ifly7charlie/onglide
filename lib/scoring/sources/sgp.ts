@@ -24,8 +24,9 @@ import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, type PilotRecord} from '../shared/pilots';
 import {upsertTaskAndLegs} from '../shared/tasks';
 import {downloadPictureCached} from '../shared/images';
+import {updateTracker} from '../shared/trackers';
 
-import type {ClassId, CompNo, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
+import type {ClassId, CompNo, FetchPilotsOptions, FetchPilotsResult, FetchResultsOptions, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 
 // The legacy daemon used a fixed raw class name 'sgp' hashed with the
 // scoringsource.compid to produce a unique classid. Keeping the same
@@ -207,10 +208,12 @@ async function installSgpTask(ctx: SourceCtx, classid: ClassId, task: any): Prom
 }
 
 //
-// Upsert one row into the tracker table from an SGP `tracks[]` entry.
-// SGP carries FLARM IDs on the pilot record itself (no separate
-// robocontrol lookup needed), so we extract every 6-hex tail from
-// `trackId` and append any paired OGN tracker. Mirrors bin/sgp.ts:324.
+// Upsert the tracker row for one SGP `tracks[]` entry. SGP carries
+// FLARM IDs on the pilot record itself (no separate robocontrol lookup
+// needed), so we extract every 6-hex tail from `trackId` and append any
+// paired OGN tracker. Routes through `updateTracker` so feed-conflict
+// protection (robocontrol vs sgp) and `trackerhistory` rows match the
+// other adapters.
 //
 async function upsertSgpTracker(
     ctx: SourceCtx, //
@@ -218,25 +221,25 @@ async function upsertSgpTracker(
     compno: CompNo,
     pilot: any
 ): Promise<void> {
-    const flarmIds: string[] = String(pilot.trackId ?? '').match(/[0-9A-F]{6}$/gi) || ['unknown'];
+    const flarmIds: string[] = String(pilot.trackId ?? '').match(/[0-9A-F]{6}$/gi) || [];
     if (pilot.ognTrackerPaired) {
         const m = String(pilot.ognTrackerPaired).match(/[0-9A-F]{6}$/gi);
         if (m) flarmIds.push(...m);
     }
     const trackerid = flarmIds.filter((d) => d?.length).join(',') || 'unknown';
+
+    // updateTracker is UPDATE-only and would no-op for a brand-new
+    // pilot — seed an unclaimed placeholder row first. Mirrors the
+    // soaringspot adapter at lines 303-314.
     try {
         await ctx.db.query(escape`
-            INSERT INTO
-                tracker (class, compno, type, trackerid)
-            VALUES
-                (${classid}, ${compno}, 'flarm', ${trackerid}) ON DUPLICATE KEY
-            UPDATE trackerid =
-            VALUES
-                (trackerid)
+            INSERT IGNORE INTO tracker (class, compno, type, trackerid)
+            VALUES (${classid}, ${compno}, 'flarm', 'unknown')
         `);
     } catch (e) {
-        ctx.log(`SGP tracker upsert failed for ${classid}/${compno}:`, e);
+        ctx.log(`SGP tracker placeholder failed for ${classid}/${compno}:`, e);
     }
+    await updateTracker(ctx.db, ctx.log, classid, compno, trackerid, 'sgp');
 }
 
 //
@@ -248,6 +251,7 @@ async function upsertSgpTracker(
 //
 export class SgpSource implements ScoringSource {
     readonly type = 'sgp';
+    readonly trackerIntervalMs = 5 * 60 * 1000;
 
     async ensureMetadata(ctx: SourceCtx): Promise<void> {
         try {
@@ -257,7 +261,7 @@ export class SgpSource implements ScoringSource {
         }
     }
 
-    async fetchPilots(ctx: SourceCtx): Promise<FetchPilotsResult> {
+    async fetchPilots(ctx: SourceCtx, options?: FetchPilotsOptions): Promise<FetchPilotsResult> {
         const accumulator = new PilotFetchAccumulator();
         const synthetic = {n: 0};
 
@@ -305,16 +309,34 @@ export class SgpSource implements ScoringSource {
             }
         }
 
-        await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
-        for (const cid of accumulator.observed.keys()) {
-            await syncClassHandicapFlag(ctx.db, ctx.log, cid);
+        // skipPrune is set by the trackers-cadence path so a flaky
+        // upstream can't wipe the roster at 5-minute intervals. The
+        // tracker upsert above is the only side-effect we want then.
+        if (!options?.skipPrune) {
+            await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
+            for (const cid of accumulator.observed.keys()) {
+                await syncClassHandicapFlag(ctx.db, ctx.log, cid);
+            }
         }
 
         return {observed: accumulator.observed};
     }
 
-    async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate): Promise<FetchResultsResult> {
+    // Trackers and pilots come in the same JSON payload, so the trackers
+    // cadence re-uses fetchPilots with skipPrune to avoid wiping the
+    // roster on a flap.
+    async fetchTrackers(ctx: SourceCtx): Promise<void> {
+        await this.fetchPilots(ctx, {skipPrune: true});
+    }
+
+    async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {
         const observedClasses = new Set<ClassId>();
+
+        // SGP has no per-pilot results to fetch — the JSON payload only
+        // carries `task` + `tracks`. resultsOnly therefore short-circuits.
+        if (options?.resultsOnly) {
+            return {observedClasses};
+        }
 
         const res = await fetchSgpJson(ctx);
         if (!res || !res.task) {

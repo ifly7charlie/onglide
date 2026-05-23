@@ -29,7 +29,7 @@ import {upsertTaskAndLegs} from '../shared/tasks';
 import {updateTracker} from '../shared/trackers';
 import {downloadPictureCached} from '../shared/images';
 
-import type {ClassId, CompNo, FetchPilotsResult, FetchResultsOptions, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
+import type {ClassId, CompNo, FetchPilotsOptions, FetchPilotsResult, FetchResultsOptions, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 
 const API_ROOT = 'https://api.soaringspot.com/v1/';
 const REL_CONTESTS = 'http://api.soaringspot.com/rel/contests';
@@ -513,6 +513,7 @@ async function processDayResults(
 //
 export class SoaringSpotApiSource implements ScoringSource {
     readonly type = 'soaringspotkey';
+    readonly trackerIntervalMs = 15 * 60 * 1000;
 
     //
     // Pull the contests enumeration once and pick the right contest;
@@ -541,7 +542,7 @@ export class SoaringSpotApiSource implements ScoringSource {
         await updateCompetitionRow(ctx, contest);
     }
 
-    async fetchPilots(ctx: SourceCtx): Promise<FetchPilotsResult> {
+    async fetchPilots(ctx: SourceCtx, options?: FetchPilotsOptions): Promise<FetchPilotsResult> {
         const accumulator = new PilotFetchAccumulator();
         const synthetic = {n: 0};
         const keys = extractKeys(ctx);
@@ -576,12 +577,24 @@ export class SoaringSpotApiSource implements ScoringSource {
             await updatePilotsFromApi(ctx, classUrl, classid, displayName, accumulator, synthetic, keys);
         }
 
-        await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
-        for (const classid of accumulator.observed.keys()) {
-            await syncClassHandicapFlag(ctx.db, ctx.log, classid);
+        // skipPrune is set by the trackers-cadence path: a flap on the
+        // OAuth side at 15-minute cadence must not delete pilots. The
+        // per-pilot upsert + updateTracker writes already ran above.
+        if (!options?.skipPrune) {
+            await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
+            for (const classid of accumulator.observed.keys()) {
+                await syncClassHandicapFlag(ctx.db, ctx.log, classid);
+            }
         }
 
         return {observed: accumulator.observed};
+    }
+
+    // Trackers come embedded in the contestants payload (`live_track_id`),
+    // so the trackers cadence re-uses fetchPilots with skipPrune. Pilots
+    // get refreshed as a side effect, which is acceptable.
+    async fetchTrackers(ctx: SourceCtx): Promise<void> {
+        await this.fetchPilots(ctx, {skipPrune: true});
     }
 
     async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {
@@ -590,6 +603,7 @@ export class SoaringSpotApiSource implements ScoringSource {
         if (!keys) return {observedClasses};
 
         const tasksOnly = options?.tasksOnly === true;
+        const resultsOnly = options?.resultsOnly === true;
         const forceResults = options?.forceResults === true;
         const acceptYesterday = options?.acceptYesterday === true;
         const todayDatecode = localDatecode(ctx.tz);
@@ -617,6 +631,10 @@ export class SoaringSpotApiSource implements ScoringSource {
             if (!classUrl) continue;
 
             // ----- Tasks: latest day only -----
+            // resultsOnly skips this whole block — the results-cadence
+            // call path has no reason to spend 3 round-trips re-fetching
+            // the task it already imported on the tasks-cadence call.
+            if (!resultsOnly) {
             const tasksDoc = await apiGet(classUrl + '/tasks', keys, ctx.log);
             const tasksList: any[] = tasksDoc?._embedded?.[REL_TASKS] ?? [];
             const latestTask = [...tasksList].sort((a, b) => String(a.task_date).localeCompare(String(b.task_date))).at(-1);
@@ -650,6 +668,7 @@ export class SoaringSpotApiSource implements ScoringSource {
                 }
             } else {
                 ctx.log(`${classid}: no tasks published yet`);
+            }
             }
 
             if (tasksOnly) continue;

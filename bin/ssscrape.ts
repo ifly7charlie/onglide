@@ -33,13 +33,13 @@ import escape from 'sql-template-strings';
 import yargs from 'yargs';
 import {hideBin} from 'yargs/helpers';
 
-import {runScheduler, SourceRegistry} from '../lib/scoring/scheduler';
+import {runScheduler, SourceRegistry, dumpSchedulerState} from '../lib/scoring/scheduler';
 import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape';
 import {SgpSource} from '../lib/scoring/sources/sgp';
 import {SoaringSpotApiSource} from '../lib/scoring/sources/soaringspot';
+import {RobocontrolSource} from '../lib/scoring/sources/robocontrol';
 import type {ScoringSource, SourceCtx} from '../lib/scoring/source';
 import {regeocodeMissingCompetitions} from '../lib/scoring/shared/contestLocation';
-import {fetchRobocontrol} from '../lib/scoring/shared/robocontrol';
 
 const mysql = require('serverless-mysql');
 const dotenv = require('dotenv');
@@ -95,6 +95,7 @@ async function main(): Promise<void> {
     registry.register(new SoaringSpotScrapeSource());
     registry.register(new SgpSource());
     registry.register(new SoaringSpotApiSource());
+    registry.register(new RobocontrolSource());
     // Future: registry.register(new RstSource());
 
     const args = yargs(hideBin(process.argv))
@@ -227,8 +228,23 @@ async function main(): Promise<void> {
         return;
     }
 
-    // Daemon mode: scheduler heartbeat + robocontrol loop.
+    // Daemon mode: scheduler heartbeat drives everything — robocontrol
+    // is registered as a tracker-only ScoringSource above and runs on
+    // the same per-competition cadence as the other adapters.
     console.log('Background scoring scraper enabled');
+
+    // SIGUSR1 — on-demand scheduler state dump for troubleshooting.
+    //   kill -USR1 <pid>
+    // prints the per-comp / per-source next-due timestamps, observations,
+    // and sticky flags to the daemon log so "why isn't X firing" can be
+    // answered without restarting.
+    process.on('SIGUSR1', () => {
+        try {
+            dumpSchedulerState(console.log);
+        } catch (e) {
+            console.log('dumpSchedulerState threw:', e);
+        }
+    });
 
     // One-shot sweep at boot: any competition rows whose lt/lg are still
     // NULL/0 get re-geocoded from `sitename`. Fire-and-forget so we don't
@@ -239,11 +255,6 @@ async function main(): Promise<void> {
         db: mysql_db,
         registry
     }).catch((e) => console.log('runScheduler failed:', e));
-
-    fetchRobocontrol(mysql_db, (msg, ...args) => console.log(msg, ...args));
-    setInterval(() => {
-        fetchRobocontrol(mysql_db, (msg, ...args) => console.log(msg, ...args));
-    }, 3 * 60 * 60 * 1000);
 }
 
 //

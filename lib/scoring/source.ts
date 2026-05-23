@@ -75,6 +75,11 @@ export type SkipDayPredicate = (classid: ClassId, datecode: Datecode, dateISO: s
 // any newly-published task, but skip the per-pilot results parsing
 // (no class has a task yet, so there are no results to fetch).
 //
+// `resultsOnly` is the symmetric flag for the results-cadence path:
+// the adapter should skip the tasks HTTP chain entirely and only
+// fetch/import per-pilot results. Used by the scheduler once results
+// polling is allowed (post-F or post-18:00 local).
+//
 // `forceResults` overrides the adapter's "skip results for any day
 // that isn't local today" safety check. Set only by CLI one-shot mode
 // when the user has explicitly asked for a specific (class, datecode).
@@ -86,8 +91,19 @@ export type SkipDayPredicate = (classid: ClassId, datecode: Datecode, dateISO: s
 //
 export interface FetchResultsOptions {
     tasksOnly?: boolean;
+    resultsOnly?: boolean;
     forceResults?: boolean;
     acceptYesterday?: boolean;
+}
+
+//
+// FetchPilotsOptions — options for the pilots fetch path. `skipPrune`
+// suppresses `pruneUnseenPilots` (and per-pilot pilotresult writes)
+// so the higher-cadence trackers stream can re-use the contestants
+// endpoint without risking a flaky upstream wiping the roster.
+//
+export interface FetchPilotsOptions {
+    skipPrune?: boolean;
 }
 
 //
@@ -122,15 +138,26 @@ export interface ScoringSource {
 
     // Fetch the pilot roster across all classes. Adapter writes pilots /
     // tracker via `lib/scoring/shared/pilots.ts` and returns what it saw
-    // so the scheduler can prune unseen rows.
-    fetchPilots(ctx: SourceCtx): Promise<FetchPilotsResult>;
+    // so the scheduler can prune unseen rows. `options.skipPrune` (set
+    // by the trackers-cadence path) suppresses the prune + pilotresult
+    // writes — see FetchPilotsOptions.
+    fetchPilots(ctx: SourceCtx, options?: FetchPilotsOptions): Promise<FetchPilotsResult>;
 
     // Fetch tasks + per-day results across all classes. Adapter writes
     // tasks/taskleg/contestday/pilotresult via the shared helpers; the
     // scheduler hands in a `skipDay` so old days are not refetched, and
-    // optionally a `tasksOnly` flag to suppress the results-parsing
-    // half of the work on pre-task fast ticks.
+    // optionally `tasksOnly` / `resultsOnly` to fetch only one half on
+    // the corresponding cadence.
     fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult>;
+
+    // Fetch the live tracker (compno → FLARM ID) mapping. Optional —
+    // only adapters that have a tracker source implement it. Driven on
+    // the scheduler's trackers cadence (08:00-22:00 local, per-source
+    // interval until AllHome, hourly after). Idempotent. The hint
+    // `trackerIntervalMs` tells the scheduler how often to poll; the
+    // scheduler falls back to 15 min if unset.
+    fetchTrackers?(ctx: SourceCtx): Promise<void>;
+    readonly trackerIntervalMs?: number;
 
     // Optional daily competition discovery. The scheduler calls this at
     // most once per UTC day (at or after 05:00 UTC) and INSERT IGNOREs

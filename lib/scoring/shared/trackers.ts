@@ -20,7 +20,7 @@ import escape from 'sql-template-strings';
 import type {ClassId, CompNo} from '../source';
 
 // Feeds that own a tracker row. Must be a subset of trackerhistory.method.
-export type TrackerFeed = 'robocontrol' | 'soaringspot';
+export type TrackerFeed = 'robocontrol' | 'soaringspot' | 'sgp';
 
 //
 // updateTracker — point one (class, compno) row at a new set of FLARM

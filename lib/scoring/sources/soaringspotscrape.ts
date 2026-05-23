@@ -26,7 +26,7 @@ import {toDateCode} from '../../datecode';
 import {getElevationOffset} from '../../getelevationoffset';
 import {processIGC, checkForOGNMatches} from '../../flightprocessing/launchlanding';
 
-import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsResult, FetchResultsOptions, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
+import type {ClassId, CompNo, DiscoverCtx, DiscoveredCompetition, FetchPilotsOptions, FetchPilotsResult, FetchResultsOptions, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 import {findTimezoneFromLocation, getTzOffset, localDatecode} from '../shared/timezone';
 import {findApproximateContestLocation} from '../shared/contestLocation';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, correctClassHandicaps, type PilotRecord} from '../shared/pilots';
@@ -506,7 +506,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
         }
     }
 
-    async fetchPilots(ctx: SourceCtx): Promise<FetchPilotsResult> {
+    async fetchPilots(ctx: SourceCtx, options?: FetchPilotsOptions): Promise<FetchPilotsResult> {
         const accumulator = new PilotFetchAccumulator();
         const synthetic = {n: 0};
 
@@ -591,10 +591,17 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                 await upsertPilot(ctx.db, ctx.log, pilot, accumulator, synthetic);
             }
 
-            await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
+            // skipPrune is reserved for the trackers cadence; the scrape
+            // adapter doesn't currently implement fetchTrackers (the HTML
+            // page has no FLARM IDs — robocontrol feeds them separately),
+            // but the flag is honoured for parity in case a CLI or future
+            // path wants a pilots refresh without the destructive prune.
+            if (!options?.skipPrune) {
+                await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
 
-            for (const classid of accumulator.observed.keys()) {
-                await syncClassHandicapFlag(ctx.db, ctx.log, classid);
+                for (const classid of accumulator.observed.keys()) {
+                    await syncClassHandicapFlag(ctx.db, ctx.log, classid);
+                }
             }
         } catch (e) {
             ctx.log(`fetchPilots failed for ${ctx.compid}:`, e);
@@ -605,6 +612,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
 
     async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {
         const tasksOnly = options?.tasksOnly === true;
+        const resultsOnly = options?.resultsOnly === true;
         const forceResults = options?.forceResults === true;
         const acceptYesterday = options?.acceptYesterday === true;
         const observedClasses = new Set<ClassId>();
@@ -708,10 +716,15 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     // ships — some sources show cancelled on the overview
                     // row but still serve a normal task JSON.
                     const cancelled = /cancell?ed|scrubbed/i.test(daynumber) || /cancell?ed|scrubbed/i.test(getAttributeValue(cells[1] as any, 'class') ?? '');
-                    const taskUrlAttr = getAttributeValue(taskAnchor as any, 'href');
+                    // resultsOnly skips the task fetch block — the results
+                    // half doesn't depend on anything the task fetch
+                    // produces (cancelled detection is from the overview
+                    // row, not the task JSON; the results block uses
+                    // cells[3] which is independent of the task <a>).
+                    const taskUrlAttr = resultsOnly ? null : getAttributeValue(taskAnchor as any, 'href');
                     if (taskUrlAttr) {
                         try {
-                            console.log('https://www.soaringspot.com' + taskUrlAttr);
+                            ctx.log('https://www.soaringspot.com' + taskUrlAttr);
                             const taskBody = await fetchSoaringSpot('https://www.soaringspot.com' + taskUrlAttr).then((res) => res.text());
                             const task = taskBody.match(extractTask);
                             if (task) {
@@ -753,7 +766,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                     const resultUrlAttr = resultsAnchor ? getAttributeValue(resultsAnchor as any, 'href') : null;
                     if (resultUrlAttr) {
                         try {
-                            console.log('https://www.soaringspot.com' + resultUrlAttr);
+                            ctx.log('https://www.soaringspot.com' + resultUrlAttr);
                             const resBody = await fetchSoaringSpot('https://www.soaringspot.com' + resultUrlAttr).then((res) => res.text());
                             const resDom = htmlparser.parseDocument(resBody);
                             const classTable = /result-daily/;
