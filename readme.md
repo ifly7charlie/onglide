@@ -79,6 +79,21 @@ Onglide can support multiple IDs for a pilot. These are not currently
 automatically detected but I'm happy to configure them if needed (it's
 used for the delayed IGC trackers and SGP for example)
 
+# Troubleshooting
+
+The map shows a small x mark at the point it has identified as your
+airfield. If this mark is in the wrong place it will cause issues with
+landouts and failing to identify launched gliders. 
+
+The position is determined by doing a geocode lookup on the airfield
+location as you have set in SeeYou/SoaringSpot for the competition.
+Don't use abbreviations or add extra details eg Dunstable, UK is ok
+but Dunstable LGC, UK will not match and will result in the
+competition not tracking.  The name is updated when the competition is
+checked so you can change this at any time.
+
+
+
 # Other
 
 ## Running your own 
