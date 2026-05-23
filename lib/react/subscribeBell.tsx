@@ -51,22 +51,26 @@ function SubscribeBellIcon({compid}: {compid: string}) {
 
 // Labeled row — used inside the mobile drawer where icon-only would be too
 // terse and there's room for the full action text. Owns its drawer-group
-// wrapper so an absent bell leaves no empty section behind.
+// wrapper so an absent bell leaves no empty section behind. The inner
+// .drawer-button-row absorbs the drawer-group's child padding so the bell
+// button itself can keep the same padding/border as the class-tab buttons.
 function SubscribeBellRow({compid}: {compid: string}) {
     const {supported, subscribed, loading, busy, denied, label, onClick} = useBellState(compid);
     if (!supported || loading) return null;
     return (
         <div className="drawer-group">
-            <button
-                type="button"
-                className={'sidepanel-bell-row' + (subscribed ? ' subscribed' : '')}
-                aria-pressed={subscribed}
-                disabled={busy || denied}
-                onClick={onClick}
-            >
-                <FontAwesomeIcon icon={subscribed ? faBell : faBellSlash} />
-                <span>{label}</span>
-            </button>
+            <div className="drawer-button-row">
+                <button
+                    type="button"
+                    className={'sidepanel-bell-row' + (subscribed ? ' subscribed' : '')}
+                    aria-pressed={subscribed}
+                    disabled={busy || denied}
+                    onClick={onClick}
+                >
+                    <FontAwesomeIcon icon={subscribed ? faBell : faBellSlash} />
+                    <span>{label}</span>
+                </button>
+            </div>
         </div>
     );
 }
