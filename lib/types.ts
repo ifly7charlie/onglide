@@ -473,7 +473,7 @@ export enum CompStatus {
 export const TASK_STATES: ReadonlySet<string> = new Set<string>([CompStatus.AfterBrief, CompStatus.Launched, CompStatus.StartOpen, CompStatus.AllHome, CompStatus.Scrubbed]);
 
 // compstatus codes that mean launching has begun.
-export const LAUNCHED_STATES: ReadonlySet<string> = new Set<string>([CompStatus.Launched, CompStatus.StartOpen, CompStatus.AllHome]);
+export const LAUNCHED_STATES: ReadonlySet<string> = new Set<string>([CompStatus.Launched, CompStatus.StartOpen, CompStatus.FirstFinisher, CompStatus.AllHome]);
 
 // compstatus codes that mean the class actually launched/flew that day —
 // used to gate the globe's 'yesterday' badge so a briefed-but-scrubbed or
