@@ -169,6 +169,79 @@ layers:
           - key: class
             value: monument
 
+      # Hill figures / geoglyphs (Uffington White Horse, Cerne Abbas Giant) -
+      # large ground markings, conspicuous from the air. Mapped as area outlines
+      # and nearly always named, so no notability filter is needed.
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          man_made: geoglyph
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: class
+            value: geoglyph
+
+      # Archaeological sites - prehistoric monuments such as Stonehenge and
+      # Avebury. historic=archaeological_site is a very broad tag, so two filters
+      # are stacked: the site_type / archaeological_site sub-tag must name a
+      # conspicuous category (stone circles, hillforts, ancient cities), which
+      # drops minor categories - lone barrows, findspots, field systems,
+      # petroglyphs; and the site must carry a wikipedia or wikidata tag, the
+      # same notability test as monuments above. Geoglyphs also carry the
+      # historic tag but are emitted by the feature above, so they are excluded
+      # here to avoid a duplicate symbol.
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 12
+        include_when:
+          __all__:
+            - historic: archaeological_site
+            - __any__:
+                site_type: &archaeological_categories
+                  - megalith
+                  - fortification
+                  - hillfort
+                  - hill_fort
+                  - city
+                  - citadel
+                  - henge
+                archaeological_site: *archaeological_categories
+            - __any__:
+                wikipedia: __any__
+                wikidata: __any__
+        exclude_when:
+          name: ""
+          man_made: geoglyph
+        attributes:
+          - *name_attr
+          - key: class
+            value: archaeological_site
+
+      # Same set as points - smaller sites (standing stones, barrows) are mapped
+      # on nodes.
+      - source: osm
+        geometry: point
+        min_zoom: 12
+        include_when:
+          __all__:
+            - historic: archaeological_site
+            - __any__:
+                site_type: *archaeological_categories
+                archaeological_site: *archaeological_categories
+            - __any__:
+                wikipedia: __any__
+                wikidata: __any__
+        exclude_when:
+          name: ""
+          man_made: geoglyph
+        attributes:
+          - *name_attr
+          - key: class
+            value: archaeological_site
+
       # Windmills (often visible landmarks in NL/DE/UK)
       - source: osm
         geometry: point

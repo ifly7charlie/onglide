@@ -496,9 +496,10 @@ export function buildMapStyle(): StyleSpecification {
                 // Landmark + obstacle symbols from the landmarks schema, each with its
                 // own icon (drawn in mapIcons.ts): obstacles — turbines, masts, towers,
                 // cooling towers, power/solar plants — in warning red; heritage landmarks
-                // — castles, cathedrals, lighthouses, windmills, monuments — in muted
-                // gold. Power lines and solar-farm extent render in their own layers;
-                // memorials and city gates are dropped upstream in landmarks.yml.
+                // — castles, cathedrals, lighthouses, windmills, monuments, ancient
+                // sites — in muted gold. Power lines and solar-farm extent render in
+                // their own layers; memorials and city gates are dropped upstream in
+                // landmarks.yml.
                 id: 'landmark-point',
                 type: 'symbol',
                 source: LABELS_SOURCE,
@@ -506,7 +507,7 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['!=', 'class', 'power_line'],
                 minzoom: 10,
                 layout: {
-                    'icon-image': ['match', ['get', 'class'], 'wind_turbine', 'wind-turbine', 'cooling_tower', 'cooling-tower', 'mast', 'mast', 'tower', 'tower', 'power_plant', 'power-plant', 'solar_farm', 'solar-farm', 'cathedral', 'cathedral', 'lighthouse', 'lighthouse', 'windmill', 'windmill', 'monument', 'monument', ['castle', 'fort', 'manor', 'ruins'], 'castle', 'castle'],
+                    'icon-image': ['match', ['get', 'class'], 'wind_turbine', 'wind-turbine', 'cooling_tower', 'cooling-tower', 'mast', 'mast', 'tower', 'tower', 'power_plant', 'power-plant', 'solar_farm', 'solar-farm', 'cathedral', 'cathedral', 'lighthouse', 'lighthouse', 'windmill', 'windmill', 'monument', 'monument', ['geoglyph', 'archaeological_site'], 'megalith', ['castle', 'fort', 'manor', 'ruins'], 'castle', 'castle'],
                     'icon-size': ['interpolate', ['linear'], ['zoom'], 10, ['match', ['get', 'class'], 'wind_turbine', 0.7, 0.5], 16, ['match', ['get', 'class'], 'wind_turbine', 1.4, 1]],
                     'icon-anchor': 'bottom',
                     'icon-allow-overlap': false,

@@ -399,6 +399,34 @@ function makeMonumentIcon(): ImageData {
     return ctx.getImageData(0, 0, 32, 32);
 }
 
+// Trilithon (two uprights + lintel) — stands in for prehistoric heritage:
+// stone circles / archaeological sites and hill-figure geoglyphs alike.
+function makeMegalithIcon(): ImageData {
+    const ctx = icon32();
+    ctx.beginPath(); // lintel across the top
+    ctx.moveTo(6, 6);
+    ctx.lineTo(26, 6);
+    ctx.lineTo(26, 12);
+    ctx.lineTo(6, 12);
+    ctx.closePath();
+    fillKeyed(ctx, HERITAGE_COLOR);
+    ctx.beginPath(); // left upright
+    ctx.moveTo(8, 12);
+    ctx.lineTo(13, 12);
+    ctx.lineTo(13, 30);
+    ctx.lineTo(8, 30);
+    ctx.closePath();
+    fillKeyed(ctx, HERITAGE_COLOR);
+    ctx.beginPath(); // right upright
+    ctx.moveTo(19, 12);
+    ctx.lineTo(24, 12);
+    ctx.lineTo(24, 30);
+    ctx.lineTo(19, 30);
+    ctx.closePath();
+    fillKeyed(ctx, HERITAGE_COLOR);
+    return ctx.getImageData(0, 0, 32, 32);
+}
+
 // Registry of every runtime image the style expects. Each entry is added
 // independently with a hasImage guard so one failure can't skip the rest.
 const ICONS: Array<[string, () => ImageData]> = [
@@ -416,7 +444,8 @@ const ICONS: Array<[string, () => ImageData]> = [
     ['cathedral', makeCathedralIcon],
     ['lighthouse', makeLighthouseIcon],
     ['windmill', makeWindmillIcon],
-    ['monument', makeMonumentIcon]
+    ['monument', makeMonumentIcon],
+    ['megalith', makeMegalithIcon]
 ];
 
 // Signposts bake the site UI font into the canvas; we redraw once the
