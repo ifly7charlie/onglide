@@ -209,6 +209,7 @@ export async function upsertPilot(
         enqueuePortraitRefresh(db, log, pilot.classid, pilot.compno, fainumber);
     }
 
+    const isNew = existing.length === 0;
     try {
         await db.query(escape`
             INSERT INTO
@@ -286,6 +287,9 @@ export async function upsertPilot(
                 registereddt = NOW()
         `);
         accumulator.record(pilot.classid, pilot.compno, pilot.className);
+        if (isNew) {
+            log(`NEW PILOT registered ${pilot.classid}/${pilot.compno} — ${pilot.fullName}${pilot.country ? ` (${pilot.country})` : ''}${pilot.glider ? ` glider=${pilot.glider}` : ''} handicap=${pilot.handicap}`);
+        }
     } catch (e) {
         log(`pilot INSERT failed ${pilotTag(pilot)}:`, e);
     }

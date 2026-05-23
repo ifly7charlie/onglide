@@ -44,6 +44,22 @@ function convertToMysqlTime(jsontime: string | undefined | null): string | null 
 }
 
 //
+// extractTrigraph — pull the 3-char turnpoint code out of an upstream
+// task_points[].name. Names usually look like "LAS Lasham" — first
+// 3 chars are the trigraph. Some upstreams encode the code as a leading
+// 1-4 digit number ("123 Foo Field"); when that's the case the numeric
+// prefix is the trigraph and the cleaned remainder becomes the name.
+//
+function extractTrigraph(rawName: string | undefined | null): {trigraph: string; name: string} {
+    const raw = String(rawName ?? '');
+    const numMatch = raw.match(/^([0-9]{1,4})/);
+    if (numMatch) {
+        return {trigraph: numMatch[1], name: raw.replace(/^([0-9]{1,4})/, '').trim()};
+    }
+    return {trigraph: raw.substring(0, 3), name: raw};
+}
+
+//
 // Hash a parsed task json so we can short-circuit re-inserts when the
 // upstream hasn't changed it. Same algorithm the old ssscrape used so
 // historical hashes still match.
@@ -232,8 +248,24 @@ export async function upsertTaskAndLegs(
         }
         return false;
     }
-    const oldHash = dbhashrow?.[0]?.hash ?? '(none)';
-    log(`${classid} - ${date}: task changed (old=${String(oldHash).substring(0, 16)} new=${hash.substring(0, 16)})`);
+    // Summary of the task we're about to install — useful for spotting
+    // a `nostart` rewrite (the L→S start-time update the scheduler's
+    // tasks cadence is built around) or a brand-new task landing.
+    const isNew = !dbhashrow || dbhashrow.length === 0;
+    const nostartFinal = upstreamNoStart ?? existingNoStart ?? '00:00:00';
+    const realTpts = Array.isArray(day.task_points)
+        ? [...day.task_points].filter((tp: any) => tp.multiple_start == 0).sort((a: any, b: any) => a.point_index - b.point_index)
+        : [];
+    const trigraphs = realTpts.map((tp: any) => extractTrigraph(tp.name).trigraph).join(',');
+    const distanceKm = typeof day.task_distance === 'number' ? (day.task_distance / 1000).toFixed(1) : '?';
+    if (isNew) {
+        log(`${classid} - ${date}: TASK INSTALLED — nostart=${nostartFinal} type=${day.task_type} distance=${distanceKm}km duration=${duration} tps=[${trigraphs}] hash=${hash.substring(0, 16)}`);
+    } else {
+        const nostartChanged = upstreamNoStart && upstreamNoStart !== existingNoStart;
+        const nostartFragment = nostartChanged ? `nostart=${existingNoStart ?? 'null'}→${upstreamNoStart}` : `nostart=${nostartFinal}`;
+        const oldHash = dbhashrow[0].hash ?? '(none)';
+        log(`${classid} - ${date}: TASK CHANGED — ${nostartFragment} type=${day.task_type} distance=${distanceKm}km duration=${duration} tps=[${trigraphs}] (old=${String(oldHash).substring(0, 16)} new=${hash.substring(0, 16)})`);
+    }
 
     for (const tp of day.task_points) {
         tp.altitude = await new Promise((resolve) => getElevationOffset(toDeg(tp.latitude), toDeg(tp.longitude), resolve as any));
@@ -295,11 +327,7 @@ export async function upsertTaskAndLegs(
                     continue;
                 }
 
-                let tpname: string = tp.name;
-                let trigraph = tpname.substring(0, 3);
-                if (tpname && ([trigraph] = tpname.match(/^([0-9]{1,4})/) || [trigraph])) {
-                    tpname = tpname.replace(/^([0-9]{1,4})/, '').trim();
-                }
+                const {trigraph, name: tpname} = extractTrigraph(tp.name);
 
                 previousPoint = currentPoint;
                 currentPoint = point([toDeg(tp.longitude), toDeg(tp.latitude)]);
