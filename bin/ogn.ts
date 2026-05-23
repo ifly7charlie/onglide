@@ -812,8 +812,6 @@ async function main() {
         if (!readOnly) sweepDeferredStarts(getNow, db).catch((e) => console.log('sweepDeferredStarts failed', e));
     }, 15 * 1000);
 
-    //    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
-
     //
     // Update competition information - runs discovery to pick up new
     // or finished comps, then ticks every running context, then rebuilds
@@ -830,7 +828,7 @@ async function main() {
         rebuildAprsFilter();
         // Safety net: drop push subscriptions for comps that have expired.
         if (!readOnly) await sweepExpiredSubscriptions(db).catch((e) => console.log('sweepExpiredSubscriptions failed', e));
-    }, 240 * 1000);
+    }, 60 * 1000);
 }
 
 process.on('SIGINT', handleExit);
@@ -2668,7 +2666,6 @@ async function refreshUpcomingCompetitions(rows: any[]) {
         broadcastCompetitionsDelta(changed, removed);
     }
 }
-
 
 // Build a CompetitionSummary for one comp from in-memory state. Mirrors
 // the aggregation that pages/api/competitions.ts used to do in JS, but
