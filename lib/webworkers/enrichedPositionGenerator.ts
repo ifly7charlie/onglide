@@ -10,6 +10,8 @@ import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, Airf
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
 
+import {getLocalRelief} from '../getelevationoffset';
+
 import {GliderLog, noopGliderLog} from './gliderLog';
 
 //
@@ -62,14 +64,31 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                             (gapLength > 2 * 3600 && previousPoint.g < 400) || // 2h silent at modest altitude: assume landed
                             gapLength > 5 * 3600 // 5h silent at any altitude: assume landed
                         ) {
-                            if (distance(previousPoint.geoJSON!, airfield.point!) < 3) {
+                            if (distance(previousPoint.geoJSON!, airfield.point!) < 5) {
                                 ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
                                 log(`epg: ${previousPoint.c} home/grid: ${ps}`);
                                 stationary = true;
-                            } else if (ridgeRunningDistance < 2.5 || gapLength > 2 * 3600) {
-                                log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance}`);
+                            } else if (gapLength > 2 * 3600) {
+                                // 2h silent overrides ridge-running protection — definitely landed
+                                log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance} (>2h gap)`);
                                 ps = PositionStatus.Landed;
                                 stationary = true;
+                            } else if (ridgeRunningDistance < 2.5) {
+                                // Too little tracked low-altitude movement to call it ridge-running.
+                                // Fall back to terrain: high local relief (~1.1km window) means
+                                // there's ridge-soarable ground at this point, so don't land them
+                                // out just because we haven't accumulated rrd yet. Tile is already
+                                // RAM-cached from the AGL lookup upstream in aprs.ts.
+                                // relief < 0 means the DEM lookup failed — fail flying (don't land
+                                // out on a DEM outage).
+                                const relief = await getLocalRelief(previousPoint.lat, previousPoint.lng, 20);
+                                if (relief > 25 || relief < 0) {
+                                    log(`epg: ${previousPoint.c} not landing out: ridge terrain relief ${relief}m (rrd: ${ridgeRunningDistance})`);
+                                } else {
+                                    log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance} relief: ${relief}m`);
+                                    ps = PositionStatus.Landed;
+                                    stationary = true;
+                                }
                             } else {
                                 log(`epg: ${previousPoint.c} not landing out due to rrd: ${ridgeRunningDistance}`);
                             }
