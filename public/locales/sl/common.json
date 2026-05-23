@@ -29,7 +29,10 @@
         "land_data": "Zemljiški podatki:",
         "natural_earth": "Natural Earth",
         "official_scores": "Uradni rezultati",
-        "official_scores_hint": "Spodnji rezultati so iz sledenja v živo — tapnite za uradne rezultate"
+        "official_scores_hint": "Spodnji rezultati so iz sledenja v živo — tapnite za uradne rezultate",
+        "notify_subscribe": "Obveščaj me o tem tekmovanju",
+        "notify_unsubscribe": "Prenehaj obveščati",
+        "notify_denied": "Obvestila so v vašem brskalniku blokirana"
     },
     "task": {
         "speed": "Hitrostna naloga",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Pomagaj prevesti Onglide za jadralno skupnost",
         "translation_help_link_label": "Prispevaj na GitHubu"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nova naloga določena",
+        "task_changed": "{{classname}}: naloga spremenjena",
+        "launching": "{{classname}}: vzleti potekajo",
+        "racing": "{{classname}}: jadralna letala tekmujejo",
+        "finishing": "{{classname}}: pričakujemo prihode"
     }
 }

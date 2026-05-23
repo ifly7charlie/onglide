@@ -29,7 +29,10 @@
         "land_data": "Údaje o pevnine:",
         "natural_earth": "Natural Earth",
         "official_scores": "Oficiálne výsledky",
-        "official_scores_hint": "Výsledky nižšie pochádzajú zo živého sledovania — ťuknutím zobrazíte oficiálne výsledky"
+        "official_scores_hint": "Výsledky nižšie pochádzajú zo živého sledovania — ťuknutím zobrazíte oficiálne výsledky",
+        "notify_subscribe": "Upozorňovať na túto súťaž",
+        "notify_unsubscribe": "Prestať upozorňovať",
+        "notify_denied": "Oznámenia sú vo vašom prehliadači blokované"
     },
     "task": {
         "speed": "Rýchlostná úloha",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Pomôžte preložiť Onglide pre plachtárske spoločenstvo",
         "translation_help_link_label": "Prispieť na GitHube"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nová trať nastavená",
+        "task_changed": "{{classname}}: trať zmenená",
+        "launching": "{{classname}}: vzlety prebiehajú",
+        "racing": "{{classname}}: klzáky pretekajú",
+        "finishing": "{{classname}}: blíži sa cieľ"
     }
 }

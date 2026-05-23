@@ -29,7 +29,10 @@
         "land_data": "Datos terrestres:",
         "natural_earth": "Natural Earth",
         "official_scores": "Resultados oficiales",
-        "official_scores_hint": "Las puntuaciones siguientes provienen del seguimiento en vivo — toca para ver los resultados oficiales"
+        "official_scores_hint": "Las puntuaciones siguientes provienen del seguimiento en vivo — toca para ver los resultados oficiales",
+        "notify_subscribe": "Avisarme sobre esta competición",
+        "notify_unsubscribe": "Dejar de avisarme",
+        "notify_denied": "Las notificaciones están bloqueadas en tu navegador"
     },
     "task": {
         "speed": "Prueba de velocidad",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Ayuda a traducir Onglide para la comunidad del vuelo a vela",
         "translation_help_link_label": "Contribuir en GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nueva prueba definida",
+        "task_changed": "{{classname}}: prueba modificada",
+        "launching": "{{classname}}: despegando",
+        "racing": "{{classname}}: planeadores en carrera",
+        "finishing": "{{classname}}: llegadas inminentes"
     }
 }

@@ -29,7 +29,10 @@
         "land_data": "Données terrestres :",
         "natural_earth": "Natural Earth",
         "official_scores": "Résultats officiels",
-        "official_scores_hint": "Les scores ci-dessous proviennent du suivi en direct — appuyez pour les résultats officiels"
+        "official_scores_hint": "Les scores ci-dessous proviennent du suivi en direct — appuyez pour les résultats officiels",
+        "notify_subscribe": "M'avertir de cette compétition",
+        "notify_unsubscribe": "Ne plus m’avertir",
+        "notify_denied": "Les notifications sont bloquées dans votre navigateur"
     },
     "task": {
         "speed": "Épreuve de vitesse",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Aidez à traduire Onglide pour la communauté vélivole",
         "translation_help_link_label": "Contribuer sur GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nouvelle épreuve définie",
+        "task_changed": "{{classname}}: épreuve modifiée",
+        "launching": "{{classname}}: décollages en cours",
+        "racing": "{{classname}}: planeurs en course",
+        "finishing": "{{classname}}: premières arrivées attendues"
     }
 }

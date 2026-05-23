@@ -118,6 +118,35 @@ NEXT_PUBLIC_PMTILES_LABELS_URL=https://tiles.onglide.com/europe-labels.pmtiles
 
 If unset, all layers fall back to `NEXT_PUBLIC_PMTILES_URL` (single-source setup).
 
+Optional: Web Push notifications. Users can subscribe (a bell next to the
+competition name) to be notified when a class's status changes — task set,
+launching, racing, finishing — even with the browser closed. This needs a VAPID
+key pair, generated once with `npx web-push generate-vapid-keys`:
+
+```
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=<public key — inlined into the client bundle>
+VAPID_PRIVATE_KEY=<private key — daemon only, keep secret>
+VAPID_SUBJECT=mailto:<your contact email>
+```
+
+If these are unset the feature is silently disabled and the bell does not show.
+Push requires the `pushsubscription` table — present in `conf/sql/onglide_schema.sql`,
+or apply `conf/sql/migrations/20260522_pushsubscription.sql` to an existing
+database. Push needs a secure context (HTTPS or localhost); on iOS the site must
+be added to the Home Screen before notifications can be enabled.
+
+Notifications are **opt-in per competition**. The bell appears, and subscriptions
+are accepted, only when `competition.pushnotifications = 'Y'` (the column
+defaults to `'N'`; apply `conf/sql/migrations/20260522_competition_pushnotifications.sql`
+to an existing database). Enable a competition with:
+
+```sql
+UPDATE competition SET pushnotifications = 'Y' WHERE compid = 'yourcompid';
+```
+
+Clearing it back to `'N'` hides the bell, rejects new subscriptions, and stops
+the daemon notifying existing subscribers.
+
 
 ### Map tiles
 

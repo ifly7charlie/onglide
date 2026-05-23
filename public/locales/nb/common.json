@@ -29,7 +29,10 @@
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
         "official_scores": "Offisielle resultater",
-        "official_scores_hint": "Resultatene nedenfor er fra sanntidssporing — trykk for offisielle resultater"
+        "official_scores_hint": "Resultatene nedenfor er fra sanntidssporing — trykk for offisielle resultater",
+        "notify_subscribe": "Varsle meg om denne konkurransen",
+        "notify_unsubscribe": "Slutt å varsle meg",
+        "notify_denied": "Varsler er blokkert i nettleseren din"
     },
     "task": {
         "speed": "Hastighetsoppgave",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Hjelp med å oversette Onglide for seilflymiljøet",
         "translation_help_link_label": "Bidra på GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: ny oppgave satt",
+        "task_changed": "{{classname}}: oppgave endret",
+        "launching": "{{classname}}: start pågår",
+        "racing": "{{classname}}: seilfly i konkurranse",
+        "finishing": "{{classname}}: målganger ventes"
     }
 }

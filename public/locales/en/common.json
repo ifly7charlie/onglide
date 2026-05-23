@@ -29,7 +29,10 @@
         "land_data": "Land data:",
         "natural_earth": "Natural Earth",
         "official_scores": "Official scores",
-        "official_scores_hint": "Scores below are from live tracking — tap for official results"
+        "official_scores_hint": "Scores below are from live tracking — tap for official results",
+        "notify_subscribe": "Notify me about this competition",
+        "notify_unsubscribe": "Stop notifying me",
+        "notify_denied": "Notifications are blocked in your browser"
     },
     "task": {
         "speed": "Speed Task",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Help translate Onglide for the gliding community",
         "translation_help_link_label": "Information on GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: new task set",
+        "task_changed": "{{classname}}: task changed",
+        "launching": "{{classname}}: launching",
+        "racing": "{{classname}}: gliders racing",
+        "finishing": "{{classname}}: finishers due"
     }
 }

@@ -29,7 +29,10 @@
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
         "official_scores": "Officiella resultat",
-        "official_scores_hint": "Resultaten nedan kommer från livespårning — tryck för officiella resultat"
+        "official_scores_hint": "Resultaten nedan kommer från livespårning — tryck för officiella resultat",
+        "notify_subscribe": "Meddela mig om denna tävling",
+        "notify_unsubscribe": "Sluta meddela mig",
+        "notify_denied": "Aviseringar är blockerade i din webbläsare"
     },
     "task": {
         "speed": "Hastighetsuppgift",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Hjälp till att översätta Onglide för segelflygets community",
         "translation_help_link_label": "Bidra på GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: ny bana satt",
+        "task_changed": "{{classname}}: bana ändrad",
+        "launching": "{{classname}}: start pågår",
+        "racing": "{{classname}}: segelflygplan i tävling",
+        "finishing": "{{classname}}: målgångar väntas"
     }
 }

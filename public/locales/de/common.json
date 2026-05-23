@@ -29,7 +29,10 @@
         "land_data": "Landdaten:",
         "natural_earth": "Natural Earth",
         "official_scores": "Offizielle Ergebnisse",
-        "official_scores_hint": "Die Ergebnisse unten stammen aus dem Live-Tracking — für offizielle Ergebnisse tippen"
+        "official_scores_hint": "Die Ergebnisse unten stammen aus dem Live-Tracking — für offizielle Ergebnisse tippen",
+        "notify_subscribe": "Über diesen Wettbewerb benachrichtigen",
+        "notify_unsubscribe": "Benachrichtigungen beenden",
+        "notify_denied": "Benachrichtigungen sind in Ihrem Browser blockiert"
     },
     "task": {
         "speed": "Geschwindigkeitsaufgabe",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Hilf, Onglide für die Segelflug-Community zu übersetzen",
         "translation_help_link_label": "Auf GitHub mitwirken"
+    },
+    "notification": {
+        "task_set": "{{classname}}: neue Aufgabe gesetzt",
+        "task_changed": "{{classname}}: Aufgabe geändert",
+        "launching": "{{classname}}: Start läuft",
+        "racing": "{{classname}}: Rennen läuft",
+        "finishing": "{{classname}}: Zieleinläufe erwartet"
     }
 }

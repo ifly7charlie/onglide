@@ -29,7 +29,10 @@
         "land_data": "Maa-aineisto:",
         "natural_earth": "Natural Earth",
         "official_scores": "Viralliset tulokset",
-        "official_scores_hint": "Alla olevat tulokset ovat live-seurannasta — napauta nähdäksesi viralliset tulokset"
+        "official_scores_hint": "Alla olevat tulokset ovat live-seurannasta — napauta nähdäksesi viralliset tulokset",
+        "notify_subscribe": "Ilmoita minulle tästä kilpailusta",
+        "notify_unsubscribe": "Lopeta ilmoitukset",
+        "notify_denied": "Ilmoitukset on estetty selaimessasi"
     },
     "task": {
         "speed": "Nopeustehtävä",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Auta kääntämään Onglide purjelennon yhteisölle",
         "translation_help_link_label": "Osallistu GitHubissa"
+    },
+    "notification": {
+        "task_set": "{{classname}}: uusi tehtävä asetettu",
+        "task_changed": "{{classname}}: tehtävä muuttui",
+        "launching": "{{classname}}: lähdöt käynnissä",
+        "racing": "{{classname}}: purjelentokoneet kilpailevat",
+        "finishing": "{{classname}}: maaliintuloja odotetaan"
     }
 }

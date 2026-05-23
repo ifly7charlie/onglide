@@ -29,7 +29,10 @@
         "land_data": "Földadatok:",
         "natural_earth": "Natural Earth",
         "official_scores": "Hivatalos eredmények",
-        "official_scores_hint": "Az alábbi eredmények élő követésből származnak — koppintson a hivatalos eredményekért"
+        "official_scores_hint": "Az alábbi eredmények élő követésből származnak — koppintson a hivatalos eredményekért",
+        "notify_subscribe": "Értesítés erről a versenyről",
+        "notify_unsubscribe": "Értesítések leállítása",
+        "notify_denied": "Az értesítések le vannak tiltva a böngészőben"
     },
     "task": {
         "speed": "Sebességi feladat",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Segíts lefordítani az Onglide-ot a vitorlázórepülő közösségnek",
         "translation_help_link_label": "Hozzájárulás a GitHubon"
+    },
+    "notification": {
+        "task_set": "{{classname}}: új feladat kitűzve",
+        "task_changed": "{{classname}}: feladat módosítva",
+        "launching": "{{classname}}: felszállás folyamatban",
+        "racing": "{{classname}}: vitorlázók versenyben",
+        "finishing": "{{classname}}: célba érkezések várhatók"
     }
 }

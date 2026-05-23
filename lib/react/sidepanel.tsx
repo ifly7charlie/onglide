@@ -6,6 +6,7 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 import {Options} from './options';
+import {SubscribeBell} from './subscribeBell';
 import {StatusIcon, STATUS_LABEL_KEYS} from './competition-status';
 import type {CompetitionDisplayStatus} from '../competition-display-status';
 
@@ -72,6 +73,7 @@ export function SidePanelHeader({comp}: {comp: any}) {
                     </div>
                 ) : null}
             </div>
+            <SubscribeBell compid={comp?.compid} />
         </div>
     );
 }

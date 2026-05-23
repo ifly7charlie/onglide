@@ -29,7 +29,10 @@
         "land_data": "Dane lądowe:",
         "natural_earth": "Natural Earth",
         "official_scores": "Wyniki oficjalne",
-        "official_scores_hint": "Wyniki poniżej pochodzą ze śledzenia na żywo — dotknij, aby zobaczyć wyniki oficjalne"
+        "official_scores_hint": "Wyniki poniżej pochodzą ze śledzenia na żywo — dotknij, aby zobaczyć wyniki oficjalne",
+        "notify_subscribe": "Powiadamiaj mnie o tych zawodach",
+        "notify_unsubscribe": "Przestań powiadamiać",
+        "notify_denied": "Powiadomienia są zablokowane w przeglądarce"
     },
     "task": {
         "speed": "Konkurencja prędkościowa",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Pomóż przetłumaczyć Onglide dla społeczności szybowcowej",
         "translation_help_link_label": "Pomóż na GitHubie"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nowe zadanie ustawione",
+        "task_changed": "{{classname}}: zadanie zmienione",
+        "launching": "{{classname}}: starty w toku",
+        "racing": "{{classname}}: szybowce w wyścigu",
+        "finishing": "{{classname}}: spodziewane mety"
     }
 }

@@ -19,9 +19,9 @@
             "purpose": "any"
         },
         {
-            "src": "/logo64.png",
+            "src": "/logo128.png",
             "type": "image/png",
-            "sizes": "64x64",
+            "sizes": "128x128",
             "purpose": "any"
         }
     ]

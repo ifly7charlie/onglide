@@ -43,6 +43,9 @@ import {fromDateCode, toDateCode, competitionStartTs} from '../lib/datecode';
 // Display-status derivation shared with the front-end (JSX-free entry point).
 import {classDisplayStatus, type CompetitionDisplayStatus} from '../lib/competition-display-status';
 
+// Web Push notifications for competition status changes (daemon-only module).
+import {initPushNotifications, notifyCompetitionDelta, sweepDeferredStarts, sweepExpiredSubscriptions, purgeSubscriptionsForComp} from './lib/pushNotifications';
+
 // Reserved channel name for the global "all competitions" feed used by the
 // landing page. Lowercase so it cannot collide with a real `{className}{datecode}`
 // channel (those are upper-cased alphanumeric — see channelName()).
@@ -466,6 +469,10 @@ async function main() {
     // and we do a LOT of them
     initialiseInsights();
 
+    // Arm Web Push (no-op if VAPID keys are not configured).
+    initPushNotifications();
+    if (readOnly) console.log('pushNotifications: readOnly mode (REPLAY_DB / OGN_READ_ONLY) — status notifications are suppressed');
+
     console.log('Onglide OGN handler', readOnly ? '(read only)' : '', process.env.NEXT_PUBLIC_SITEURL);
     console.log(`db ${process.env.MYSQL_DATABASE} on ${process.env.MYSQL_HOST}`);
 
@@ -799,6 +806,12 @@ async function main() {
     // can't distinguish "no comps changed" from "connection is dead".
     setInterval(broadcastCompetitionsKeepalive, 15 * 1000);
 
+    // Release deferred "started" push notifications whose start-open time has
+    // now passed — reuses the 15s cadence rather than a bespoke timer.
+    setInterval(() => {
+        if (!readOnly) sweepDeferredStarts(getNow, db).catch((e) => console.log('sweepDeferredStarts failed', e));
+    }, 15 * 1000);
+
     //    console.log(getNow() - (getNow() % 60), (getNow() % 60) * (1000 / multiplier), multiplier, getNow());
 
     //
@@ -815,6 +828,8 @@ async function main() {
             }
         }
         rebuildAprsFilter();
+        // Safety net: drop push subscriptions for comps that have expired.
+        if (!readOnly) await sweepExpiredSubscriptions(db).catch((e) => console.log('sweepExpiredSubscriptions failed', e));
     }, 240 * 1000);
 }
 
@@ -1173,6 +1188,8 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
     // and broadcasting `removed` would leave clients on a "can't find
     // competition" overlay until they reconnect to the new daemon.
     if (!shuttingDown) broadcastCompetitionsDelta([], [competition.compid]);
+    // The comp is over — drop any push subscriptions still held for it.
+    if (!readOnly) purgeSubscriptionsForComp(competition.compid, db).catch((e) => console.log('purgeSubscriptionsForComp failed', e));
 }
 
 async function tickCompetition(competition: CompetitionContext) {
@@ -2909,6 +2926,8 @@ function broadcastCompetitionsDelta(changedCompids: string[], removedCompids: st
         const prev = competitionSummaries.get(compid);
         if (prev && summaryFingerprint(prev) === summaryFingerprint(s)) continue;
         competitionSummaries.set(compid, s);
+        // Fire Web Push notifications for any notifiable status transition.
+        if (!readOnly) notifyCompetitionDelta(prev, s, getNow, db).catch((e) => console.log('notifyCompetitionDelta failed', e));
         dirty.push(s);
     }
     // Only treat a removal as real if the comp was actually being published —

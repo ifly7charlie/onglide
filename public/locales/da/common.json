@@ -29,7 +29,10 @@
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
         "official_scores": "Officielle resultater",
-        "official_scores_hint": "Resultaterne nedenfor er fra live-sporing — tryk for officielle resultater"
+        "official_scores_hint": "Resultaterne nedenfor er fra live-sporing — tryk for officielle resultater",
+        "notify_subscribe": "Giv mig besked om denne konkurrence",
+        "notify_unsubscribe": "Stop med at give besked",
+        "notify_denied": "Notifikationer er blokeret i din browser"
     },
     "task": {
         "speed": "Hastighedsopgave",
@@ -273,5 +276,12 @@
     "footer": {
         "translation_help": "Hjælp med at oversætte Onglide for svæveflyver-fællesskabet",
         "translation_help_link_label": "Bidrag på GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: ny opgave sat",
+        "task_changed": "{{classname}}: opgave ændret",
+        "launching": "{{classname}}: start i gang",
+        "racing": "{{classname}}: svævefly i konkurrence",
+        "finishing": "{{classname}}: målgange forventes"
     }
 }
