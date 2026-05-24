@@ -409,7 +409,7 @@ let loadTimer: NodeJS.Timeout | null = null;
 // Our persistence
 import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
 import {competitionStartForDatecode} from '../datecode';
-import {inorderAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
+import {aprsAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
 
 //
 // Start a listener
@@ -1245,7 +1245,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     // whenever officialDelay changes, so live delay edits propagate to the
     // next call here. makeGetNow honours replay mode.
     const realNow = aircraft.airfield.getNow();
-    const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
+    const to: Epoch = (realNow - aprsAdditionalDelay) as Epoch;
     let position = sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
     if (!log) {
