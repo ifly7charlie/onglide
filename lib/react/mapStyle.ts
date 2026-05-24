@@ -57,6 +57,10 @@ interface MapPalette {
     textLandmark: string;
     sky: string;
     horizon: string;
+    hillshadeShadow: string;
+    hillshadeHighlight: string;
+    hillshadeAccent: string;
+    hillshadeExaggeration: number;
 }
 
 const LIGHT_PALETTE: MapPalette = {
@@ -86,7 +90,11 @@ const LIGHT_PALETTE: MapPalette = {
     textVillage: '#555555',
     textLandmark: '#5a3d1e',
     sky: '#87ceeb',
-    horizon: '#e6f0f7'
+    horizon: '#e6f0f7',
+    hillshadeShadow: '#473b30',
+    hillshadeHighlight: '#fff8ec',
+    hillshadeAccent: '#000000',
+    hillshadeExaggeration: 0.3
 };
 
 const DARK_PALETTE: MapPalette = {
@@ -118,7 +126,13 @@ const DARK_PALETTE: MapPalette = {
     textVillage: '#c8c8c8',
     textLandmark: '#e2b873',
     sky: '#0e1a2a',
-    horizon: '#1b2a3c'
+    horizon: '#1b2a3c',
+    // On the near-black dark background, true-black shadows vanish; warm the
+    // highlight so lit slopes lift off the basemap instead.
+    hillshadeShadow: '#000000',
+    hillshadeHighlight: '#8a7355',
+    hillshadeAccent: '#000000',
+    hillshadeExaggeration: 0.3
 };
 
 // Resolved once and cached — see the note above on no runtime switching.
@@ -180,6 +194,19 @@ export function buildMapStyle(): StyleSpecification {
         },
         layers: [
             {id: 'background', type: 'background', paint: {'background-color': p.background}},
+            {
+                id: 'hillshade',
+                type: 'hillshade',
+                source: 'terrain',
+                paint: {
+                    'hillshade-exaggeration': p.hillshadeExaggeration,
+                    'hillshade-shadow-color': p.hillshadeShadow,
+                    'hillshade-highlight-color': p.hillshadeHighlight,
+                    'hillshade-accent-color': p.hillshadeAccent,
+                    'hillshade-illumination-direction': 315,
+                    'hillshade-illumination-anchor': 'map'
+                }
+            },
             {
                 id: 'landcover-grass',
                 type: 'fill',
