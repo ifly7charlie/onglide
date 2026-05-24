@@ -53,6 +53,7 @@ async function run() {
         .option('until', {type: 'number', description: 'epoch seconds upper bound (optional)'})
         .option('summary', {type: 'boolean', description: 'one row per flarm id: oldest, newest, count, rate'})
         .option('delay-stats', {type: 'boolean', description: 'distribution of receive-delay d (writeTime - t) and per-setting late count'})
+        .option('burst-stats', {type: 'boolean', description: 'shape of PMQ-induced drops per flarm: cursor jumps (a fresh packet bumps lastTime past late ones), drop victims per jump, longest emit-gap vs raw-gap (visual dead zones)'})
         .help()
         .alias('help', 'h').argv;
 
@@ -85,6 +86,8 @@ async function run() {
 
     if (args['delay-stats']) {
         await delayStats(makeIter(), effectiveCompDelay);
+    } else if (args['burst-stats']) {
+        await burstStats(makeIter());
     } else if (args.summary) {
         await summary(makeIter());
     } else {
@@ -197,6 +200,202 @@ async function delayStats(iter: AsyncIterable<any>, compDelay: number) {
 
     console.log('');
     console.log(`stream out-of-order packets (t < max t seen for the same flarm, regardless of delay): ${overall.streamOOO} / ${total} (${((100 * overall.streamOOO) / total).toFixed(2)}%)`);
+}
+
+// Simulate the PMQ drop rule (drop a packet whose t ≤ aircraft.lastTime when
+// it arrives) per flarm, and characterise the shape of the resulting drops.
+//
+// PMQ doesn't drop on delay magnitude — a flarm whose packets are uniformly
+// 25 s late still makes it through, because each packet's t > the previous
+// emitted t. Drops only happen when a *fresher* packet jumps lastTime past
+// timestamps that haven't yet been emitted (the late ones become victims).
+//
+// What we report per flarm:
+//   - jumps:            count of fresh emits that bumped lastTime by > 1 s
+//   - longestJump(s):   the worst single jump (cursor moved this many seconds
+//                       in one step — those seconds of track are at risk)
+//   - drops:            packets PMQ would never forward (t ≤ lastTime on arrival)
+//   - clusters / max:   30-s-merged groupings of dropped timestamps. Few large
+//                       clusters → bursty / receiver-driven; many tiny ones →
+//                       scattered.
+//   - longestEmitGap:   longest interval between consecutive *emitted*
+//                       timestamps. This is what the front-end track shows
+//                       as "no data" between two vertices.
+//   - longestRawGap:    same on the raw stream (flarm's real silence). The
+//                       difference is the invented-by-PMQ dead zone.
+const DROP_CLUSTER_MERGE_SEC = 30;
+
+interface BurstProfile {
+    flarmId: string;
+    raw: number;
+    emitted: number;
+    dropped: number;
+    jumpCount: number;
+    longestJumpSeconds: number;
+    totalJumpedSeconds: number;
+    longestEmitGap: number;
+    longestRawGap: number;
+    dropClusters: number;
+    largestDropCluster: number; // packets in single 30-s-merged cluster
+    longestDropClusterSeconds: number; // span of that cluster
+}
+
+interface BurstState {
+    prof: BurstProfile;
+    maxEmittedT: number;
+    emittedTs: number[]; // monotonic (only push when t > maxEmittedT)
+    rawTs: number[]; // need to sort at the end (arrival order ≠ t order)
+    droppedTs: number[]; // need to sort at the end
+}
+
+async function burstStats(iter: AsyncIterable<any>) {
+    const flarms = new Map<string, BurstState>();
+
+    for await (const msg of iter) {
+        const id = (msg.f ?? '??????') as string;
+        const t = msg.t | 0;
+        let s = flarms.get(id);
+        if (!s) {
+            s = {
+                prof: {
+                    flarmId: id,
+                    raw: 0,
+                    emitted: 0,
+                    dropped: 0,
+                    jumpCount: 0,
+                    longestJumpSeconds: 0,
+                    totalJumpedSeconds: 0,
+                    longestEmitGap: 0,
+                    longestRawGap: 0,
+                    dropClusters: 0,
+                    largestDropCluster: 0,
+                    longestDropClusterSeconds: 0
+                },
+                maxEmittedT: -Infinity,
+                emittedTs: [],
+                rawTs: [],
+                droppedTs: []
+            };
+            flarms.set(id, s);
+        }
+        s.prof.raw++;
+        s.rawTs.push(t);
+        if (t > s.maxEmittedT) {
+            const jump = s.maxEmittedT === -Infinity ? 0 : t - s.maxEmittedT;
+            if (jump > 1) {
+                s.prof.jumpCount++;
+                s.prof.totalJumpedSeconds += jump - 1;
+                if (jump > s.prof.longestJumpSeconds) s.prof.longestJumpSeconds = jump;
+            }
+            s.maxEmittedT = t;
+            s.prof.emitted++;
+            s.emittedTs.push(t);
+        } else {
+            s.prof.dropped++;
+            s.droppedTs.push(t);
+        }
+    }
+
+    if (flarms.size === 0) {
+        console.log('no tracker data in this range');
+        return;
+    }
+
+    for (const s of flarms.values()) finaliseBurstState(s);
+
+    console.log(`PMQ drop simulation (per-flarm; arrival-order walk; drop iff t ≤ maxEmittedT)`);
+    console.log(`drop-cluster merge window = ${DROP_CLUSTER_MERGE_SEC}s; gaps in seconds`);
+    console.log('');
+    console.log('flarm    raw   emit   drop  jumps  longestJump  totalJumped  clusters  biggestCluster(pkts/span)  longestEmitGap  longestRawGap');
+    const sorted = [...flarms.values()].sort((a, b) => (a.prof.flarmId < b.prof.flarmId ? -1 : 1));
+    for (const s of sorted) printBurstRow(s.prof);
+
+    if (flarms.size > 1) {
+        const agg = aggregateBurstProfiles([...flarms.values()].map((s) => s.prof));
+        console.log('');
+        printBurstRow(agg);
+    }
+}
+
+function finaliseBurstState(s: BurstState) {
+    s.rawTs.sort((a, b) => a - b);
+    s.droppedTs.sort((a, b) => a - b);
+    // emittedTs already monotonic (only pushed when t > maxEmittedT in arrival order).
+    s.prof.longestEmitGap = longestConsecutiveGap(s.emittedTs);
+    s.prof.longestRawGap = longestConsecutiveGap(s.rawTs);
+
+    let clusterStart = -1;
+    let clusterEnd = -1;
+    let clusterCount = 0;
+    for (const t of s.droppedTs) {
+        if (clusterStart < 0 || t - clusterEnd > DROP_CLUSTER_MERGE_SEC) {
+            if (clusterStart >= 0) closeCluster(s.prof, clusterStart, clusterEnd, clusterCount);
+            clusterStart = t;
+            clusterEnd = t;
+            clusterCount = 1;
+        } else {
+            clusterEnd = t;
+            clusterCount++;
+        }
+    }
+    if (clusterStart >= 0) closeCluster(s.prof, clusterStart, clusterEnd, clusterCount);
+}
+
+function closeCluster(p: BurstProfile, start: number, end: number, count: number) {
+    p.dropClusters++;
+    if (count > p.largestDropCluster) {
+        p.largestDropCluster = count;
+        p.longestDropClusterSeconds = end - start;
+    }
+}
+
+function longestConsecutiveGap(sortedTs: number[]): number {
+    let max = 0;
+    for (let i = 1; i < sortedTs.length; i++) {
+        const g = sortedTs[i] - sortedTs[i - 1];
+        if (g > max) max = g;
+    }
+    return max;
+}
+
+function aggregateBurstProfiles(profiles: BurstProfile[]): BurstProfile {
+    const agg: BurstProfile = {
+        flarmId: '*',
+        raw: 0,
+        emitted: 0,
+        dropped: 0,
+        jumpCount: 0,
+        longestJumpSeconds: 0,
+        totalJumpedSeconds: 0,
+        longestEmitGap: 0,
+        longestRawGap: 0,
+        dropClusters: 0,
+        largestDropCluster: 0,
+        longestDropClusterSeconds: 0
+    };
+    for (const p of profiles) {
+        agg.raw += p.raw;
+        agg.emitted += p.emitted;
+        agg.dropped += p.dropped;
+        agg.jumpCount += p.jumpCount;
+        agg.totalJumpedSeconds += p.totalJumpedSeconds;
+        agg.dropClusters += p.dropClusters;
+        if (p.longestJumpSeconds > agg.longestJumpSeconds) agg.longestJumpSeconds = p.longestJumpSeconds;
+        if (p.longestEmitGap > agg.longestEmitGap) agg.longestEmitGap = p.longestEmitGap;
+        if (p.longestRawGap > agg.longestRawGap) agg.longestRawGap = p.longestRawGap;
+        if (p.largestDropCluster > agg.largestDropCluster) {
+            agg.largestDropCluster = p.largestDropCluster;
+            agg.longestDropClusterSeconds = p.longestDropClusterSeconds;
+        }
+    }
+    return agg;
+}
+
+function printBurstRow(p: BurstProfile) {
+    const cluster = p.largestDropCluster > 0 ? `${p.largestDropCluster}/${p.longestDropClusterSeconds}s` : '-';
+    console.log(
+        `${p.flarmId.padEnd(6)}  ${String(p.raw).padStart(5)}  ${String(p.emitted).padStart(5)}  ${String(p.dropped).padStart(5)}  ${String(p.jumpCount).padStart(5)}  ${String(p.longestJumpSeconds).padStart(11)}  ${String(p.totalJumpedSeconds).padStart(11)}  ${String(p.dropClusters).padStart(8)}  ${cluster.padStart(25)}  ${String(p.longestEmitGap).padStart(14)}  ${String(p.longestRawGap).padStart(13)}`
+    );
 }
 
 // Walk the (already-sorted) thresholds in one pass over the sorted bucket

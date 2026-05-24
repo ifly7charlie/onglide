@@ -769,6 +769,9 @@ async function main() {
             const hasListenerActivity = channel.statistics.activeListeners > 0 || channel.statistics.peakListeners > 0 || channel.statistics.totalViewingTime > 0 || viewTime > 0;
             if (activeGliderCount > 0 || hasPackets || hasListenerActivity) {
                 const parts: string[] = [`${activeGliderCount} active gliders`, `${channel.statistics.positionsSent}/${channel.statistics.totalPackets} positions sent`];
+                if (channel.statistics.outOfOrderPackets) {
+                    parts.push(`${channel.statistics.outOfOrderPackets} ooo`);
+                }
                 if (hasListenerActivity) {
                     parts.push(
                         `${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
@@ -3045,19 +3048,6 @@ async function processAprsMessage(className: string, channel: Channel, message: 
         initialiseDeck(message.c as Compno, glider, randomBytes(4).readUInt32BE(0));
         return;
     }
-
-    // We have everything therefore we need to reset the available tracks for new connections
-    /*    if (message.t == (2 as Epoch)) {
-        console.log(`${className}/${message.c}: track up to date, setting a resend`);
-        channel.webPathBaseTime = 0 as Epoch;
-        channel.resendTracks = async () => {
-            console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
-            channel.resendTracks = null; // we will shortly have done it so no need to
-            // keep this function.
-            channel.sendBinary(await generateRecentPilotTracks(channel));
-        };
-        return;
-    } */
 
     // We ignore ticks
     if ('tick' in message) {
