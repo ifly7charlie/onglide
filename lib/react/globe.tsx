@@ -69,6 +69,48 @@ export interface Competition {
     displayStatus: CompetitionDisplayStatus;
 }
 
+// Rank for ordering Live comps: most-active status first, then by current
+// viewer count, then by registered pilot count. Marker draw order is the
+// reverse of this so the top-of-list comp is rendered last (= on top), which
+// is what deck.gl picking returns when dots are stacked at one location.
+const STATUS_RANK: Record<CompetitionDisplayStatus, number> = {
+    finishing: 0,
+    started: 1,
+    launching: 2,
+    task_set: 3,
+    home: 4,
+    notask: 5,
+    cancelled: 6,
+    yesterday: 7,
+    upcoming: 8
+};
+
+function compPilotCount(c: Competition): number {
+    return (c.classes ?? []).reduce((s, cls) => s + (cls.pilotCount || 0), 0);
+}
+
+function compRank(c: Competition): number {
+    const classes = c.classes ?? [];
+    if (!classes.length) return STATUS_RANK[c.displayStatus] ?? 99;
+    return Math.min(...classes.map((cls) => STATUS_RANK[cls.displayStatus] ?? 99));
+}
+
+function splitAndSortByRank(comps: Competition[], summary: StatusSummary | null): {live: Competition[]; upcoming: Competition[]} {
+    const live = comps
+        .filter((c) => c.displayStatus !== 'upcoming')
+        .sort((a, b) => {
+            const ra = compRank(a);
+            const rb = compRank(b);
+            if (ra !== rb) return ra - rb;
+            const va = summary?.byComp.get(a.compid)?.viewers ?? 0;
+            const vb = summary?.byComp.get(b.compid)?.viewers ?? 0;
+            if (va !== vb) return vb - va;
+            return compPilotCount(b) - compPilotCount(a);
+        });
+    const upcoming = comps.filter((c) => c.displayStatus === 'upcoming');
+    return {live, upcoming};
+}
+
 //
 // Pick an initial view state for the globe: centered on the centroid of all
 // visible competitions. If competitions cluster tightly, zoom in; otherwise
@@ -86,7 +128,7 @@ function computeInitialViewState(comps: Competition[]) {
     const lngRange = lngs.length ? Math.max(...lngs) - Math.min(...lngs) : 0;
     const span = Math.max(latRange, lngRange);
     // Rough zoom heuristic: tighter cluster -> closer zoom
-    const zoom = span < 5 ? 3.5 : span < 15 ? 2.5 : span < 40 ? 1.5 : 0.5;
+    const zoom = span < 5 ? 4.5 : span < 15 ? 3.5 : span < 40 ? 2.5 : 1.5;
     return {latitude: latMean, longitude: lngMean, zoom};
 }
 
@@ -104,6 +146,32 @@ function computeInitialViewState(comps: Competition[]) {
 export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions: Competition[]; countriesGeoJson: any}) {
     const {t} = useTranslation('common');
     const [highlightedCompid, setHighlightedCompid] = useState<string | null>(null);
+    const summary = useStatusSummary();
+
+    // "In view only" filter for the list. Doesn't affect the markers — markers
+    // off-screen are already invisible on the globe, so filtering the markers
+    // would be redundant work.
+    const [filterToView, setFilterToView] = useState(false);
+
+    // Canvas size, tracked via a ResizeObserver on the container so it's
+    // populated on mount (DeckGL's own onResize only fires after the first
+    // re-render — toggling the in-view filter pre-interaction would otherwise
+    // do nothing because width/height were still 0). Used together with the
+    // live viewState to construct a Viewport for the in-view projection test.
+    const canvasRef = useRef<HTMLDivElement | null>(null);
+    const [canvasSize, setCanvasSize] = useState<{width: number; height: number}>({width: 0, height: 0});
+    useEffect(() => {
+        const el = canvasRef.current;
+        if (!el) return;
+        const update = () => {
+            const r = el.getBoundingClientRect();
+            setCanvasSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : {width: r.width, height: r.height}));
+        };
+        update();
+        const ro = new ResizeObserver(update);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
 
     // Refs to each list entry, keyed by compid, so hovering/clicking a marker
     // on the globe can scroll the corresponding row into view in the side panel.
@@ -188,17 +256,79 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
     // Fly to a competition's coordinates on list hover. Wrapped in
     // useCallback so the list panel's hover handlers don't re-render the
     // whole component each time.
-    const flyTo = useCallback((comp: Competition) => {
-        if (typeof comp.lat !== 'number' || typeof comp.lng !== 'number') return;
-        setViewState((prev: any) => ({
-            ...prev,
-            longitude: comp.lng,
-            latitude: comp.lat,
-            zoom: Math.max(prev.zoom ?? 1, 3.5),
-            transitionDuration: 1000,
-            transitionInterpolator: new FlyToInterpolator({speed: 1.2})
-        }));
-    }, []);
+    //
+    // Skip while the "in view only" filter is on: moving the camera would
+    // mutate the in-view set, reorder/shrink the list under the cursor, and
+    // trigger a new hover on whichever entry slid into place — producing a
+    // runaway feedback loop. Filtered users navigate by zooming the globe.
+    const flyTo = useCallback(
+        (comp: Competition) => {
+            if (filterToView) return;
+            if (typeof comp.lat !== 'number' || typeof comp.lng !== 'number') return;
+            setViewState((prev: any) => ({
+                ...prev,
+                longitude: comp.lng,
+                latitude: comp.lat,
+                zoom: Math.max(prev.zoom ?? 1, 3.5),
+                transitionDuration: 1000,
+                transitionInterpolator: new FlyToInterpolator({speed: 1.2})
+            }));
+        },
+        [filterToView]
+    );
+
+    // One stable GlobeView instance, used both as the DeckGL `views` prop and
+    // to build a Viewport for the "in view only" projection test.
+    const globeView = useMemo(() => new GlobeView({id: 'globe', resolution: 10}), []);
+
+    // Set of compids currently inside the viewport (with a small margin), or
+    // null when the filter is off. Recomputed on every pan/zoom but only when
+    // the filter is on, so unrelated view changes stay cheap.
+    const inViewCompids = useMemo<Set<string> | null>(() => {
+        if (!filterToView || canvasSize.width === 0 || canvasSize.height === 0) return null;
+        let viewport: any;
+        try {
+            viewport = (globeView as any).makeViewport({width: canvasSize.width, height: canvasSize.height, viewState});
+        } catch {
+            return null;
+        }
+        // Guard against points on the back of the sphere: project() still
+        // returns finite pixel coords for the antipode on a GlobeView. The
+        // great-circle distance from the camera centre gives a definitive
+        // back/front test — cosD < ~0 means more than 90° away.
+        const camLatRad = ((viewState.latitude ?? 0) * Math.PI) / 180;
+        const camLngRad = ((viewState.longitude ?? 0) * Math.PI) / 180;
+        const sinCamLat = Math.sin(camLatRad);
+        const cosCamLat = Math.cos(camLatRad);
+        const ids = new Set<string>();
+        for (const c of visibleCompetitions) {
+            const pLatRad = (c.lat * Math.PI) / 180;
+            const pLngRad = (c.lng * Math.PI) / 180;
+            const cosD = sinCamLat * Math.sin(pLatRad) + cosCamLat * Math.cos(pLatRad) * Math.cos(pLngRad - camLngRad);
+            if (cosD < 0.05) continue;
+            const projected = viewport.project([c.lng, c.lat]);
+            if (!projected) continue;
+            const [x, y] = projected;
+            if (x >= 0 && x <= canvasSize.width && y >= 0 && y <= canvasSize.height) {
+                ids.add(c.compid);
+            }
+        }
+        return ids;
+    }, [filterToView, globeView, canvasSize.width, canvasSize.height, viewState, visibleCompetitions]);
+
+    // Sort once for both purposes: the side panel reads `panelLists` (filtered
+    // by `inViewCompids` when the tickbox is on), and the marker layers read
+    // `markerData` (always all comps, ordered so the top-of-list comp is the
+    // last instance drawn → picked first when dots overlap).
+    const sortedAll = useMemo(() => splitAndSortByRank(visibleCompetitions, summary), [visibleCompetitions, summary]);
+    const panelLists = useMemo(() => {
+        if (!inViewCompids) return sortedAll;
+        return {
+            live: sortedAll.live.filter((c) => inViewCompids.has(c.compid)),
+            upcoming: sortedAll.upcoming.filter((c) => inViewCompids.has(c.compid))
+        };
+    }, [sortedAll, inViewCompids]);
+    const markerData = useMemo(() => [...[...sortedAll.upcoming].reverse(), ...[...sortedAll.live].reverse()], [sortedAll]);
 
     const layers = useMemo(() => {
         // Densely-tessellated sphere mesh for the ocean. See earlier commit
@@ -233,7 +363,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
         // highlightedCompid so deck.gl re-uploads the buffers on change.
         const markers = new ScatterplotLayer<Competition>({
             id: 'competition-markers',
-            data: visibleCompetitions,
+            data: markerData,
             pickable: true,
             getPosition: (c) => [c.lng, c.lat, 0],
             getFillColor: (c) => STATUS_COLOURS[c.displayStatus],
@@ -254,7 +384,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
                 scheduleHoverScroll(compid);
             },
             updateTriggers: {
-                getFillColor: [visibleCompetitions],
+                getFillColor: [markerData],
                 getLineColor: [highlightedCompid],
                 getRadius: [highlightedCompid],
                 getLineWidth: [highlightedCompid]
@@ -266,7 +396,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
         // colour fill and the icon sits cleanly on top.
         const markerIcons = new IconLayer<Competition>({
             id: 'competition-marker-icons',
-            data: visibleCompetitions,
+            data: markerData,
             pickable: false,
             getPosition: (c) => [c.lng, c.lat, 0],
             getIcon: (c) => ({
@@ -280,7 +410,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
             getSize: (c) => (c.compid === highlightedCompid ? 18 : 11),
             sizeUnits: 'pixels',
             updateTriggers: {
-                getIcon: [visibleCompetitions],
+                getIcon: [markerData],
                 getSize: [highlightedCompid]
             }
         });
@@ -289,7 +419,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
         // handles non-ASCII glyphs in competition names.
         const labels = new TextLayer<Competition>({
             id: 'competition-labels',
-            data: visibleCompetitions,
+            data: markerData,
             characterSet: 'auto',
             fontSettings: {sdf: true},
             getPosition: (c) => [c.lng, c.lat, 0],
@@ -305,7 +435,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
         });
 
         return [earthSphere, countries, markers, markerIcons, labels].filter(Boolean) as any[];
-    }, [visibleCompetitions, countriesGeoJson, highlightedCompid]);
+    }, [markerData, countriesGeoJson, highlightedCompid]);
 
     // Lighting with SunLight at current time. Recomputed once on mount.
     const effects = useMemo(
@@ -320,9 +450,9 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 
     return (
         <div style={{position: 'fixed', inset: 0, background: '#0b1a33'}}>
-            <div className="globe-canvas">
+            <div className="globe-canvas" ref={canvasRef}>
                 <DeckGL
-                    views={new GlobeView({id: 'globe', resolution: 10}) as any}
+                    views={globeView as any}
                     viewState={viewState as any}
                     onViewStateChange={({viewState: v}: any) => setViewState(v)}
                     controller={hasData}
@@ -353,12 +483,22 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 
             {/* Right-side competition list panel */}
             <CompetitionListPanel
-                competitions={competitions}
+                live={panelLists.live}
+                upcoming={panelLists.upcoming}
+                summary={summary}
+                hasAnyComps={competitions.length > 0}
                 highlightedCompid={highlightedCompid}
                 setHighlightedCompid={setHighlightedCompid}
                 flyTo={flyTo}
                 entryRefs={entryRefs}
             />
+
+            {hasData ? (
+                <label className="map-filter-toggle">
+                    <input type="checkbox" checked={filterToView} onChange={(e) => setFilterToView(e.target.checked)} />
+                    {t('competition.in_view_only')}
+                </label>
+            ) : null}
 
             <div className="map-legend">
                 {(['upcoming', 'notask', 'task_set', 'launching', 'started', 'finishing', 'home', 'yesterday'] as const).map((s) => (
@@ -387,13 +527,19 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
 // on the globe gets the ring treatment via ScatterplotLayer's updateTriggers.
 //
 function CompetitionListPanel({
-    competitions,
+    live,
+    upcoming,
+    summary,
+    hasAnyComps,
     highlightedCompid,
     setHighlightedCompid,
     flyTo,
     entryRefs
 }: {
-    competitions: Competition[];
+    live: Competition[];
+    upcoming: Competition[];
+    summary: StatusSummary | null;
+    hasAnyComps: boolean;
     highlightedCompid: string | null;
     setHighlightedCompid: (id: string | null) => void;
     flyTo: (c: Competition) => void;
@@ -402,44 +548,7 @@ function CompetitionListPanel({
     // All hooks must run on every render — call them before any early return,
     // otherwise the hook order changes between renders and React errors out.
     const {t} = useTranslation('common');
-    const summary = useStatusSummary();
-    if (!competitions.length) return null;
-
-    // Group competitions into Live / Upcoming so users can tell at a glance
-    // which ones are clickable. Upcoming entries stay in the list (so pilots
-    // can find their comp) but navigation is disabled.
-    // Within Live, rank by the most active status across the comp's classes
-    // (finishing > racing > launching > task set > home > no task), then by
-    // viewers desc, then by registered pilot count desc.
-    const STATUS_RANK: Record<CompetitionDisplayStatus, number> = {
-        finishing: 0,
-        started: 1,
-        launching: 2,
-        task_set: 3,
-        home: 4,
-        notask: 5,
-        cancelled: 6,
-        yesterday: 7,
-        upcoming: 8
-    };
-    const pilotCount = (c: Competition) => (c.classes ?? []).reduce((s, cls) => s + (cls.pilotCount || 0), 0);
-    const compRank = (c: Competition) => {
-        const classes = c.classes ?? [];
-        if (!classes.length) return STATUS_RANK[c.displayStatus] ?? 99;
-        return Math.min(...classes.map((cls) => STATUS_RANK[cls.displayStatus] ?? 99));
-    };
-    const live = competitions
-        .filter((c) => c.displayStatus !== 'upcoming')
-        .sort((a, b) => {
-            const ra = compRank(a);
-            const rb = compRank(b);
-            if (ra !== rb) return ra - rb;
-            const va = summary?.byComp.get(a.compid)?.viewers ?? 0;
-            const vb = summary?.byComp.get(b.compid)?.viewers ?? 0;
-            if (va !== vb) return vb - va;
-            return pilotCount(b) - pilotCount(a);
-        });
-    const upcoming = competitions.filter((c) => c.displayStatus === 'upcoming');
+    if (!hasAnyComps) return null;
 
     const renderSection = (titleKey: 'live' | 'upcoming', comps: Competition[], clickable: boolean, suffix?: React.ReactNode) => {
         if (!comps.length) return null;

@@ -26,6 +26,7 @@
         "pilot_other": "{{count}} piloter",
         "tracked_pilots": "{{tracked}}/{{total}} piloter",
         "live_stats": " · {{tracked}}/{{registered}} piloter · {{flying}} flyr · {{landed}} landet",
+        "in_view_only": "Bare synlige",
         "viewers_short": "seere",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",

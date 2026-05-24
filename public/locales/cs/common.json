@@ -26,6 +26,7 @@
         "pilot_other": "{{count}} pilotů",
         "tracked_pilots": "{{tracked}}/{{total}} pilotů",
         "live_stats": " · {{tracked}}/{{registered}} pilotů · {{flying}} ve vzduchu · {{landed}} přistáli",
+        "in_view_only": "Pouze ve výřezu",
         "viewers_short": "diváků",
         "land_data": "Data o pevnině:",
         "natural_earth": "Natural Earth",

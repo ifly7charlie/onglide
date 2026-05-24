@@ -26,6 +26,7 @@
         "pilot_other": "{{count}} pilotov",
         "tracked_pilots": "{{tracked}}/{{total}} pilotov",
         "live_stats": " · {{tracked}}/{{registered}} pilotov · {{flying}} v zraku · {{landed}} pristali",
+        "in_view_only": "Samo vidne",
         "viewers_short": "gledalcev",
         "land_data": "Zemljiški podatki:",
         "natural_earth": "Natural Earth",

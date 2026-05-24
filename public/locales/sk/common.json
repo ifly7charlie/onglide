@@ -26,6 +26,7 @@
         "pilot_other": "{{count}} pilotov",
         "tracked_pilots": "{{tracked}}/{{total}} pilotov",
         "live_stats": " · {{tracked}}/{{registered}} pilotov · {{flying}} vo vzduchu · {{landed}} pristáli",
+        "in_view_only": "Iba viditeľné",
         "viewers_short": "divákov",
         "land_data": "Údaje o pevnine:",
         "natural_earth": "Natural Earth",

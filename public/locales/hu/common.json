@@ -26,6 +26,7 @@
         "pilot_other": "{{count}} pilóta",
         "tracked_pilots": "{{tracked}}/{{total}} pilóta",
         "live_stats": " · {{tracked}}/{{registered}} pilóta · {{flying}} levegőben · {{landed}} leszállt",
+        "in_view_only": "Csak láthatók",
         "viewers_short": "néző",
         "land_data": "Földadatok:",
         "natural_earth": "Natural Earth",

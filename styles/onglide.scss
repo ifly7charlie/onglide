@@ -693,6 +693,34 @@ button {
     }
 }
 
+// Floating "in view only" toggle on the globe page. Mirrors the
+// .map-legend chrome on the opposite (top-left) corner.
+.map-filter-toggle {
+    position: fixed;
+    left: 20px;
+    top: 20px;
+    padding: 8px 12px;
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 15;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+
+    input[type='checkbox'] {
+        cursor: pointer;
+        margin: 0;
+    }
+}
+
 .map-attribution {
     position: fixed;
     right: 8px;

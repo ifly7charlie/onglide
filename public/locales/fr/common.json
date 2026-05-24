@@ -26,6 +26,7 @@
         "pilot_other": "{{count}} pilotes",
         "tracked_pilots": "{{tracked}}/{{total}} pilotes",
         "live_stats": " · {{tracked}}/{{registered}} pilotes · {{flying}} en vol · {{landed}} posés",
+        "in_view_only": "Visibles uniquement",
         "viewers_short": "spectateurs",
         "land_data": "Données terrestres :",
         "natural_earth": "Natural Earth",

@@ -26,6 +26,7 @@
         "pilot_other": "{{count}} piloter",
         "tracked_pilots": "{{tracked}}/{{total}} piloter",
         "live_stats": " · {{tracked}}/{{registered}} piloter · {{flying}} i luften · {{landed}} landat",
+        "in_view_only": "Endast synliga",
         "viewers_short": "tittare",
         "land_data": "Landdata:",
         "natural_earth": "Natural Earth",
