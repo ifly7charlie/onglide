@@ -27,6 +27,8 @@ import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 import {racingScoringGenerator} from './racingScoringGenerator';
 import {enrichedPositionGenerator} from './enrichedPositionGenerator';
 
+import {getLocalRelief} from '../getelevationoffset';
+
 // DH adjuster
 import {adjustDistanceHandicapTask} from '../flightprocessing/distancehandicap';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
@@ -480,7 +482,7 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
     const stats = config.flightstats ? createFlightStatistics(glider.compno, log) : null;
 
     // 0. Check if we are flying etc
-    const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
+    const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log, getLocalRelief);
     const observed = stats ? stats.observer(epg) : epg;
 
     // 1. Figure out where in the task we are

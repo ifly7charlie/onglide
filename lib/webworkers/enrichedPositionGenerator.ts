@@ -10,16 +10,28 @@ import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, Airf
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
 
-import {getLocalRelief} from '../getelevationoffset';
-
 import {GliderLog, noopGliderLog} from './gliderLog';
+
+// Injected DEM relief lookup. Server scoring chain wires in the real
+// getLocalRelief from getelevationoffset (which uses fs/disk caching and
+// can't run in the browser). Client/test callers leave it default and get
+// the noop — they don't need terrain-aware landout detection. Same pattern
+// as the GliderLog dependency above.
+export type LocalReliefFn = (lat: number, lng: number, radiusPixels?: number) => Promise<number>;
+const noopLocalRelief: LocalReliefFn = async () => -1;
 
 //
 // Get a generator to calculate task status
-export const enrichedPositionGenerator = async function* (airfield: AirfieldLocation, pointGenerator: InOrderGenerator, _log?: GliderLog): EnrichedPositionGenerator {
+export const enrichedPositionGenerator = async function* (
+    airfield: AirfieldLocation,
+    pointGenerator: InOrderGenerator,
+    _log?: GliderLog,
+    _localRelief?: LocalReliefFn
+): EnrichedPositionGenerator {
     //
     // Make sure we have some logging
     const log: GliderLog = _log ?? noopGliderLog;
+    const localRelief: LocalReliefFn = _localRelief ?? noopLocalRelief;
 
     let previousPoint: EnrichedPosition | null = null;
     let point: EnrichedPosition | null = null;
@@ -81,7 +93,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                                 // RAM-cached from the AGL lookup upstream in aprs.ts.
                                 // relief < 0 means the DEM lookup failed — fail flying (don't land
                                 // out on a DEM outage).
-                                const relief = await getLocalRelief(previousPoint.lat, previousPoint.lng, 20);
+                                const relief = await localRelief(previousPoint.lat, previousPoint.lng, 20);
                                 if (relief > 25 || relief < 0) {
                                     log(`epg: ${previousPoint.c} not landing out: ridge terrain relief ${relief}m (rrd: ${ridgeRunningDistance})`);
                                 } else {
