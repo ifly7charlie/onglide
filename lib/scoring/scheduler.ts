@@ -682,19 +682,36 @@ const lastDiscoveryUtcDate = new Map<string, string>();
 const previousScoringSourceEntries = new Set<string>();
 const droppedScoringSourceEntries = new Set<string>();
 
+// (compid, type) pairs whose processCompetition is currently running.
+// Heartbeats fire on a fixed setInterval and processCompetition for a
+// SoaringSpot scrape comp can easily exceed the 60 s interval (the
+// process-global SOARINGSPOT rate limiter serialises every fetch on
+// that host), so without a per-comp gate we'd queue overlapping passes
+// for the slow comps AND quick comps like SGP would still be stuck
+// behind them in a serial for-loop. The gate plus Promise.all means
+// SGP/robocontrol get their cadence honoured regardless of whatever's
+// blocked on SoaringSpot.
+const inFlightCompetitions = new Set<string>();
+
 export async function runScheduler(opts: SchedulerOptions): Promise<void> {
     const log = opts.log ?? ((msg: string, ...args: unknown[]) => console.log(msg, ...args));
     const interval = opts.heartbeatMs ?? HEARTBEAT_MS;
 
     log(`scheduler: starting; types=${opts.registry.types().join(',')} heartbeat=${interval}ms`);
 
-    // Run the first heartbeat immediately so a fresh process picks up
-    // work before the first interval elapses.
-    await heartbeat(opts.db, opts.registry, log);
-
+    // Kick off the recurring heartbeat first so it starts ticking even
+    // while the initial pass is still draining the rate-limited
+    // SoaringSpot queue. The per-comp `inFlightCompetitions` gate (in
+    // heartbeat) prevents overlapping processCompetition for the same
+    // (compid, type), so it's safe for setInterval-driven heartbeats
+    // and the initial pass to overlap.
     setInterval(() => {
         heartbeat(opts.db, opts.registry, log).catch((e) => log('scheduler heartbeat failed:', e));
     }, interval);
+
+    // Fire the first heartbeat immediately (no await) so a fresh
+    // process picks up work without waiting a whole interval.
+    heartbeat(opts.db, opts.registry, log).catch((e) => log('scheduler initial heartbeat failed:', e));
 }
 
 async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, ...args: unknown[]) => void): Promise<void> {
@@ -753,23 +770,39 @@ async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, .
         log('scheduler: override scan failed (treating as no overrides for this heartbeat):', e);
     }
 
-    for (const src of sources ?? []) {
-        if (!src.compid || !src.url) continue;
-        const adapter = registry.get(src.type);
-        if (!adapter) continue;
-        // Override gate: a comp with `soaringspotkey` suppresses its
-        // scrape source only. Robocontrol (and any other tracker-only
-        // adapter) is orthogonal and continues firing.
-        if (overriddenComps.has(src.compid) && OVERRIDE_TARGET_TYPES.has(src.type)) {
-            log(`scheduler: skipping ${src.compid} (${src.type}) — overridden by '${OVERRIDE_SOURCE_TYPE}' source`);
-            continue;
-        }
-        try {
-            await processCompetition(db, adapter, src, log);
-        } catch (e) {
-            log(`scheduler: competition ${src.compid} failed:`, e);
-        }
-    }
+    // Fan comps out concurrently so a slow SoaringSpot fetch can't
+    // block SGP/robocontrol behind it. The `inFlightCompetitions` gate
+    // skips comps still being processed by an earlier heartbeat — that
+    // matters because processCompetition for a SoaringSpot comp can
+    // exceed the 60 s heartbeat interval (the process-global host
+    // rate limiter serialises every fetch).
+    await Promise.all(
+        (sources ?? []).map(async (src) => {
+            if (!src.compid || !src.url) return;
+            const adapter = registry.get(src.type);
+            if (!adapter) return;
+            // Override gate: a comp with `soaringspotkey` suppresses
+            // its scrape source only. Robocontrol (and any other
+            // tracker-only adapter) is orthogonal and continues firing.
+            if (overriddenComps.has(src.compid) && OVERRIDE_TARGET_TYPES.has(src.type)) {
+                log(`scheduler: skipping ${src.compid} (${src.type}) — overridden by '${OVERRIDE_SOURCE_TYPE}' source`);
+                return;
+            }
+            const key = `${src.compid}|${src.type}`;
+            if (inFlightCompetitions.has(key)) {
+                log(`scheduler: skipping ${src.compid} (${src.type}) — previous heartbeat still in flight`);
+                return;
+            }
+            inFlightCompetitions.add(key);
+            try {
+                await processCompetition(db, adapter, src, log);
+            } catch (e) {
+                log(`scheduler: competition ${src.compid} failed:`, e);
+            } finally {
+                inFlightCompetitions.delete(key);
+            }
+        })
+    );
 }
 
 //
