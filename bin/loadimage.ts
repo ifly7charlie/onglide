@@ -20,7 +20,7 @@ async function run() {
             return;
         }
 
-        const db: ReturnType<typeof mysql> = mysql({config: {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: args.competition, decimalNumbers: true}});
+        const db: ReturnType<typeof mysql> = mysql({config: {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PASSWORD, database: args.competition, decimalNumbers: true, flags: ['-FOUND_ROWS']}});
 
         db.query('INSERT INTO images (class, compno, image, updated) VALUES (?, ?, ?, UNIX_TIMESTAMP())', [args.class, args.compno, data])
             .then((results) => console.log(results))

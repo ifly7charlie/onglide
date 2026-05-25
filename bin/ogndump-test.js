@@ -38,6 +38,8 @@ async function main() {
             user: process.env.MYSQL_USER,
             password: process.env.MYSQL_PASSWORD,
             decimalNumbers: true,
+            // affectedRows = changed rows, not matched rows.
+            flags: ['-FOUND_ROWS'],
             onError: (e) => {
                 console.log(e);
             }

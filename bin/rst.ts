@@ -62,7 +62,11 @@ async function main() {
             database: process.env.MYSQL_DATABASE || 'ogn',
             user: process.env.MYSQL_USER || 'ogn',
             password: process.env.MYSQL_PASSWORD,
-            decimalNumbers: true
+            decimalNumbers: true,
+            // Disable CLIENT_FOUND_ROWS so UPDATE.affectedRows counts
+            // rows actually changed, not rows matched (callers across
+            // the codebase rely on that).
+            flags: ['-FOUND_ROWS']
         }
     });
 

@@ -87,7 +87,12 @@ async function main(): Promise<void> {
             database: process.env.MYSQL_DATABASE || 'ogn',
             user: process.env.MYSQL_USER || 'ogn',
             password: process.env.MYSQL_PASSWORD,
-            decimalNumbers: true
+            decimalNumbers: true,
+            // Disable CLIENT_FOUND_ROWS so UPDATE.affectedRows counts
+            // rows actually changed, not rows matched. Callers across
+            // this codebase rely on that semantics (see
+            // lib/scoring/shared/trackers.ts:updateTracker).
+            flags: ['-FOUND_ROWS']
         }
     });
 

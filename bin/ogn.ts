@@ -434,7 +434,11 @@ async function main() {
             // Return DATE / DATETIME / TIMESTAMP columns as strings so they
             // match our `: string` type declarations and survive proto
             // encoding (the encoder rejects Date instances).
-            dateStrings: true
+            dateStrings: true,
+            // Disable CLIENT_FOUND_ROWS so UPDATE.affectedRows counts
+            // rows actually changed, not rows matched. Several callers
+            // depend on that (e.g. updateTracker, pilotresult upserts).
+            flags: ['-FOUND_ROWS']
         },
         onError: (e) => {
             console.log(e);

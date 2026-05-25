@@ -46,7 +46,9 @@ const mysql = Mysql({
         password: process.env.MYSQL_PASSWORD,
         // mysql2@3.x returns BIGINT/DECIMAL as strings by default;
         // restore mysql@2.x behaviour of returning numbers
-        decimalNumbers: true
+        decimalNumbers: true,
+        // affectedRows = changed rows, not matched rows.
+        flags: ['-FOUND_ROWS']
     },
     onError: (e) => {
         console.log(e);
