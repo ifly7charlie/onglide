@@ -218,6 +218,21 @@ function formatCadence(ms: number): string {
     return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`;
 }
 
+// Render a time-until-next-fire interval (nextXAt - Date.now()) for the
+// `wait-next-due` reasons. Truncates to whole seconds under a minute,
+// whole minutes between 1m and 1h, and h+m above. Negative deltas
+// shouldn't happen in this branch (caller already gated on
+// nowMs < nextAt) but normalise to 0s defensively.
+function formatWait(ms: number): string {
+    if (ms <= 0) return '0s';
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    const totalMin = Math.round(ms / 60_000);
+    if (totalMin < 60) return `${totalMin}m`;
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    return mins > 0 ? `${hours}h${mins}m` : `${hours}h`;
+}
+
 function desiredTaskCadence(obs: ClassObservation, firstLaunchAt: number | null, nowMs: number, activeOverrideMs?: number): number | null {
     if (STATUS_NO_TASK.has(obs.status)) return INTERVAL_TASKS_FAST_MS;
     if (STATUS_INSTALLED_PRELAUNCH.has(obs.status)) return INTERVAL_TASKS_SLOW_MS;
@@ -299,7 +314,7 @@ export function computeDecisions(
     } else if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
         reasons.push('pilots:wait-10am');
     } else {
-        reasons.push('pilots:wait-next-due');
+        reasons.push(`pilots:wait-next-due (in ${formatWait(srcState.nextPilotsAt - nowMs)})`);
     }
 
     // ----- tasks -----
@@ -332,7 +347,7 @@ export function computeDecisions(
         fetchTasks = true;
         reasons.push(`tasks:due (${formatCadence(tasksCadenceMs)})`);
     } else {
-        reasons.push(`tasks:wait-next-due (${formatCadence(tasksCadenceMs)})`);
+        reasons.push(`tasks:wait-next-due (${formatCadence(tasksCadenceMs)}, in ${formatWait(srcState.nextTasksAt - nowMs)})`);
     }
 
     // ----- results -----
@@ -359,7 +374,7 @@ export function computeDecisions(
         fetchResults = true;
         reasons.push(state.everFOrHToday ? 'results:post-F-or-H' : 'results:post-18:00');
     } else {
-        reasons.push('results:wait-next-due');
+        reasons.push(`results:wait-next-due (in ${formatWait(srcState.nextResultsAt - nowMs)})`);
     }
 
     // ----- maintenance -----
@@ -909,9 +924,26 @@ async function processCompetition(
     // robocontrol + a primary adapter can both fire for the same compid.
     // Window opens at 10:00 local — there's nothing worth tracking
     // before the morning gate that pilots and tasks share.
+    //
+    // Reason label is computed before the fetch so it reflects the
+    // decision (due / wait / off-hours / no-adapter), matching the
+    // pilots/tasks/results pattern computeDecisions uses.
+    let trackersReason: string;
+    if (!adapter.fetchTrackers) {
+        trackersReason = 'trackers:no-adapter';
+    } else if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
+        trackersReason = 'trackers:before-10am';
+    } else if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE) {
+        trackersReason = 'trackers:after-22:00-stop';
+    } else if (Date.now() >= srcState.nextTrackersAt) {
+        trackersReason = 'trackers:due';
+    } else {
+        trackersReason = `trackers:wait-next-due (in ${formatWait(srcState.nextTrackersAt - Date.now())})`;
+    }
+    decisions.reasons.push(trackersReason);
+
     if (adapter.fetchTrackers && localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE && localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
         if (Date.now() >= srcState.nextTrackersAt) {
-            ctx.log(`scheduler: trackers due`);
             try {
                 await adapter.fetchTrackers(ctx);
             } catch (e) {
