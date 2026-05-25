@@ -1883,14 +1883,16 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
     return {cTrackers, keyedDb, prevGliders, initialGliderCount, initialCompGliderCount, removedGlidersCount: removedGliders.length};
 }
 
-// First-load DDB block gate. Mirrors the unknown→matched APRS path in
-// processFlarmIdMatch for trackerids set out-of-band (manual entry,
-// matchtrackers.ts, etc.) that never went through that flow. If any
-// comma-separated device_id in `trackerRow.dbTrackerId` has tracked!=Y
-// in the merged DDB and the comp hasn't opted into trackingconsent,
-// mutates trackerRow.dbTrackerId to 'blocked' and persists the tracker /
-// trackerhistory rows. The caller's existing 'blocked' branch then
-// handles worker-side cleanup. Skips silently when ddb is empty
+// First-load DDB block gate. Runs once per process for trackerids loaded
+// from the DB (whether set by processFlarmIdMatch's blocked branch, manual
+// entry, or matchtrackers.ts). If any comma-separated device_id in
+// `trackerRow.dbTrackerId` has tracked!=Y in the merged DDB and the comp
+// hasn't opted into trackingconsent, mutates trackerRow.dbTrackerId to
+// 'blocked' so the caller's 'blocked' branch handles worker-side cleanup.
+// The DB row keeps the real flarmId — block state is a runtime decision
+// re-derived each restart from DDB+consent, so consent flips don't need
+// a DB rewrite to take effect. Inserts a trackerhistory audit row noting
+// the blocked device_id and source. Skips silently when ddb is empty
 // (no fetch yet) — picked up on the next datecode rollover.
 function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, displayName: string, trackingconsent: string | undefined | null): void {
     if (!trackerRow.dbTrackerId || trackerRow.dbTrackerId === 'unknown' || trackerRow.dbTrackerId === 'blocked') return;
@@ -1908,22 +1910,14 @@ function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, displayName: string, tr
     if (!blockedEntry) return;
     const sources = blockedEntry.sources?.join('+') ?? '?';
     const method = blockedMethod(blockedEntry);
-    console.log(`${displayName}:${trackerRow.compno} first-load blocked via DDB (${blockedEntry.device_id}, sources: ${sources})`);
+    console.log(`${displayName}:${trackerRow.compno} first-load blocked via DDB (${blockedEntry.device_id}, sources: ${sources}, method: ${method})`);
     trackerRow.dbTrackerId = 'blocked';
     if (!readOnly) {
         db.transaction()
             .query(
                 escape`
-                UPDATE tracker
-                SET trackerid = 'blocked'
-                WHERE compno = ${trackerRow.compno} AND class = ${trackerRow.className}
-                LIMIT 1
-            `
-            )
-            .query(
-                escape`
                 INSERT INTO trackerhistory (compno, changed, flarmid, greg, method)
-                VALUES (${trackerRow.compno}, now(), 'blocked', ${blockedEntry.registration || null}, ${method})
+                VALUES (${trackerRow.compno}, now(), ${blockedEntry.device_id}, ${blockedEntry.registration || null}, ${method})
             `
             )
             .commit();
@@ -1961,7 +1955,16 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 }
                 const listening = !channel.afterSunset && t.scoredStatus == 'S';
 
-                if (!hadTracker) {
+                // Re-derive the runtime block from DDB once per process per
+                // pilot. glider.blocked stays set across ticks within a
+                // process, so we skip after the first hit — otherwise every
+                // tick would re-insert a trackerhistory audit row (the DB
+                // row keeps the real flarmId, so the function can't
+                // self-gate the way it did when it overwrote trackerid).
+                // applyDDBFirstLoadBlock mutates t.dbTrackerId='blocked' on
+                // hit, which feeds the OR below; glider.blocked covers
+                // subsequent ticks where t.dbTrackerId is fresh from the DB.
+                if (!hadTracker && !glider.blocked) {
                     applyDDBFirstLoadBlock(t, channel.displayName, competition.trackingconsent);
                 }
 
@@ -1970,7 +1973,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 // for the frontend and keep them out of the scoring worker
                 // entirely — otherwise the worker emits empty (flightStatus=0)
                 // scores that overwrite the synth, causing scoreId churn.
-                if (t.dbTrackerId === 'blocked') {
+                if (t.dbTrackerId === 'blocked' || glider.blocked) {
                     // Pilot just transitioned from tracked to blocked: drop them
                     // from the worker so it stops scoring them.
                     if (glider.scoringConfigured && !glider.blocked) {
@@ -3139,10 +3142,15 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         if (isBlocked(ddbf, competition.trackingconsent)) {
             const sources = ddbf.sources?.join('+') ?? '?';
             const method = blockedMethod(ddbf);
+            // Persist the real flarmId on the tracker row so the association
+            // survives restarts; the in-memory dbTrackerId is set to 'blocked'
+            // so updateTrackers / aprs.ts / scoring all treat the pilot as
+            // blocked at runtime. applyDDBFirstLoadBlock re-runs the DDB
+            // check on next load and restores the in-memory block state.
             for (const match of matches) {
                 match.dbTrackerId = 'blocked';
                 unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
-                unknownTrackers[flarmId].message = `${flarmId}: ${match.compno} declined livetracking via DDB (sources: ${sources})`;
+                unknownTrackers[flarmId].message = `${flarmId}: matched to ${match.compno} (${match.className}) from DDB but blocked — declined livetracking (sources: ${sources}, method: ${method})`;
                 console.log(unknownTrackers[flarmId].message);
                 if (!readOnly) {
                     db.transaction()
@@ -3150,11 +3158,11 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                             escape`
                             UPDATE tracker
                             SET
-                                trackerid = 'blocked'
+                                trackerid = ${flarmId}
                             WHERE
                                 compno = ${match.compno}
                                 AND class = ${match.className}
-                                AND trackerid IN ('unknown', '')
+                                AND trackerid IN ('unknown', 'blocked', '')
                             LIMIT
                                 1
                         `
@@ -3167,7 +3175,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                                 (
                                     ${match.compno},
                                     now(),
-                                    'blocked',
+                                    ${flarmId},
                                     ${ddbf.registration || null},
                                     ${method}
                                 )
