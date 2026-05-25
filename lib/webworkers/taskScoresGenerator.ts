@@ -162,8 +162,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 // and may have fake time for AATs use the actual time we are scored to which is in item.t
                 const currentLegTime = legTime(leg);
                 if (sl.time) {
-                    sl.duration = (currentLegTime || item.t) - sl.time;
-                    sl.taskDuration = (currentLegTime || item.t) - item.utcStart;
+                    const endT = currentLegTime || item.t;
+                    if (endT >= sl.time) sl.duration = endT - sl.time;
+                    if (item.utcStart && endT >= item.utcStart) sl.taskDuration = endT - item.utcStart;
                 }
 
                 // And now do speeds

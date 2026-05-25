@@ -510,9 +510,16 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                         const crossings = hc.crossings;
                         if (crossings.length >= 2) {
                             log(`* turnpoint ${status.currentLeg} intersection between ${previousPoint.t} and ${point.t} `);
-                            if (!task.rules.aat) {
+                            // Crossing times come from real fixes, but a pre-start track
+                            // that nicks a downstream sector line would still place
+                            // entryTimeStamp before utcStart — drop any such crossings.
+                            const minT = status.utcStart ?? 0;
+                            const validCrossings = hc.crossings.filter((c) => c.at.t >= minT);
+                            if (!validCrossings.length) {
+                                log(`- crossings rejected: all before utcStart ${minT}`);
+                            } else if (!task.rules.aat) {
                                 possibleAdvances.push({
-                                    possiblePoints: [hc.crossings.at(0)!.at],
+                                    possiblePoints: [validCrossings[0].at],
                                     estimatedTurnType: EstimatedTurnType.crossing,
                                     rewindTo: point.t,
                                     ld: 0
@@ -521,7 +528,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                 break;
                             } else {
                                 possibleAdvances.push({
-                                    possiblePoints: hc.crossings.map((c) => c.at),
+                                    possiblePoints: validCrossings.map((c) => c.at),
                                     estimatedTurnType: EstimatedTurnType.crossing,
                                     rewindTo: point.t,
                                     ld: 0
@@ -554,7 +561,12 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                     `* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` +
                                         ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`
                                 );
-                                const possibleT = Math.round(point.t - (distanceRemaining / distanceNeeded) * elapsedTime) as Epoch;
+                                // Linear interpolation across a gap that straddles utcStart
+                                // can extrapolate the estimated turn time before the start; clamp it.
+                                const possibleT = Math.max(
+                                    Math.round(point.t - (distanceRemaining / distanceNeeded) * elapsedTime),
+                                    status.utcStart ?? 0
+                                ) as Epoch;
                                 possibleAdvances.push({
                                     possiblePoints: [{...hc.onBoundary!, t: possibleT}],
                                     estimatedTurnType: EstimatedTurnType.dogleg,
