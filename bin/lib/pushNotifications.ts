@@ -293,6 +293,7 @@ async function sendEvents(compid: string, compName: string, events: NotifyEvent[
                 stat.failed++;
                 // 404/410 — the browser dropped the subscription. Reap it.
                 if (err?.statusCode === 404 || err?.statusCode === 410) {
+                    console.log(`pushNotifications: reaping sub ${sub.id} (${compid}) — push service returned ${err.statusCode}`);
                     await db.query(escape`DELETE FROM pushsubscription WHERE id = ${sub.id}`).catch(() => {});
                 } else {
                     console.log(`pushNotifications: send failed (${err?.statusCode ?? '?'}) for sub ${sub.id}`);
@@ -312,7 +313,9 @@ async function sendEvents(compid: string, compName: string, events: NotifyEvent[
 // destroyed (rollover after its final local day).
 export async function purgeSubscriptionsForComp(compid: string, db: any): Promise<void> {
     try {
-        await db.query(escape`DELETE FROM pushsubscription WHERE compid = ${compid}`);
+        const result = await db.query(escape`DELETE FROM pushsubscription WHERE compid = ${compid}`);
+        const n = result?.affectedRows ?? 0;
+        if (n > 0) console.log(`pushNotifications: purged ${n} subscription(s) for ${compid} (context teardown)`);
         for (const key of deferredStarts.keys()) {
             if (key.startsWith(compid + ':')) deferredStarts.delete(key);
         }
@@ -324,7 +327,9 @@ export async function purgeSubscriptionsForComp(compid: string, db: any): Promis
 // Safety net for comps removed without a clean context teardown.
 export async function sweepExpiredSubscriptions(db: any): Promise<void> {
     try {
-        await db.query(escape`DELETE FROM pushsubscription WHERE expiresat < NOW()`);
+        const result = await db.query(escape`DELETE FROM pushsubscription WHERE expiresat < NOW()`);
+        const n = result?.affectedRows ?? 0;
+        if (n > 0) console.log(`pushNotifications: swept ${n} expired subscription(s)`);
     } catch (e) {
         console.log('pushNotifications: expiry sweep failed', e);
     }

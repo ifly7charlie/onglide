@@ -72,6 +72,13 @@ export default async function handler(req, res) {
         return;
     }
 
+    // INSERT...ON DUPLICATE KEY UPDATE: affectedRows is 1 for a fresh insert,
+    // 2 for an update of an existing row. Log both so we can correlate browser
+    // POSTs to row identity in the DB.
+    const affected = result?.affectedRows ?? 0;
+    const action = affected === 2 ? 'refreshed' : affected === 1 ? 'inserted' : 'noop';
+    console.log(`api/push/subscribe: ${action} compid=${compid} endpointhash=${endpointHash} lang=${safeLang} expires=${comp.expires}`);
+
     res.status(200).json({ok: true});
     mysqlEnd();
 }

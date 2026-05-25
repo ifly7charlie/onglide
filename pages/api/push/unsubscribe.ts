@@ -29,6 +29,11 @@ export default async function handler(req, res) {
         return;
     }
 
+    // Always log — a 0-row delete (stray/replayed call against an already-gone
+    // sub) returns 200 silently otherwise.
+    const affected = result?.affectedRows ?? 0;
+    console.log(`api/push/unsubscribe: compid=${compid} endpointhash=${hash} deleted=${affected}`);
+
     res.status(200).json({ok: true});
     mysqlEnd();
 }
