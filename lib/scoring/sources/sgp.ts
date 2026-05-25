@@ -81,17 +81,36 @@ function extractCompDate(compDate: any): string | null {
     return null;
 }
 
+// HTTP timeout for the SGP JSON endpoint. The scheduler trackers cadence
+// is 5 min and the tasks cadence drops to 1 min during launch (see
+// activeTasksCadenceMs); a request that takes longer than 20 s on
+// either path is overwhelmingly more useful as a timeout-with-error
+// than as a heartbeat-blocking await. Without this, a stalled TCP
+// socket from glidertracking.fai.org pins the per-heartbeat slot for
+// SGP indefinitely — fetchTrackers/fetchResultsAndTasks never return,
+// `lastTrackersFetch` is never updated, and the only log line you'd
+// ever see is `scheduler: trackers due` followed by silence.
+const SGP_FETCH_TIMEOUT_MS = 20_000;
+
 async function fetchSgpJson(ctx: SourceCtx): Promise<any | null> {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), SGP_FETCH_TIMEOUT_MS);
     try {
-        const res = await fetch(ctx.url);
+        const res = await fetch(ctx.url, {signal: ac.signal});
         if (!res.ok) {
             ctx.log(`SGP fetch ${ctx.url} → ${res.status} ${res.statusText}`);
             return null;
         }
         return await res.json();
     } catch (e) {
-        ctx.log(`SGP fetch failed for ${ctx.compid}:`, e);
+        if ((e as any)?.name === 'AbortError') {
+            ctx.log(`SGP fetch timed out after ${SGP_FETCH_TIMEOUT_MS} ms for ${ctx.compid} (${ctx.url})`);
+        } else {
+            ctx.log(`SGP fetch failed for ${ctx.compid}:`, e);
+        }
         return null;
+    } finally {
+        clearTimeout(timer);
     }
 }
 

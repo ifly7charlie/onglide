@@ -98,17 +98,30 @@ function authHeaders(keys: ApiKeys): RequestInit {
     };
 }
 
+// HTTP timeout for SoaringSpot OAuth API calls. Same justification as
+// SGP — a stalled socket from api.soaringspot.com mustn't pin a
+// heartbeat slot indefinitely.
+const OAUTH_FETCH_TIMEOUT_MS = 30_000;
+
 async function apiGet(url: string, keys: ApiKeys, log: (msg: string, ...args: unknown[]) => void): Promise<any | null> {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), OAUTH_FETCH_TIMEOUT_MS);
     try {
-        const res = await fetch(url, authHeaders(keys));
+        const res = await fetch(url, {...authHeaders(keys), signal: ac.signal});
         if (!res.ok) {
             log(`soaringspot api ${url} returned ${res.status}: ${res.statusText}`);
             return null;
         }
         return await res.json();
     } catch (e) {
-        log(`soaringspot api ${url} threw:`, e);
+        if ((e as any)?.name === 'AbortError') {
+            log(`soaringspot api ${url} timed out after ${OAUTH_FETCH_TIMEOUT_MS} ms`);
+        } else {
+            log(`soaringspot api ${url} threw:`, e);
+        }
         return null;
+    } finally {
+        clearTimeout(timer);
     }
 }
 

@@ -162,6 +162,11 @@ export interface NominatimGeocode {
     displayName: string;
     countryCode?: string; // ISO-3166-1 alpha-2, uppercased
     source: 'nominatim' | 'wikidata';
+    // OSM feature class from Nominatim (`aeroway`, `place`, `highway`,
+    // …). Wikidata results don't have one — left undefined. Callers in
+    // airfield-only mode use this to short-circuit: a class=aeroway
+    // geocode is the airfield itself and needs no further refinement.
+    featureClass?: string;
 }
 
 interface NominatimResult {
@@ -257,8 +262,87 @@ export async function geocodeNominatim(name: string, log: Logger = noopLogger): 
         lon: parseFloat(r.lon),
         displayName: r.display_name,
         countryCode: r.address?.country_code ? r.address.country_code.toUpperCase() : undefined,
-        source: 'nominatim'
+        source: 'nominatim',
+        featureClass: r.class
     };
+}
+
+// Aerodrome-biased Nominatim retry. Append the English term `aerodrome`
+// to bias the gazetteer toward the `aeroway=aerodrome` feature when the
+// bare sitename matched a same-named settlement (e.g. nine "Hütten"
+// places in Germany, none of which is Flugplatz Hütten-Hotzenwald).
+// `aerodrome` works across locales because it's the literal OSM tag
+// value, not a language word. Returns only an aeroway hit — accepting
+// any other class here would just reintroduce the original ambiguity.
+export async function geocodeNominatimAerodrome(name: string, log: Logger = noopLogger): Promise<NominatimGeocode | null> {
+    // Strip a trailing `, <Country>` segment — Nominatim's text matcher
+    // treats `Hütten, Germany aerodrome` as three tokens and finds
+    // nothing, whereas `Hütten aerodrome` lifts the actual aeroway hit
+    // out of the noise cleanly.
+    const base = name.replace(/\s*,\s*[^,]+$/, '').trim() || name;
+    const q = `${base} aerodrome`;
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`;
+    let resp: Response;
+    try {
+        resp = await fetch(url, {headers: {'User-Agent': HTTP_UA}});
+    } catch (e) {
+        log(`nominatim aerodrome retry: fetch threw for "${q}":`, e);
+        return null;
+    }
+    if (!resp.ok) {
+        log(`nominatim aerodrome retry: HTTP ${resp.status} for "${q}"`);
+        return null;
+    }
+    const json = (await resp.json().catch(() => null)) as NominatimResult[] | null;
+    if (!json?.length) {
+        log(`nominatim aerodrome retry: no match for "${q}"`);
+        return null;
+    }
+    const aero = json.find((r) => r.class === 'aeroway');
+    if (!aero) {
+        log(`nominatim aerodrome retry: no aeroway feature in ${json.length} result(s) for "${q}"`);
+        return null;
+    }
+    return {
+        lat: parseFloat(aero.lat),
+        lon: parseFloat(aero.lon),
+        displayName: aero.display_name,
+        countryCode: aero.address?.country_code ? aero.address.country_code.toUpperCase() : undefined,
+        source: 'nominatim',
+        featureClass: aero.class
+    };
+}
+
+// Multi-result Nominatim wrapper used by the step-3 fallback. Returns
+// up to `limit` geocoded hits in `pickBestNominatimResult` preference
+// order (aeroway, then place, then non-street, then everything else),
+// so the caller can try several seed points before giving up.
+export async function geocodeNominatimSeeds(name: string, limit: number = 5, log: Logger = noopLogger): Promise<NominatimGeocode[]> {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name)}&format=json&limit=${Math.max(10, limit * 2)}&addressdetails=1`;
+    let resp: Response;
+    try {
+        resp = await fetch(url, {headers: {'User-Agent': HTTP_UA}});
+    } catch (e) {
+        log(`nominatim seeds: fetch threw for "${name}":`, e);
+        return [];
+    }
+    if (!resp.ok) {
+        log(`nominatim seeds: HTTP ${resp.status} for "${name}"`);
+        return [];
+    }
+    const json = (await resp.json().catch(() => null)) as NominatimResult[] | null;
+    if (!json?.length) return [];
+    const score = (r: NominatimResult) =>
+        r.class === 'aeroway' ? 0 : r.class === 'place' ? 1 : !r.class || !GEOCODE_DEMOTED_CLASSES.has(r.class) ? 2 : 3;
+    const sorted = [...json].sort((a, b) => score(a) - score(b));
+    return sorted.slice(0, limit).map((r) => ({
+        lat: parseFloat(r.lat),
+        lon: parseFloat(r.lon),
+        displayName: r.display_name,
+        countryCode: r.address?.country_code ? r.address.country_code.toUpperCase() : undefined,
+        source: 'nominatim' as const,
+        featureClass: r.class
+    }));
 }
 
 interface SparqlBinding {
@@ -323,6 +407,130 @@ export async function geocodeWikidata(name: string, log: Logger = noopLogger): P
         countryCode: row.cc?.value ? row.cc.value.toUpperCase() : undefined,
         source: 'wikidata'
     };
+}
+
+// Build a regex alternation from the sitename's word tokens, preserving
+// diacritics (Overpass `~` matches the raw OSM value byte-by-byte —
+// `Hutten` won't match `Hütten`, and the case-insensitive `,i` flag is
+// broken for multi-byte UTF-8 so we can't rely on it either). Each
+// token contributes up to four variants: original, original capitalised,
+// ASCII-folded (for OSM names tagged without diacritics e.g.
+// `Huetten Hotzenwald`), and ASCII-folded capitalised. Strips the
+// trailing `, <Country>` segment so the country name doesn't become a
+// matchable token, and filters airfield-type stopwords so they don't
+// widen the regex pointlessly. Regex-special characters are escaped.
+function sitenameRegexAlternation(sitename: string): string | null {
+    const stripped = sitename.replace(/\s*,\s*[^,]+$/, '').trim() || sitename;
+    const variants = new Set<string>();
+    const addVariant = (s: string) => {
+        if (!s) return;
+        variants.add(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const cap = s.charAt(0).toLocaleUpperCase() + s.slice(1);
+        if (cap !== s) variants.add(cap.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    };
+    for (const t of stripped.split(/[\s\-,.()'"\/]+/)) {
+        if (t.length < 3) continue;
+        const norm = t
+            .normalize('NFD')
+            .replace(/[̀-ͯ]/g, '')
+            .toLowerCase()
+            .replace(NON_DECOMPOSABLE_RE, (c) => NON_DECOMPOSABLE_MAP[c]);
+        if (STOPWORDS.has(norm)) continue;
+        addVariant(t);
+        const ascii = t
+            .normalize('NFD')
+            .replace(/[̀-ͯ]/g, '')
+            .replace(NON_DECOMPOSABLE_RE, (c) => NON_DECOMPOSABLE_MAP[c]);
+        if (ascii !== t) addVariant(ascii);
+    }
+    if (!variants.size) return null;
+    return Array.from(variants).join('|');
+}
+
+// Country-scoped aerodrome search. Asks Overpass for every
+// `aeroway=aerodrome|airstrip` whose `name` regex-matches a token in the
+// sitename, anywhere inside the ISO country area. Avoids the seed-point
+// failure mode of `nearbyAerodromes` — when the geocode lands on a
+// same-named town 150 km from the actual airfield (e.g. "Hütten,
+// Germany"), the 30 km radius sweep misses it; this query doesn't.
+// `seedLat`/`seedLon` are optional and only feed the ranking tiebreaker:
+// the regex can return several country-wide matches (Hütten-Hotzenwald
+// AND Hüttenbusch in Germany) and the Nominatim seed's region picks
+// between them.
+export async function findAerodromesByCountry(
+    countryCode: string,
+    sitename: string,
+    seedLat?: number,
+    seedLon?: number,
+    log: Logger = noopLogger
+): Promise<RankedAirfield[]> {
+    const pattern = sitenameRegexAlternation(sitename);
+    if (!pattern) {
+        log(`overpass country search: no usable tokens in "${sitename}"`);
+        return [];
+    }
+    const cc = countryCode.toUpperCase();
+    // Two Overpass quirks captured here:
+    //   - The area must be bound to a named variable (`->.a`) and each
+    //     union member must reference it explicitly. Default area sets
+    //     get cleared between union members, so the union returns zero
+    //     hits even when each statement individually would match.
+    //   - Don't constrain `admin_level=2` on the area — GB's country
+    //     boundary doesn't carry admin_level=2 in OSM (the home
+    //     nations are admin_level=4), so the constraint silently drops
+    //     UK queries to zero hits. `ISO3166-1=<cc>` is unique enough
+    //     on its own to identify the country boundary.
+    const q = `[out:json][timeout:25];
+area["ISO3166-1"="${cc}"]->.a;
+(
+  node["aeroway"~"^(aerodrome|airstrip)$"]["name"~"${pattern}"](area.a);
+  way["aeroway"~"^(aerodrome|airstrip)$"]["name"~"${pattern}"](area.a);
+  relation["aeroway"~"^(aerodrome|airstrip)$"]["name"~"${pattern}"](area.a);
+);
+out center tags;`;
+
+    let resp: Response;
+    try {
+        resp = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': HTTP_UA},
+            body: 'data=' + encodeURIComponent(q)
+        });
+    } catch (e) {
+        log(`overpass country search: fetch threw for cc=${cc}:`, e);
+        return [];
+    }
+    if (!resp.ok) {
+        log(`overpass country search: HTTP ${resp.status} for cc=${cc}`);
+        return [];
+    }
+    const json = (await resp.json().catch(() => null)) as {elements: OverpassElement[]} | null;
+    if (!json?.elements?.length) {
+        log(`overpass country search: 0 aerodromes in ${cc} matching /${pattern}/i`);
+        return [];
+    }
+
+    const haveSeed = typeof seedLat === 'number' && typeof seedLon === 'number';
+    const origin = haveSeed ? point([seedLon!, seedLat!]) : null;
+    const aerodromes: OsmAerodrome[] = [];
+    for (const el of json.elements) {
+        const tags = el.tags || {};
+        const aname = tags.name || tags['name:en'] || tags.icao || tags.iata;
+        if (!aname) continue;
+        const elat = el.lat ?? el.center?.lat;
+        const elon = el.lon ?? el.center?.lon;
+        if (elat == null || elon == null) continue;
+        aerodromes.push({
+            name: aname,
+            icao: tags.icao,
+            iata: tags.iata,
+            lat: elat,
+            lon: elon,
+            distanceKm: origin ? distance(origin, point([elon, elat])) : 0,
+            aerowayType: tags.aeroway || ''
+        });
+    }
+    return rankAirfieldsBySite(sitename, aerodromes);
 }
 
 export async function nearbyAerodromes(lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM, log: Logger = noopLogger): Promise<OsmAerodrome[]> {

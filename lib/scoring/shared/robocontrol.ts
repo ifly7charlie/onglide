@@ -66,10 +66,30 @@ export async function fetchRobocontrol(db: any, log: Log): Promise<void> {
     }
 }
 
+// HTTP timeout for robocontrol feeds. Robocontrol is a parallel tracker
+// source — a stalled feed mustn't pin the scheduler's per-comp slot
+// alongside the primary adapter's. Caller already wraps in try/catch
+// (scheduler.ts:861 and fetchRobocontrol:62), so an AbortError surfaces
+// as a normal logged failure.
+const ROBOCONTROL_FETCH_TIMEOUT_MS = 20_000;
+
 export async function fetchRobocontrolOne(db: any, log: Log, compid: string, url: string): Promise<void> {
     log(`robocontrol: polling ${url} for compid=${compid}`);
 
-    const res = await fetch(url);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), ROBOCONTROL_FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+        res = await fetch(url, {signal: ac.signal});
+    } catch (e) {
+        if ((e as any)?.name === 'AbortError') {
+            log(`robocontrol: ${url} timed out after ${ROBOCONTROL_FETCH_TIMEOUT_MS} ms`);
+            return;
+        }
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
     if (res.status != 200) {
         log(`robocontrol: ${url} returned ${res.status}`);
         return;
