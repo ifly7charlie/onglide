@@ -149,6 +149,22 @@ export interface OsmAerodrome {
     lon: number;
     distanceKm: number;
     aerowayType: string; // 'aerodrome' | 'airstrip'
+    // Locality address tags joined into one space-separated string —
+    // addr:city, addr:town, addr:place, addr:hamlet, addr:suburb, and
+    // is_in:city when present. Lets ranking match clubs named for the
+    // club (e.g. "London Gliding Club", addr:city=Dunstable) against a
+    // town-only sitename like "Dunstable, UK".
+    locality?: string;
+}
+
+const LOCALITY_TAG_KEYS = ['addr:city', 'addr:town', 'addr:place', 'addr:hamlet', 'addr:suburb', 'is_in:city'];
+function extractLocality(tags: Record<string, string>): string | undefined {
+    const parts: string[] = [];
+    for (const k of LOCALITY_TAG_KEYS) {
+        const v = tags[k];
+        if (v && !parts.includes(v)) parts.push(v);
+    }
+    return parts.length ? parts.join(' ') : undefined;
 }
 
 export interface RankedAirfield extends OsmAerodrome {
@@ -470,67 +486,78 @@ export async function findAerodromesByCountry(
         return [];
     }
     const cc = countryCode.toUpperCase();
-    // Two Overpass quirks captured here:
-    //   - The area must be bound to a named variable (`->.a`) and each
-    //     union member must reference it explicitly. Default area sets
-    //     get cleared between union members, so the union returns zero
-    //     hits even when each statement individually would match.
-    //   - Don't constrain `admin_level=2` on the area — GB's country
-    //     boundary doesn't carry admin_level=2 in OSM (the home
-    //     nations are admin_level=4), so the constraint silently drops
-    //     UK queries to zero hits. `ISO3166-1=<cc>` is unique enough
-    //     on its own to identify the country boundary.
-    const q = `[out:json][timeout:25];
-area["ISO3166-1"="${cc}"]->.a;
-(
-  node["aeroway"~"^(aerodrome|airstrip)$"]["name"~"${pattern}"](area.a);
-  way["aeroway"~"^(aerodrome|airstrip)$"]["name"~"${pattern}"](area.a);
-  relation["aeroway"~"^(aerodrome|airstrip)$"]["name"~"${pattern}"](area.a);
-);
-out center tags;`;
-
-    let resp: Response;
-    try {
-        resp = await fetch('https://overpass-api.de/api/interpreter', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': HTTP_UA},
-            body: 'data=' + encodeURIComponent(q)
-        });
-    } catch (e) {
-        log(`overpass country search: fetch threw for cc=${cc}:`, e);
-        return [];
-    }
-    if (!resp.ok) {
-        log(`overpass country search: HTTP ${resp.status} for cc=${cc}`);
-        return [];
-    }
-    const json = (await resp.json().catch(() => null)) as {elements: OverpassElement[]} | null;
-    if (!json?.elements?.length) {
-        log(`overpass country search: 0 aerodromes in ${cc} matching /${pattern}/i`);
-        return [];
-    }
-
     const haveSeed = typeof seedLat === 'number' && typeof seedLon === 'number';
     const origin = haveSeed ? point([seedLon!, seedLat!]) : null;
-    const aerodromes: OsmAerodrome[] = [];
-    for (const el of json.elements) {
-        const tags = el.tags || {};
-        const aname = tags.name || tags['name:en'] || tags.icao || tags.iata;
-        if (!aname) continue;
-        const elat = el.lat ?? el.center?.lat;
-        const elon = el.lon ?? el.center?.lon;
-        if (elat == null || elon == null) continue;
-        aerodromes.push({
-            name: aname,
-            icao: tags.icao,
-            iata: tags.iata,
-            lat: elat,
-            lon: elon,
-            distanceKm: origin ? distance(origin, point([elon, elat])) : 0,
-            aerowayType: tags.aeroway || ''
-        });
+
+    // Two passes — one matching against `name`, one against `addr:city`
+    // — issued as separate requests. Trying to union them in a single
+    // Overpass query (`(way[name~p](area.a); way[addr:city~p](area.a);)`)
+    // consistently returns zero hits, an Overpass quirk with named-area
+    // references across union members. Two requests also degrade
+    // gracefully under rate-limiting: a 429 on one pass still lets the
+    // other contribute. Picks up clubs named for the club (London
+    // Gliding Club at Dunstable) via `addr:city=Dunstable`.
+    const collected = new Map<string, OsmAerodrome>();
+    const seenKey = (lat: number, lon: number) => `${lat.toFixed(5)},${lon.toFixed(5)}`;
+    const ingest = (els: OverpassElement[] | null | undefined) => {
+        for (const el of els || []) {
+            const tags = el.tags || {};
+            const aname = tags.name || tags['name:en'] || tags.icao || tags.iata;
+            if (!aname) continue;
+            const elat = el.lat ?? el.center?.lat;
+            const elon = el.lon ?? el.center?.lon;
+            if (elat == null || elon == null) continue;
+            const k = seenKey(elat, elon);
+            if (collected.has(k)) continue;
+            collected.set(k, {
+                name: aname,
+                icao: tags.icao,
+                iata: tags.iata,
+                lat: elat,
+                lon: elon,
+                distanceKm: origin ? distance(origin, point([elon, elat])) : 0,
+                aerowayType: tags.aeroway || '',
+                locality: extractLocality(tags)
+            });
+        }
+    };
+
+    const passes: Array<{label: string; key: string}> = [
+        {label: 'name', key: 'name'},
+        {label: 'addr:city', key: 'addr:city'}
+    ];
+    for (const {label, key} of passes) {
+        const q = `[out:json][timeout:25];
+area["ISO3166-1"="${cc}"]->.a;
+(
+  node["aeroway"~"^(aerodrome|airstrip)$"]["${key}"~"${pattern}"](area.a);
+  way["aeroway"~"^(aerodrome|airstrip)$"]["${key}"~"${pattern}"](area.a);
+  relation["aeroway"~"^(aerodrome|airstrip)$"]["${key}"~"${pattern}"](area.a);
+);
+out center tags;`;
+        let resp: Response;
+        try {
+            resp = await fetch('https://overpass-api.de/api/interpreter', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': HTTP_UA},
+                body: 'data=' + encodeURIComponent(q)
+            });
+        } catch (e) {
+            log(`overpass country search (${label}): fetch threw for cc=${cc}:`, e);
+            continue;
+        }
+        if (!resp.ok) {
+            log(`overpass country search (${label}): HTTP ${resp.status} for cc=${cc}`);
+            continue;
+        }
+        const json = (await resp.json().catch(() => null)) as {elements: OverpassElement[]} | null;
+        const hits = json?.elements?.length ?? 0;
+        log(`overpass country search (${label}): ${hits} hit(s) in ${cc}`);
+        ingest(json?.elements);
     }
-    return rankAirfieldsBySite(sitename, aerodromes);
+
+    if (!collected.size) return [];
+    return rankAirfieldsBySite(sitename, Array.from(collected.values()));
 }
 
 export async function nearbyAerodromes(lat: number, lon: number, radiusKm: number = DEFAULT_RADIUS_KM, log: Logger = noopLogger): Promise<OsmAerodrome[]> {
@@ -580,7 +607,8 @@ out center tags;`;
             lat: elat,
             lon: elon,
             distanceKm: distance(origin, point([elon, elat])),
-            aerowayType: tags.aeroway || ''
+            aerowayType: tags.aeroway || '',
+            locality: extractLocality(tags)
         });
     }
     out.sort((a, b) => a.distanceKm - b.distanceKm);
@@ -591,7 +619,12 @@ export function rankAirfieldsBySite(sitename: string, aerodromes: OsmAerodrome[]
     const siteTokens = tokenize(sitename);
     const ranked: RankedAirfield[] = aerodromes.map((a) => {
         const matched: string[] = [];
-        for (const t of tokenize(a.name)) {
+        // Match against name + locality combined — a club named for the
+        // club (e.g. "London Gliding Club") in a sitename-named town
+        // (Dunstable) gets picked up via addr:city without dropping
+        // name-based matches.
+        const haystack = a.locality ? `${a.name} ${a.locality}` : a.name;
+        for (const t of tokenize(haystack)) {
             if (siteTokens.some((s) => tokenMatch(s, t))) matched.push(t);
         }
         return {...a, nameOverlap: matched.length, matchedTokens: matched};
