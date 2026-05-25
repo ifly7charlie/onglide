@@ -1030,6 +1030,17 @@ async function reconcileContexts() {
                     channels[cname]?.scoring?.setAirfield(ctx.location);
                 }
             }
+            const newTrackingconsent = row.trackingconsent || 'N';
+            if (newTrackingconsent !== ctx.trackingconsent) {
+                console.log(`${compShort(compid)}: trackingconsent ${ctx.trackingconsent} -> ${newTrackingconsent}`);
+                ctx.trackingconsent = newTrackingconsent;
+                // The runtime DDB block (glider.blocked) is sticky across ticks
+                // to avoid re-inserting trackerhistory rows; the next updateTrackers
+                // tick honours competition.trackingconsent in its blocked-branch
+                // gate, so a flip to 'Y' lifts the runtime block on its own.
+                // Persisted 'blocked' sentinels in tracker.trackerid (written by
+                // matchtrackers) are NOT cleared — re-run matchtrackers to recover.
+            }
             continue;
         }
         try {
@@ -1977,7 +1988,15 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 // for the frontend and keep them out of the scoring worker
                 // entirely — otherwise the worker emits empty (flightStatus=0)
                 // scores that overwrite the synth, causing scoreId churn.
-                if (t.dbTrackerId === 'blocked' || glider.blocked) {
+                //
+                // competition.trackingconsent='Y' overrides the runtime DDB
+                // block (sticky glider.blocked set by applyDDBFirstLoadBlock
+                // or processFlarmIdMatch): falling through lets the "no longer
+                // blocked" branch below restore scoring. A literal 'blocked'
+                // sentinel persisted in tracker.trackerid by matchtrackers is
+                // honoured regardless — we have no real flarmid to track with,
+                // so re-run matchtrackers to recover.
+                if (t.dbTrackerId === 'blocked' || (glider.blocked && competition.trackingconsent !== 'Y')) {
                     // Pilot just transitioned from tracked to blocked: drop them
                     // from the worker so it stops scoring them.
                     if (glider.scoringConfigured && !glider.blocked) {
