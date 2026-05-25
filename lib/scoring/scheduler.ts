@@ -657,6 +657,16 @@ const state = new Map<string, CompState>();
 // immediately instead of waiting until 05:00 UTC.
 const lastDiscoveryUtcDate = new Map<string, string>();
 
+// (compid, type) pairs seen on the most recent successful scoringsource
+// read. Used by the next heartbeat to detect (compid, type) entries that
+// vanished without dropDeadCompetition having dropped them — a canary
+// for transient DB issues (connection lost, slave replication gap) or
+// an external row deletion. The dropped set holds entries we removed
+// this process via dropDeadCompetition so the canary doesn't false-flag
+// our own cleanup.
+const previousScoringSourceEntries = new Set<string>();
+const droppedScoringSourceEntries = new Set<string>();
+
 export async function runScheduler(opts: SchedulerOptions): Promise<void> {
     const log = opts.log ?? ((msg: string, ...args: unknown[]) => console.log(msg, ...args));
     const interval = opts.heartbeatMs ?? HEARTBEAT_MS;
@@ -686,9 +696,31 @@ async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, .
         // make audit easier.
         sources = (await db.query(escape`SELECT * FROM scoringsource WHERE type IN (${registry.types()}) ORDER BY type, compid`)) as any[];
     } catch (e) {
-        log('scheduler: scoringsource read failed:', e);
+        // DB connection / query failure — abort the heartbeat. We
+        // deliberately do NOT touch in-memory state or trigger any
+        // cleanup here: an empty (or unreadable) scoringsource result
+        // must NOT be interpreted as "all comps removed". The next
+        // heartbeat will retry.
+        log('scheduler: scoringsource read failed — aborting heartbeat (in-memory state preserved):', e);
         return;
     }
+
+    // Canary: which (compid, type) entries were present last heartbeat
+    // that aren't here now, excluding ones the scheduler explicitly
+    // dropped? When this fires for a comp you didn't expect to lose, it
+    // points at either an external row delete or a DB read returning
+    // stale/partial results.
+    const currentEntries = new Set<string>();
+    for (const src of sources ?? []) {
+        if (src.compid && src.type) currentEntries.add(`${src.compid}|${src.type}`);
+    }
+    for (const prev of previousScoringSourceEntries) {
+        if (currentEntries.has(prev) || droppedScoringSourceEntries.has(prev)) continue;
+        const [compid, type] = prev.split('|');
+        log(`scheduler: ${compid} (${type}) missing from scoringsource read — was present last heartbeat and NOT dropped by the scheduler. Likely DB connection blip or external row removal; in-memory state preserved, will resume when the row returns.`);
+    }
+    previousScoringSourceEntries.clear();
+    for (const e of currentEntries) previousScoringSourceEntries.add(e);
 
     // Override gate: collect every compid that has an authoritative
     // `soaringspotkey` row. Any registered source for one of those
@@ -701,7 +733,9 @@ async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, .
             if (r.compid) overriddenComps.add(r.compid);
         }
     } catch (e) {
-        log('scheduler: override scan failed:', e);
+        // Override scan failure degrades to "no overrides" — adapters
+        // continue firing rather than mis-classifying as suppressed.
+        log('scheduler: override scan failed (treating as no overrides for this heartbeat):', e);
     }
 
     for (const src of sources ?? []) {
@@ -966,7 +1000,12 @@ async function processCompetition(
         try {
             const dropped = await dropDeadCompetition(db, ctx.log, src.compid);
             if (dropped) {
+                ctx.log(`scheduler: dropped competition (cascade complete, no leftover rows). Removing from in-memory state; will not appear in subsequent heartbeats unless re-added to scoringsource.`);
                 state.delete(src.compid);
+                // Remember every (compid, type) tuple we removed so the
+                // heartbeat canary doesn't flag this as an unexpected
+                // disappearance on the next read.
+                droppedScoringSourceEntries.add(`${src.compid}|${src.type}`);
                 return;
             }
         } catch (e) {

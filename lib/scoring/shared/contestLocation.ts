@@ -82,12 +82,18 @@ export async function regeocodeMissingCompetitions(
     db: any, //
     log: (msg: string, ...args: unknown[]) => void
 ): Promise<void> {
-    const rows: Array<{compid: string; sitename: string}> = await db.query(escape`
-        SELECT compid, sitename
-        FROM competition
-        WHERE sitename IS NOT NULL AND sitename != ''
-          AND (lt IS NULL OR lt = 0 OR lg IS NULL OR lg = 0)
-    `);
+    let rows: Array<{compid: string; sitename: string}>;
+    try {
+        rows = await db.query(escape`
+            SELECT compid, sitename
+            FROM competition
+            WHERE sitename IS NOT NULL AND sitename != ''
+              AND (lt IS NULL OR lt = 0 OR lg IS NULL OR lg = 0)
+        `);
+    } catch (e) {
+        log('regeocodeMissingCompetitions: competition read failed:', e);
+        return;
+    }
     if (!rows?.length) return;
 
     log(`regeocodeMissingCompetitions: ${rows.length} competition(s) need geocoding`);

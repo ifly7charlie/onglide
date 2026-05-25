@@ -134,6 +134,14 @@ export async function upsertTaskAndLegs(
         return false;
     }
 
+    // Single forensic boundary around the whole install: standalone
+    // UPDATEs (grandprix flag, compstatus), the SELECT for the hash
+    // short-circuit, the transaction chain, and the post-tx
+    // pilotresult sync and tz refinement. The transaction's own
+    // .rollback() callback handles in-flight chain failures; this
+    // catch picks up everything else and logs with classid+date so a
+    // mid-import DB blip isn't anonymous.
+    try {
     let tasktype: 'S' | 'A' | 'D' | 'E' = 'S';
     let duration = '00:00';
     if (day.task_type == 'assigned_area') {
@@ -577,6 +585,10 @@ export async function upsertTaskAndLegs(
 
     log(`${classname}: processed task ${date}`);
     return true;
+    } catch (e) {
+        log(`${classid} - ${date}: upsertTaskAndLegs failed:`, e);
+        return false;
+    }
 }
 
 //
