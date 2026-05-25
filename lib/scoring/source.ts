@@ -159,6 +159,15 @@ export interface ScoringSource {
     fetchTrackers?(ctx: SourceCtx): Promise<void>;
     readonly trackerIntervalMs?: number;
 
+    // Optional override for the tasks-fetch cadence during L (launching)
+    // and S (post-start, within the launch window) class phases. When
+    // unset, the scheduler uses INTERVAL_TASKS_FAST_MS for L and
+    // INTERVAL_TASKS_SLOW_MS for S — fine for adapters whose tasks
+    // payload is expensive. SGP sets this tight (60 s) because its
+    // task+tracks JSON is cheap and the L→S nostart rewrite needs to
+    // land in seconds, not minutes.
+    readonly activeTasksCadenceMs?: number;
+
     // Optional daily competition discovery. The scheduler calls this at
     // most once per UTC day (at or after 05:00 UTC) and INSERT IGNOREs
     // each returned `{compid, url}` into `scoringsource` so any new

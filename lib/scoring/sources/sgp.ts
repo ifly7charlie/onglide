@@ -252,6 +252,11 @@ async function upsertSgpTracker(
 export class SgpSource implements ScoringSource {
     readonly type = 'sgp';
     readonly trackerIntervalMs = 5 * 60 * 1000;
+    // SGP's task+tracks JSON is cheap and the L→S nostart rewrite (start
+    // line time) needs to land within seconds, not the 10-min FAST
+    // default. Honoured by the scheduler's desiredTaskCadence for L and
+    // S phases.
+    readonly activeTasksCadenceMs = 60 * 1000;
 
     async ensureMetadata(ctx: SourceCtx): Promise<void> {
         try {
@@ -261,11 +266,11 @@ export class SgpSource implements ScoringSource {
         }
     }
 
-    async fetchPilots(ctx: SourceCtx, options?: FetchPilotsOptions): Promise<FetchPilotsResult> {
+    async fetchPilots(ctx: SourceCtx, options?: FetchPilotsOptions, prefetchedJson?: any): Promise<FetchPilotsResult> {
         const accumulator = new PilotFetchAccumulator();
         const synthetic = {n: 0};
 
-        const res = await fetchSgpJson(ctx);
+        const res = prefetchedJson !== undefined ? prefetchedJson : await fetchSgpJson(ctx);
         if (!res || !Array.isArray(res.tracks)) {
             return {observed: accumulator.observed};
         }
@@ -322,11 +327,23 @@ export class SgpSource implements ScoringSource {
         return {observed: accumulator.observed};
     }
 
-    // Trackers and pilots come in the same JSON payload, so the trackers
-    // cadence re-uses fetchPilots with skipPrune to avoid wiping the
-    // roster on a flap.
+    // Trackers, pilots, and task all come in the same JSON payload, so
+    // the trackers cadence fetches once and dispatches to both
+    // installSgpTask and fetchPilots(skipPrune). skipPrune avoids wiping
+    // the roster on a flap; installing the task here means the FAST
+    // tasks cadence isn't the only path that picks up startline-time
+    // amendments — the 5 min trackers cadence catches them too, for free.
     async fetchTrackers(ctx: SourceCtx): Promise<void> {
-        await this.fetchPilots(ctx, {skipPrune: true});
+        const res = await fetchSgpJson(ctx);
+        if (!res) return;
+        if (res.task) {
+            const classid = makeClassId(ctx.compid, SGP_RAW_CLASS) as ClassId;
+            const todayDatecode = localDatecode(ctx.tz);
+            await upsertClass(ctx.db, ctx.log, ctx.compid, classid, SGP_CLASS_LABEL, todayDatecode);
+            await flagGrandPrixClass(ctx, classid);
+            await installSgpTask(ctx, classid, res.task);
+        }
+        await this.fetchPilots(ctx, {skipPrune: true}, res);
     }
 
     async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {

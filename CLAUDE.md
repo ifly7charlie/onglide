@@ -102,9 +102,11 @@ Generators in `lib/webworkers/` receive a `log` parameter; **use it, not `consol
 **Four independent streams per heartbeat.** The scheduler dispatches pilots, tasks, results, and trackers separately, each on its own cadence and gate:
 
 - **pilots** — daily 10:00 local gate, plus urgent path when the comp is active but the DB is empty.
-- **tasks** — per-class cadence via `desiredTaskCadence`: FAST (10 min) while pre-task or status='L'; SLOW (30 min) for briefed-pre-launch or post-start; stops once every today-class is F/H/Z or past its `30m + 1m × pilotsInClass` post-launch window. Stop at 22:00 local.
+- **tasks** — per-class cadence via `desiredTaskCadence`: FAST (10 min) while pre-task or status='L'; SLOW (30 min) for briefed-pre-launch or post-start; stops once every today-class is F/H/Z or past its `30m + 1m × pilotsInClass` post-launch window. Stop at 22:00 local. An adapter may set `activeTasksCadenceMs` to override the L/S cadence — SGP uses 60 s because its task+tracks JSON is cheap and the L→S `nostart` rewrite (start-line time) needs to land in seconds. The "fast"/"slow" reason labels were replaced by `formatCadence` (e.g. `1m`, `10m`, `30m`).
 - **results** — gated on the sticky `everFOrHToday` (any class today has hit `'F'` or `'H'`) OR `localNow >= 18:00`. SLOW (30 min) cadence until 22:00.
-- **trackers** — per-adapter `trackerIntervalMs` (SGP 5 min, OAuth/robocontrol 15 min) between 10:00 and 22:00; drops to hourly once every non-`'Z'` today-class is `'F'` or `'H'`. Adapters that don't expose `fetchTrackers` are skipped.
+- **trackers** — per-adapter `trackerIntervalMs` (SGP 5 min, OAuth/robocontrol 15 min) between 10:00 and 22:00; drops to hourly once every non-`'Z'` today-class is `'F'` or `'H'`. Adapters that don't expose `fetchTrackers` are skipped. SGP's `fetchTrackers` installs the task from the same JSON payload it already pulls for pilots/trackers — so the 5-min trackers cadence picks up tasks for free, and the separate tasks-cadence GET is only the extra polling above that.
+
+On daemon startup `initSourceState` jitters the first per-stream fetch over `STARTUP_JITTER_MS` (5 min). The 30-min `oneSidedJitter` is reserved for "tomorrow at HH:MM local" parking — using it for first-fetch would swallow the entire FAST tasks cadence on a restart during launch.
 
 Dispatch state (`nextPilotsAt` / `nextTasksAt` / `nextResultsAt` / `nextTrackersAt` and the `lastXFetch` bookkeeping) lives in `SourceState` keyed by `ScoringSource.type` inside each `CompState` — so robocontrol's no-op pilots/results stubs can't advance the primary adapter's timestamps. Comp-wide state (`observations`, `firstLaunch`, `everFOrHToday`, comp window, pilot/task counts) stays at the `CompState` level.
 

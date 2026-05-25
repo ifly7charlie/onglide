@@ -208,15 +208,25 @@ interface SchedulerDecisions {
 //   S           → SLOW (30m)   — post-start within firstLaunch + 30m + 1m*pilotsInClass window; null after
 //   F, H, Z     → null         — done for the day
 //
-function desiredTaskCadence(obs: ClassObservation, firstLaunchAt: number | null, nowMs: number): number | null {
+// Render a tasks-cadence interval as a human-readable suffix for the
+// scheduler reasons log. Used to be a hard-coded "fast"/"slow" label
+// based on equality with INTERVAL_TASKS_FAST_MS, but with per-adapter
+// overrides (e.g. SGP at 60s) those labels stop matching the real wait.
+function formatCadence(ms: number): string {
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    const minutes = ms / 60_000;
+    return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`;
+}
+
+function desiredTaskCadence(obs: ClassObservation, firstLaunchAt: number | null, nowMs: number, activeOverrideMs?: number): number | null {
     if (STATUS_NO_TASK.has(obs.status)) return INTERVAL_TASKS_FAST_MS;
     if (STATUS_INSTALLED_PRELAUNCH.has(obs.status)) return INTERVAL_TASKS_SLOW_MS;
-    if (obs.status === 'L') return INTERVAL_TASKS_FAST_MS;
+    if (obs.status === 'L') return activeOverrideMs ?? INTERVAL_TASKS_FAST_MS;
     if (obs.status === 'S') {
         if (obs.fullyScored) return null;
-        if (firstLaunchAt == null) return INTERVAL_TASKS_SLOW_MS; // no anchor yet — be safe and keep polling
+        if (firstLaunchAt == null) return activeOverrideMs ?? INTERVAL_TASKS_SLOW_MS; // no anchor yet — be safe and keep polling
         const windowMs = TASK_LAUNCH_WINDOW_BASE_MS + obs.pilotsInClass * TASK_LAUNCH_WINDOW_PER_PILOT_MS;
-        return nowMs < firstLaunchAt + windowMs ? INTERVAL_TASKS_SLOW_MS : null;
+        return nowMs < firstLaunchAt + windowMs ? (activeOverrideMs ?? INTERVAL_TASKS_SLOW_MS) : null;
     }
     // F, H, Z, or any other code — done for the day.
     return null;
@@ -230,7 +240,8 @@ export function computeDecisions(
     state: CompState, //
     srcState: SourceState,
     localNow: LocalTime,
-    nowMs: number
+    nowMs: number,
+    activeTasksCadenceMs?: number
 ): SchedulerDecisions {
     const reasons: string[] = [];
 
@@ -301,7 +312,7 @@ export function computeDecisions(
     if (todaysObs.length > 0) {
         for (const obs of todaysObs) {
             const firstLaunchAt = state.firstLaunch.get(obs.classid) ?? null;
-            const cadence = desiredTaskCadence(obs, firstLaunchAt, nowMs);
+            const cadence = desiredTaskCadence(obs, firstLaunchAt, nowMs, activeTasksCadenceMs);
             if (cadence != null && (tasksCadenceMs == null || cadence < tasksCadenceMs)) {
                 tasksCadenceMs = cadence;
             }
@@ -319,9 +330,9 @@ export function computeDecisions(
         reasons.push('tasks:all-done-for-day');
     } else if (nowMs >= srcState.nextTasksAt) {
         fetchTasks = true;
-        reasons.push(`tasks:due (${tasksCadenceMs === INTERVAL_TASKS_FAST_MS ? 'fast' : 'slow'})`);
+        reasons.push(`tasks:due (${formatCadence(tasksCadenceMs)})`);
     } else {
-        reasons.push(`tasks:wait-next-due (${tasksCadenceMs === INTERVAL_TASKS_FAST_MS ? 'fast' : 'slow'})`);
+        reasons.push(`tasks:wait-next-due (${formatCadence(tasksCadenceMs)})`);
     }
 
     // ----- results -----
@@ -460,6 +471,16 @@ const ONE_SIDED_JITTER_MS = 30 * 60 * 1000;
 
 function oneSidedJitter(): number {
     return Math.floor(Math.random() * ONE_SIDED_JITTER_MS);
+}
+
+// Startup jitter — used by initSourceState to spread first-fetch HTTP
+// across freshly-registered comps without swallowing the FAST tasks
+// cadence (10 min) that the launch window depends on. 30-min one-sided
+// jitter is fine for "tomorrow at 10am" parking but too long here.
+const STARTUP_JITTER_MS = 5 * 60 * 1000;
+
+function startupJitter(): number {
+    return Math.floor(Math.random() * STARTUP_JITTER_MS);
 }
 
 // localMinuteToEpochMsForward — like localMinuteToEpochMs but with
@@ -836,7 +857,7 @@ async function processCompetition(
         st.perSource.set(src.type, srcState);
     }
 
-    const decisions = computeDecisions(st, srcState, localNow, Date.now());
+    const decisions = computeDecisions(st, srcState, localNow, Date.now(), adapter.activeTasksCadenceMs);
 
     // skipDay (rule 1) needs to know whether any class has a task today.
     let anyTaskToday = false;
@@ -1024,7 +1045,7 @@ function initSourceState(tz: string, localNow: LocalTime): SourceState {
     const morningOrJitter = (): number =>
         inNightQuiet //
             ? localMinuteToEpochMsForward(tz, localNow, MORNING_RESUME_LOCAL_MINUTE)
-            : Date.now() + oneSidedJitter();
+            : Date.now() + startupJitter();
     return {
         nextPilotsAt: morningOrJitter(),
         nextTasksAt: morningOrJitter(),
