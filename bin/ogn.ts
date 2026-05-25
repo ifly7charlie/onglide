@@ -1916,8 +1916,8 @@ function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, displayName: string, tr
         db.transaction()
             .query(
                 escape`
-                INSERT INTO trackerhistory (compno, changed, flarmid, greg, method)
-                VALUES (${trackerRow.compno}, now(), ${blockedEntry.device_id}, ${blockedEntry.registration || null}, ${method})
+                INSERT INTO trackerhistory (compno, class, changed, flarmid, greg, method)
+                VALUES (${trackerRow.compno}, ${trackerRow.className}, now(), ${blockedEntry.device_id}, ${blockedEntry.registration || null}, ${method})
             `
             )
             .commit();
@@ -3170,10 +3170,11 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                         .query(
                             escape`
                             INSERT INTO
-                                trackerhistory (compno, changed, flarmid, greg, method)
+                                trackerhistory (compno, class, changed, flarmid, greg, method)
                             VALUES
                                 (
                                     ${match.compno},
+                                    ${match.className},
                                     now(),
                                     ${flarmId},
                                     ${ddbf.registration || null},
@@ -3232,10 +3233,11 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
                 .query(
                     escape`
                     INSERT INTO
-                        trackerhistory (compno, changed, flarmid, launchtime, method)
+                        trackerhistory (compno, class, changed, flarmid, launchtime, method)
                     VALUES
                         (
                             ${match.compno},
+                            ${match.className},
                             now(),
                             ${flarmId},
                             now(),

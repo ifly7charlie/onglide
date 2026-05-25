@@ -296,10 +296,11 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
                     `)
                     .query(sql`
                         INSERT INTO
-                            trackerhistory (compno, changed, flarmid, launchtime, method)
+                            trackerhistory (compno, class, changed, flarmid, launchtime, method)
                         VALUES
                             (
                                 ${mCompno},
+                                ${classid},
                                 now(),
                                 ${m.flarmid},
                                 now(),
@@ -475,10 +476,11 @@ export async function processIGC(
                     `)
                     .query(sql`
                         INSERT INTO
-                            trackerhistory (compno, changed, flarmid, launchtime, method)
+                            trackerhistory (compno, class, changed, flarmid, launchtime, method)
                         VALUES
                             (
                                 ${compno},
+                                ${classid},
                                 now(),
                                 ${flarmId},
                                 now(),

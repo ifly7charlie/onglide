@@ -625,8 +625,8 @@ async function applyDecisions(decisions: Map<Match, Decision>) {
                 WHERE class = ${pilot.class} AND compno = ${pilot.compno}
             `);
             t.query(escape`
-                INSERT INTO trackerhistory (compno, changed, flarmid, greg, method)
-                VALUES (${pilot.compno}, now(), ${histFlarm}, ${device.registration || null}, ${method})
+                INSERT INTO trackerhistory (compno, class, changed, flarmid, greg, method)
+                VALUES (${pilot.compno}, ${pilot.class}, now(), ${histFlarm}, ${device.registration || null}, ${method})
             `);
             flarmCount++;
         }
