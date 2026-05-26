@@ -211,9 +211,9 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
             await setTimeout(1); // explicit yield - ensures logging and stuff are working and spreads out between the different compnos so one doesn't starve the rest on restart
         }
     } catch (e) {
-        console.log(compno, '[', options.scoreId, '] scoreCollector exception', e, (e as Error)?.stack);
+        console.log(`[${id}] ${className}/${compno} [${options.scoreId}] scoreCollector exception`, e, (e as Error)?.stack);
     }
     trackMetric('sc.done.' + className, 1);
     trackMetric('sc.done', 1);
-    console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
+    console.log(`[${id}] ${className}: SC Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
 }

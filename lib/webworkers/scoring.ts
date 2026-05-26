@@ -464,7 +464,7 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
     // Per-glider on-disk log: logs/<datecode>/<class>/<compno>.log,
     // truncated fresh for this chain instance.
-    const log = createGliderLog(config.datecode, glider.className, glider.compno);
+    const log = createGliderLog(config.datecode, glider.className, glider.compno, glider.scoreId);
     glider.log = log;
 
     let handicap = glider.handicap;

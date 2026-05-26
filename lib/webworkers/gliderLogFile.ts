@@ -104,7 +104,7 @@ function formatArg(a: any): string {
 // (absolute, or relative to the process cwd); defaults to <cwd>/logs.
 const logBaseDir = process.env.SCORING_LOG_DIR || path.join(process.cwd(), 'logs');
 
-export function createGliderLog(datecode: string | number, className: string, compno: string): GliderLogHandle {
+export function createGliderLog(datecode: string | number, className: string, compno: string, scoreId: string): GliderLogHandle {
     const dir = path.join(logBaseDir, String(datecode), String(className));
     // pid in the filename so two ogn processes scoring the same comp don't
     // truncate-and-overwrite each other's file (which leaves NUL-byte holes).
@@ -120,7 +120,7 @@ export function createGliderLog(datecode: string | number, className: string, co
         console.log(`gliderLog: unable to open ${filePath}: ${e}`);
     }
 
-    let buffer: string[] = [];
+    let buffer: string[] = [`${new Date().toISOString()} chain start ${className}/${compno} [${scoreId}]`];
 
     const append = (args: any[], isError: boolean) => {
         const stamp = new Date().toISOString();

@@ -133,7 +133,7 @@ Vector basemap is a single self-hosted `.pmtiles` file served over HTTP range re
 ## Repository quirks
 
 - `dist/` is the build output for daemons — don't edit it. `nextdest/` is similar for the front-end type-check pass.
-- A few stray `*~` and `#…#` editor backup files are checked in alongside their real counterparts; ignore them.
+- Emacs leaves `*~` and `#…#` backup files alongside their real counterparts; `.gitignore` excludes them so they never make it into commits.
 - `.aprs` files at the repo root are recorded APRS logs used for replay/testing (large — `476.aprs` is ~230 MB).
 - The Next.js version pinned here **is not safe to expose directly** — always run behind Apache/Cloudflare (see `readme.md`).
 - `readme.md` (lowercase) is the operator's deployment guide. It documents env vars (`NEXT_PUBLIC_PMTILES_URL`, `MYSQL_PASSWORD`, `SOARINGSPOT_*`, `ROBOCONTROL_URL`, etc.), Planetiler invocations for pmtiles, and the docker-compose topology (`mysql`, `soaringspot`, `ogn`, `next`, `apache`).

@@ -201,7 +201,6 @@ interface Channel {
     //    name: string
     className: ClassName;
     compid: string;
-    displayName: string; // "<compShort>/<classname>" — for log lines
     classname: string; // human-readable class name (e.g. "Open", "Standard")
     datecode: Datecode;
 
@@ -317,7 +316,6 @@ interface Glider {
     compno: Compno;
     className: ClassName;
     compid: string;
-    displayName: string; // mirrors channel.displayName for log clarity
     channelName: ChannelName;
 
     flarmIdRegex: RegExp;
@@ -749,7 +747,7 @@ async function main() {
                     client.terminate();
                 });
                 console.log(
-                    `${channel.displayName}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`
+                    `${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`
                 );
             }
 
@@ -1133,7 +1131,7 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
     for (const cname of ownedCnames) {
         const channel = channels[cname];
         if (!channel) continue;
-        console.log(`${tag}/${channel.displayName}: closing ${channel.clients.length} clients`);
+        console.log(`${tag}/${channel.className}: closing ${channel.clients.length} clients`);
         const clients = channel.clients; // adopt so nothing else tries to deal with them
         channel.clients = [];
         for (const client of clients) {
@@ -1361,7 +1359,6 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 className: c.class,
                 compid: c.compid,
                 classname: c.classname,
-                displayName: `${compShort(c.compid)}/${c.classname}`,
                 datecode: datecode,
                 compStatus: c.status || '',
                 statusDatecode: (c.datecode as Datecode | null) ?? null,
@@ -1450,7 +1447,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     // and added to newchannels. Only touch channels belonging to this competition.
     const stale = Object.values(channels).filter((c) => c.compid === competition.compid && !newchannels[channelName(c.className, c.datecode)]);
     if (stale.length) {
-        console.log(`${compShort(competition.compid)} closing channels: ${stale.map((c) => c.displayName).join(',')}`);
+        console.log(`${compShort(competition.compid)} closing channels: ${stale.map((c) => c.className).join(',')}`);
         stale.forEach((channel) => {
             channel.broadcastChannel?.close();
             channel.scoring?.shutdown();
@@ -1476,7 +1473,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
         channels[cname as ChannelName] = channel;
     }
     const channelsLine = Object.values(newchannels)
-        .map((c) => `${c.displayName}${c.datecode}`)
+        .map((c) => `${c.className}${c.datecode}`)
         .join(',');
     if (lastChannelsLog.get(competition.compid) !== channelsLine) {
         console.log(`${compShort(competition.compid)} channels: ${channelsLine}`);
@@ -1489,7 +1486,6 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
     const getTask = async (channel: Channel, maxHandicap: number) => {
         const className = channel.className;
         const datecode = channel.datecode;
-        const displayName = channel.displayName;
         const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow)[]>(escape`
             SELECT
                 tasks.*,
@@ -1523,7 +1519,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
         `)) || {})[0];
 
         if (!taskdetails || !taskdetails.type) {
-            console.log(`${displayName}/${datecode}: no active task`, taskdetails);
+            console.log(`${className}/${datecode}: no active task`, taskdetails);
             return null;
         }
 
@@ -1542,7 +1538,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
         `);
 
         if (tasklegs.length < 2) {
-            console.log(`${displayName}: task ${taskid} is invalid - too few turnpoints`);
+            console.log(`${className}: task ${taskid} is invalid - too few turnpoints`);
             return null;
         }
 
@@ -1577,15 +1573,15 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
 
         if (!equal(channel.task ?? {}, updatedTask ?? {})) {
             console.log(
-                `new task for ${channel.displayName}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs
+                `new task for ${channel.className}: changed from ${channel.task?.details?.taskid || 'none'} to ${updatedTask?.details?.taskid || 'none'} [${channel.datecode}] ${updatedTask?.legs
                     ?.reduce((a, l) => a + l.length, 0)
                     .toFixed(1)}km`
             );
-            console.log(`${channel.displayName}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
+            console.log(`${channel.className}: Startline open: ${updatedTask?.rules.nostartutc}, sgp: ${updatedTask?.rules.grandprixstart}, hcap: ${updatedTask?.rules.handicapped}, aat: ${updatedTask?.rules.aat}`);
 
             // If it had a task, and doesn't any longer then just stop it scoring
             if (channel.task && !updatedTask) {
-                console.log(`${channel.displayName}: ** clear task`);
+                console.log(`${channel.className}: ** clear task`);
                 channel.scoring?.clearTask();
                 channel.scoreHistory.clear();
                 channel.allScores = {};
@@ -1599,7 +1595,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
             if (updatedTask) {
                 channel.task = updatedTask;
                 channel.geoTask = taskGeoJSON(updatedTask);
-                console.log(`${channel.displayName}: ** rescore ** ${channel.scoreId} => ${channel.proposedScoreId} (task changed)`);
+                console.log(`${channel.className}: ** rescore ** ${channel.scoreId} => ${channel.proposedScoreId} (task changed)`);
                 channel.scoreHistory.set(channel.proposedScoreId, new Map());
                 channel.scoring?.setTask(channel.task, channel.proposedScoreId);
                 channel.scoreIdUpdateRequired = true;
@@ -1673,7 +1669,7 @@ function rebuildAprsFilter() {
 
     if (filter === lastAprsFilter) return;
     lastAprsFilter = filter;
-    console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.displayName).join(',') || 'no-tasks'}]: ${filter}`);
+    console.log(`aprs filter (${filter.length} bytes) [${withTasks.map((c) => c.className).join(',') || 'no-tasks'}]: ${filter}`);
     aprsController?.setFilter(filter);
 }
 
@@ -1690,7 +1686,7 @@ function sendTask(sendTo: Channel | OgnWebSocket, channel: Channel) {
                   }
                 : {legs: []}
         },
-        `task ${channel.displayName}`
+        `task ${channel.className}`
     );
     if (msg) sendTo.sendBinary(msg);
 }
@@ -1824,14 +1820,14 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
         if (g.compid !== compid) return false;
         const newValue = keyedDb[makeClassname_Compno(g)];
         if (!newValue || newValue.dbTrackerId != g.dbTrackerId) {
-            console.log(`${g.displayName}:${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
+            console.log(`${g.className}:${g?.compno} - new: ${newValue?.dbTrackerId} vs old: ${g.dbTrackerId} scoredStatus: ${newValue?.scoredStatus}`);
             return true; // removed or it has changed id
         }
         return g.datecode != datecode;
     });
 
     removedGliders.forEach((g) => {
-        console.log(`${g.displayName}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
+        console.log(`${g.className}:${g.compno} terminating scoring & tracking as no flarm ids found [channel ${g.channelName}]`);
         if (g.dbTrackerId && g.dbTrackerId != 'unknown' && g.dbTrackerId != 'blocked') {
             aprsController?.untrackGlider(g.compno, g.className, g.channelName, g.dbTrackerId);
         }
@@ -1855,7 +1851,7 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
         if (channel.compid !== compid || channel.datecode !== datecode) continue;
         for (const compno of Object.keys(channel.allScores) as Compno[]) {
             if (!keyedDb[makeClassname_Compno(channel.className, compno)]) {
-                console.log(`${channel.displayName}:${compno} clearing orphan score (not in current pilot list)`);
+                console.log(`${channel.className}:${compno} clearing orphan score (not in current pilot list)`);
                 channel.scoring?.clearGlider(compno);
                 channel.scoreIdUpdateRequired = true;
                 forgetCompno(channel, compno);
@@ -1888,7 +1884,6 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
         gliders[gliderKey] = Object.assign(existing || {}, {
             ...t,
             compid: t.compid,
-            displayName: `${compShort(t.compid)}/${t.classname}`,
             channelName: channelName(t.className, datecode),
             greg: t?.greg?.replace(/[^A-Z0-9]/i, ''),
             datecode
@@ -1909,7 +1904,7 @@ async function updatePilots(competition: CompetitionContext, datecode: Datecode)
 // a DB rewrite to take effect. Inserts a trackerhistory audit row noting
 // the blocked device_id and source. Skips silently when ddb is empty
 // (no fetch yet) — picked up on the next datecode rollover.
-function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, displayName: string, trackingconsent: string | undefined | null): void {
+function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, className: string, trackingconsent: string | undefined | null): void {
     if (!trackerRow.dbTrackerId || trackerRow.dbTrackerId === 'unknown' || trackerRow.dbTrackerId === 'blocked') return;
     if (Object.keys(ddb).length === 0) return;
     let blockedEntry: SharedDDBEntry | undefined;
@@ -1925,7 +1920,7 @@ function applyDDBFirstLoadBlock(trackerRow: CTrackerRow, displayName: string, tr
     if (!blockedEntry) return;
     const sources = blockedEntry.sources?.join('+') ?? '?';
     const method = blockedMethod(blockedEntry);
-    console.log(`${displayName}:${trackerRow.compno} first-load blocked via DDB (${blockedEntry.device_id}, sources: ${sources}, method: ${method})`);
+    console.log(`${className}:${trackerRow.compno} first-load blocked via DDB (${blockedEntry.device_id}, sources: ${sources}, method: ${method})`);
     trackerRow.dbTrackerId = 'blocked';
     if (!readOnly) {
         db.transaction()
@@ -1980,7 +1975,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 // hit, which feeds the OR below; glider.blocked covers
                 // subsequent ticks where t.dbTrackerId is fresh from the DB.
                 if (!hadTracker && !glider.blocked) {
-                    applyDDBFirstLoadBlock(t, channel.displayName, competition.trackingconsent);
+                    applyDDBFirstLoadBlock(t, channel.className, competition.trackingconsent);
                 }
 
                 // Blocked pilots: aprs.ts validateGlider rejects 'blocked', so
@@ -2000,7 +1995,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                     // Pilot just transitioned from tracked to blocked: drop them
                     // from the worker so it stops scoring them.
                     if (glider.scoringConfigured && !glider.blocked) {
-                        console.log(`${channel.displayName}:${t.compno} now blocked, clearing from worker`);
+                        console.log(`${channel.className}:${t.compno} now blocked, clearing from worker`);
                         channel.scoring?.clearGlider(t.compno);
                     }
                     glider.blocked = true;
@@ -2022,7 +2017,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 // drop the synthesised Blocked score so the sendScore guard
                 // doesn't keep refusing to overwrite it.
                 if (glider.blocked) {
-                    console.log(`${channel.displayName}:${t.compno} no longer blocked, restoring scoring`);
+                    console.log(`${channel.className}:${t.compno} no longer blocked, restoring scoring`);
                     glider.blocked = false;
                     glider.scoringConfigured = false;
                     delete channel.allScores[t.compno];
@@ -2212,7 +2207,7 @@ async function finaliseTracksBroadcast(competition: CompetitionContext) {
         if (channel.compid !== competition.compid) continue;
         if (channel.tracksBroadcastRequired) {
             channel.tracksBroadcastRequired = false;
-            await primeAndBroadcast(channel, `updateTrackers ${channel.displayName}`);
+            await primeAndBroadcast(channel, `updateTrackers ${channel.className}`);
         }
     }
 }
@@ -2273,7 +2268,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
     const firstPointTime = Math.min(channel.earliestStart ?? channel.earliestScore ?? Infinity, now - 120);
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
-        console.log(`${channel.displayName}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
+        console.log(`${channel.className}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
         const toStream = Object.entries(gliders).reduce<Record<string, any>>((result, [compno, glider]) => {
             if (glider.className == channel.className) {
                 const p = glider.deck;
@@ -2301,7 +2296,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
             return result;
         }, {});
         // Send the client the current version of the tracks
-        const webPath = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: 0}}, `webPath ${channel.displayName}`);
+        const webPath = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: 0}}, `webPath ${channel.className}`);
         // Don't advertise a baseTime for a snapshot with no pilots — viewers
         // would fetch the empty .bin and the proxy/browser would cache it.
         if (webPath && Object.keys(toStream).length > 0) {
@@ -2347,7 +2342,7 @@ async function generateRecentPilotTracks(channel: Channel) {
         return result;
     }, {});
     // Send the client the current version of the tracks
-    return safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.displayName}`) ?? new Uint8Array(0);
+    return safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.className}`) ?? new Uint8Array(0);
 }
 
 // Build the tracks message and broadcast it to all clients of the channel.
@@ -2428,7 +2423,7 @@ async function sendAllScores(client: OgnWebSocket) {
             },
             t: channelNow(channel)
         },
-        `sendAllScores ${channel.displayName}`
+        `sendAllScores ${channel.className}`
     );
 
     // If it's after a join then only send to the one client
@@ -2450,7 +2445,7 @@ async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = fa
                   }
                 : {})
         },
-        `sendIdentifiersToAll ${channel.displayName}`
+        `sendIdentifiersToAll ${channel.className}`
     );
 
     // If it's after a join then only send to the one client
@@ -2462,7 +2457,7 @@ async function sendIdentifiersToAll(channel: Channel, includeScore: boolean = fa
 // information
 async function sendScore(channel: Channel, compno: Compno, score: PilotScore, recentStart: Epoch | undefined, scoreId: string, t: Epoch | undefined, migrateFrom: string) {
     if (compno == '_live') {
-        console.log(`${channel.displayName}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
+        console.log(`${channel.className}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
         if (channel.liveScoreId != scoreId) {
             channel.scoreHistory.delete(channel.liveScoreId);
         }
@@ -2471,8 +2466,8 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         // _live is the "live scoring is ready" signal — re-derive compstatus now.
         updateCompStatus(channel);
         sendIdentifiersToAll(channel, true);
-        console.log(`${channel.displayName}/${channel.datecode}: updating all tracks`);
-        await primeAndBroadcast(channel, `_live ${channel.displayName}/${channel.datecode}`);
+        console.log(`${channel.className}/${channel.datecode}: updating all tracks`);
+        await primeAndBroadcast(channel, `_live ${channel.className}/${channel.datecode}`);
 
         const pendingChannels = Object.values(channels)
             .filter(channelNeedsScoring)
@@ -2610,7 +2605,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 .sort((a, b) => Number(a) - Number(b))
                 .map((t) => `${d(Number(t))}=${mcs[t]}`)
                 .join(', ');
-            console.log(`${channel.displayName} likely GP start ${likely ? d(Number(likely)) : 'none'}; buckets: ${buckets}`);
+            console.log(`${channel.className} likely GP start ${likely ? d(Number(likely)) : 'none'}; buckets: ${buckets}`);
         }
     }
 
@@ -3019,7 +3014,7 @@ async function sendKeepalive(channel: Channel) {
     const sumConnectedTime = channel.clients.reduce((a: number, c: any) => a + (compNow - c.connectedAt), 0);
 
     if (channel.clients.length) {
-        console.log(`${channel.displayName}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
+        console.log(`${channel.className}: ${channel.clients.length} subscribed ${Math.trunc(sumConnectedTime / channel.clients.length / 30) / 2}m avg time, ${channel.activeGliders.size} gliders airborne`);
     }
 
     // For sending the keepalive
@@ -3035,7 +3030,7 @@ async function sendKeepalive(channel: Channel) {
                 airborne: channel.activeGliders.size
             }
         },
-        `keepalive ${channel.displayName}`
+        `keepalive ${channel.className}`
     );
 
     // Reset for next iteration (independent of encode outcome — the snapshot was already taken)
@@ -3064,13 +3059,13 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     const glider = gliders[makeClassname_Compno(channel.className, message.c as Compno)];
 
     if (!glider) {
-        console.log(`${channel.displayName}/${message.c}: unexpected position ${d(message.t)}`);
+        console.log(`${channel.className}/${message.c}: unexpected position ${d(message.t)}`);
         return;
     }
 
     // If we have a reset message
     if (message.t == (0 as Epoch)) {
-        console.log(`${channel.displayName}/${message.c}: new track start received`);
+        console.log(`${channel.className}/${message.c}: new track start received`);
         initialiseDeck(message.c as Compno, glider, randomBytes(4).readUInt32BE(0));
         return;
     }
