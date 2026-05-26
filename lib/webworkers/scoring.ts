@@ -453,19 +453,18 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
     } else if (!glider.task) {
         console.log(`${config.className}/${compno}: unable to rescore glider (no task configured) [${scoreId}]`);
     } else {
-        // Flush + close the previous chain's logger before the new chain
-        // (and a fresh, truncated log file) is built in getScoringChain.
-        glider.log?.close();
+        // Each chain owns its own logger; closed by the auto-close wrapper
+        // inside getScoringChain when the chain ends or is restart-broken.
         scoreUpdater?.collect(compno, (glider.scoring = getScoringChain(glider, config, glider.task)), scoreId);
     }
 }
 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
-    // Per-glider on-disk log: logs/<datecode>/<class>/<compno>.log,
-    // truncated fresh for this chain instance.
+    // Per-glider on-disk log: logs/<datecode>/<class>/<compno>.<pid>.log,
+    // append-mode and shared across chains; the scoreId line prefix lets
+    // grep separate concurrent rescore sequences.
     const log = createGliderLog(config.datecode, glider.className, glider.compno, glider.scoreId);
-    glider.log = log;
 
     let handicap = glider.handicap;
 
@@ -497,5 +496,17 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
     //    and therefore speeds
     const scores = taskScoresGenerator(task, glider.compno, handicap, distances, log);
 
-    return stats ? stats.attacher(scores) : scores;
+    return autoCloseLog(stats ? stats.attacher(scores) : scores, log);
+}
+
+// Wrap the final scoring chain so the per-glider logger is closed (and its
+// buffer flushed) when iteration ends — naturally, via a restart-count break
+// in iterateAndUpdate, or by an upstream exception. Without this the file
+// descriptor leaks for every replaced chain.
+async function* autoCloseLog<T>(inner: AsyncGenerator<T, void, void>, log: GliderLogHandle): AsyncGenerator<T, void, void> {
+    try {
+        yield* inner;
+    } finally {
+        log.close();
+    }
 }

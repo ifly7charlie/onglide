@@ -114,18 +114,19 @@ export function createGliderLog(datecode: string | number, className: string, co
     let fd = -1;
     try {
         fs.mkdirSync(dir, {recursive: true});
-        // 'w' truncates — a fresh chain instance gets a fresh file.
-        fd = fs.openSync(filePath, 'w');
+        // 'a' appends — concurrent rescore sequences share the file; each
+        // line carries the scoreId so they can be untangled by grep.
+        fd = fs.openSync(filePath, 'a');
     } catch (e) {
         console.log(`gliderLog: unable to open ${filePath}: ${e}`);
     }
 
-    let buffer: string[] = [`${new Date().toISOString()} chain start ${className}/${compno} [${scoreId}]`];
+    let buffer: string[] = [`${new Date().toISOString()} [${scoreId}] chain start ${className}/${compno}`];
 
     const append = (args: any[], isError: boolean) => {
         const stamp = new Date().toISOString();
         const body = args.map(formatArg).join(' ');
-        buffer.push(isError ? `${stamp} ERROR ${body}` : `${stamp} ${body}`);
+        buffer.push(isError ? `${stamp} [${scoreId}] ERROR ${body}` : `${stamp} [${scoreId}] ${body}`);
     };
 
     const flush = () => {

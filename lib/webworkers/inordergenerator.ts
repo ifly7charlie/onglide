@@ -177,28 +177,23 @@ export function bindChannelForInOrderPackets(
 
         // Loop till we are told to stop (an exception on yield)
         while (messageQueueId === currentMessageQueueId) {
-            // If we don't have a message we should wait
+            // If we don't have a message we wait first; only emit a tick if the
+            // wait expired without a message. This keeps the tick useful for EPG's
+            // gap-based landout detection without firing one on every real fix.
             if (position >= messageQueue.length) {
-                // We will tick on empty queue with the current real time this flushes out
-                // landouts
-                const nextPoint = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
-                if (messageQueueId !== currentMessageQueueId) return;
-                if (nextPoint) {
-                    // If scoring needs us to rewind we can do that immediately
-                    position = sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
-                    continue;
-                }
-
-                // Otherwise we will wait for next message, or until a timeout has occurred
-                // this may be less than 5 minutes as there can be more than one iterator on an IOG
-                // but it's unlikely
-                const timeout = setTimeout(() => resolveAll(), 300_000);
+                const timeout = setTimeout(() => resolveAll(), 60_000);
                 await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
                 clearTimeout(timeout);
+                if (messageQueueId !== currentMessageQueueId) return;
 
                 // >= (not ==) because the t=0 reset handler can clear messageQueue
                 // while we're awaiting, leaving position stale and > length.
                 if (position >= messageQueue.length) {
+                    const nextPoint = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
+                    if (messageQueueId !== currentMessageQueueId) return;
+                    if (nextPoint) {
+                        position = sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
+                    }
                     continue;
                 }
             }

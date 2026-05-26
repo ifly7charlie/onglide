@@ -122,9 +122,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                 if (ok) {
                     log('ok tick on isTick', status);
-                    if (previousPoint) {
-                        status.lastProcessedPoint = simplifyPoint(previousPoint);
-                    }
                     let startIsCloseOrPassed = status.t + 59 > (status.utcStart ?? 0);
                     if (lastTickStatus && !startIsCloseOrPassed && !status._) {
                         continue;
@@ -563,10 +560,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                 );
                                 // Linear interpolation across a gap that straddles utcStart
                                 // can extrapolate the estimated turn time before the start; clamp it.
-                                const possibleT = Math.max(
-                                    Math.round(point.t - (distanceRemaining / distanceNeeded) * elapsedTime),
-                                    status.utcStart ?? 0
-                                ) as Epoch;
+                                const possibleT = Math.max(Math.round(point.t - (distanceRemaining / distanceNeeded) * elapsedTime), status.utcStart ?? 0) as Epoch;
                                 possibleAdvances.push({
                                     possiblePoints: [{...hc.onBoundary!, t: possibleT}],
                                     estimatedTurnType: EstimatedTurnType.dogleg,
