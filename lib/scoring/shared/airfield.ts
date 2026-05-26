@@ -290,14 +290,18 @@ export async function geocodeNominatim(name: string, log: Logger = noopLogger): 
 // `aerodrome` works across locales because it's the literal OSM tag
 // value, not a language word. Returns only an aeroway hit — accepting
 // any other class here would just reintroduce the original ambiguity.
-export async function geocodeNominatimAerodrome(name: string, log: Logger = noopLogger): Promise<NominatimGeocode | null> {
+export async function geocodeNominatimAerodrome(name: string, log: Logger = noopLogger, countryCode?: string): Promise<NominatimGeocode | null> {
     // Strip a trailing `, <Country>` segment — Nominatim's text matcher
     // treats `Hütten, Germany aerodrome` as three tokens and finds
     // nothing, whereas `Hütten aerodrome` lifts the actual aeroway hit
-    // out of the noise cleanly.
+    // out of the noise cleanly. `countryCode` (ISO alpha-2) is passed
+    // through Nominatim's `countrycodes` filter to keep an ASCII-folded
+    // sitename like `Żar` from matching `Aeropuerto Almirante Marcos
+    // Zar` in Argentina.
     const base = name.replace(/\s*,\s*[^,]+$/, '').trim() || name;
     const q = `${base} aerodrome`;
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`;
+    const ccParam = countryCode ? `&countrycodes=${encodeURIComponent(countryCode.toLowerCase())}` : '';
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1${ccParam}`;
     let resp: Response;
     try {
         resp = await fetch(url, {headers: {'User-Agent': HTTP_UA}});

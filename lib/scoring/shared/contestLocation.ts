@@ -82,9 +82,12 @@ export async function findApproximateContestLocation(
         log(`  stage 1 skipped: no country code from Nominatim or sitename suffix`);
     }
 
-    // Stage 2: Nominatim aerodrome-biased retry.
-    log(`  stage 2: nominatim "<name> aerodrome" retry`);
-    const aero = await geocodeNominatimAerodrome(location, log).catch((e) => {
+    // Stage 2: Nominatim aerodrome-biased retry. Pass the country code
+    // so an ASCII-folded sitename (`Żar` → `Zar`) doesn't match an
+    // unrelated airfield in another country (e.g. `Aeropuerto Almirante
+    // Marcos Zar`, Argentina).
+    log(`  stage 2: nominatim "<name> aerodrome" retry (cc=${countryCode || '-'})`);
+    const aero = await geocodeNominatimAerodrome(location, log, countryCode).catch((e) => {
         log('nominatim aerodrome retry threw:', e);
         return null;
     });
@@ -93,10 +96,24 @@ export async function findApproximateContestLocation(
         return makeResult(aero.lat, aero.lon, aero.countryCode || countryCode || '');
     }
 
-    // Stage 3: top-N Nominatim seeds + 30 km Overpass sweeps.
-    log(`  stage 3: trying ${Math.min(seeds.length, 3)} nominatim seed(s) with radius overpass`);
+    // Stage 3: top-N Nominatim seeds + 30 km Overpass sweeps. If the
+    // full sitename yielded no seeds (truncated or misspelled, e.g.
+    // "Čakovec Pribisla" instead of "Čakovec Pribislavec"), retry with
+    // just the first word — Nominatim resolves it to the town centroid
+    // and the 30 km sweep finds aerodromes nearby whose name still
+    // prefix-matches the original token (`pribislavec` ~ `pribisla`).
+    let stageSeeds = seeds;
+    if (!stageSeeds.length) {
+        const stripped = location.replace(/\s*,\s*[^,]+$/, '').trim() || location;
+        const firstWord = stripped.split(/[\s\-,.()'"\/]+/).find((w) => w.length >= 3);
+        if (firstWord && firstWord !== stripped) {
+            log(`  stage 3: no seeds for full sitename, retrying with first word "${firstWord}"`);
+            stageSeeds = await geocodeNominatimSeeds(firstWord, 3, log).catch(() => [] as typeof seeds);
+        }
+    }
+    log(`  stage 3: trying ${Math.min(stageSeeds.length, 3)} nominatim seed(s) with radius overpass`);
     let best: RankedAirfield | null = null;
-    for (const seed of seeds.slice(0, 3)) {
+    for (const seed of stageSeeds.slice(0, 3)) {
         const ranked = await findAirfieldsByPoint(location, seed.lat, seed.lon, undefined, log).catch(() => [] as RankedAirfield[]);
         const top = ranked[0];
         if (!top || top.nameOverlap < 1) continue;

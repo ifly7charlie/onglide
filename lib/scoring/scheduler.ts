@@ -345,7 +345,8 @@ export function computeDecisions(
         reasons.push('tasks:all-done-for-day');
     } else if (nowMs >= srcState.nextTasksAt) {
         fetchTasks = true;
-        reasons.push(`tasks:due (${formatCadence(tasksCadenceMs)})`);
+        const repairYesterday = srcState.lastResultsLocalDate !== localNow.iso;
+        reasons.push(`tasks:due (${formatCadence(tasksCadenceMs)}${repairYesterday ? ' +repair-yesterday-results' : ''})`);
     } else {
         reasons.push(`tasks:wait-next-due (${formatCadence(tasksCadenceMs)}, in ${formatWait(srcState.nextTasksAt - nowMs)})`);
     }
@@ -994,16 +995,32 @@ async function processCompetition(
     if (decisions.fetchTasks) {
         const skipDay = makeSkipDayPredicate(st.tz, localNow, anyTaskToday);
         const acceptYesterday = srcState.lastResultsLocalDate !== localNow.iso;
+        // On the first task tick of a new local day, drop tasksOnly so the
+        // same fetch also pulls yesterday's results page (one shot to repair
+        // any pilotresult row whose start/finish was written from an earlier
+        // degenerate mid-day scrape). The results-only branch alone is gated
+        // on F/H or 18:00 — too late if yesterday's data needs to be
+        // correct for morning re-runs of findtrackers, etc.
+        const tasksOnly = !acceptYesterday;
         try {
-            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {tasksOnly: true, acceptYesterday});
+            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {tasksOnly, acceptYesterday});
             if (result?.observedClasses) {
                 srcState.lastTaskObservedClasses = result.observedClasses;
             }
             // Refresh observations — a task install promotes compstatus to
             // 'B', which the next decisions evaluation needs to see.
             await refreshObservations(st, ctx, nowInTz(st.tz));
+            // Combined morning fetch already touched the results page —
+            // mark today as done so the next task tick reverts to tasks-only
+            // and the standard results-only cadence doesn't double-pull
+            // yesterday. We don't bump nextResultsAt: the results-only
+            // branch should still fire on its own gate (F/H or 18:00).
+            if (!tasksOnly) {
+                srcState.lastResultsFetch = Date.now();
+                srcState.lastResultsLocalDate = localNow.iso;
+            }
         } catch (e) {
-            ctx.log('fetchResultsAndTasks (tasks-only) threw:', e);
+            ctx.log(`fetchResultsAndTasks (${tasksOnly ? 'tasks-only' : 'tasks+repair-yesterday-results'}) threw:`, e);
         }
         srcState.nextTasksAt = scheduleNextTasks(st, nowInTz(st.tz), Date.now(), decisions.tasksCadenceMs);
     }
