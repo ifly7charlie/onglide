@@ -44,7 +44,7 @@ import {fromDateCode, toDateCode, competitionStartTs} from '../lib/datecode';
 import {classDisplayStatus, type CompetitionDisplayStatus} from '../lib/competition-display-status';
 
 // Web Push notifications for competition status changes (daemon-only module).
-import {initPushNotifications, notifyCompetitionDelta, sweepDeferredStarts, sweepExpiredSubscriptions, purgeSubscriptionsForComp} from './lib/pushNotifications';
+import {initPushNotifications, notifyCompetitionDelta, sweepDeferredStarts, sweepExpiredSubscriptions} from './lib/pushNotifications';
 
 // Reserved channel name for the global "all competitions" feed used by the
 // landing page. Lowercase so it cannot collide with a real `{className}{datecode}`
@@ -1202,8 +1202,6 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
     // and broadcasting `removed` would leave clients on a "can't find
     // competition" overlay until they reconnect to the new daemon.
     if (!shuttingDown) broadcastCompetitionsDelta([], [competition.compid]);
-    // The comp is over — drop any push subscriptions still held for it.
-    if (!readOnly) purgeSubscriptionsForComp(competition.compid, db).catch((e) => console.log('purgeSubscriptionsForComp failed', e));
 }
 
 async function tickCompetition(competition: CompetitionContext) {
