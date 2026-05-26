@@ -2559,10 +2559,11 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                     : score;
             channel.allScores[compno] = stored;
 
-            // Re-derive compstatus from genuine live scoring only — skip while a
-            // rescore is in flight (those scores carry the proposed scoreId, not
-            // liveScoreId, and channel.scoreId !== channel.liveScoreId).
-            if (channel.scoreId === channel.liveScoreId && scoreId === channel.liveScoreId) {
+            // Re-derive compstatus from the authoritative live chain only —
+            // scoreId must match liveScoreId. A rescore running concurrently
+            // (channel.scoreId !== channel.liveScoreId) does not block this:
+            // its scores carry the proposed scoreId and won't take this branch.
+            if (scoreId === channel.liveScoreId) {
                 updateCompStatus(channel);
             }
         }
