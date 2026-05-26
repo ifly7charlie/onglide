@@ -127,3 +127,4 @@ lib/.#htmlhelper.js
 keys/*
 db
 mariadb
+next-env.d.ts
