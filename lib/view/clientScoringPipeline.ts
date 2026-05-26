@@ -11,6 +11,7 @@ import {racingScoringGenerator} from '../webworkers/racingScoringGenerator';
 import {assignedAreaScoringGenerator} from '../webworkers/assignedAreaScoringGenerator';
 import {taskScoresGenerator} from '../webworkers/taskScoresGenerator';
 import {createFlightStatistics} from '../webworkers/flightStatistics';
+import {noopGliderLog} from '../webworkers/gliderLog';
 
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 
@@ -60,17 +61,18 @@ export async function scoreIGCFlight(
     const lastFixTime = fixes[fixes.length - 1].t;
     const getNow = () => lastFixTime;
 
-    // Build the scoring chain (same pattern as getScoringChain in scoring.ts)
-    const noop = () => {};
-    const stats = createFlightStatistics(compno, noop);
+    // Build the scoring chain (same pattern as getScoringChain in scoring.ts).
+    // No per-glider log file client-side — use the no-op logger.
+    const log = noopGliderLog;
+    const stats = createFlightStatistics(compno, log);
     const inorder = bindClientInOrderGenerator(compno, fixes);
-    const epg = enrichedPositionGenerator(airfield, inorder(getNow), noop);
+    const epg = enrichedPositionGenerator(airfield, inorder(getNow), log);
     const observed = stats.observer(epg);
-    const tpg = taskPositionGenerator(task, utcStart, observed, noop);
+    const tpg = taskPositionGenerator(task, utcStart, observed, log);
     const distances = task.rules.aat //
-        ? assignedAreaScoringGenerator(task, tpg, noop)
-        : racingScoringGenerator(task, tpg, noop);
-    const scores = taskScoresGenerator(task, compno, handicap, distances, noop);
+        ? assignedAreaScoringGenerator(task, tpg, log)
+        : racingScoringGenerator(task, tpg, log);
+    const scores = taskScoresGenerator(task, compno, handicap, distances, log);
     const attachedScores = stats.attacher(scores);
 
     // Collect all scores

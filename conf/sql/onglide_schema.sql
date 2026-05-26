@@ -1,3 +1,9 @@
+CREATE DATABASE ogn;
+USE ogn;
+--
+--
+-- Table structure for table `comprules`
+--
 
 --
 -- Table structure for table `classes`
@@ -35,6 +41,7 @@ CREATE TABLE `compdayshelper` (
 DROP TABLE IF EXISTS `competition`;
 CREATE TABLE `competition` (
   `compid` varchar(40) NOT NULL COMMENT 'url-safe competition identifier, used in routing',
+  `compgroup` varchar(40) DEFAULT NULL COMMENT 'optional group key; restricts visibility on the /all/<group> feed',
   `name` varchar(60) DEFAULT NULL COMMENT 'Competition name',
   `sitename` varchar(100) DEFAULT NULL COMMENT 'Site name',
 
@@ -53,6 +60,7 @@ CREATE TABLE `competition` (
   `flightstats` char(1) DEFAULT 'N' COMMENT 'Compute per-flight statistics (thermals, wind, etc.) - Y/N',
   `trackingconsent` char(1) DEFAULT 'N' COMMENT 'Y = comp has obtained explicit livetracking consent from pilots; bypass DDB tracked=N block',
   `delayseconds` int(11) DEFAULT NULL COMMENT 'official tracking delay in seconds; NULL = inherit NEXT_PUBLIC_COMPETITION_DELAY env (default 10)',
+  `pushnotifications` char(1) DEFAULT 'N' COMMENT 'Y = Web Push status notifications enabled for this competition',
   PRIMARY KEY (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 
@@ -65,14 +73,33 @@ CREATE TABLE `compstatus` (
   `class` char(15) NOT NULL,
   `datecode` char(3) DEFAULT NULL COMMENT 'current contest date code for this class',
   
-  `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,X=confirm reg,P=prebrief,B=afterbrief,G=gridded,L=launched,S=startopen/flying,F=first finisher imminent,R=all reported,H=all home,Z=scrubbed,O=comp over',
+  `status` char(1) DEFAULT '?' COMMENT 'what is happening with this class (?=prereg,:=no task this day,B=afterbrief,G=gridded,L=launched,S=startopen/flying,F=first finisher imminent,H=all home,Z=scrubbed,O=comp over',
+  `laststatuschange` datetime DEFAULT NULL COMMENT 'UTC time the status column last transitioned to a new value (maintained by triggers below)',
   `resultsdatecode` char(3) DEFAULT NULL COMMENT 'what date is scoring up to with uploading, results after this date wont be displayed',
   `task` char(1) DEFAULT 'A' COMMENT 'selected task',
 
   `startheight` int(11) DEFAULT '0',
-  `notes` text  COMMENT 'Headline message to display', 
+  `notes` text  COMMENT 'Headline message to display',
   UNIQUE KEY `class` (`class`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Current competition status, one row per class';
+
+--
+-- Triggers maintain compstatus.laststatuschange. The column is bumped only when
+-- the status value actually changes — other UPDATEs (resultsdatecode, task,
+-- notes, etc.) leave it alone. Defined here so a fresh schema install gets
+-- them; the matching migration installs the same triggers on existing DBs.
+--
+DROP TRIGGER IF EXISTS `compstatus_laststatuschange_ins`;
+CREATE TRIGGER `compstatus_laststatuschange_ins`
+BEFORE INSERT ON `compstatus`
+FOR EACH ROW
+SET NEW.laststatuschange = UTC_TIMESTAMP();
+
+DROP TRIGGER IF EXISTS `compstatus_laststatuschange_upd`;
+CREATE TRIGGER `compstatus_laststatuschange_upd`
+BEFORE UPDATE ON `compstatus`
+FOR EACH ROW
+SET NEW.laststatuschange = IF(NOT (NEW.status <=> OLD.status), UTC_TIMESTAMP(), OLD.laststatuschange);
 
 --
 -- Table structure for table `contestday`
@@ -374,55 +401,36 @@ CREATE TABLE `movements` (
   `id` char(40) NOT NULL,
   `type` enum('flarm','igc') DEFAULT NULL,
   `datecode` char(3) DEFAULT NULL,
+  `compid` varchar(40) DEFAULT NULL COMMENT 'competition this movement belongs to',
   PRIMARY KEY (`id`,`time`,`action`),
   KEY `action` (`action`,`type`,`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 --
--- Table structure for table `trackpoints`
+-- Table structure for table `pushsubscription`
+--
+-- Browser Web Push subscriptions. The daemon sends competition status
+-- notifications to these endpoints. Target tuple (compid, targetclass,
+-- targetcompno): both target columns '' = whole competition.
 --
 
-DROP TABLE IF EXISTS `trackpoints`;
-CREATE TABLE `trackpoints` (
-  `compno` char(4) NOT NULL,
-  `class` char(15) NOT NULL,
-  `datecode` char(3) NOT NULL,
-  `lat` float NOT NULL,
-  `lng` float NOT NULL,
-  `altitude` int(11) NOT NULL,
-  `agl` int(11) NOT NULL,
-  `t` int(11) NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
-  `bearing` int(11) DEFAULT NULL,
-  `speed` float DEFAULT NULL,
-  `station` char(25) DEFAULT NULL,
-  PRIMARY KEY (`datecode`,`class`,`t`,`compno`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+DROP TABLE IF EXISTS `pushsubscription`;
+CREATE TABLE `pushsubscription` (
+  `id`            int unsigned NOT NULL AUTO_INCREMENT,
+  `endpoint`      varchar(512) NOT NULL COMMENT 'browser push service endpoint URL (contains a secret token)',
+  `endpointhash`  char(64)     NOT NULL COMMENT 'SHA-256 hex of endpoint — safe lookup key for status/unsubscribe',
+  `p256dh`        varchar(128) NOT NULL COMMENT 'client public key for payload encryption',
+  `auth`          varchar(64)  NOT NULL COMMENT 'client auth secret for payload encryption',
+  `compid`        varchar(40)  NOT NULL COMMENT 'competition this subscription follows',
+  `targetclass`   varchar(64)  NOT NULL DEFAULT '' COMMENT '"" = whole competition; reserved for future per-class',
+  `targetcompno`  varchar(16)  NOT NULL DEFAULT '' COMMENT '"" = whole competition; reserved for future per-pilot',
+  `lang`          char(8)      NOT NULL DEFAULT 'en' COMMENT 'subscriber UI language — notification text is built in this language',
+  `expiresat`     datetime     NOT NULL COMMENT 'safety-net expiry (after the comp end date)',
+  `created`       datetime     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniqsub` (`endpoint`(255), `compid`, `targetclass`, `targetcompno`),
+  KEY `idx_compid` (`compid`),
+  KEY `idx_endpointhash` (`endpointhash`),
+  KEY `idx_expiresat` (`expiresat`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Web Push subscriptions for competition status notifications';
 
-
-
---
--- Table structure for table `sectortypes`
---
-
-DROP TABLE IF EXISTS `sectortypes`;
-CREATE TABLE `sectortypes` (
-  `countrycode` char(2) DEFAULT NULL,
-  `name` char(20) DEFAULT NULL,
-  `defaults` char(40) DEFAULT NULL,
-  KEY `st` (`countrycode`,`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
---
--- Dumping data for table `sectortypes`
---
-
-INSERT INTO `sectortypes` VALUES ('UK','Start Sector','sector,np,5,90,0,0,0'),('UK','BGA Sector','sector,symmetrical,20,45,0.5,180,0'),('UK','BGA Enhanced Sector','sector,symmetrical,10,90,0.5,180,0'),('UK','AAT','sector,symmetrical,20,180,0,0,2'),('UK','Finish Line','line,pp,2,90,0,0,1'),('UK','Finish Ring','sector,pp,3,180,0,0,1'),('UK','DH Sector','sector,symmetrical,20,45,5,180,0'),('UK','DH Enhanced Sector','sector,symmetrical,10,90,5,180,0'),('CZ','Start Line','line,np,5,90,0,0,1'),('CZ','Sector','sector,symmetrical,0.5,180,0,0,1'),('CZ','Finish Ring','sector,pp,3,180,0,0,1'),('CZ','AAT','sector,symmetrical,20,180,0,0,2'),('CZ','Hack Start','sector,np,5,90,0,0,0'),('SK','Start','sector,np,5,90,0,0,0'),('SK','Finish Ring','sector,np,3,180,0,0,0'),('SK','Barrel','sector,np,0.5,180,0,0,0'),('SK','Finish Line','sector,pp,2,90,0,0,1'),('SK','Start Line','line,pp,5,90,0,0,1');
-
-CREATE TABLE `scores` (
-  `class` char(15) NOT NULL,
-  `datecode` char(3) NOT NULL,
-  `t` int NOT NULL DEFAULT '0' COMMENT 'timestamp epoch',
-  `score` blob,
-  `sameAsT` int DEFAULT NULL,
-  PRIMARY KEY (`class`,`datecode`,`t`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;

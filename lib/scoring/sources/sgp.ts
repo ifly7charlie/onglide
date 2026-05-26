@@ -24,8 +24,9 @@ import {upsertClass, syncClassHandicapFlag} from '../shared/classes';
 import {PilotFetchAccumulator, upsertPilot, pruneUnseenPilots, type PilotRecord} from '../shared/pilots';
 import {upsertTaskAndLegs} from '../shared/tasks';
 import {downloadPictureCached} from '../shared/images';
+import {updateTracker} from '../shared/trackers';
 
-import type {ClassId, CompNo, FetchPilotsResult, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
+import type {ClassId, CompNo, FetchPilotsOptions, FetchPilotsResult, FetchResultsOptions, FetchResultsResult, ScoringSource, SkipDayPredicate, SourceCtx} from '../source';
 
 // The legacy daemon used a fixed raw class name 'sgp' hashed with the
 // scoringsource.compid to produce a unique classid. Keeping the same
@@ -80,17 +81,36 @@ function extractCompDate(compDate: any): string | null {
     return null;
 }
 
+// HTTP timeout for the SGP JSON endpoint. The scheduler trackers cadence
+// is 5 min and the tasks cadence drops to 1 min during launch (see
+// activeTasksCadenceMs); a request that takes longer than 20 s on
+// either path is overwhelmingly more useful as a timeout-with-error
+// than as a heartbeat-blocking await. Without this, a stalled TCP
+// socket from glidertracking.fai.org pins the per-heartbeat slot for
+// SGP indefinitely — fetchTrackers/fetchResultsAndTasks never return,
+// `lastTrackersFetch` is never updated, and the only log line you'd
+// ever see is `scheduler: trackers due` followed by silence.
+const SGP_FETCH_TIMEOUT_MS = 20_000;
+
 async function fetchSgpJson(ctx: SourceCtx): Promise<any | null> {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), SGP_FETCH_TIMEOUT_MS);
     try {
-        const res = await fetch(ctx.url);
+        const res = await fetch(ctx.url, {signal: ac.signal});
         if (!res.ok) {
             ctx.log(`SGP fetch ${ctx.url} → ${res.status} ${res.statusText}`);
             return null;
         }
         return await res.json();
     } catch (e) {
-        ctx.log(`SGP fetch failed for ${ctx.compid}:`, e);
+        if ((e as any)?.name === 'AbortError') {
+            ctx.log(`SGP fetch timed out after ${SGP_FETCH_TIMEOUT_MS} ms for ${ctx.compid} (${ctx.url})`);
+        } else {
+            ctx.log(`SGP fetch failed for ${ctx.compid}:`, e);
+        }
         return null;
+    } finally {
+        clearTimeout(timer);
     }
 }
 
@@ -207,10 +227,12 @@ async function installSgpTask(ctx: SourceCtx, classid: ClassId, task: any): Prom
 }
 
 //
-// Upsert one row into the tracker table from an SGP `tracks[]` entry.
-// SGP carries FLARM IDs on the pilot record itself (no separate
-// robocontrol lookup needed), so we extract every 6-hex tail from
-// `trackId` and append any paired OGN tracker. Mirrors bin/sgp.ts:324.
+// Upsert the tracker row for one SGP `tracks[]` entry. SGP carries
+// FLARM IDs on the pilot record itself (no separate robocontrol lookup
+// needed), so we extract every 6-hex tail from `trackId` and append any
+// paired OGN tracker. Routes through `updateTracker` so feed-conflict
+// protection (robocontrol vs sgp) and `trackerhistory` rows match the
+// other adapters.
 //
 async function upsertSgpTracker(
     ctx: SourceCtx, //
@@ -218,25 +240,25 @@ async function upsertSgpTracker(
     compno: CompNo,
     pilot: any
 ): Promise<void> {
-    const flarmIds: string[] = String(pilot.trackId ?? '').match(/[0-9A-F]{6}$/gi) || ['unknown'];
+    const flarmIds: string[] = String(pilot.trackId ?? '').match(/[0-9A-F]{6}$/gi) || [];
     if (pilot.ognTrackerPaired) {
         const m = String(pilot.ognTrackerPaired).match(/[0-9A-F]{6}$/gi);
         if (m) flarmIds.push(...m);
     }
     const trackerid = flarmIds.filter((d) => d?.length).join(',') || 'unknown';
+
+    // updateTracker is UPDATE-only and would no-op for a brand-new
+    // pilot — seed an unclaimed placeholder row first. Mirrors the
+    // soaringspot adapter at lines 303-314.
     try {
         await ctx.db.query(escape`
-            INSERT INTO
-                tracker (class, compno, type, trackerid)
-            VALUES
-                (${classid}, ${compno}, 'flarm', ${trackerid}) ON DUPLICATE KEY
-            UPDATE trackerid =
-            VALUES
-                (trackerid)
+            INSERT IGNORE INTO tracker (class, compno, type, trackerid)
+            VALUES (${classid}, ${compno}, 'flarm', 'unknown')
         `);
     } catch (e) {
-        ctx.log(`SGP tracker upsert failed for ${classid}/${compno}:`, e);
+        ctx.log(`SGP tracker placeholder failed for ${classid}/${compno}:`, e);
     }
+    await updateTracker(ctx.db, ctx.log, classid, compno, trackerid, 'sgp');
 }
 
 //
@@ -248,6 +270,12 @@ async function upsertSgpTracker(
 //
 export class SgpSource implements ScoringSource {
     readonly type = 'sgp';
+    readonly trackerIntervalMs = 5 * 60 * 1000;
+    // SGP's task+tracks JSON is cheap and the L→S nostart rewrite (start
+    // line time) needs to land within seconds, not the 10-min FAST
+    // default. Honoured by the scheduler's desiredTaskCadence for L and
+    // S phases.
+    readonly activeTasksCadenceMs = 60 * 1000;
 
     async ensureMetadata(ctx: SourceCtx): Promise<void> {
         try {
@@ -257,11 +285,11 @@ export class SgpSource implements ScoringSource {
         }
     }
 
-    async fetchPilots(ctx: SourceCtx): Promise<FetchPilotsResult> {
+    async fetchPilots(ctx: SourceCtx, options?: FetchPilotsOptions, prefetchedJson?: any): Promise<FetchPilotsResult> {
         const accumulator = new PilotFetchAccumulator();
         const synthetic = {n: 0};
 
-        const res = await fetchSgpJson(ctx);
+        const res = prefetchedJson !== undefined ? prefetchedJson : await fetchSgpJson(ctx);
         if (!res || !Array.isArray(res.tracks)) {
             return {observed: accumulator.observed};
         }
@@ -305,16 +333,46 @@ export class SgpSource implements ScoringSource {
             }
         }
 
-        await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
-        for (const cid of accumulator.observed.keys()) {
-            await syncClassHandicapFlag(ctx.db, ctx.log, cid);
+        // skipPrune is set by the trackers-cadence path so a flaky
+        // upstream can't wipe the roster at 5-minute intervals. The
+        // tracker upsert above is the only side-effect we want then.
+        if (!options?.skipPrune) {
+            await pruneUnseenPilots(ctx.db, ctx.log, accumulator);
+            for (const cid of accumulator.observed.keys()) {
+                await syncClassHandicapFlag(ctx.db, ctx.log, cid);
+            }
         }
 
         return {observed: accumulator.observed};
     }
 
-    async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate): Promise<FetchResultsResult> {
+    // Trackers, pilots, and task all come in the same JSON payload, so
+    // the trackers cadence fetches once and dispatches to both
+    // installSgpTask and fetchPilots(skipPrune). skipPrune avoids wiping
+    // the roster on a flap; installing the task here means the FAST
+    // tasks cadence isn't the only path that picks up startline-time
+    // amendments — the 5 min trackers cadence catches them too, for free.
+    async fetchTrackers(ctx: SourceCtx): Promise<void> {
+        const res = await fetchSgpJson(ctx);
+        if (!res) return;
+        if (res.task) {
+            const classid = makeClassId(ctx.compid, SGP_RAW_CLASS) as ClassId;
+            const todayDatecode = localDatecode(ctx.tz);
+            await upsertClass(ctx.db, ctx.log, ctx.compid, classid, SGP_CLASS_LABEL, todayDatecode);
+            await flagGrandPrixClass(ctx, classid);
+            await installSgpTask(ctx, classid, res.task);
+        }
+        await this.fetchPilots(ctx, {skipPrune: true}, res);
+    }
+
+    async fetchResultsAndTasks(ctx: SourceCtx, skipDay: SkipDayPredicate, options?: FetchResultsOptions): Promise<FetchResultsResult> {
         const observedClasses = new Set<ClassId>();
+
+        // SGP has no per-pilot results to fetch — the JSON payload only
+        // carries `task` + `tracks`. resultsOnly therefore short-circuits.
+        if (options?.resultsOnly) {
+            return {observedClasses};
+        }
 
         const res = await fetchSgpJson(ctx);
         if (!res || !res.task) {

@@ -38,7 +38,9 @@ const mysql = Mysql({
         database: process.env.MYSQL_DATABASE,
         user: process.env.MYSQL_USER,
         password: process.env.MYSQL_PASSWORD,
-        decimalNumbers: true
+        decimalNumbers: true,
+        // affectedRows = changed rows, not matched rows.
+        flags: ['-FOUND_ROWS']
     },
     onError: (e) => console.error(e),
     onConnectError: (x) => console.error('mysql connect error', x),

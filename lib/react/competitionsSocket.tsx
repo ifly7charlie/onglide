@@ -9,7 +9,9 @@ import {useEffect} from 'react';
 import {useDispatch} from '../redux';
 import {competitionsConnected, competitionsSnapshot, competitionsDelta} from '../redux/competitionsSlice';
 import {OnglideWebSocketMessage} from '../protobuf/onglide';
+import {unscaleFromWire} from '../protobuf/wireScaling';
 import {competitionsWebsocketUrl} from './fixupUrls';
+import {triggerVersionCheck} from './autoUpdate';
 
 // Server pushes a `ka` packet every 15s on /all. If we hear nothing for
 // longer than this we assume the connection has gone silent (NAT timeout,
@@ -70,6 +72,8 @@ export function CompetitionsSocket() {
                 retry = 0;
                 dispatch(competitionsConnected(true));
                 armWatchdog(socket);
+                // Daemon (re)connect is the strongest deploy signal — see autoUpdate.tsx.
+                triggerVersionCheck();
             };
             socket.onclose = (ev) => {
                 console.log('CompetitionsSocket: close', {code: ev.code, reason: ev.reason, wasClean: ev.wasClean});
@@ -91,7 +95,7 @@ export function CompetitionsSocket() {
                 }
                 try {
                     const buf = new Uint8Array(ev.data as ArrayBuffer);
-                    const decoded = OnglideWebSocketMessage.decode(buf);
+                    const decoded = unscaleFromWire(OnglideWebSocketMessage.decode(buf));
                     if (decoded.competitions) {
                         const {competitions, removed, full} = decoded.competitions;
                         if (full) {

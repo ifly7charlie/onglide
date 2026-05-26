@@ -6,7 +6,8 @@
         "loading_map": "Laddar karta...",
         "loading_competitions": "Laddar tävlingar...",
         "back_to_globe": "Tillbaka till glob",
-        "language": "Språk"
+        "language": "Språk",
+        "update_available": "Uppdatering tillgänglig — tryck för att läsa in på nytt"
     },
     "competition": {
         "live": "Direkt",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} piloter",
         "tracked_pilots": "{{tracked}}/{{total}} piloter",
         "live_stats": " · {{tracked}}/{{registered}} piloter · {{flying}} i luften · {{landed}} landat",
+        "in_view_only": "Endast synliga",
         "viewers_short": "tittare",
         "land_data": "Landdata:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Tryck för officiella resultat",
+        "official_scores_hint": "Informationen nedan kommer från livespårning",
+        "notify_subscribe": "Meddela mig om denna tävling",
+        "notify_unsubscribe": "Sluta meddela mig",
+        "notify_denied": "Aviseringar är blockerade i din webbläsare"
     },
     "task": {
         "speed": "Hastighetsuppgift",
@@ -57,10 +64,11 @@
         "launching": "Startar",
         "racing": "Tävlar",
         "finishing": "I mål snart",
-        "home": "Hemma",
+        "home": "Repris",
         "no_task": "Ingen uppgift än",
         "upcoming": "Kommande",
-        "yesterday": "Igår"
+        "yesterday": "Repris igår",
+        "cancelled": "Inställd"
     },
     "pilot": {
         "gridded_waiting": "På startlinje, väntar på start",
@@ -169,7 +177,9 @@
         "show_other_classes": "Visar segelflygplan från andra klasser, klicka för att bara visa nuvarande klass",
         "show_only_current": "Visa endast vald klass, klicka för att visa andra klasser också",
         "switch_to_metric": "Byt till metriska enheter",
-        "switch_to_imperial": "Byt till imperiska enheter"
+        "switch_to_imperial": "Byt till imperiska enheter",
+        "map_attribution": "Kartattribution",
+        "close": "Stäng"
     },
     "drawer": {
         "class": "Klass",
@@ -187,6 +197,7 @@
         "competition_time": "tävlingstid",
         "your_time": "din tid",
         "live": "Direkt",
+        "replay": "Uppspelning",
         "offline": "Offline",
         "end": "Slut"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Hjälp till att översätta Onglide för segelflygets community",
         "translation_help_link_label": "Bidra på GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: ny bana satt",
+        "task_changed": "{{classname}}: bana ändrad",
+        "launching": "{{classname}}: start pågår",
+        "racing": "{{classname}}: segelflygplan i tävling",
+        "finishing": "{{classname}}: målgångar väntas"
     }
 }

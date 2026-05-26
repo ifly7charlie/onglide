@@ -34,7 +34,9 @@ const mysql = Mysql({
         host: process.env.MYSQL_HOST,
         database: process.env.MYSQL_DATABASE,
         user: process.env.MYSQL_USER,
-        password: process.env.MYSQL_PASSWORD
+        password: process.env.MYSQL_PASSWORD,
+        // affectedRows = changed rows, not matched rows.
+        flags: ['-FOUND_ROWS']
     }
 });
 
@@ -625,8 +627,8 @@ async function applyDecisions(decisions: Map<Match, Decision>) {
                 WHERE class = ${pilot.class} AND compno = ${pilot.compno}
             `);
             t.query(escape`
-                INSERT INTO trackerhistory (compno, changed, flarmid, greg, method)
-                VALUES (${pilot.compno}, now(), ${histFlarm}, ${device.registration || null}, ${method})
+                INSERT INTO trackerhistory (compno, class, changed, flarmid, greg, method)
+                VALUES (${pilot.compno}, ${pilot.class}, now(), ${histFlarm}, ${device.registration || null}, ${method})
             `);
             flarmCount++;
         }

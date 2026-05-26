@@ -13,6 +13,7 @@ import escape from 'sql-template-strings';
 
 import {normalizeClassNameForDisplay} from '../../classid';
 import type {ClassId} from '../source';
+import {CompStatus, TASK_STATES} from '../../types';
 
 //
 // upsertClass — idempotent INSERT … ON DUPLICATE KEY UPDATE for the
@@ -71,11 +72,11 @@ export async function upsertClass(
         await db.query(escape`
             UPDATE compstatus
             SET
-                status = ':',
+                status = ${CompStatus.NoTask},
                 datecode = ${todayDatecode}
             WHERE
                 class = ${classid}
-                AND status IN ('?', ':')
+                AND status IN (${[CompStatus.PreReg, CompStatus.NoTask]})
         `);
     } catch (e) {
         log(`upsertClass failed for ${compid}/${classid}:`, e);
@@ -165,8 +166,8 @@ export async function cascadeDeleteClass(
 
 //
 // resetStaleCompStatus — if a class's compstatus.status is a "daily"
-// value from a previous local day (L/S/R/H/B/Z with a stale datecode),
-// and no task row exists for today, clear it back to ':' so the frontend
+// value from a previous local day (a TASK_STATES code with a stale
+// datecode), and no task row exists for today, clear it back to ':' so the frontend
 // doesn't keep showing yesterday's "flying"/"briefed"/"scrubbed" state on
 // a new day that hasn't yet had a task installed.
 //
@@ -187,12 +188,12 @@ export async function resetStaleCompStatus(
             JOIN classes cl ON cl.class = cs.class
             LEFT JOIN tasks t ON t.class = cs.class AND t.datecode = ${todayDatecode}
             SET
-                cs.status = ':',
+                cs.status = ${CompStatus.NoTask},
                 cs.datecode = ${todayDatecode}
             WHERE
                 cl.compid = ${compid}
                 AND t.class IS NULL
-                AND cs.status IN ('B', 'L', 'S', 'R', 'H', 'Z')
+                AND cs.status IN (${[...TASK_STATES]})
                 AND (cs.datecode IS NULL OR cs.datecode <> ${todayDatecode})
         `);
         if (r?.affectedRows) {

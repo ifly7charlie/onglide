@@ -137,6 +137,14 @@ export function preprocessSector(tp: TaskLeg) {
         tp.a2 = 180 as Bearing;
     }
 
+    // A sector cylinder (start/finish ring, or a fixed turnpoint) is encoded
+    // with a zero apex angle but a non-zero radius. a1 == 180 is the full-circle
+    // marker used everywhere else (analytic crossing, quickSector, finish-ring
+    // length adjustment), so normalise the zero-angle form to it.
+    if (tp.type == 'sector' && tp.a1 == 0 && tp.r1 > 0 && !tp.r2) {
+        tp.a1 = 180 as Bearing;
+    }
+
     // Help speed up turnpoint checking
     if (tp.type == 'sector' && tp.a1 == 180 && !tp.a12 && !tp.r2) {
         tp.quickSector = true;

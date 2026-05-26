@@ -34,7 +34,16 @@ export const LAUNCHING_TOTAL_FRACTION = 0.1; // 10% of all gliders in the class
 // recover a class stuck at B/G into H.
 export const HOME_OGN_COVERAGE = 0.5;
 
-export const inorderAdditionalDelay = 6;
+// Cushion (seconds) before the scoring in-order generator emits a packet as
+// "live". Lower means scoring sees data sooner; reorders within this window
+// are absorbed without triggering a rescore.
+export const inorderAdditionalDelay = 2;
+
+// Cushion (seconds) for the display-path emit in aprs.ts processMessageQueue:
+// packets with t < realNow - aprsAdditionalDelay are eligible for emission to
+// the per-class BroadcastChannel that feeds the websocket. Larger values
+// recover more late-arriving packets at the cost of fresher tracks.
+export const aprsAdditionalDelay = 15;
 
 // trackGlider coalescing window: each new glider registration arms (or
 // re-arms) a setTimeout. After this many ms of quiet, flushLoads runs a

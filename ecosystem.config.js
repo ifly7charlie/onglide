@@ -17,8 +17,8 @@ module.exports = {
             log_date_format: "YYYY-MM-DD HH:mm:ss Z",
         },
         {
-            name: "soaringspot",
-            script: "./bin/soaringspot.js",
+            name: "ssscrape",
+            script: "./bin/ssscrape.js",
             restart_delay: 120000,
             max_restarts: 30,
             autorestart: true,

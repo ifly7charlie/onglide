@@ -9,6 +9,7 @@ import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskSta
 
 import {stripPoints} from '../flightprocessing/taskhelper';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
+import {GliderLog, noopGliderLog} from './gliderLog';
 
 import {RELAXED_START_TOLERANCE_M} from '../constants';
 
@@ -20,14 +21,10 @@ function simplifyPoint(point: PositionMessage | BasePositionMessage): BasePositi
 
 //
 // Get a generator to calculate task status
-export const taskPositionGenerator = async function* (task: Task, officialStart: Epoch, iterator: EnrichedPositionGenerator, log?: Function): AsyncGenerator<TaskStatus, void, void> {
+export const taskPositionGenerator = async function* (task: Task, officialStart: Epoch, iterator: EnrichedPositionGenerator, _log?: GliderLog): AsyncGenerator<TaskStatus, void, void> {
     //
     // Make sure we have some logging
-    if (!log) {
-        log = () => {
-            /**/
-        };
-    }
+    const log: GliderLog = _log ?? noopGliderLog;
 
     let lastTickStatus: TaskStatus | null = null;
     let status: TaskStatus = null;
@@ -100,7 +97,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     //    let iterator = pointGenerator(log);
     for (let current = await iterator.next(); !current.done; current = await iterator.next()) {
         if (!current.value) {
-            console.log(`TPG: no value received in iterator for ${previousPoint?.c || 'unknown'}`, current);
+            log.error(`TPG: no value received in iterator for ${previousPoint?.c || 'unknown'}`, current);
             break;
         }
 
@@ -125,9 +122,6 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                 if (ok) {
                     log('ok tick on isTick', status);
-                    if (previousPoint) {
-                        status.lastProcessedPoint = simplifyPoint(previousPoint);
-                    }
                     let startIsCloseOrPassed = status.t + 59 > (status.utcStart ?? 0);
                     if (lastTickStatus && !startIsCloseOrPassed && !status._) {
                         continue;
@@ -169,7 +163,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             if (landedBack) {
                 landedBack = false;
                 resetStart();
-                console.log(`New flight found for ${status.compno} after landback - t:${status.t}`);
+                log(`New flight found for ${status.compno} after landback - t:${status.t}`);
             }
 
             // Can't score with only one point
@@ -214,7 +208,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                     status.legs[0].points = [{t: status.utcStart, lat: task.legs[0].nlat, lng: task.legs[0].nlng, a: (previousPoint || point).a}];
                     status.legs[0].exitTimeStamp = status.utcStart;
 
-                    console.log(point.c, 'start reached', new Date(point.t * 1000).toISOString());
+                    log(point.c, 'start reached', new Date(point.t * 1000).toISOString());
 
                     // If we were not tracking at the start then we can assume a start point at the
                     // start point... this will allow dog leg etc to calculate and may help with 'recovery'
@@ -513,9 +507,16 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                         const crossings = hc.crossings;
                         if (crossings.length >= 2) {
                             log(`* turnpoint ${status.currentLeg} intersection between ${previousPoint.t} and ${point.t} `);
-                            if (!task.rules.aat) {
+                            // Crossing times come from real fixes, but a pre-start track
+                            // that nicks a downstream sector line would still place
+                            // entryTimeStamp before utcStart — drop any such crossings.
+                            const minT = status.utcStart ?? 0;
+                            const validCrossings = hc.crossings.filter((c) => c.at.t >= minT);
+                            if (!validCrossings.length) {
+                                log(`- crossings rejected: all before utcStart ${minT}`);
+                            } else if (!task.rules.aat) {
                                 possibleAdvances.push({
-                                    possiblePoints: [hc.crossings.at(0)!.at],
+                                    possiblePoints: [validCrossings[0].at],
                                     estimatedTurnType: EstimatedTurnType.crossing,
                                     rewindTo: point.t,
                                     ld: 0
@@ -524,7 +525,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                 break;
                             } else {
                                 possibleAdvances.push({
-                                    possiblePoints: hc.crossings.map((c) => c.at),
+                                    possiblePoints: validCrossings.map((c) => c.at),
                                     estimatedTurnType: EstimatedTurnType.crossing,
                                     rewindTo: point.t,
                                     ld: 0
@@ -557,7 +558,9 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                                     `* dog leg ${status.currentLeg}, ${distanceNeeded.toFixed(1)} km needed, gap length ${elapsedTime} seconds` +
                                         ` could have achieved distance in the time: ${neededSpeed.toFixed(1)} kph < ${possibleSpeed} kph (between ${previousPoint.t} and ${point.t}) (ld: ${ld})`
                                 );
-                                const possibleT = Math.round(point.t - (distanceRemaining / distanceNeeded) * elapsedTime) as Epoch;
+                                // Linear interpolation across a gap that straddles utcStart
+                                // can extrapolate the estimated turn time before the start; clamp it.
+                                const possibleT = Math.max(Math.round(point.t - (distanceRemaining / distanceNeeded) * elapsedTime), status.utcStart ?? 0) as Epoch;
                                 possibleAdvances.push({
                                     possiblePoints: [{...hc.onBoundary!, t: possibleT}],
                                     estimatedTurnType: EstimatedTurnType.dogleg,
@@ -615,11 +618,7 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 yield status;
             }
         } catch (e) {
-            console.log('Exception in taskPositionGenerator');
-            console.log(e);
-            console.log(JSON.stringify(current, stripPoints, 4));
-            console.log(JSON.stringify(status, stripPoints, 4));
-            //            console.log(JSON.stringify(task, null, 4));
+            log.error('Exception in taskPositionGenerator', e, JSON.stringify(current, stripPoints), JSON.stringify(status, stripPoints));
         }
     }
 

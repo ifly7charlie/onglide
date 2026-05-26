@@ -3,11 +3,11 @@
 // Chrome trace analyzer for onglide perf work.
 //
 // Usage:
-//   node bin/trace.js <file> stats                    high-level overview
-//   node bin/trace.js <file> long [minMs=100] [tid]   list long main-thread tasks
-//   node bin/trace.js <file> hot [limit=25]           top profile functions (whole trace)
-//   node bin/trace.js <file> window <ts> <dur>        top profile functions in a time window
-//   node bin/trace.js <file> children <ts> <dur> [tid]  main-thread children inside a window
+//   node bin/profiling/trace.js <file> stats                    high-level overview
+//   node bin/profiling/trace.js <file> long [minMs=100] [tid]   list long main-thread tasks
+//   node bin/profiling/trace.js <file> hot [limit=25]           top profile functions (whole trace)
+//   node bin/profiling/trace.js <file> window <ts> <dur>        top profile functions in a time window
+//   node bin/profiling/trace.js <file> children <ts> <dur> [tid]  main-thread children inside a window
 //
 // Timestamps are microseconds, matching Chrome's raw trace format. The `long` and
 // `window` commands print timestamps that you can feed back into `window`/`children`.

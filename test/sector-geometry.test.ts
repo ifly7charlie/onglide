@@ -342,3 +342,77 @@ describe('Sector with gap (a1=45, r1=20km, a2=45, r2=0.5km)', () => {
         expect(geoJSONContains(tp, p.lat, p.lng)).toBe(false);
     });
 });
+
+// ── Cylinder encoded with a1=0 (start / finish ring) ────────────────────
+//
+// SoaringSpot encodes a start/finish cylinder (or a fixed-point cylinder)
+// with a *zero* apex angle and a non-zero radius, rather than the a1=180
+// full-circle marker used elsewhere. preprocessSector normalises this so the
+// analytic crossing code builds a real departure circle — otherwise
+// _hasCrossedSector dereferences an empty nearest-candidate list and throws
+// "Cannot read properties of undefined (reading 'az')".
+
+describe('Cylinder encoded with a1=0 (r1=5km, fixed)', () => {
+    const task = makeSectorTask({r1: 5, a1: 0, direction: 'fixed'});
+    const tp = getSectorTP(task);
+    const tpCenter = {lat: task.legs[1].nlat, lng: task.legs[1].nlng};
+
+    test('preprocessSector normalises a1 0 -> 180', () => {
+        expect(task.legs[1].a1).toBe(180);
+    });
+
+    test('PreparedTurnpoint builds a full departure circle', () => {
+        expect(tp.hasDep).toBe(true);
+        expect(tp.hasDepWedge).toBe(false); // full circle, not a wedge
+    });
+
+    test('point inside at various bearings', () => {
+        for (const bearing of [0, 45, 90, 135, 180, 225, 270, 315]) {
+            const p = pointAtBearingDistance(tpCenter, bearing, 3);
+            expect(isInSector(tp, p.lat, p.lng)).toBe(true);
+        }
+    });
+
+    test('point beyond radius is outside', () => {
+        const p = pointAtBearingDistance(tpCenter, 0, 8);
+        expect(isInSector(tp, p.lat, p.lng)).toBe(false);
+    });
+
+    test('hasCrossed against an exterior segment does not throw and reports distance', () => {
+        // Regression: a1=0 previously produced no departure geometry, so
+        // _hasCrossedSector dereferenced an empty nearest-candidate list.
+        const prev = pointAtBearingDistance(tpCenter, 90, 30);
+        const pos = pointAtBearingDistance(tpCenter, 100, 28);
+        let result: ReturnType<PreparedTurnpoint['hasCrossed']> | undefined;
+        expect(() => {
+            result = tp.hasCrossed({lat: prev.lat, lng: prev.lng, t: 1000 as Epoch, a: 0}, {lat: pos.lat, lng: pos.lng, t: 1001 as Epoch, a: 0});
+        }).not.toThrow();
+        expect(result!.crossings).toHaveLength(0);
+        expect(result!.finalInside).toBe(false);
+        // distance to the 5km ring ≈ 28 - 5 = 23km
+        expect(result!.distanceKm!).toBeGreaterThan(20);
+        expect(result!.distanceKm!).toBeLessThan(28);
+    });
+
+    test('a segment crossing into the cylinder is detected', () => {
+        const prev = pointAtBearingDistance(tpCenter, 90, 10);
+        const pos = pointAtBearingDistance(tpCenter, 90, 2);
+        const hc = tp.hasCrossed({lat: prev.lat, lng: prev.lng, t: 1000 as Epoch, a: 0}, {lat: pos.lat, lng: pos.lng, t: 1060 as Epoch, a: 0});
+        expect(hc.finalInside).toBe(true);
+        expect(hc.crossings.some((c) => c.entered)).toBe(true);
+    });
+
+    test('GeoJSON renders as a full circle', () => {
+        for (const bearing of [0, 90, 180, 270]) {
+            const p = pointAtBearingDistance(tpCenter, bearing, 3);
+            expect(geoJSONContains(tp, p.lat, p.lng)).toBe(true);
+        }
+    });
+
+    test('a1=0 is left alone when an approach lobe (r2) is present', () => {
+        // The normalisation only applies to a bare cylinder. With r2 > 0 the
+        // zero departure angle is intentional, not a circle marker.
+        const withApproach = makeSectorTask({r1: 20, a1: 0, r2: 5, a2: 90, direction: 'symmetrical'});
+        expect(withApproach.legs[1].a1).toBe(0);
+    });
+});

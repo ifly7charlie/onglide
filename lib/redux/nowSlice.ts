@@ -5,6 +5,7 @@
 import {createSlice, createSelector} from '@reduxjs/toolkit';
 
 import {updateClassAction} from './actions';
+import {selectCompetitionsByCompid} from './competitionsSlice';
 
 //const updateTracksAction = createAction<PilotTracks>('updateTracks');
 
@@ -19,6 +20,7 @@ interface NowSliceState {
     now: Epoch;
     onlineStart: Epoch;
     liveScoreId: string;
+    live: boolean;
 }
 
 // Define the initial state using that type
@@ -29,7 +31,8 @@ const initialState: NowSliceState = {
     earliestScore: Infinity as Epoch,
     latestScore: 0 as Epoch,
     onlineStart: 0 as Epoch,
-    liveScoreId: ''
+    liveScoreId: '',
+    live: false
 };
 
 export const nowSlice = createSlice({
@@ -55,6 +58,7 @@ export const nowSlice = createSlice({
             state.latestScore = payload.latestScore as Epoch;
             state.onlineStart = payload.t as Epoch;
             state.liveScoreId = payload.scoreId ?? '';
+            state.live = payload.live ?? false;
         });
     },
     selectors: {
@@ -64,15 +68,26 @@ export const nowSlice = createSlice({
         selectScoreId: (state) => state.liveScoreId,
         selectEarliestScore: (state) => state.earliestScore,
         selectLatestScore: (state) => state.latestScore,
-        selectOnline: (state) => state.onlineStart
+        selectOnline: (state) => state.onlineStart,
+        selectLive: (state) => state.live
     }
 });
 
 export default nowSlice.reducer;
 export const {updateNow, offline} = nowSlice.actions;
-export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectEarliestScore, selectLatestScore, selectOnline} = nowSlice.selectors;
+export const {selectNow, selectClassName, selectDatecode, selectScoreId, selectEarliestScore, selectLatestScore, selectOnline, selectLive} = nowSlice.selectors;
 
 export const selectAvailableScoreTimes = createSelector(
     [selectEarliestScore, selectLatestScore, selectScoreId],
-    (earliestScore, latestScore, liveScoreId) => ({earliestScore, latestScore, live: !!liveScoreId})
+    (earliestScore, latestScore, liveScoreId) => ({earliestScore, latestScore, scoringInProgress: !!liveScoreId})
 );
+
+// Broadcast delay (seconds) for the comp owning the current className.
+// Joins nowSlice.className → competitionsSlice; returns 0 until the /all
+// snapshot lands or when the class isn't found.
+export const selectOfficialDelay = createSelector([selectClassName, selectCompetitionsByCompid], (className, byCompid): Epoch => {
+    for (const comp of Object.values(byCompid)) {
+        if (comp.classes.some((c) => c.class === className)) return (comp.officialDelay ?? 0) as Epoch;
+    }
+    return 0 as Epoch;
+});

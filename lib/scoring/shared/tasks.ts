@@ -17,6 +17,7 @@ import {getElevationOffset} from '../../getelevationoffset';
 import type {ClassId} from '../source';
 import {findTimezoneFromLocation, getTzOffset} from './timezone';
 import {cascadeDeleteClass} from './classes';
+import {CompStatus, LAUNCHED_STATES} from '../../types';
 
 import {point, Coord} from '@turf/helpers';
 import distance from '@turf/distance';
@@ -40,6 +41,22 @@ function toDeg(a: number): number {
 function convertToMysqlTime(jsontime: string | undefined | null): string | null {
     if (!jsontime) return null;
     return jsontime.replace(/^.*T/, '');
+}
+
+//
+// extractTrigraph — pull the 3-char turnpoint code out of an upstream
+// task_points[].name. Names usually look like "LAS Lasham" — first
+// 3 chars are the trigraph. Some upstreams encode the code as a leading
+// 1-4 digit number ("123 Foo Field"); when that's the case the numeric
+// prefix is the trigraph and the cleaned remainder becomes the name.
+//
+function extractTrigraph(rawName: string | undefined | null): {trigraph: string; name: string} {
+    const raw = String(rawName ?? '');
+    const numMatch = raw.match(/^([0-9]{1,4})/);
+    if (numMatch) {
+        return {trigraph: numMatch[1], name: raw.replace(/^([0-9]{1,4})/, '').trim()};
+    }
+    return {trigraph: raw.substring(0, 3), name: raw};
 }
 
 //
@@ -106,6 +123,25 @@ export async function upsertTaskAndLegs(
     const date: string = day.task_date;
     const dateCode = toDateCode(date);
 
+    // Reject placeholder/empty tasks before we start a transaction.
+    // SoaringSpot occasionally publishes a task row whose task_points
+    // are all `multiple_start != 0` (alternate-start markers, no real
+    // legs) — the taskleg INSERT would produce "INSERT … VALUES" with
+    // no row tuples and ER_PARSE_ERROR the transaction.
+    const realPoints = Array.isArray(day.task_points) ? day.task_points.filter((tp: any) => tp.multiple_start == 0) : [];
+    if (realPoints.length < 2) {
+        log(`${classid} - ${date}: skipping task install — ${realPoints.length} real task_points (need >=2)`);
+        return false;
+    }
+
+    // Single forensic boundary around the whole install: standalone
+    // UPDATEs (grandprix flag, compstatus), the SELECT for the hash
+    // short-circuit, the transaction chain, and the post-tx
+    // pilotresult sync and tz refinement. The transaction's own
+    // .rollback() callback handles in-flight chain failures; this
+    // catch picks up everything else and logs with classid+date so a
+    // mid-import DB blip isn't anonymous.
+    try {
     let tasktype: 'S' | 'A' | 'D' | 'E' = 'S';
     let duration = '00:00';
     if (day.task_type == 'assigned_area') {
@@ -157,8 +193,8 @@ export async function upsertTaskAndLegs(
     // standalone query (rather than inside the chain) to side-step the
     // flaky transaction-chain commit behaviour. The status NOT IN guard
     // protects airborne/landed classes from being demoted, but only when
-    // the locked state belongs to *this* dateCode — a stale L/S/R/H from
-    // a previous day must yield to the new task's 'B'. 'Z' (scrubbed) is
+    // the locked state belongs to *this* dateCode — a stale LAUNCHED_STATES
+    // code from a previous day must yield to the new task's 'B'. 'Z' (scrubbed) is
     // intentionally allowed so a new task on a later day overrides a
     // stale scrubbed status from a previous datecode.
     //
@@ -169,13 +205,13 @@ export async function upsertTaskAndLegs(
         await db.query(escape`
             UPDATE compstatus
             SET
-                status = 'B',
+                status = ${CompStatus.AfterBrief},
                 datecode = ${dateCode}
             WHERE
                 class = ${classid}
                 AND (datecode IS NULL OR ${dateCode} >= datecode)
                 AND (
-                    status NOT IN ('L', 'S', 'R', 'H')
+                    status NOT IN (${[...LAUNCHED_STATES]})
                     OR datecode IS NULL
                     OR datecode <> ${dateCode}
                 )
@@ -184,7 +220,7 @@ export async function upsertTaskAndLegs(
         await db.query(escape`
             UPDATE compstatus
             SET
-                status = 'Z',
+                status = ${CompStatus.Scrubbed},
                 datecode = ${dateCode}
             WHERE
                 class = ${classid}
@@ -220,7 +256,24 @@ export async function upsertTaskAndLegs(
         }
         return false;
     }
-    log(`${classid} - ${date}: task changed`);
+    // Summary of the task we're about to install — useful for spotting
+    // a `nostart` rewrite (the L→S start-time update the scheduler's
+    // tasks cadence is built around) or a brand-new task landing.
+    const isNew = !dbhashrow || dbhashrow.length === 0;
+    const nostartFinal = upstreamNoStart ?? existingNoStart ?? '00:00:00';
+    const realTpts = Array.isArray(day.task_points)
+        ? [...day.task_points].filter((tp: any) => tp.multiple_start == 0).sort((a: any, b: any) => a.point_index - b.point_index)
+        : [];
+    const trigraphs = realTpts.map((tp: any) => extractTrigraph(tp.name).trigraph).join(',');
+    const distanceKm = typeof day.task_distance === 'number' ? (day.task_distance / 1000).toFixed(1) : '?';
+    if (isNew) {
+        log(`${classid} - ${date}: TASK INSTALLED — nostart=${nostartFinal} type=${day.task_type} distance=${distanceKm}km duration=${duration} tps=[${trigraphs}] hash=${hash.substring(0, 16)}`);
+    } else {
+        const nostartChanged = upstreamNoStart && upstreamNoStart !== existingNoStart;
+        const nostartFragment = nostartChanged ? `nostart=${existingNoStart ?? 'null'}→${upstreamNoStart}` : `nostart=${nostartFinal}`;
+        const oldHash = dbhashrow[0].hash ?? '(none)';
+        log(`${classid} - ${date}: TASK CHANGED — ${nostartFragment} type=${day.task_type} distance=${distanceKm}km duration=${duration} tps=[${trigraphs}] (old=${String(oldHash).substring(0, 16)} new=${hash.substring(0, 16)})`);
+    }
 
     for (const tp of day.task_points) {
         tp.altitude = await new Promise((resolve) => getElevationOffset(toDeg(tp.latitude), toDeg(tp.longitude), resolve as any));
@@ -282,11 +335,7 @@ export async function upsertTaskAndLegs(
                     continue;
                 }
 
-                let tpname: string = tp.name;
-                let trigraph = tpname.substring(0, 3);
-                if (tpname && ([trigraph] = tpname.match(/^([0-9]{1,4})/) || [trigraph])) {
-                    tpname = tpname.replace(/^([0-9]{1,4})/, '').trim();
-                }
+                const {trigraph, name: tpname} = extractTrigraph(tp.name);
 
                 previousPoint = currentPoint;
                 currentPoint = point([toDeg(tp.longitude), toDeg(tp.latitude)]);
@@ -294,6 +343,33 @@ export async function upsertTaskAndLegs(
                 const leglength = previousPoint ? distance(previousPoint, currentPoint) : 0;
                 const bearingDeg = previousPoint ? (bearing(previousPoint, currentPoint) + 360) % 360 : 0;
                 const hi = 0;
+
+                // Observation-zone geometry.
+                const ozLine = !!tp.oz_line;
+                let r1 = tp.oz_radius1 / 1000;
+                let r2 = tp.oz_radius2 / 1000;
+                let a1 = ozLine ? 90 : toDeg(tp.oz_angle1);
+                // SoaringSpot/SeeYou encode "full inner cylinder" as
+                // oz_angle2 = π/2 (apex 180°); the renderer treats
+                // a2 = 180 as the full-circle marker.
+                let a2 = toDeg(tp.oz_angle2) >= 90 - 1e-6 ? 180 : toDeg(tp.oz_angle2);
+
+                // An observation zone with no radius is degenerate — there is
+                // nothing to cross or measure distance to, which crashes the
+                // scoring chain. Fall back to a sane default: a 3km line, or a
+                // 500m barrel for a sector.
+                if (!(r1 > 0) && !(r2 > 0)) {
+                    if (ozLine) {
+                        log(`${classid} - ${date}: turnpoint ${tp.point_index} (${tpname}) line has no length — substituting a 3km line`);
+                        r1 = 3;
+                    } else {
+                        log(`${classid} - ${date}: turnpoint ${tp.point_index} (${tpname}) sector has no radius — substituting a 500m barrel`);
+                        r1 = 0.5;
+                        a1 = 180;
+                    }
+                    r2 = 0;
+                    a2 = 0;
+                }
 
                 query += '( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,? ),';
 
@@ -309,15 +385,12 @@ export async function upsertTaskAndLegs(
                     hi,
                     trigraph,
                     tpname,
-                    tp.oz_line ? 'line' : 'sector',
+                    ozLine ? 'line' : 'sector',
                     oz_types[tp.oz_type],
-                    tp.oz_radius1 / 1000,
-                    tp.oz_line ? 90 : toDeg(tp.oz_angle1),
-                    tp.oz_radius2 / 1000,
-                    // SoaringSpot/SeeYou encode "full inner cylinder" as
-                    // oz_angle2 = π/2 (apex 180°); the renderer treats
-                    // a2 = 180 as the full-circle marker.
-                    toDeg(tp.oz_angle2) >= 90 - 1e-6 ? 180 : toDeg(tp.oz_angle2),
+                    r1,
+                    a1,
+                    r2,
+                    a2,
                     tp.oz_type == 'fixed' ? toDeg(tp.oz_angle12) : 0,
                     tp.altitude
                 ]);
@@ -512,6 +585,10 @@ export async function upsertTaskAndLegs(
 
     log(`${classname}: processed task ${date}`);
     return true;
+    } catch (e) {
+        log(`${classid} - ${date}: upsertTaskAndLegs failed:`, e);
+        return false;
+    }
 }
 
 //

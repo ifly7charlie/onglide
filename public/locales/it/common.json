@@ -6,7 +6,8 @@
         "loading_map": "Caricamento mappa...",
         "loading_competitions": "Caricamento gare...",
         "back_to_globe": "Torna al globo",
-        "language": "Lingua"
+        "language": "Lingua",
+        "update_available": "Aggiornamento disponibile — tocca per ricaricare"
     },
     "competition": {
         "live": "In diretta",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} piloti",
         "tracked_pilots": "{{tracked}}/{{total}} piloti",
         "live_stats": " · {{tracked}}/{{registered}} piloti · {{flying}} in volo · {{landed}} atterrati",
+        "in_view_only": "Solo visibili",
         "viewers_short": "spettatori",
         "land_data": "Dati terrestri:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Tocca per i risultati ufficiali",
+        "official_scores_hint": "Le informazioni seguenti provengono dal tracciamento in tempo reale",
+        "notify_subscribe": "Avvisami su questa competizione",
+        "notify_unsubscribe": "Smetti di avvisarmi",
+        "notify_denied": "Le notifiche sono bloccate nel browser"
     },
     "task": {
         "speed": "Prova di velocità",
@@ -57,10 +64,11 @@
         "launching": "Decollo",
         "racing": "In gara",
         "finishing": "In finale",
-        "home": "Rientrato",
+        "home": "Riproduci",
         "no_task": "Nessuna prova ancora",
         "upcoming": "In arrivo",
-        "yesterday": "Ieri"
+        "yesterday": "Riproduci ieri",
+        "cancelled": "Annullato"
     },
     "pilot": {
         "gridded_waiting": "In griglia, in attesa di partenza",
@@ -169,7 +177,9 @@
         "show_other_classes": "Mostra alianti di altre classi, clicca per mostrare solo la classe corrente",
         "show_only_current": "Mostra solo la classe selezionata, clicca per mostrare anche le altre",
         "switch_to_metric": "Passa alle unità metriche",
-        "switch_to_imperial": "Passa alle unità imperiali"
+        "switch_to_imperial": "Passa alle unità imperiali",
+        "map_attribution": "Attribuzione della mappa",
+        "close": "Chiudi"
     },
     "drawer": {
         "class": "Classe",
@@ -187,6 +197,7 @@
         "competition_time": "ora di gara",
         "your_time": "ora locale",
         "live": "In diretta",
+        "replay": "Replay",
         "offline": "Offline",
         "end": "Fine"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Aiuta a tradurre Onglide per la comunità del volo a vela",
         "translation_help_link_label": "Contribuisci su GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nuova prova impostata",
+        "task_changed": "{{classname}}: prova modificata",
+        "launching": "{{classname}}: decolli in corso",
+        "racing": "{{classname}}: alianti in gara",
+        "finishing": "{{classname}}: arrivi imminenti"
     }
 }

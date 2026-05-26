@@ -6,7 +6,8 @@
         "loading_map": "Kaart wordt geladen...",
         "loading_competitions": "Wedstrijden worden geladen...",
         "back_to_globe": "Terug naar globe",
-        "language": "Taal"
+        "language": "Taal",
+        "update_available": "Update beschikbaar — tik om opnieuw te laden"
     },
     "competition": {
         "live": "Live",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} piloten",
         "tracked_pilots": "{{tracked}}/{{total}} piloten",
         "live_stats": " · {{tracked}}/{{registered}} piloten · {{flying}} in de lucht · {{landed}} geland",
+        "in_view_only": "Alleen zichtbare",
         "viewers_short": "kijkers",
         "land_data": "Landdata:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Tik voor officiële uitslagen",
+        "official_scores_hint": "De informatie hieronder komt van live tracking",
+        "notify_subscribe": "Mij op de hoogte houden van deze wedstrijd",
+        "notify_unsubscribe": "Stop met meldingen",
+        "notify_denied": "Meldingen zijn geblokkeerd in je browser"
     },
     "task": {
         "speed": "Snelheidsopdracht",
@@ -57,10 +64,11 @@
         "launching": "Starten",
         "racing": "Onderweg",
         "finishing": "Finishen",
-        "home": "Thuis",
+        "home": "Herhaling",
         "no_task": "Nog geen opdracht",
         "upcoming": "Aanstaand",
-        "yesterday": "Gisteren"
+        "yesterday": "Herhaling gisteren",
+        "cancelled": "Geannuleerd"
     },
     "pilot": {
         "gridded_waiting": "Op het grid, wacht op start",
@@ -169,7 +177,9 @@
         "show_other_classes": "Toont zwevers van andere klassen, klik om alleen de huidige klasse te tonen",
         "show_only_current": "Toon alleen geselecteerde klasse, klik om andere klassen ook te tonen",
         "switch_to_metric": "Schakel naar metrische eenheden",
-        "switch_to_imperial": "Schakel naar imperiale eenheden"
+        "switch_to_imperial": "Schakel naar imperiale eenheden",
+        "map_attribution": "Kaartattributie",
+        "close": "Sluiten"
     },
     "drawer": {
         "class": "Klasse",
@@ -187,6 +197,7 @@
         "competition_time": "wedstrijdtijd",
         "your_time": "jouw tijd",
         "live": "Live",
+        "replay": "Herhaling",
         "offline": "Offline",
         "end": "Einde"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Help Onglide te vertalen voor de zweefvliegcommunity",
         "translation_help_link_label": "Bijdragen op GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nieuwe taak ingesteld",
+        "task_changed": "{{classname}}: taak gewijzigd",
+        "launching": "{{classname}}: lanceringen bezig",
+        "racing": "{{classname}}: zweefvliegtuigen in race",
+        "finishing": "{{classname}}: finishers verwacht"
     }
 }

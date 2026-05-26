@@ -16,11 +16,10 @@ yarn build              # protobuf + tsc for daemons (run before bin/* scripts)
 yarn build:protobuf     # only the .proto -> ts regen
 yarn dev                # next dev (webpack mode)
 yarn ogn                # OGN/APRS daemon (frontends connect via its websocket)
-yarn soaringspot        # data sync from SoaringSpot (OAuth API)
-yarn ssscrape           # data sync via HTML scrape; also drives SGP sources
+yarn ssscrape           # data sync daemon: drives SoaringSpot OAuth API, HTML scrape, and SGP sources
 yarn rst                # RST Online sync
 yarn ogn:dev            # tsc-watch + node --inspect (auto-restarts on rebuild)
-yarn soaringspot:dev    # same pattern for the scraper
+yarn ssscrape:dev       # same pattern for the scoring scraper
 yarn test               # vitest run (test/**/*.test.ts)
 yarn test:watch         # vitest watch
 ```
@@ -39,7 +38,7 @@ Prettier: 4-space, **225-char print width**, single quotes, no bracket spacing, 
 This is a soaring-competition tracking platform. The repo runs as **two cooperating processes** that share a MySQL DB:
 
 1. **`bin/ogn.ts`** — long-running daemon that subscribes to the OGN APRS feed, scores every pilot in real time, and exposes a websocket (`ws://…:8080`) to browsers. Owns all scoring state in-process.
-2. **`bin/{soaringspot,ssscrape,rst,sgp}.ts`** — one of these runs alongside `ogn.ts` to pull pilots / tasks / results from the contest's upstream system into the DB. Choice depends on the contest (see `readme.md`).
+2. **`bin/ssscrape.ts`** — the scoring scraper daemon. Runs the scheduler in `lib/scoring/scheduler.ts`, which drives every registered `ScoringSource` adapter: SoaringSpot OAuth API, SoaringSpot HTML scrape, SGP, and robocontrol (tracker-only). The choice of primary upstream is per-competition via a row in `scoringsource`; robocontrol rows are orthogonal and coexist with the primary. **`bin/rst.ts`** is the legacy RST sync (still its own daemon — not a `ScoringSource`).
 3. **Next.js (`pages/`)** — front-end. Reads competition metadata via `getServerSideProps` (direct DB), then connects to the OGN daemon's websocket for live tracks + scores. Almost no API routes; live state flows over the websocket, not REST.
 
 ### Front-end → daemon channel
@@ -98,7 +97,24 @@ Generators in `lib/webworkers/` receive a `log` parameter; **use it, not `consol
 
 ### Scoring sources (data-sync adapters)
 
-`lib/scoring/scheduler.ts` runs a 60-second heartbeat in competition-local time and decides what's due to fetch. Each upstream (SoaringSpot OAuth, SoaringSpot scrape, RST, SGP) implements the `ScoringSource` interface in `lib/scoring/source.ts` and hands parsed records to the shared helpers in `lib/scoring/shared/` (pilots, tasks, classes, airfield). The adapter knows nothing about timing; the scheduler knows nothing about HTTP. Adding a new upstream = new file under `lib/scoring/sources/` + a `bin/` entry point.
+`lib/scoring/scheduler.ts` runs a 60-second heartbeat in competition-local time and decides what's due to fetch. Each upstream — SoaringSpot OAuth, SoaringSpot scrape, SGP, and robocontrol — implements the `ScoringSource` interface in `lib/scoring/source.ts` and hands parsed records to the shared helpers in `lib/scoring/shared/` (pilots, tasks, classes, airfield, trackers). The adapter knows nothing about timing; the scheduler knows nothing about HTTP. RST is *not* a `ScoringSource` yet — it runs as the standalone `bin/rst.ts` daemon. Adding a new upstream = new file under `lib/scoring/sources/` registered in `bin/ssscrape.ts`.
+
+**Four independent streams per heartbeat.** The scheduler dispatches pilots, tasks, results, and trackers separately, each on its own cadence and gate:
+
+- **pilots** — daily 10:00 local gate, plus urgent path when the comp is active but the DB is empty.
+- **tasks** — per-class cadence via `desiredTaskCadence`: FAST (10 min) while pre-task or status='L'; SLOW (30 min) for briefed-pre-launch or post-start; stops once every today-class is F/H/Z or past its `30m + 1m × pilotsInClass` post-launch window. Stop at 22:00 local. An adapter may set `activeTasksCadenceMs` to override the L/S cadence — SGP uses 60 s because its task+tracks JSON is cheap and the L→S `nostart` rewrite (start-line time) needs to land in seconds. The "fast"/"slow" reason labels were replaced by `formatCadence` (e.g. `1m`, `10m`, `30m`).
+- **results** — gated on the sticky `everFOrHToday` (any class today has hit `'F'` or `'H'`) OR `localNow >= 18:00`. SLOW (30 min) cadence until 22:00.
+- **trackers** — per-adapter `trackerIntervalMs` (SGP 5 min, OAuth/robocontrol 15 min) between 10:00 and 22:00; drops to hourly once every non-`'Z'` today-class is `'F'` or `'H'`. Adapters that don't expose `fetchTrackers` are skipped. SGP's `fetchTrackers` installs the task from the same JSON payload it already pulls for pilots/trackers — so the 5-min trackers cadence picks up tasks for free, and the separate tasks-cadence GET is only the extra polling above that.
+
+On daemon startup `initSourceState` jitters the first per-stream fetch over `STARTUP_JITTER_MS` (5 min). The 30-min `oneSidedJitter` is reserved for "tomorrow at HH:MM local" parking — using it for first-fetch would swallow the entire FAST tasks cadence on a restart during launch.
+
+Dispatch state (`nextPilotsAt` / `nextTasksAt` / `nextResultsAt` / `nextTrackersAt` and the `lastXFetch` bookkeeping) lives in `SourceState` keyed by `ScoringSource.type` inside each `CompState` — so robocontrol's no-op pilots/results stubs can't advance the primary adapter's timestamps. Comp-wide state (`observations`, `firstLaunch`, `everFOrHToday`, comp window, pilot/task counts) stays at the `CompState` level.
+
+Each `ClassObservation` carries `laststatuschange` (UTC epoch ms, from `compstatus.laststatuschange`, maintained by BEFORE INSERT/UPDATE triggers that bump only on real transitions — see `conf/sql/onglide_schema.sql`). The scheduler uses it on restart as a fallback to seed `firstLaunch` for classes already in L/S/F, so the post-launch task window is anchored even when the in-memory map is empty.
+
+**Override gate.** A comp with a `scoringsource` row of `type='soaringspotkey'` suppresses its `soaringspotscrape` row (the OAuth API is authoritative). Robocontrol is not suppressed — see `OVERRIDE_TARGET_TYPES` in `scheduler.ts`.
+
+**Debug.** `dumpSchedulerState()` is exported from the scheduler and wired to `SIGUSR1` in `bin/ssscrape.ts`. `kill -USR1 <pid>` prints the full per-comp / per-source state to stdout.
 
 ### Task geometry
 
@@ -117,7 +133,7 @@ Vector basemap is a single self-hosted `.pmtiles` file served over HTTP range re
 ## Repository quirks
 
 - `dist/` is the build output for daemons — don't edit it. `nextdest/` is similar for the front-end type-check pass.
-- A few stray `*~` and `#…#` editor backup files are checked in alongside their real counterparts; ignore them.
+- Emacs leaves `*~` and `#…#` backup files alongside their real counterparts; `.gitignore` excludes them so they never make it into commits.
 - `.aprs` files at the repo root are recorded APRS logs used for replay/testing (large — `476.aprs` is ~230 MB).
 - The Next.js version pinned here **is not safe to expose directly** — always run behind Apache/Cloudflare (see `readme.md`).
 - `readme.md` (lowercase) is the operator's deployment guide. It documents env vars (`NEXT_PUBLIC_PMTILES_URL`, `MYSQL_PASSWORD`, `SOARINGSPOT_*`, `ROBOCONTROL_URL`, etc.), Planetiler invocations for pmtiles, and the docker-compose topology (`mysql`, `soaringspot`, `ogn`, `next`, `apache`).

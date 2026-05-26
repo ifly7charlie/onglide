@@ -27,6 +27,8 @@ import {assignedAreaScoringGenerator} from './assignedAreaScoringGenerator';
 import {racingScoringGenerator} from './racingScoringGenerator';
 import {enrichedPositionGenerator} from './enrichedPositionGenerator';
 
+import {getLocalRelief} from '../getelevationoffset';
+
 // DH adjuster
 import {adjustDistanceHandicapTask} from '../flightprocessing/distancehandicap';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
@@ -38,6 +40,10 @@ import {scoreCollector} from './scoreCollector';
 
 // Optional flight statistics (thermals/straights/wind), per competition flag
 import {createFlightStatistics} from './flightStatistics';
+
+// Per-glider on-disk scoring log
+import {createGliderLog} from './gliderLogFile';
+import type {GliderLogHandle} from './gliderLog';
 
 import {makeGetNow, getDelay} from '../now';
 
@@ -204,6 +210,10 @@ interface GliderState {
     scoring: any;
 
     task: any;
+
+    // Per-glider on-disk log for the current scoring chain instance.
+    // Recreated (and the file truncated) on every rescore.
+    log?: GliderLogHandle;
 }
 
 // What are we scoring - we will register each one when
@@ -443,24 +453,24 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
     } else if (!glider.task) {
         console.log(`${config.className}/${compno}: unable to rescore glider (no task configured) [${scoreId}]`);
     } else {
+        // Each chain owns its own logger; closed by the auto-close wrapper
+        // inside getScoringChain when the chain ends or is restart-broken.
         scoreUpdater?.collect(compno, (glider.scoring = getScoringChain(glider, config, glider.task)), scoreId);
     }
 }
 
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
-    const log =
-        process.env.NEXT_PUBLIC_COMPNO && glider.compno == process.env.NEXT_PUBLIC_COMPNO
-            ? console.log
-            : () => {
-                  /*noop*/
-              };
+    // Per-glider on-disk log: logs/<datecode>/<class>/<compno>.<pid>.log,
+    // append-mode and shared across chains; the scoreId line prefix lets
+    // grep separate concurrent rescore sequences.
+    const log = createGliderLog(config.datecode, glider.className, glider.compno, glider.scoreId);
 
     let handicap = glider.handicap;
 
     // Distance handicap
     if (task.rules.dh) {
-        console.log('adjusting for dh task');
+        log('adjusting for dh task');
         task = adjustDistanceHandicapTask(task, glider.handicap);
         //        handicap = 100;
     }
@@ -471,7 +481,7 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
     const stats = config.flightstats ? createFlightStatistics(glider.compno, log) : null;
 
     // 0. Check if we are flying etc
-    const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log);
+    const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log, getLocalRelief);
     const observed = stats ? stats.observer(epg) : epg;
 
     // 1. Figure out where in the task we are
@@ -486,5 +496,17 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
     //    and therefore speeds
     const scores = taskScoresGenerator(task, glider.compno, handicap, distances, log);
 
-    return stats ? stats.attacher(scores) : scores;
+    return autoCloseLog(stats ? stats.attacher(scores) : scores, log);
+}
+
+// Wrap the final scoring chain so the per-glider logger is closed (and its
+// buffer flushed) when iteration ends — naturally, via a restart-count break
+// in iterateAndUpdate, or by an upstream exception. Without this the file
+// descriptor leaks for every replaced chain.
+async function* autoCloseLog<T>(inner: AsyncGenerator<T, void, void>, log: GliderLogHandle): AsyncGenerator<T, void, void> {
+    try {
+        yield* inner;
+    } finally {
+        log.close();
+    }
 }

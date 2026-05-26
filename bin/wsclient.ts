@@ -8,26 +8,29 @@
 //
 //   node dist/bin/wsclient.js                       # default: ws://localhost:8080/all
 //   node dist/bin/wsclient.js --channel BLUE070
-//   node dist/bin/wsclient.js --url wss://www.onglide.com/all
+//   node dist/bin/wsclient.js --group sgp            # ws://localhost:8080/all/sgp
+//   node dist/bin/wsclient.js --url wss://www.onglide.com/all/sgp
 //
 
 import yargs from 'yargs';
 import WebSocket from 'ws';
 
 import {OnglideWebSocketMessage} from '../lib/protobuf/onglide';
+import {unscaleFromWire} from '../lib/protobuf/wireScaling';
 
 async function run() {
     const args = await yargs(process.argv.slice(2))
         .option('url', {type: 'string', description: 'full ws/wss URL (overrides host/port/channel)'})
         .option('host', {type: 'string', default: 'localhost', description: 'host:port (default localhost:WEBSOCKET_PORT or 8080)'})
         .option('channel', {type: 'string', default: 'all', description: 'channel name to subscribe to (default: /all landing-page feed)'})
+        .option('group', {type: 'string', description: 'restrict the /all feed to a competition group -> /all/<group>'})
         .option('messages', {type: 'number', default: '0', description: 'how many messages to wait for'})
         .option('tls', {type: 'boolean', default: false, description: 'use wss instead of ws'})
         .option('details', {type: 'boolean', default: false, description: 'after each summary, pretty-print the decoded message as JSON'})
         .help()
         .alias('help', 'h').argv;
 
-    const url = args.url ?? buildUrl(args.host, args.channel, args.tls);
+    const url = args.url ?? buildUrl(args.host, args.channel, args.group, args.tls);
     console.log(`connecting to ${url}`);
 
     const ws = new WebSocket(url);
@@ -59,7 +62,7 @@ async function run() {
         }
         try {
             const buf = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data as Buffer);
-            const decoded = OnglideWebSocketMessage.decode(buf);
+            const decoded = unscaleFromWire(OnglideWebSocketMessage.decode(buf));
             console.log(`${ts} ${buf.byteLength}b ${summarise(decoded)}`);
             if (args.details) {
                 // toJSON gives us the protobuf-friendly representation (bytes
@@ -84,10 +87,17 @@ async function run() {
     });
 }
 
-function buildUrl(host: string, channel: string, tls: boolean): string {
+function buildUrl(host: string, channel: string, group: string | undefined, tls: boolean): string {
     const proto = tls ? 'wss' : 'ws';
     const hp = host.includes(':') ? host : `${host}:${process.env.WEBSOCKET_PORT || 8080}`;
-    return `${proto}://${hp}/${channel}`;
+    // Build the path from slash-trimmed segments so a stray leading/trailing
+    // slash on --channel or --group can't produce `//` (which the daemon
+    // strips to a different channel name than intended). --group is appended
+    // verbatim, so `--channel all/sgp` and `--channel all --group sgp` are
+    // equivalent.
+    const trim = (s: string) => s.replace(/^\/+|\/+$/g, '');
+    const path = [trim(channel), group ? trim(group) : ''].filter(Boolean).join('/');
+    return `${proto}://${hp}/${path}`;
 }
 
 // Build a one-line summary of the populated fields on the message. Order

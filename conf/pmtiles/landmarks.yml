@@ -1,5 +1,5 @@
-schema_name: European Landmarks
-schema_description: Castles, lighthouses, cathedrals, and other large landmarks
+schema_name: Onglide Map Overlay
+schema_description: Map labels (places, roads, water, peaks, aerodromes) plus landmarks and obstacles, drawn over satellite imagery and supplying the labels in street-view mode
 attribution: <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap contributors</a>
 
 args:
@@ -9,32 +9,31 @@ args:
   osm_url:
     description: OSM URL
     default: '${ args.area == "planet" ? "aws:latest" : ("geofabrik:" + args.area) }'
-  languages:
-    description: Languages to include in name attributes
-    default: en,de,fr,es,it,pl,cs,nl,sv,fi
-  minzoom:
-    default: 6
-  maxzoom:
-    default: 14
 
 sources:
   osm:
     type: osm
     url: '${ args.osm_url }'
 
+# Glider pilots navigate by the local-language name of a feature, so every label
+# carries the raw OSM `name` tag only — no transliteration or per-language variants.
 tag_mappings:
   name:
-    type: string
-  name_en:
-    key: name:en
-    type: string
-  name_de:
-    key: name:de
     type: string
 
 layers:
 
   - id: landmark
+    # Solar farms are sometimes mapped as thousands of individual panel polygons,
+    # which can bloat a single tile to megabytes. merge_polygons combines touching
+    # panels into one shape; min_area then drops the small fragments, at the max
+    # zoom too (plain min_size does not apply at max zoom). Planetiler cannot bridge
+    # gaps between non-touching polygons, so raise min_area_at_max_zoom if a
+    # specific panel-mapped farm still comes through heavy.
+    tile_post_process:
+      merge_polygons:
+        min_area: 6
+        min_area_at_max_zoom: 12
     features:
 
       # Castles, forts, named historic structures - polygons (most are mapped as areas)
@@ -45,17 +44,12 @@ layers:
           historic:
             - castle
             - fort
-            - city_gate
             - manor
         exclude_when:
           name: ""
         attributes:
           - &name_attr
             key: name
-          - &name_en_attr
-            key: name_en
-          - &name_de_attr
-            key: name_de
           - key: class
             value: '${ feature.tags.get("historic") }'
           - key: subclass
@@ -69,14 +63,11 @@ layers:
           historic:
             - castle
             - fort
-            - city_gate
             - manor
         exclude_when:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: '${ feature.tags.get("historic") }'
           - key: subclass
@@ -92,8 +83,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: ruins
 
@@ -108,8 +97,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: cathedral
 
@@ -123,8 +110,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: lighthouse
 
@@ -142,8 +127,6 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: tower
           - key: subclass
@@ -151,22 +134,113 @@ layers:
           - key: height
             tag_value: height
 
-      # Memorials and monuments only when named (drops roadside plaques without context)
+      # Tall guyed masts (radio/TV) - the tallest obstacles. man_made=mast is by
+      # definition a tall structure, so no height filter is needed. Most are unnamed,
+      # so the name exclusion is dropped here.
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          man_made: mast
+        attributes:
+          - *name_attr
+          - key: class
+            value: mast
+          - key: subclass
+            tag_value: tower:type
+          - key: height
+            tag_value: height
+
+      # Monuments - only notable ones, carrying a wikipedia or wikidata tag, so
+      # small village memorials and plaques (historic=memorial) stay off the map.
       - source: osm
         geometry: point
         min_zoom: 13
         include_when:
-          historic:
-            - monument
-            - memorial
+          __all__:
+            historic: monument
+            __any__:
+              wikipedia: __any__
+              wikidata: __any__
         exclude_when:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
-            value: '${ feature.tags.get("historic") }'
+            value: monument
+
+      # Hill figures / geoglyphs (Uffington White Horse, Cerne Abbas Giant) -
+      # large ground markings, conspicuous from the air. Mapped as area outlines
+      # and nearly always named, so no notability filter is needed.
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          man_made: geoglyph
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: class
+            value: geoglyph
+
+      # Archaeological sites - prehistoric monuments such as Stonehenge and
+      # Avebury. historic=archaeological_site is a very broad tag, so two filters
+      # are stacked: the site_type / archaeological_site sub-tag must name a
+      # conspicuous category (stone circles, hillforts, ancient cities), which
+      # drops minor categories - lone barrows, findspots, field systems,
+      # petroglyphs; and the site must carry a wikipedia or wikidata tag, the
+      # same notability test as monuments above. Geoglyphs also carry the
+      # historic tag but are emitted by the feature above, so they are excluded
+      # here to avoid a duplicate symbol.
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 12
+        include_when:
+          __all__:
+            - historic: archaeological_site
+            - __any__:
+                site_type: &archaeological_categories
+                  - megalith
+                  - fortification
+                  - hillfort
+                  - hill_fort
+                  - city
+                  - citadel
+                  - henge
+                archaeological_site: *archaeological_categories
+            - __any__:
+                wikipedia: __any__
+                wikidata: __any__
+        exclude_when:
+          name: ""
+          man_made: geoglyph
+        attributes:
+          - *name_attr
+          - key: class
+            value: archaeological_site
+
+      # Same set as points - smaller sites (standing stones, barrows) are mapped
+      # on nodes.
+      - source: osm
+        geometry: point
+        min_zoom: 12
+        include_when:
+          __all__:
+            - historic: archaeological_site
+            - __any__:
+                site_type: *archaeological_categories
+                archaeological_site: *archaeological_categories
+            - __any__:
+                wikipedia: __any__
+                wikidata: __any__
+        exclude_when:
+          name: ""
+          man_made: geoglyph
+        attributes:
+          - *name_attr
+          - key: class
+            value: archaeological_site
 
       # Windmills (often visible landmarks in NL/DE/UK)
       - source: osm
@@ -178,7 +252,250 @@ layers:
           name: ""
         attributes:
           - *name_attr
-          - *name_en_attr
-          - *name_de_attr
           - key: class
             value: windmill
+
+      # Wind turbines - tall obstacles that cluster over the open country flown on XC.
+      # Rarely named, so no name exclusion.
+      - source: osm
+        geometry: point
+        min_zoom: 10
+        include_when:
+          __all__:
+            power: generator
+            generator:source: wind
+        attributes:
+          - *name_attr
+          - key: class
+            value: wind_turbine
+          - key: height
+            tag_value: height
+
+      # Power stations / generating plants - large landmarks and thermal sources.
+      # Solar is split out below as its own class; battery storage is excluded
+      # entirely - small fenced compounds, not a landmark or an obstacle.
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 10
+        include_when:
+          power: plant
+        exclude_when:
+          plant:source:
+            - solar
+            - battery
+        attributes:
+          - *name_attr
+          - key: class
+            value: power_plant
+          - key: subclass
+            tag_value: plant:source
+
+      # Solar farms - large unlandable areas and a useful navigation feature, so
+      # emitted as polygons (the footprint matters for routing) rather than points.
+      # Captured both as whole-site plants and as generator-tagged panel arrays;
+      # the layer-level merge_polygons/min_area above collapses panel-level mapping.
+      - source: osm
+        geometry: polygon
+        min_zoom: 10
+        include_when:
+          __all__:
+            power: plant
+            plant:source: solar
+        attributes:
+          - *name_attr
+          - key: class
+            value: solar_farm
+
+      # Generator-tagged solar (the panel arrays). Roof-mounted generators are
+      # excluded so rooftop PV does not clutter the map - only ground farms.
+      - source: osm
+        geometry: polygon
+        min_zoom: 11
+        include_when:
+          __all__:
+            power: generator
+            generator:source: solar
+        exclude_when:
+          location:
+            - roof
+            - rooftop
+          generator:place: roof
+        attributes:
+          - *name_attr
+          - key: class
+            value: solar_farm
+
+      # Cooling towers - very tall, far-visible (polygons mapped as areas)
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 11
+        include_when:
+          man_made: cooling_tower
+        attributes:
+          - *name_attr
+          - key: class
+            value: cooling_tower
+          - key: height
+            tag_value: height
+
+      # Cooling towers tagged on nodes
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          man_made: cooling_tower
+        attributes:
+          - *name_attr
+          - key: class
+            value: cooling_tower
+          - key: height
+            tag_value: height
+
+      # High-voltage power lines - a cable hazard on low approaches and outlandings.
+      # No name exclusion: power lines are almost never named.
+      - source: osm
+        geometry: line
+        min_zoom: 11
+        include_when:
+          power: line
+        attributes:
+          - key: class
+            value: power_line
+          - key: voltage
+            tag_value: voltage
+
+  # --- Label layers -------------------------------------------------------------
+  # These reproduce the OpenMapTiles label source-layers the map style reads, so the
+  # overlay file carries every label as well as the landmarks.
+
+  - id: place
+    features:
+      - source: osm
+        geometry: point
+        min_zoom: 6
+        include_when:
+          place:
+            - city
+            - town
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: class
+            tag_value: place
+      - source: osm
+        geometry: point
+        min_zoom: 10
+        include_when:
+          place:
+            - village
+            - suburb
+            - hamlet
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: class
+            tag_value: place
+
+  - id: transportation_name
+    features:
+      - source: osm
+        geometry: line
+        min_zoom: 10
+        include_when:
+          highway:
+            - motorway
+            - trunk
+            - primary
+        attributes:
+          - *name_attr
+          - key: class
+            tag_value: highway
+          - key: ref
+            tag_value: ref
+
+  - id: water_name
+    features:
+      # Lakes / reservoirs - point label at the centroid
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 9
+        include_when:
+          natural: water
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+      # Waterways are split by type and staged by zoom: a named stream is useless
+      # at overview zoom and there are vast numbers of them, so each type only
+      # enters the tiles once it is worth labelling. Rivers first, then canals,
+      # then streams - this keeps low-zoom water_name tiles small.
+      - source: osm
+        geometry: line
+        min_zoom: 9
+        include_when:
+          waterway: river
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+      - source: osm
+        geometry: line
+        min_zoom: 11
+        include_when:
+          waterway: canal
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+      - source: osm
+        geometry: line
+        min_zoom: 13
+        include_when:
+          waterway: stream
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+
+  - id: aerodrome_label
+    features:
+      - source: osm
+        geometry: polygon_centroid
+        min_zoom: 9
+        include_when:
+          aeroway: aerodrome
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: icao
+            tag_value: icao
+      - source: osm
+        geometry: point
+        min_zoom: 9
+        include_when:
+          aeroway: aerodrome
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: icao
+            tag_value: icao
+
+  - id: mountain_peak
+    features:
+      - source: osm
+        geometry: point
+        min_zoom: 11
+        include_when:
+          natural:
+            - peak
+            - volcano
+        exclude_when:
+          name: ""
+        attributes:
+          - *name_attr
+          - key: ele
+            tag_value: ele

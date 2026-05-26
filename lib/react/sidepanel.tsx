@@ -6,10 +6,12 @@ import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
 import {Options} from './options';
+import {SubscribeBell} from './subscribeBell';
 import {StatusIcon, STATUS_LABEL_KEYS} from './competition-status';
 import type {CompetitionDisplayStatus} from '../competition-display-status';
 
 import type {Options as OptionsType, ClassName} from '../types';
+import {groupForHost} from './domainGroups';
 
 interface SidePanelProps {
     comp: any;
@@ -29,7 +31,9 @@ export function compShortName(comp: any) {
             .replace(/.*World Gliding Championship[s]*/gi, 'WGC')
             .replace(/.*European Gliding Championship[s]*/gi, 'EGC')
             .replace(/.*Sailplane Grandprix]*/gi, 'SGP')
-            ?.trim() || comp?.name || ''
+            ?.trim() ||
+        comp?.name ||
+        ''
     );
 }
 
@@ -49,7 +53,7 @@ export function SidePanelHeader({comp}: {comp: any}) {
     ) : null;
     return (
         <div className="sidepanel-header">
-            <Link href="/" className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+            <Link href={groupForHost(window.location.host) ? '/' : 'https://www.onglide.com/'} className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                 <FontAwesomeIcon icon={faGlobe} />
             </Link>
             {logo}
@@ -69,6 +73,7 @@ export function SidePanelHeader({comp}: {comp: any}) {
                     </div>
                 ) : null}
             </div>
+            <SubscribeBell compid={comp?.compid} />
         </div>
     );
 }
@@ -84,14 +89,7 @@ export function SidePanelClassTabs({comp, vc, onClassChange}: {comp: any; vc: Cl
                 // with proper datecode-staleness demotion; trust it as-is.
                 const ds = (c.displayStatus ?? 'notask') as CompetitionDisplayStatus;
                 return (
-                    <button
-                        key={c.class}
-                        role="tab"
-                        aria-selected={c.class === vc}
-                        className={c.class === vc ? 'active' : ''}
-                        title={t(STATUS_LABEL_KEYS[ds])}
-                        onClick={() => onClassChange(c.class)}
-                    >
+                    <button key={c.class} role="tab" aria-selected={c.class === vc} className={c.class === vc ? 'active' : ''} title={t(STATUS_LABEL_KEYS[ds])} onClick={() => onClassChange(c.class)}>
                         <StatusIcon status={ds} className="status-icon" />
                         {c.classname.replace(/\s+(meter|metre)/, 'm')}
                     </button>

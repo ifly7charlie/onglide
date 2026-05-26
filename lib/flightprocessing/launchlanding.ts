@@ -41,7 +41,7 @@ const minTestTime = 5;
 // that we can use both in soaringspot.js (on the igc file) or for the flarm
 // ID. We can then correlate the two
 // note: id could be either class+compno or flarmid
-export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl = 0, db, type) {
+export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at: Epoch | undefined, point: Position | undefined, agl: AltitudeAgl = 0, db, type, compid?: string) {
     // Now we are going to manipulate this track to look for either launch or landing
     let track = unknownTrack[id];
 
@@ -119,18 +119,19 @@ export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at:
             if (!track.airborne) {
                 if (db) {
                     db.query(sql`
-                        INSERT IGNORE INTO movements (action, time, id, type, datecode)
+                        INSERT IGNORE INTO movements (action, time, id, type, datecode, compid)
                         VALUES
                             (
                                 'launch',
                                 ${at},
                                 ${id},
                                 ${type},
-                                ${datecode}
+                                ${datecode},
+                                ${compid ?? null}
                             )
                     `);
                 }
-                console.log(id, at, 'launch', speed, gain, agl);
+                console.log(compid ?? '?', id, at, 'launch', speed, gain, agl);
                 track.airborne = true;
             }
         } else {
@@ -141,18 +142,19 @@ export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at:
                 if (Math.abs(gain) < 10 && speed < 35 && agl < 50) {
                     if (db) {
                         db.query(sql`
-                            INSERT IGNORE INTO movements (action, time, id, type, datecode)
+                            INSERT IGNORE INTO movements (action, time, id, type, datecode, compid)
                             VALUES
                                 (
                                     'landing',
                                     ${at},
                                     ${id},
                                     ${type},
-                                    ${datecode}
+                                    ${datecode},
+                                    ${compid ?? null}
                                 )
                         `);
                     }
-                    console.log(id, at, 'landing', speed, gain, agl);
+                    console.log(compid ?? '?', id, at, 'landing', speed, gain, agl);
                     track.airborne = false;
                 }
             }
@@ -161,7 +163,7 @@ export function capturePossibleLaunchLanding(id: string, datecode: Datecode, at:
 
     // Are we airborne? Only an 'on' here, toggle off after landing detected extra check
     if (!track.airborne && speed > 130 && agl > 200) {
-        console.log(id, at, 'airborne trace start', speed, agl);
+        console.log(compid ?? '?', id, at, 'airborne trace start', speed, agl);
         track.airborne = true;
     }
 
@@ -294,10 +296,11 @@ export async function checkForOGNMatches(classid: string, date: string, mysql) {
                     `)
                     .query(sql`
                         INSERT INTO
-                            trackerhistory (compno, changed, flarmid, launchtime, method)
+                            trackerhistory (compno, class, changed, flarmid, launchtime, method)
                         VALUES
                             (
                                 ${mCompno},
+                                ${classid},
                                 now(),
                                 ${m.flarmid},
                                 now(),
@@ -326,7 +329,8 @@ export async function processIGC(
     url,
     https,
     mysql,
-    getHeaders?: () => {headers: {Authorization: string}} | undefined
+    getHeaders?: () => {headers: {Authorization: string}} | undefined,
+    compid?: string
 ) {
     // IGC files may be from a Flarm, if they are then we can extract the flarm ID from them
     // and associate it with the device
@@ -398,7 +402,7 @@ export async function processIGC(
                     AND class = ${classid}
             `);
             if (validFile) {
-                capturePossibleLaunchLanding(key, dateCode, Infinity as Epoch, undefined, undefined, mysql, 'igc'); // force a final point for longers that truncate before stationary
+                capturePossibleLaunchLanding(key, dateCode, Infinity as Epoch, undefined, undefined, mysql, 'igc', compid); // force a final point for longers that truncate before stationary
                 console.log(`igc: processed ${date} ${classid} - ${compno} successfully`);
                 checkForOGNMatches(classid, date, mysql);
             } else {
@@ -441,7 +445,7 @@ export async function processIGC(
                     // yes some files contain this information but we use same algo
                     // for flarm so hopefully a closer match
                     try {
-                        capturePossibleLaunchLanding(key, dateCode, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc');
+                        capturePossibleLaunchLanding(key, dateCode, time as Epoch, [lng, lat], alt - location.altitude, mysql, 'igc', compid);
                         // We are valid if we have a point within 20km of configured airfield
                         // will also require epochbase to be set to make it this far
                         validFile = true;
@@ -472,10 +476,11 @@ export async function processIGC(
                     `)
                     .query(sql`
                         INSERT INTO
-                            trackerhistory (compno, changed, flarmid, launchtime, method)
+                            trackerhistory (compno, class, changed, flarmid, launchtime, method)
                         VALUES
                             (
                                 ${compno},
+                                ${classid},
                                 now(),
                                 ${flarmId},
                                 now(),

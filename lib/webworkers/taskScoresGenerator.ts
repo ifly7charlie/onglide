@@ -3,6 +3,7 @@ import {PositionStatus} from '../types';
 
 import {PilotScore, PilotScoreLeg, SpeedDist} from '../protobuf/onglide';
 import {distHaversineRaw} from '../flightprocessing/taskhelper';
+import {GliderLog} from './gliderLog';
 
 //
 function copyPick(d, o, ...props) {
@@ -14,7 +15,7 @@ function selectPick(o, ...props) {
 }
 
 //export function everySoOftenGenerator<Type extends TimeStampType> *(interval: Epoch, input: SoftenGenerator<Type>): SoftenGenerator<Type> {
-export const taskScoresGenerator = async function* (task: Task, compno: Compno, handicap: number, input: CalculatedTaskGenerator, log: Function): TaskScoresGenerator {
+export const taskScoresGenerator = async function* (task: Task, compno: Compno, handicap: number, input: CalculatedTaskGenerator, log: GliderLog): TaskScoresGenerator {
     // Helper for handicapping
     function calcHandicap(dist) {
         return Math.round((1000.0 * dist) / handicap) / 10;
@@ -63,7 +64,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
     for (let current = await input.next(); !current.done && current.value; current = await input.next()) {
         const item = current.value;
         if (!item) {
-            console.log(`TSG: no value received in iterator for ${compno}`, current);
+            log.error(`TSG: no value received in iterator for ${compno}`, current);
             return;
         }
 
@@ -161,8 +162,9 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
                 // and may have fake time for AATs use the actual time we are scored to which is in item.t
                 const currentLegTime = legTime(leg);
                 if (sl.time) {
-                    sl.duration = (currentLegTime || item.t) - sl.time;
-                    sl.taskDuration = (currentLegTime || item.t) - item.utcStart;
+                    const endT = currentLegTime || item.t;
+                    if (endT >= sl.time) sl.duration = endT - sl.time;
+                    if (item.utcStart && endT >= item.utcStart) sl.taskDuration = endT - item.utcStart;
                 }
 
                 // And now do speeds
@@ -267,5 +269,5 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
         yield score;
     }
 
-    console.log(`TSG: ${compno} leaving function`);
+    log(`TSG: ${compno} leaving function`);
 };

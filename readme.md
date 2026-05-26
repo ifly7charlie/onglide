@@ -79,6 +79,21 @@ Onglide can support multiple IDs for a pilot. These are not currently
 automatically detected but I'm happy to configure them if needed (it's
 used for the delayed IGC trackers and SGP for example)
 
+# Troubleshooting
+
+The map shows a small x mark at the point it has identified as your
+airfield. If this mark is in the wrong place it will cause issues with
+landouts and failing to identify launched gliders. 
+
+The position is determined by doing a geocode lookup on the airfield
+location as you have set in SeeYou/SoaringSpot for the competition.
+Don't use abbreviations or add extra details eg Dunstable, UK is ok
+but Dunstable LGC, UK will not match and will result in the
+competition not tracking.  The name is updated when the competition is
+checked so you can change this at any time.
+
+
+
 # Other
 
 ## Running your own 
@@ -117,6 +132,35 @@ NEXT_PUBLIC_PMTILES_LABELS_URL=https://tiles.onglide.com/europe-labels.pmtiles
 ```
 
 If unset, all layers fall back to `NEXT_PUBLIC_PMTILES_URL` (single-source setup).
+
+Optional: Web Push notifications. Users can subscribe (a bell next to the
+competition name) to be notified when a class's status changes — task set,
+launching, racing, finishing — even with the browser closed. This needs a VAPID
+key pair, generated once with `npx web-push generate-vapid-keys`:
+
+```
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=<public key — inlined into the client bundle>
+VAPID_PRIVATE_KEY=<private key — daemon only, keep secret>
+VAPID_SUBJECT=mailto:<your contact email>
+```
+
+If these are unset the feature is silently disabled and the bell does not show.
+Push requires the `pushsubscription` table — present in `conf/sql/onglide_schema.sql`,
+or apply `conf/sql/migrations/20260522_pushsubscription.sql` to an existing
+database. Push needs a secure context (HTTPS or localhost); on iOS the site must
+be added to the Home Screen before notifications can be enabled.
+
+Notifications are **opt-in per competition**. The bell appears, and subscriptions
+are accepted, only when `competition.pushnotifications = 'Y'` (the column
+defaults to `'N'`; apply `conf/sql/migrations/20260522_competition_pushnotifications.sql`
+to an existing database). Enable a competition with:
+
+```sql
+UPDATE competition SET pushnotifications = 'Y' WHERE compid = 'yourcompid';
+```
+
+Clearing it back to `'N'` hides the bell, rejects new subscriptions, and stops
+the daemon notifying existing subscribers.
 
 
 ### Map tiles
@@ -168,17 +212,26 @@ RAM for disk, a bit slower):
 Regional variants: swap `--area=europe` for `--area=north-america`, `--area=australia-oceania`,
 or `--osm-path=/data/your.osm.pbf` for a custom Geofabrik extract.
 
-For monthly refreshes, wrap in a shell script with atomic rename so live clients don't
-see a partial file:
-
-```
-docker run ... --output=/data/europe.pmtiles.new
-mv /data/europe.pmtiles.new /srv/tiles/europe.pmtiles
-```
+For monthly refreshes, do **not** replace the file in place under the same URL.
+A range-caching CDN (Cloudflare) caches individual byte ranges; after an in-place
+swap it stitches ranges from the old and new build together, which the client
+decodes as corrupt tiles. Give every build a unique, immutable URL instead —
+`bin/build-tiles.sh` names each archive with a short content hash
+(`world-overlay.<hash>.pmtiles`) and writes the new URLs to
+`~/pmtiles/pmtiles-manifest.env`. Source that into the deploy, point
+`NEXT_PUBLIC_PMTILES_URL` / `NEXT_PUBLIC_PMTILES_LABELS_URL` at the new URLs, and
+rebuild the Next.js app (the `NEXT_PUBLIC_*` values are inlined at build time).
 
 Serve the file from any HTTP host that honours byte-range requests (nginx static file
-serving with `add_header Accept-Ranges bytes;` works) and point `NEXT_PUBLIC_PMTILES_URL`
-at the public URL. Cloudflare in front caches the ranges and handles public egress.
+serving with `add_header Accept-Ranges bytes;` works). Because each URL is content-
+hashed and never reused, it is served `Cache-Control: immutable` with a one-year
+max-age, and the browser cache does the work.
+
+Do **not** put the tiles host behind Cloudflare. pmtiles is read entirely via HTTP
+Range requests, and Cloudflare does not cache range responses (a multi-GB archive
+also exceeds its cacheable object size) — so it adds no caching benefit, and a
+partially-cached object can return byte ranges from different builds, which decodes
+as corrupt tiles. Serve `tiles.onglide.com` directly from the range-capable origin.
 
 ### Optional: split label layers into a separate pmtiles
 
@@ -247,13 +300,13 @@ Atkinson Hyperlegible Next OTFs are a free download from Braille Institute, or f
 the [Google Fonts repo](https://github.com/googlefonts/atkinson-hyperlegible-next).
 The `.woff2` files in `public/fonts/` are for the UI (CSS only) and not usable here.
 
-You can also use it to specify the soaring spot credentials, or you
-can pass then in through your service provider environment variables.
-
-```
-SOARINGSPOT_CLIENT_ID=
-SOARINGSPOT_SECRET=
-```
+SoaringSpot OAuth API credentials no longer come from `.env` — they live
+in the `scoringsource` table per competition. Insert one row of
+`type = 'soaringspotkey'` with `client_id`, `secret` and the local
+`compid`, and the scoring scraper (`yarn ssscrape`) picks it up on the
+next heartbeat. Optional columns:
+  - `contest_name` to disambiguate when the key has access to multiple contests
+  - `actuals`: `1` (FAI/IGC actuals — default), `0` (handicapped speeds), `-1` (BGA decimal-encoded)
 
 To enable SSL add ONGLIDE_SSL to the .env file
 
@@ -273,5 +326,19 @@ set a numeric value to override per-comp. Live edits picked up on the next
 ```
 UPDATE competition SET delayseconds = 600 WHERE compid = 'mychamps2026';
 UPDATE competition SET delayseconds = NULL WHERE compid = 'leagueround3'; -- back to env-var default
+```
+
+### Per-glider scoring logs
+
+The scoring worker writes a diagnostic log per glider for the lifetime of its
+current scoring chain to `<datecode>/<class>/<compno>.log` — the file is
+truncated whenever the glider is rescored. Writes are batched in memory and
+flushed every few seconds, so they don't sit on the scoring hot path.
+
+By default these go under `logs/` in the process working directory. Override
+the base directory with `SCORING_LOG_DIR` (absolute, or relative to the cwd):
+
+```
+SCORING_LOG_DIR=/var/log/onglide
 ```
 

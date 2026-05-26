@@ -6,7 +6,8 @@
         "loading_map": "Loading map...",
         "loading_competitions": "Loading competitions...",
         "back_to_globe": "Back to globe",
-        "language": "Language"
+        "language": "Language",
+        "update_available": "Update available — tap to reload"
     },
     "competition": {
         "live": "Live",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} pilots",
         "tracked_pilots": "{{tracked}}/{{total}} pilots",
         "live_stats": " · {{tracked}}/{{registered}} pilots · {{flying}} flying · {{landed}} landed",
+        "in_view_only": "In view only",
         "viewers_short": "viewers",
         "land_data": "Land data:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Tap for Official Scores",
+        "official_scores_hint": "Information below is from live tracking",
+        "notify_subscribe": "Notify me about this competition",
+        "notify_unsubscribe": "Stop notifying me",
+        "notify_denied": "Notifications are blocked in your browser"
     },
     "task": {
         "speed": "Speed Task",
@@ -57,10 +64,11 @@
         "launching": "Launching",
         "racing": "Racing",
         "finishing": "Finishing",
-        "home": "Home",
+        "home": "Replay",
         "no_task": "No task yet",
         "upcoming": "Upcoming",
-        "yesterday": "Yesterday"
+        "yesterday": "Replay yesterday",
+        "cancelled": "Cancelled"
     },
     "pilot": {
         "gridded_waiting": "Gridded, waiting to fly",
@@ -169,7 +177,9 @@
         "show_other_classes": "Showing gliders from other classes, click to only show current class",
         "show_only_current": "Show selected class only, click to show other classes as well",
         "switch_to_metric": "Switch to metric units",
-        "switch_to_imperial": "Switch to imperial units"
+        "switch_to_imperial": "Switch to imperial units",
+        "map_attribution": "Map attribution",
+        "close": "Close"
     },
     "drawer": {
         "class": "Class",
@@ -187,6 +197,7 @@
         "competition_time": "competition time",
         "your_time": "your time",
         "live": "Live",
+        "replay": "Replay",
         "offline": "Offline",
         "end": "End"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Help translate Onglide for the gliding community",
         "translation_help_link_label": "Information on GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: new task set",
+        "task_changed": "{{classname}}: task changed",
+        "launching": "{{classname}}: launching",
+        "racing": "{{classname}}: gliders racing",
+        "finishing": "{{classname}}: finishers due"
     }
 }

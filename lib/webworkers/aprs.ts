@@ -409,7 +409,7 @@ let loadTimer: NodeJS.Timeout | null = null;
 // Our persistence
 import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
 import {competitionStartForDatecode} from '../datecode';
-import {inorderAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
+import {aprsAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
 
 //
 // Start a listener
@@ -666,7 +666,7 @@ function startAprsListener(config: AprsListenerConfig) {
     let unstableCount = 0;
 
     // Connect to the APRS server
-    connection = new ISSocket(`onglide/${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
+    connection = new ISSocket(`onglide ${version}`, APRSSERVER, PORTNUMBER, 'OG', -1, true, 'id', FILTER) as any;
     let parser = new aprsParser();
     // Seed liveness: the first kaInterval fires up to a full grace period
     // after this point. Without seeding, an early tick before any packet
@@ -1245,7 +1245,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     // whenever officialDelay changes, so live delay edits propagate to the
     // next call here. makeGetNow honours replay mode.
     const realNow = aircraft.airfield.getNow();
-    const to: Epoch = (realNow - inorderAdditionalDelay) as Epoch;
+    const to: Epoch = (realNow - aprsAdditionalDelay) as Epoch;
     let position = sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
 
     if (!log) {
@@ -1332,7 +1332,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
             // then mark it as so.
             if (point.g < 100) {
                 if (aircraft.ground === 0) {
-                    console.log(`${point.c}: on ground @ ${point.t}`);
+                    console.log(`${aircraft.className}:${point.c}: on ground @ ${point.t}`);
                 }
                 aircraft.ground = 6;
             }
@@ -1384,7 +1384,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {
         aircraft.channel!.postMessage({
             c: aircraft.compno, //
-            t: (messages.length && position > 0 ? messages[Math.min(position, messages.length) - 1]?.t : undefined) || (2 as Epoch),
+            t: to,
             _: true,
             tick: true
         } as any);

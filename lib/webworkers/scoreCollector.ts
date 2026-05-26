@@ -1,6 +1,6 @@
 import {trackMetric} from '../insights';
 
-import {Epoch, ClassName, Compno, TaskScoresGenerator, PositionStatusText} from '../types';
+import {Epoch, ClassName, Compno, TaskScoresGenerator, PositionStatusText, PositionStatus} from '../types';
 
 import {PilotScore} from '../protobuf/onglide';
 
@@ -92,7 +92,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
         const changed = scoreChanged(oldScore, score, true);
         if (changed) {
             if (oldScore && oldScore.flightStatus != score.flightStatus) {
-                console.log(`${className}:${score.compno}: ${PositionStatusText[oldScore.flightStatus ?? 0]} => ${PositionStatusText[score.flightStatus ?? 0]} @ ${d(score.t)}`);
+                console.log(`${className}:${score.compno}: ${PositionStatusText[oldScore.flightStatus ?? PositionStatus.Unknown]} => ${PositionStatusText[score.flightStatus ?? PositionStatus.Unknown]} @ ${d(score.t)}`);
             }
             const recentStart = score.utcStart && c.mostRecentStart[compno] != score.utcStart ? score.utcStart : undefined;
             c.mostRecentStart[compno] = score.utcStart as Epoch;
@@ -164,7 +164,7 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
                 // If it hasn't already been put into the new scoreId then
                 // (which means it hasn't already been restarted) then
                 // we need to just move it over
-                Object.keys(cO.allScores).forEach((compno) => {
+                (Object.keys(cO.allScores) as Compno[]).forEach((compno) => {
                     if (!(compno in cN.optionsForCompno)) {
                         cN.allScores[compno] = cO.allScores[compno];
                         cN.allScores[compno].scoreId = scoreId;
@@ -211,9 +211,9 @@ async function iterateAndUpdate(id: string, className: ClassName, compno: Compno
             await setTimeout(1); // explicit yield - ensures logging and stuff are working and spreads out between the different compnos so one doesn't starve the rest on restart
         }
     } catch (e) {
-        console.log(compno, '[', options.scoreId, '] scoreCollector exception', e, (e as Error)?.stack);
+        console.log(`[${id}] ${className}/${compno} [${options.scoreId}] scoreCollector exception`, e, (e as Error)?.stack);
     }
     trackMetric('sc.done.' + className, 1);
     trackMetric('sc.done', 1);
-    console.log(`[${id}] SC: Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
+    console.log(`[${id}] ${className}: SC Completed scoring iteration (restart #${myRestartCount}) for ${compno} [${options.scoreId}]`);
 }

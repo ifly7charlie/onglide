@@ -447,6 +447,39 @@ export interface ContestDayTableRow {
     status: string;
 }
 
+//
+// compstatus.status — a single-character per-class day-state code. The
+// `compstatus` table holds one sticky row per class; it is written by the
+// scoring scrapers and the OGN daemon and read by classDisplayStatus()
+// (lib/competition-display-status.ts) and the scoring scheduler. Codes and
+// member names come from the column comment in conf/sql/onglide_schema.sql.
+// The schema also defines 'X' (confirm reg), 'P' (prebrief) and 'R' (all
+// reported); the current system never writes them, so they are omitted.
+//
+export enum CompStatus {
+    PreReg = '?', // prereg (the DB column default)
+    AfterBrief = 'B', // afterbrief
+    Gridded = 'G', // gridded
+    Launched = 'L', // launched
+    StartOpen = 'S', // start open / flying
+    FirstFinisher = 'F', // first finisher imminent
+    AllHome = 'H', // all home
+    Scrubbed = 'Z', // scrubbed
+    CompOver = 'O', // comp over
+    NoTask = ':' // no task this day (set by resetStaleCompStatus on rollover)
+}
+
+// compstatus codes that mean a task exists for the day.
+export const TASK_STATES: ReadonlySet<string> = new Set<string>([CompStatus.AfterBrief, CompStatus.Launched, CompStatus.StartOpen, CompStatus.AllHome, CompStatus.Scrubbed]);
+
+// compstatus codes that mean launching has begun.
+export const LAUNCHED_STATES: ReadonlySet<string> = new Set<string>([CompStatus.Launched, CompStatus.StartOpen, CompStatus.FirstFinisher, CompStatus.AllHome]);
+
+// compstatus codes that mean the class actually launched/flew that day —
+// used to gate the globe's 'yesterday' badge so a briefed-but-scrubbed or
+// cancelled day is not mistaken for a flown one.
+export const FLEW_STATES: ReadonlySet<string> = new Set<string>([CompStatus.Launched, CompStatus.StartOpen, CompStatus.FirstFinisher, CompStatus.AllHome]);
+
 export enum Units {
     metric = 0,
     british = 1

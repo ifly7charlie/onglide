@@ -6,7 +6,8 @@
         "loading_map": "Karte wird geladen...",
         "loading_competitions": "Wettbewerbe werden geladen...",
         "back_to_globe": "Zurück zum Globus",
-        "language": "Sprache"
+        "language": "Sprache",
+        "update_available": "Update verfügbar — zum Neuladen tippen"
     },
     "competition": {
         "live": "Live",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} Piloten",
         "tracked_pilots": "{{tracked}}/{{total}} Piloten",
         "live_stats": " · {{tracked}}/{{registered}} Piloten · {{flying}} fliegend · {{landed}} gelandet",
+        "in_view_only": "Nur sichtbare",
         "viewers_short": "Zuschauer",
         "land_data": "Landdaten:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Für offizielle Ergebnisse tippen",
+        "official_scores_hint": "Die Informationen unten stammen aus dem Live-Tracking",
+        "notify_subscribe": "Über diesen Wettbewerb benachrichtigen",
+        "notify_unsubscribe": "Benachrichtigungen beenden",
+        "notify_denied": "Benachrichtigungen sind in Ihrem Browser blockiert"
     },
     "task": {
         "speed": "Geschwindigkeitsaufgabe",
@@ -57,10 +64,11 @@
         "launching": "Startphase",
         "racing": "Im Rennen",
         "finishing": "Im Endanflug",
-        "home": "Zu Hause",
+        "home": "Wiederholung",
         "no_task": "Noch keine Aufgabe",
         "upcoming": "Bevorstehend",
-        "yesterday": "Gestern"
+        "yesterday": "Wiederholung gestern",
+        "cancelled": "Abgesagt"
     },
     "pilot": {
         "gridded_waiting": "Aufgereiht, Startbereit",
@@ -169,7 +177,9 @@
         "show_other_classes": "Segelflugzeuge anderer Klassen werden angezeigt, klicken um nur aktuelle Klasse anzuzeigen",
         "show_only_current": "Nur ausgewählte Klasse anzeigen, klicken um andere Klassen ebenfalls anzuzeigen",
         "switch_to_metric": "Auf metrisch umschalten",
-        "switch_to_imperial": "Auf imperial umschalten"
+        "switch_to_imperial": "Auf imperial umschalten",
+        "map_attribution": "Kartenattribution",
+        "close": "Schließen"
     },
     "drawer": {
         "class": "Klasse",
@@ -187,6 +197,7 @@
         "competition_time": "Wettbewerbszeit",
         "your_time": "deine Zeit",
         "live": "Live",
+        "replay": "Wiedergabe",
         "offline": "Offline",
         "end": "Ende"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Hilf, Onglide für die Segelflug-Community zu übersetzen",
         "translation_help_link_label": "Auf GitHub mitwirken"
+    },
+    "notification": {
+        "task_set": "{{classname}}: neue Aufgabe gesetzt",
+        "task_changed": "{{classname}}: Aufgabe geändert",
+        "launching": "{{classname}}: Start läuft",
+        "racing": "{{classname}}: Rennen läuft",
+        "finishing": "{{classname}}: Zieleinläufe erwartet"
     }
 }

@@ -265,6 +265,76 @@ button {
                 text-overflow: ellipsis;
             }
         }
+
+        .sidepanel-bell {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
+            border: 0;
+            border-radius: 50%;
+            background: var(--panel-hover);
+            color: inherit;
+            font-size: 18px;
+            cursor: pointer;
+
+            &:disabled {
+                opacity: 0.4;
+                cursor: default;
+            }
+
+            &.subscribed {
+                background: var(--panel-accent);
+                color: #fff;
+            }
+        }
+    }
+
+    // Wrapper that mirrors .sidepanel-classes: it sits as a direct child of
+    // .drawer-group so it absorbs the group's child-padding rule (4px 16px
+    // 10px 28px) — the same 28px left inset and top alignment the class tabs
+    // get. The button inside then keeps the same pill styling as a class tab.
+    .drawer-button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    // Labeled bell button used in the mobile drawer — visually matches the
+    // class-selector pill buttons (.sidepanel-classes button) so the drawer
+    // reads as a single consistent set of controls.
+    .sidepanel-bell-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: transparent;
+        border: 2px solid var(--panel-border);
+        border-radius: 4px;
+        color: inherit;
+        font: inherit;
+        font-size: 16px;
+        padding: 3px 13px;
+        cursor: pointer;
+
+        &:hover {
+            background: var(--panel-hover);
+        }
+
+        &:disabled {
+            opacity: 0.4;
+            cursor: default;
+
+            &:hover {
+                background: transparent;
+            }
+        }
+
+        &.subscribed {
+            background: var(--panel-accent);
+            color: #fff;
+        }
     }
 
     .sidepanel-tools {
@@ -623,6 +693,34 @@ button {
     }
 }
 
+// Floating "in view only" toggle on the globe page. Mirrors the
+// .map-legend chrome on the opposite (top-left) corner.
+.map-filter-toggle {
+    position: fixed;
+    left: 20px;
+    top: 20px;
+    padding: 8px 12px;
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 15;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+
+    input[type='checkbox'] {
+        cursor: pointer;
+        margin: 0;
+    }
+}
+
 .map-attribution {
     position: fixed;
     right: 8px;
@@ -646,6 +744,35 @@ button {
 
 // Custom map attribution: a small (i) button in the bottom-right corner
 // that opens an opaque full-page modal listing tile/data attributions.
+// Auto-update prompt — floats centered along the top edge while a new build
+// is detected but the user hasn't backgrounded the app yet. The reload also
+// fires automatically on the next visibility-hidden, so this is just a
+// "tap to reload right now" affordance.
+.autoupdate-banner {
+    position: fixed;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    max-width: calc(100% - 16px);
+
+    &:hover {
+        background: var(--panel-hover);
+    }
+}
+
 .attribution-info-toggle {
     position: fixed;
     right: 398px;
@@ -1122,6 +1249,65 @@ ul.task-legs {
     background: rgba(255, 200, 80, 0.15);
     border-left: 3px solid rgba(255, 200, 80, 0.85);
     border-radius: 3px;
+}
+
+.startline-opens-countdown {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+}
+
+.official-scores-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0 10px 0;
+    padding: 8px 10px;
+    font-size: 14px;
+    background: rgba(120, 170, 220, 0.15);
+    border-left: 3px solid rgba(120, 170, 220, 0.85);
+    border-radius: 3px;
+    color: inherit;
+    text-decoration: none;
+
+    &:hover,
+    &:focus {
+        background: rgba(120, 170, 220, 0.25);
+        color: inherit;
+    }
+}
+
+.official-scores-icon {
+    flex: none;
+    font-size: 18px;
+}
+
+.official-scores-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+    min-width: 0;
+}
+
+.official-scores-title {
+    font-weight: 700;
+}
+
+.official-scores-hint {
+    font-weight: 400;
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.official-scores-external {
+    flex: none;
+    margin-left: auto;
+    opacity: 0.7;
+}
+
+.official-scores-link:hover .official-scores-external,
+.official-scores-link:focus .official-scores-external {
+    opacity: 1;
 }
 
 .task-heading {

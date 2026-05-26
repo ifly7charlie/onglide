@@ -40,10 +40,14 @@ export function dispatchClass(dispatch: AppDispatch, earliestScore: Epoch, lates
 }
 
 export function dispatchTask(dispatch: AppDispatch, task: any, geoJSON: any) {
+    // Shallow-copy rules/details: Redux Toolkit (Immer) deep-freezes whatever is
+    // stored in state. The caller keeps a live reference to this same task object
+    // and mutates task.rules.handicapped / task.details.handicapped on (re)score,
+    // so the stored copy must not alias the working object.
     dispatch(
         updateTask({
-            rules: task.rules,
-            details: task.details,
+            rules: {...task.rules},
+            details: {...task.details},
             legs: task.legs,
             geoJSON: JSON.stringify(geoJSON),
             startOpen: false

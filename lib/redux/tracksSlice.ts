@@ -13,6 +13,7 @@ import {updateClassAction} from './actions';
 import type {RootState} from './store';
 
 import {PilotPosition, OnglideWebSocketMessage} from '../protobuf/onglide';
+import {unscaleFromWire} from '../protobuf/wireScaling';
 
 //const updateTracksAction = createAction<PilotTracks>('updateTracks');
 
@@ -251,7 +252,7 @@ export const fetchOldTracks = createAsyncThunk<{downloaded: PilotTracks; websock
                 const res = await fetch(url, {signal});
                 if (res.ok) {
                     const ab = await res.arrayBuffer();
-                    return {downloaded: OnglideWebSocketMessage.decode(new Uint8Array(ab)).tracks, websocket: residual};
+                    return {downloaded: unscaleFromWire(OnglideWebSocketMessage.decode(new Uint8Array(ab))).tracks, websocket: residual};
                 }
                 // 503 = daemon's not ready, retry; anything else, give up
                 if (res.status !== 503) {

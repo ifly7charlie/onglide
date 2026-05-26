@@ -6,7 +6,8 @@
         "loading_map": "Ładowanie mapy...",
         "loading_competitions": "Ładowanie zawodów...",
         "back_to_globe": "Powrót do globu",
-        "language": "Język"
+        "language": "Język",
+        "update_available": "Dostępna aktualizacja — dotknij, aby przeładować"
     },
     "competition": {
         "live": "Na żywo",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} pilotów",
         "tracked_pilots": "{{tracked}}/{{total}} pilotów",
         "live_stats": " · {{tracked}}/{{registered}} pilotów · {{flying}} w locie · {{landed}} wylądowanych",
+        "in_view_only": "Tylko widoczne",
         "viewers_short": "obserwatorów",
         "land_data": "Dane lądowe:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Dotknij, aby zobaczyć wyniki oficjalne",
+        "official_scores_hint": "Informacje poniżej pochodzą ze śledzenia na żywo",
+        "notify_subscribe": "Powiadamiaj mnie o tych zawodach",
+        "notify_unsubscribe": "Przestań powiadamiać",
+        "notify_denied": "Powiadomienia są zablokowane w przeglądarce"
     },
     "task": {
         "speed": "Konkurencja prędkościowa",
@@ -57,10 +64,11 @@
         "launching": "Start",
         "racing": "Wyścig",
         "finishing": "Na finiszu",
-        "home": "Wrócił",
+        "home": "Powtórka",
         "no_task": "Brak konkurencji",
         "upcoming": "Nadchodzące",
-        "yesterday": "Wczoraj"
+        "yesterday": "Powtórka z wczoraj",
+        "cancelled": "Odwołane"
     },
     "pilot": {
         "gridded_waiting": "Na pasie, gotowy do startu",
@@ -169,7 +177,9 @@
         "show_other_classes": "Pokazuje szybowce z innych klas, kliknij, aby pokazać tylko bieżącą klasę",
         "show_only_current": "Pokaż tylko wybraną klasę, kliknij, aby pokazać też inne klasy",
         "switch_to_metric": "Przełącz na jednostki metryczne",
-        "switch_to_imperial": "Przełącz na jednostki imperialne"
+        "switch_to_imperial": "Przełącz na jednostki imperialne",
+        "map_attribution": "Atrybucja mapy",
+        "close": "Zamknij"
     },
     "drawer": {
         "class": "Klasa",
@@ -187,6 +197,7 @@
         "competition_time": "czas zawodów",
         "your_time": "twój czas",
         "live": "Na żywo",
+        "replay": "Powtórka",
         "offline": "Offline",
         "end": "Koniec"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Pomóż przetłumaczyć Onglide dla społeczności szybowcowej",
         "translation_help_link_label": "Pomóż na GitHubie"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nowe zadanie ustawione",
+        "task_changed": "{{classname}}: zadanie zmienione",
+        "launching": "{{classname}}: starty w toku",
+        "racing": "{{classname}}: szybowce w wyścigu",
+        "finishing": "{{classname}}: spodziewane mety"
     }
 }

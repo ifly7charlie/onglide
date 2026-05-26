@@ -6,7 +6,8 @@
         "loading_map": "Térkép betöltése...",
         "loading_competitions": "Versenyek betöltése...",
         "back_to_globe": "Vissza a földgömbhöz",
-        "language": "Nyelv"
+        "language": "Nyelv",
+        "update_available": "Frissítés érhető el — koppintson az újratöltéshez"
     },
     "competition": {
         "live": "Élő",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} pilóta",
         "tracked_pilots": "{{tracked}}/{{total}} pilóta",
         "live_stats": " · {{tracked}}/{{registered}} pilóta · {{flying}} levegőben · {{landed}} leszállt",
+        "in_view_only": "Csak láthatók",
         "viewers_short": "néző",
         "land_data": "Földadatok:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Koppintson a hivatalos eredményekért",
+        "official_scores_hint": "Az alábbi információk élő követésből származnak",
+        "notify_subscribe": "Értesítés erről a versenyről",
+        "notify_unsubscribe": "Értesítések leállítása",
+        "notify_denied": "Az értesítések le vannak tiltva a böngészőben"
     },
     "task": {
         "speed": "Sebességi feladat",
@@ -57,10 +64,11 @@
         "launching": "Felszálláson",
         "racing": "Versenyzik",
         "finishing": "Befejezés",
-        "home": "Hazaért",
+        "home": "Visszajátszás",
         "no_task": "Még nincs feladat",
         "upcoming": "Közelgő",
-        "yesterday": "Tegnap"
+        "yesterday": "Tegnapi visszajátszás",
+        "cancelled": "Törölve"
     },
     "pilot": {
         "gridded_waiting": "Felsorakozva, indulásra kész",
@@ -169,7 +177,9 @@
         "show_other_classes": "Más osztályok vitorlázói láthatóak, kattints csak az aktuális osztály mutatásához",
         "show_only_current": "Csak a kiválasztott osztály látszik, kattints a többi mutatásához is",
         "switch_to_metric": "Váltás metrikus mértékegységekre",
-        "switch_to_imperial": "Váltás brit mértékegységekre"
+        "switch_to_imperial": "Váltás brit mértékegységekre",
+        "map_attribution": "Térkép-hivatkozás",
+        "close": "Bezárás"
     },
     "drawer": {
         "class": "Osztály",
@@ -187,6 +197,7 @@
         "competition_time": "versenyidő",
         "your_time": "saját idő",
         "live": "Élő",
+        "replay": "Visszajátszás",
         "offline": "Offline",
         "end": "Vége"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Segíts lefordítani az Onglide-ot a vitorlázórepülő közösségnek",
         "translation_help_link_label": "Hozzájárulás a GitHubon"
+    },
+    "notification": {
+        "task_set": "{{classname}}: új feladat kitűzve",
+        "task_changed": "{{classname}}: feladat módosítva",
+        "launching": "{{classname}}: felszállás folyamatban",
+        "racing": "{{classname}}: vitorlázók versenyben",
+        "finishing": "{{classname}}: célba érkezések várhatók"
     }
 }

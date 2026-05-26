@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {useTranslation} from 'next-i18next/pages';
-import {useRouter} from 'next/router';
 import {styled} from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -103,9 +102,8 @@ const PlaybackControls = ({
     setReplayTime: (t: Epoch | undefined) => void;
     tz: TZ;
 }) => {
-    const {t} = useTranslation('common');
-    const router = useRouter();
-    const lang = router.locale ?? 'en';
+    const {t, i18n} = useTranslation('common');
+    const lang = i18n.language;
     function formatDuration(value: number) {
         const minute = Math.floor(value / 60);
         const secondLeft = value - minute * 60;
@@ -117,7 +115,7 @@ const PlaybackControls = ({
     const datecode = useSelector(selectDatecode);
     const scoreId = useSelector(selectScoreId);
     const latestTrackUpdate = useSelector(selectLatestUpdate, (a, b) => a >> 4 == b >> 4); // from tracks
-    const replayEndTime = !live ? latestTrackUpdate : latestScore;
+    const replayEndTime = live ? latestTrackUpdate : latestScore;
 
     const online = useSelector(selectOnline);
 
@@ -167,7 +165,11 @@ const PlaybackControls = ({
                     sx={replayTime ? sliderSxReplay : !online ? sliderOffline : undefined}
                 />
                 <BoxAfter>
-                    {replayTime ? <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText> : <TinyText sx={{opacity: 1}}>{online ? t('connection.live') : t('connection.offline')}</TinyText>}
+                    {replayTime ? (
+                        <TinyText>+{formatDuration(replayTime - earliestScore)}</TinyText>
+                    ) : (
+                        <TinyText sx={{opacity: 1}}>{!live ? t('connection.replay') : online ? t('connection.live') : t('connection.offline')}</TinyText>
+                    )}
                     <TinyText>+{formatDuration(replayEndTime - earliestScore)}</TinyText>
                 </BoxAfter>
             </Widget>

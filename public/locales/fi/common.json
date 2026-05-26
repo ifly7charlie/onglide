@@ -6,7 +6,8 @@
         "loading_map": "Ladataan karttaa...",
         "loading_competitions": "Ladataan kilpailuja...",
         "back_to_globe": "Takaisin maapallolle",
-        "language": "Kieli"
+        "language": "Kieli",
+        "update_available": "Päivitys saatavilla — napauta päivittääksesi"
     },
     "competition": {
         "live": "Suorana",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} lentäjää",
         "tracked_pilots": "{{tracked}}/{{total}} lentäjää",
         "live_stats": " · {{tracked}}/{{registered}} lentäjää · {{flying}} ilmassa · {{landed}} laskeutunut",
+        "in_view_only": "Vain näkyvät",
         "viewers_short": "katsojaa",
         "land_data": "Maa-aineisto:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Napauta nähdäksesi viralliset tulokset",
+        "official_scores_hint": "Alla olevat tiedot ovat live-seurannasta",
+        "notify_subscribe": "Ilmoita minulle tästä kilpailusta",
+        "notify_unsubscribe": "Lopeta ilmoitukset",
+        "notify_denied": "Ilmoitukset on estetty selaimessasi"
     },
     "task": {
         "speed": "Nopeustehtävä",
@@ -57,10 +64,11 @@
         "launching": "Lähdössä",
         "racing": "Kilpailussa",
         "finishing": "Maaliin tulossa",
-        "home": "Kotona",
+        "home": "Toisto",
         "no_task": "Ei vielä tehtävää",
         "upcoming": "Tulossa",
-        "yesterday": "Eilen"
+        "yesterday": "Eilisen toisto",
+        "cancelled": "Peruttu"
     },
     "pilot": {
         "gridded_waiting": "Lähtöruudukossa, valmiina lähtöön",
@@ -169,7 +177,9 @@
         "show_other_classes": "Näytetään muiden luokkien purjekoneita, klikkaa näyttääksesi vain nykyisen luokan",
         "show_only_current": "Näytä vain valittu luokka, klikkaa näyttääksesi muutkin luokat",
         "switch_to_metric": "Vaihda metrisiin yksiköihin",
-        "switch_to_imperial": "Vaihda brittiläisiin yksiköihin"
+        "switch_to_imperial": "Vaihda brittiläisiin yksiköihin",
+        "map_attribution": "Karttatiedot",
+        "close": "Sulje"
     },
     "drawer": {
         "class": "Luokka",
@@ -187,6 +197,7 @@
         "competition_time": "kilpailuaika",
         "your_time": "oma aikasi",
         "live": "Suorana",
+        "replay": "Toisto",
         "offline": "Offline",
         "end": "Loppu"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Auta kääntämään Onglide purjelennon yhteisölle",
         "translation_help_link_label": "Osallistu GitHubissa"
+    },
+    "notification": {
+        "task_set": "{{classname}}: uusi tehtävä asetettu",
+        "task_changed": "{{classname}}: tehtävä muuttui",
+        "launching": "{{classname}}: lähdöt käynnissä",
+        "racing": "{{classname}}: purjelentokoneet kilpailevat",
+        "finishing": "{{classname}}: maaliintuloja odotetaan"
     }
 }

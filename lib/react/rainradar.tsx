@@ -3,7 +3,6 @@
 //
 
 import {useEffect, useState} from 'react';
-import {useRouter} from 'next/router';
 import {useTranslation} from 'next-i18next/pages';
 //import Source from '../lib/source';
 import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
@@ -11,9 +10,8 @@ import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
 import type {Options, TZ} from '../types';
 
 export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
-    const {t} = useTranslation('common');
-    const router = useRouter();
-    const lang = router.locale ?? 'en';
+    const {t, i18n} = useTranslation('common');
+    const lang = i18n.language;
     const [radarTileURL, setURL] = useState<string>();
     const [radarTime, setTime] = useState<string>();
 
@@ -69,9 +67,6 @@ export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
                             imageMeta = apiData.radar.past.reduce((a, b) => (a.time >= b.time ? a : b));
                         }
                         setURL(apiData.host + imageMeta.path + '/256/{z}/{x}/{y}/2/1_1.png');
-
-                        // Figure out what the local language is for international date strings
-                        const lang = navigator.languages != undefined ? navigator.languages[0] : navigator.language;
 
                         // And then produce a string to display it locally
                         const dt = new Date(imageMeta.time * 1000);

@@ -6,7 +6,8 @@
         "loading_map": "Cargando mapa...",
         "loading_competitions": "Cargando competiciones...",
         "back_to_globe": "Volver al globo",
-        "language": "Idioma"
+        "language": "Idioma",
+        "update_available": "Actualización disponible — toca para recargar"
     },
     "competition": {
         "live": "En directo",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} pilotos",
         "tracked_pilots": "{{tracked}}/{{total}} pilotos",
         "live_stats": " · {{tracked}}/{{registered}} pilotos · {{flying}} en vuelo · {{landed}} aterrizados",
+        "in_view_only": "Solo visibles",
         "viewers_short": "espectadores",
         "land_data": "Datos terrestres:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Toca para ver los resultados oficiales",
+        "official_scores_hint": "La información siguiente proviene del seguimiento en vivo",
+        "notify_subscribe": "Avisarme sobre esta competición",
+        "notify_unsubscribe": "Dejar de avisarme",
+        "notify_denied": "Las notificaciones están bloqueadas en tu navegador"
     },
     "task": {
         "speed": "Prueba de velocidad",
@@ -57,10 +64,11 @@
         "launching": "Despegando",
         "racing": "En carrera",
         "finishing": "Finalizando",
-        "home": "Regresado",
+        "home": "Reproducir",
         "no_task": "Sin prueba aún",
         "upcoming": "Próximas",
-        "yesterday": "Ayer"
+        "yesterday": "Reproducir ayer",
+        "cancelled": "Cancelado"
     },
     "pilot": {
         "gridded_waiting": "En parrilla, listo para despegar",
@@ -169,7 +177,9 @@
         "show_other_classes": "Muestra planeadores de otras clases, clic para mostrar solo la clase actual",
         "show_only_current": "Mostrar solo la clase seleccionada, clic para mostrar otras clases también",
         "switch_to_metric": "Cambiar a unidades métricas",
-        "switch_to_imperial": "Cambiar a unidades imperiales"
+        "switch_to_imperial": "Cambiar a unidades imperiales",
+        "map_attribution": "Atribución del mapa",
+        "close": "Cerrar"
     },
     "drawer": {
         "class": "Clase",
@@ -187,6 +197,7 @@
         "competition_time": "hora de competición",
         "your_time": "tu hora",
         "live": "En directo",
+        "replay": "Reproducción",
         "offline": "Sin conexión",
         "end": "Fin"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Ayuda a traducir Onglide para la comunidad del vuelo a vela",
         "translation_help_link_label": "Contribuir en GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nueva prueba definida",
+        "task_changed": "{{classname}}: prueba modificada",
+        "launching": "{{classname}}: despegando",
+        "racing": "{{classname}}: planeadores en carrera",
+        "finishing": "{{classname}}: llegadas inminentes"
     }
 }

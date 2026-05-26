@@ -18,6 +18,12 @@
 // The DB itself remains the source of truth for compstatus and for the
 // per-task start-open time (tasks.nostart on the task='B' row).
 //
+// Dispatch state (next-due timestamps, last-fetched bookkeeping) lives
+// per-source (per ScoringSource.type), not per-competition. That way a
+// tracker-only adapter like robocontrol — whose pilots/results methods
+// are no-op stubs — can't advance the primary scoring adapter's
+// `nextPilotsAt` and starve it of a fetch slot.
+//
 
 import escape from 'sql-template-strings';
 
@@ -26,35 +32,48 @@ import {SourceRegistry} from './source';
 import {applyJitter, localDateISO, localDatecode, nowInTz, type LocalTime} from './shared/timezone';
 import {diffAndRemoveClasses, resetStaleCompStatus} from './shared/classes';
 import {pruneOldDays, dropDeadCompetition} from './shared/tasks';
+import {TASK_STATES, LAUNCHED_STATES} from '../types';
 
 // ---------- intervals (rules 2/3/4) ----------
 
 const HEARTBEAT_MS = 60 * 1000;
 
-const INTERVAL_RESULTS_FAST_MS = 10 * 60 * 1000; // pre-task / briefed / first hour after launch
-const INTERVAL_RESULTS_SLOW_MS = 30 * 60 * 1000; // after launch+1h until end-of-day
-const INTERVAL_PILOTS_HOURLY_MS = 60 * 60 * 1000; // task day, before launch
+const INTERVAL_TASKS_FAST_MS = 10 * 60 * 1000; // tasks: pre-task or status==L (catch L→S nostart rewrite)
+const INTERVAL_TASKS_SLOW_MS = 30 * 60 * 1000; // tasks: post-brief pre-launch, or post-start until window closes
+const INTERVAL_RESULTS_SLOW_MS = 30 * 60 * 1000; // results: post-F/H or post-18:00 until 22:00
 const INTERVAL_PILOTS_URGENT_MS = 30 * 60 * 1000; // active comp, DB still empty
+const INTERVAL_TRACKERS_DONE_MS = 60 * 60 * 1000; // trackers: hourly once every non-Z class is F or H
+const TASK_LAUNCH_WINDOW_BASE_MS = 30 * 60 * 1000; // post-S task window base length (added to per-class pilot count)
+const TASK_LAUNCH_WINDOW_PER_PILOT_MS = 60 * 1000; // post-S task window: +1 min per pilot in the class
 
-const STOP_RESULTS_LOCAL_MINUTE = 22 * 60; // 22:00 local — stop results checks
-const RESTART_LOCAL_MINUTE = 8 * 60; // 08:00 local — wake-up after overnight quiet
-const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this
-const TASK_MORNING_LOCAL_MINUTE = 12 * 60; // 12:00 local — pre-task cadence escalates from slow→fast at noon
-const LAUNCH_GRID_LEAD_MINUTES = 30; // fallback "launch starts" anchor: tasks.nostart - 30m
+const STOP_RESULTS_LOCAL_MINUTE = 22 * 60; // 22:00 local — stop results / tasks / trackers for the day
+const MORNING_RESUME_LOCAL_MINUTE = 8 * 60; // 08:00 local — earliest minute-of-day pilots/results may run; also the park target after the 22:00 cutoff
+const PILOTS_PRETASK_LOCAL_MINUTE = 10 * 60; // 10:00 local — daily pilots fetch fires after this; also the trackers window opens here
+const TASK_MORNING_LOCAL_MINUTE = 12 * 60; // 12:00 local — upcoming-day results cutoff
+const RESULTS_START_LOCAL_MINUTE = 18 * 60; // 18:00 local — results polling unlocked even if no class has hit F/H yet
+const DEFAULT_TRACKER_INTERVAL_MS = 15 * 60 * 1000; // trackers: fallback for adapters that don't declare trackerIntervalMs
 
 // Daily SoaringSpot-style index discovery runs at or after this UTC
 // hour, plus once on startup regardless of wall-clock time.
 const DISCOVERY_UTC_HOUR = 5;
 
-// Grandprix-only: stay on fast cadence until +1h past first launch.
-const LAUNCH_FAST_TAIL_MS = 60 * 60 * 1000;
+// Authoritative scoring-source override. A competition with a
+// `soaringspotkey` row is fed by the SoaringSpot OAuth API adapter
+// (lib/scoring/sources/soaringspot.ts), which is authoritative over an
+// HTML scrape of the same data. When such a row exists this scheduler
+// skips its own scrape source for that compid — so an operator can
+// switch a competition onto the API by adding a key row, without
+// deleting the scrape row. Robocontrol is NOT suppressed by an override
+// — it's a parallel tracker source, not a competing scoring source.
+const OVERRIDE_SOURCE_TYPE = 'soaringspotkey';
+const OVERRIDE_TARGET_TYPES: ReadonlySet<string> = new Set<string>(['soaringspotscrape']);
 
-// ---------- per-class status helpers ----------
-
-// compstatus.status values that mean "we have a task for this date".
-const TASK_STATES = new Set<string>(['B', 'L', 'S', 'R', 'H', 'Z']);
-// compstatus.status values that mean "launching has begun".
-const LAUNCHED_STATES = new Set<string>(['L', 'S', 'R', 'H']);
+// Per-class compstatus phases used to drive desiredTaskCadence. These
+// are scheduler-local — adding 'F' to lib/types.ts:TASK_STATES would
+// break the task-scraper guard at lib/scoring/shared/tasks.ts:190 and
+// the launched-states veto, so the membership test lives here.
+const STATUS_NO_TASK: ReadonlySet<string> = new Set<string>(['?', ':', 'O']); // task not yet installed for the day
+const STATUS_INSTALLED_PRELAUNCH: ReadonlySet<string> = new Set<string>(['B', 'G']); // task in DB, class not yet launched
 
 // ---------- in-memory state ----------
 
@@ -64,8 +83,40 @@ interface ClassObservation {
     datecode: string | null;
     starttimeMinutes: number | null; // minute-of-day (local), parsed from tasks.nostart for the class's current datecode
     isToday: boolean; // does compstatus.datecode match today's local datecode?
-    grandprix: boolean; // classes.grandprixstart='Y' — keeps fast cadence post-task
+    grandprix: boolean; // classes.grandprixstart='Y' — kept on the observation in case scheduling wants it later
     fullyScored: boolean; // all pilotresult rows for this class/datecode have datafromscoring='Y'
+    pilotsInClass: number; // count of pilots in this class; sizes the post-launch task-amend window
+    // UTC epoch ms of the most recent compstatus.status transition for
+    // this row (maintained by DB triggers — only bumped on real
+    // transitions, not no-op rewrites). Used as the process-restart
+    // fallback for the in-memory firstLaunch map; trusted for L/S/F.
+    laststatuschange: number | null;
+}
+
+// Per-source dispatch state. The shared `state` map is keyed by compid,
+// but next-due timestamps and the corresponding last-fetched
+// bookkeeping all live here so each scoringsource type has its own
+// schedule. Robocontrol's no-op pilots/results stubs can no longer
+// steal the primary adapter's fetch slots by advancing a shared
+// timestamp.
+interface SourceState {
+    nextPilotsAt: number;
+    nextTasksAt: number;
+    nextResultsAt: number;
+    nextTrackersAt: number;
+    lastPilotsFetch: number;
+    lastResultsFetch: number;
+    lastTrackersFetch: number;
+    lastPilotsLocalDate: string | null;
+    lastResultsLocalDate: string | null;
+    // Classes the pilots page reported on the last successful fetchPilots
+    // for this source. Used (per-source) to veto the results-page diff
+    // so a staggered task publish doesn't cascade-delete a class.
+    lastPilotObservedClasses: Set<ClassId> | null;
+    // Classes the tasks fetch saw on its most recent successful pass
+    // for this source. Unioned into the diffAndRemoveClasses input on
+    // the results-only dispatch.
+    lastTaskObservedClasses: Set<ClassId> | null;
 }
 
 interface CompState {
@@ -83,12 +134,6 @@ interface CompState {
     // upstream all at once. 0 means "fire on next heartbeat".
     metadataDueAt: number;
 
-    // last successful fetches (epoch ms)
-    lastPilotsFetch: number;
-    lastResultsFetch: number;
-    // local-day bookkeeping
-    lastPilotsLocalDate: string | null;
-
     // Competition date window (YYYY-MM-DD strings in the comp's local tz,
     // inclusive). Refreshed from the `competition` row every heartbeat
     // so late-arriving start/end corrections are picked up.
@@ -104,24 +149,28 @@ interface CompState {
     // has already proven the comp is real, so waiting for the date window
     // would leave the front-end with results it can't attribute.
     tasksInDb: number | null;
-    // Classes the pilots page reported on the last successful fetchPilots
-    // in this process. Authoritative for "which classes are registered"
-    // and used to veto the results-page class-diff so a staggered task
-    // publish doesn't cascade-delete classes that just haven't flown yet.
-    // `null` until the first pilots fetch succeeds.
-    lastPilotObservedClasses: Set<ClassId> | null;
 
-    // per-class first-seen 'L' for today (epoch ms). Cleared when the
-    // local date rolls over.
+    // per-class first-seen launch transition for today (epoch ms). On
+    // restart we seed from the DB's `laststatuschange` for statuses
+    // L/S/F because that timestamp marks a launch-related transition
+    // close enough to anchor the post-launch task window. For H the
+    // timestamp is the all-home transition (much later than launch) —
+    // don't trust it. Cleared on local-date rollover.
     firstLaunch: Map<ClassId, number>;
     // The local date the firstLaunch map is keyed against — when this
     // changes we wipe the map.
     firstLaunchDate: string | null;
 
-    // Computed next-due (epoch ms). Defaults to 0 so the first heartbeat
-    // fires both fetches.
-    nextPilotsAt: number;
-    nextResultsAt: number;
+    // Sticky "any class today has hit F (FirstFinisher) or H (AllHome)".
+    // Used as the results gate alongside the 18:00 local fallback. A
+    // class that goes L→S→H quickly without lingering in F still trips
+    // the gate via H. Cleared on local-date rollover.
+    everFOrHToday: boolean;
+    everFOrHTodayDate: string | null;
+
+    // Per-source dispatch state — keyed by ScoringSource.type. Created
+    // lazily on the first heartbeat that touches a given source.
+    perSource: Map<string, SourceState>;
 
     // observations from the most recent compstatus snapshot
     observations: ClassObservation[];
@@ -137,76 +186,122 @@ interface CompState {
 
 interface SchedulerDecisions {
     fetchPilots: boolean;
+    fetchTasks: boolean;
     fetchResults: boolean;
-    // True when fetchResults is set but no class today has a task —
-    // the adapter should walk the overview to import any newly-
-    // published task but skip results-table parsing.
-    tasksOnly: boolean;
     pruneOldDays: boolean;
     dropDeadComp: boolean;
+    // Cadence interval (ms) to apply to nextTasksAt after a tasks fetch
+    // fires. null when no class qualifies — caller parks to tomorrow.
+    tasksCadenceMs: number | null;
     // rationale (for logging)
     reasons: string[];
 }
 
 //
-// computeDecisions — pure function over `state` + `localNow`. Encapsulates
-// rules 2/3/4. No DB calls, no IO — designed to be unit-testable.
+// desiredTaskCadence — per-class task-fetch cadence based on observed
+// compstatus phase. Returns null when this class has nothing left to
+// chase today. The caller takes the MIN across today-classes.
 //
-// Inputs:
-//   - state: the per-competition CompState (read-only)
-//   - localNow: precomputed local time in the competition's tz
-//   - nowMs: Date.now() (passed in for testability)
+//   ?, :, O     → FAST (10m)   — task not yet installed; catch publication
+//   B, G        → SLOW (30m)   — task in DB, pre-launch; amendments rare but possible
+//   L           → FAST (10m)   — class is launching; tasks.nostart will be rewritten on L→S, catch it promptly
+//   S           → SLOW (30m)   — post-start within firstLaunch + 30m + 1m*pilotsInClass window; null after
+//   F, H, Z     → null         — done for the day
 //
-export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: number): SchedulerDecisions {
+// Render a tasks-cadence interval as a human-readable suffix for the
+// scheduler reasons log. Used to be a hard-coded "fast"/"slow" label
+// based on equality with INTERVAL_TASKS_FAST_MS, but with per-adapter
+// overrides (e.g. SGP at 60s) those labels stop matching the real wait.
+function formatCadence(ms: number): string {
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    const minutes = ms / 60_000;
+    return Number.isInteger(minutes) ? `${minutes}m` : `${minutes.toFixed(1)}m`;
+}
+
+// Render a time-until-next-fire interval (nextXAt - Date.now()) for the
+// `wait-next-due` reasons. Truncates to whole seconds under a minute,
+// whole minutes between 1m and 1h, and h+m above. Negative deltas
+// shouldn't happen in this branch (caller already gated on
+// nowMs < nextAt) but normalise to 0s defensively.
+function formatWait(ms: number): string {
+    if (ms <= 0) return '0s';
+    if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+    const totalMin = Math.round(ms / 60_000);
+    if (totalMin < 60) return `${totalMin}m`;
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    return mins > 0 ? `${hours}h${mins}m` : `${hours}h`;
+}
+
+function desiredTaskCadence(obs: ClassObservation, firstLaunchAt: number | null, nowMs: number, activeOverrideMs?: number): number | null {
+    if (STATUS_NO_TASK.has(obs.status)) return INTERVAL_TASKS_FAST_MS;
+    if (STATUS_INSTALLED_PRELAUNCH.has(obs.status)) return INTERVAL_TASKS_SLOW_MS;
+    if (obs.status === 'L') return activeOverrideMs ?? INTERVAL_TASKS_FAST_MS;
+    if (obs.status === 'S') {
+        if (obs.fullyScored) return null;
+        if (firstLaunchAt == null) return activeOverrideMs ?? INTERVAL_TASKS_SLOW_MS; // no anchor yet — be safe and keep polling
+        const windowMs = TASK_LAUNCH_WINDOW_BASE_MS + obs.pilotsInClass * TASK_LAUNCH_WINDOW_PER_PILOT_MS;
+        return nowMs < firstLaunchAt + windowMs ? (activeOverrideMs ?? INTERVAL_TASKS_SLOW_MS) : null;
+    }
+    // F, H, Z, or any other code — done for the day.
+    return null;
+}
+
+//
+// computeDecisions — pure function over `state`, `srcState`, `localNow`.
+// Encapsulates rules 2/3/4. No DB calls, no IO — designed to be unit-testable.
+//
+export function computeDecisions(
+    state: CompState, //
+    srcState: SourceState,
+    localNow: LocalTime,
+    nowMs: number,
+    activeTasksCadenceMs?: number
+): SchedulerDecisions {
     const reasons: string[] = [];
 
-    // ----- pilots -----
-
-    // Bucket the classes by where they are in the day:
-    //   - anyTaskToday: any class whose compstatus shows we have a task for today
-    //   - anyLaunchedToday: any class whose status is in LAUNCHED_STATES today
-    let anyTaskToday = false;
-    let anyLaunchedToday = false;
-    for (const obs of state.observations) {
-        if (!obs.isToday) continue;
-        if (TASK_STATES.has(obs.status)) anyTaskToday = true;
-        if (LAUNCHED_STATES.has(obs.status)) anyLaunchedToday = true;
+    // Hard quiet window: no outbound fetches before MORNING_RESUME_LOCAL_MINUTE
+    // (08:00 local) — a daemon restart in the small hours mustn't blast
+    // through it on a 0-seeded next-due timestamp. The 22:00 upper bound
+    // is enforced per-stream below.
+    const beforeMorning = localNow.minuteOfDay < MORNING_RESUME_LOCAL_MINUTE;
+    if (beforeMorning) {
+        reasons.push('quiet:before-morning');
+        return {
+            fetchPilots: false,
+            fetchTasks: false,
+            fetchResults: false,
+            pruneOldDays: false,
+            dropDeadComp: false,
+            tasksCadenceMs: null,
+            reasons
+        };
     }
 
-    let fetchPilots = false;
+    const todaysObs = state.observations.filter((o) => o.isToday);
 
-    // Rule 2-urgent: if the comp is inside its date window (inclusive)
-    // AND we either haven't fetched pilots in this process or the DB is
-    // still empty for this comp, bypass the 10am gate and the
-    // nextPilotsAt cooldown. Handles newly-added or restart-after-crash
-    // comps whose scraper would otherwise sleep until 10:00 local while
-    // the comp is already flying.
+    // ----- pilots -----
     //
-    // Also urgent: tasks have been installed but no pilots are loaded.
-    // `fetchResultsAndTasks` has already succeeded for this comp, so
-    // waiting for `competitionStart <= today` would leave us with
-    // unattributable results (and a placeholder competition row whose
-    // sentinel dates may keep us out of the date window indefinitely).
+    // Pilots barely change day-to-day — daily 10am gate plus an urgent
+    // override for active-but-empty comps is enough. The trackers stream
+    // (per-source 5-15 min cadence) refreshes the contestants payload
+    // anyway as a side effect, so a stale pilots map gets corrected
+    // within a tracker tick.
+
     const isActiveToday = //
         state.competitionStart != null && //
         state.competitionEnd != null && //
         state.competitionStart <= localNow.iso && //
         localNow.iso <= state.competitionEnd;
-    const isEmpty = state.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
+    const isEmpty = srcState.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
     const tasksWithoutPilots = (state.tasksInDb ?? 0) > 0 && (state.pilotsInDb ?? 0) === 0;
     const urgentPilotsFetch = (isActiveToday || tasksWithoutPilots) && isEmpty;
 
-    // Rule 2: pre-task daily fetch — only if no class has a task today,
-    // we're past 10:00 local (or urgent), and we haven't already fetched
-    // today. Urgent overrides the 10am gate; nextPilotsAt still gates
-    // frequency — scheduleNextPilots picks a 30-minute retry interval
-    // while urgent conditions persist, so a flaky scrape doesn't hammer
-    // upstream every 60s.
+    let fetchPilots = false;
     if (
-        !anyTaskToday && //
         (urgentPilotsFetch || localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE) && //
-        state.lastPilotsLocalDate !== localNow.iso && //
-        nowMs >= state.nextPilotsAt
+        srcState.lastPilotsLocalDate !== localNow.iso && //
+        nowMs >= srcState.nextPilotsAt
     ) {
         fetchPilots = true;
         if (urgentPilotsFetch) {
@@ -214,24 +309,57 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
         } else {
             reasons.push('pilots:daily-10am');
         }
+    } else if (srcState.lastPilotsLocalDate === localNow.iso) {
+        reasons.push('pilots:done-today');
+    } else if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
+        reasons.push('pilots:wait-10am');
+    } else {
+        reasons.push(`pilots:wait-next-due (in ${formatWait(srcState.nextPilotsAt - nowMs)})`);
     }
 
-    // Rule 4: hourly pilots fetch on a task day until first launch.
-    // After first launch, stop until next day (lastPilotsLocalDate gates
-    // re-firing tomorrow).
-    if (!fetchPilots && anyTaskToday && !anyLaunchedToday && nowMs >= state.nextPilotsAt) {
-        fetchPilots = true;
-        reasons.push('pilots:task-hourly');
+    // ----- tasks -----
+    //
+    // Per-class cadence via desiredTaskCadence; MIN across today-classes.
+    // null cadence ⇒ no class qualifies, park to tomorrow morning. The
+    // pre-22:00 gate still applies (after 22:00 we always park).
+
+    let tasksCadenceMs: number | null = null;
+    if (todaysObs.length > 0) {
+        for (const obs of todaysObs) {
+            const firstLaunchAt = state.firstLaunch.get(obs.classid) ?? null;
+            const cadence = desiredTaskCadence(obs, firstLaunchAt, nowMs, activeTasksCadenceMs);
+            if (cadence != null && (tasksCadenceMs == null || cadence < tasksCadenceMs)) {
+                tasksCadenceMs = cadence;
+            }
+        }
+    } else {
+        // No today-classes yet (pre-comp, or compstatus empty). Keep
+        // checking at FAST so a freshly-installed task lands quickly.
+        tasksCadenceMs = INTERVAL_TASKS_FAST_MS;
+    }
+
+    let fetchTasks = false;
+    if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE) {
+        reasons.push('tasks:after-22:00-stop');
+    } else if (tasksCadenceMs == null) {
+        reasons.push('tasks:all-done-for-day');
+    } else if (nowMs >= srcState.nextTasksAt) {
+        fetchTasks = true;
+        const repairYesterday = srcState.lastResultsLocalDate !== localNow.iso;
+        reasons.push(`tasks:due (${formatCadence(tasksCadenceMs)}${repairYesterday ? ' +repair-yesterday-results' : ''})`);
+    } else {
+        reasons.push(`tasks:wait-next-due (${formatCadence(tasksCadenceMs)}, in ${formatWait(srcState.nextTasksAt - nowMs)})`);
     }
 
     // ----- results -----
+    //
+    // Results aren't worth chasing before any class hits F (FirstFinisher)
+    // or H (AllHome) — both flip the sticky `everFOrHToday` gate — or
+    // before 18:00 local. Hard 22:00 stop. The all-scored short-circuit
+    // and the upcoming-comp gate still apply.
 
-    const todaysObs = state.observations.filter((o) => o.isToday);
     const allTodayScored = todaysObs.length > 0 && todaysObs.every((o) => o.fullyScored);
     const isUpcoming = state.competitionStart != null && localNow.iso < state.competitionStart;
-    // Upcoming comps get a couple of morning ticks for a briefing that
-    // sometimes lands early, then stop until tomorrow — no point
-    // hammering upstream on a day the comp hasn't even started.
     const upcomingPastMorning = isUpcoming && localNow.minuteOfDay >= TASK_MORNING_LOCAL_MINUTE;
 
     let fetchResults = false;
@@ -239,146 +367,102 @@ export function computeDecisions(state: CompState, localNow: LocalTime, nowMs: n
         reasons.push('results:all-scored-stop');
     } else if (upcomingPastMorning) {
         reasons.push('results:upcoming-after-12:00-stop');
-    } else if (localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
-        if (nowMs >= state.nextResultsAt) {
-            fetchResults = true;
-            reasons.push('results:due');
-        }
-    } else {
+    } else if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE) {
         reasons.push('results:after-22:00-stop');
+    } else if (!state.everFOrHToday && localNow.minuteOfDay < RESULTS_START_LOCAL_MINUTE) {
+        reasons.push('results:pre-F-or-H-pre-18:00');
+    } else if (nowMs >= srcState.nextResultsAt) {
+        fetchResults = true;
+        reasons.push(state.everFOrHToday ? 'results:post-F-or-H' : 'results:post-18:00');
+    } else {
+        reasons.push(`results:wait-next-due (in ${formatWait(srcState.nextResultsAt - nowMs)})`);
     }
-
-    // tasksOnly: fast pre-task cadence. If every today-class is still
-    // pre-task (status not in TASK_STATES), there are no results to
-    // chase yet — walk the overview to catch a freshly-published task,
-    // but skip the per-pilot results parsing.
-    const tasksOnly = fetchResults && todaysObs.length > 0 && todaysObs.every((o) => !TASK_STATES.has(o.status));
-    if (tasksOnly) reasons.push('results:tasks-only');
 
     // ----- maintenance -----
 
-    // Rule 1 prune runs at most once per local day, after 10:00, on the
-    // first heartbeat that satisfies that window.
     const pruneEligible = localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE && state.lastPruneDay !== localNow.iso;
-    if (pruneEligible) {
-        reasons.push('prune:daily');
-    }
+    if (pruneEligible) reasons.push('prune:daily');
 
-    // Dead-competition check: cheap-ish (a few SELECTs) but not free —
-    // run hourly per competition.
     const deadCheck = nowMs >= state.nextDeadCheckAt;
     if (deadCheck) reasons.push('dead-comp:check');
 
     return {
         fetchPilots,
+        fetchTasks,
         fetchResults,
-        tasksOnly,
         pruneOldDays: pruneEligible,
         dropDeadComp: deadCheck,
+        tasksCadenceMs,
         reasons
     };
 }
 
 // ----- schedule next-due times -----
 
-// scheduleNextResults — figure out the right cadence for the next results
-// fetch. Chooses the *fastest* (lowest interval) cadence across all
-// observed classes today, then jitters it. Wakes at 08:00 local
-// tomorrow once we're past 22:00 local, or once every class today is
-// fully scored.
+// scheduleNextResults — next results-fetch time. Once past the 22:00
+// cutoff (or every class is fully scored), park to tomorrow morning.
+// Pre-F/H / pre-18:00 we still tick at SLOW cadence so that when the
+// gate flips open we don't sleep through the first half hour.
 function scheduleNextResults(state: CompState, localNow: LocalTime, nowMs: number): number {
     const todaysObs = state.observations.filter((o) => o.isToday);
     const allTodayScored = todaysObs.length > 0 && todaysObs.every((o) => o.fullyScored);
-    const isUpcoming = state.competitionStart != null && localNow.iso < state.competitionStart;
 
     if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE || allTodayScored) {
-        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, RESTART_LOCAL_MINUTE);
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, MORNING_RESUME_LOCAL_MINUTE);
     }
-    if (isUpcoming) {
-        // Pre-12:00 on a not-yet-started comp: 30-min cadence. After
-        // 12:00 give up for the day and wake at the next morning's
-        // RESTART_LOCAL_MINUTE.
-        if (localNow.minuteOfDay >= TASK_MORNING_LOCAL_MINUTE) {
-            return scheduleAtLocalMinuteTomorrow(state.tz, localNow, RESTART_LOCAL_MINUTE);
-        }
-        return nowMs + applyJitter(INTERVAL_RESULTS_SLOW_MS);
-    }
-
-    let fastest = INTERVAL_RESULTS_SLOW_MS;
-    let anyClassToday = false;
-    for (const obs of todaysObs) {
-        anyClassToday = true;
-        const interval = perClassResultsInterval(state, obs, localNow, nowMs);
-        if (interval < fastest) fastest = interval;
-    }
-    if (!anyClassToday) {
-        // Nothing today yet — keep the fast cadence so we notice
-        // briefing as soon as it appears.
-        fastest = INTERVAL_RESULTS_FAST_MS;
-    }
-    return nowMs + applyJitter(fastest);
+    return nowMs + applyJitter(INTERVAL_RESULTS_SLOW_MS);
 }
 
-// perClassResultsInterval — rule-3 cadence for a single class. Returns
-// the *minimum gap* until the next fetch, NOT an absolute deadline. The
-// caller folds it across all classes via min().
-//
-function perClassResultsInterval(state: CompState, obs: ClassObservation, localNow: LocalTime, nowMs: number): number {
-    if (!TASK_STATES.has(obs.status)) {
-        return INTERVAL_RESULTS_FAST_MS;
+// scheduleNextTasks — next tasks-fetch time. `cadenceMs` comes from
+// computeDecisions (already the MIN across today-classes); null means
+// no class qualifies, park to tomorrow. Past the 22:00 cutoff we also
+// park.
+function scheduleNextTasks(state: CompState, localNow: LocalTime, nowMs: number, cadenceMs: number | null): number {
+    if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE || cadenceMs == null) {
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, MORNING_RESUME_LOCAL_MINUTE);
     }
-    if (obs.grandprix) {
-        const anchor = launchAnchorMs(state, obs, localNow);
-        const pastLaunchTail = anchor != null && nowMs >= anchor + LAUNCH_FAST_TAIL_MS;
-        const pastNoStart = obs.starttimeMinutes != null && localNow.minuteOfDay >= obs.starttimeMinutes;
-        if (pastLaunchTail || pastNoStart) return INTERVAL_RESULTS_SLOW_MS;
-        return INTERVAL_RESULTS_FAST_MS;
-    }
-    return INTERVAL_RESULTS_SLOW_MS;
+    return nowMs + applyJitter(cadenceMs);
 }
 
-// launchAnchorMs — when did launching start for this class today, in
-// epoch ms? Either the in-memory first-L observation, or the fallback
-// "tasks.nostart - 30 min" if we never saw L. Only consulted by the
-// grandprix branch of perClassResultsInterval now.
-function launchAnchorMs(state: CompState, obs: ClassObservation, localNow: LocalTime): number | null {
-    const seen = state.firstLaunch.get(obs.classid);
-    if (seen) return seen;
-    if (obs.starttimeMinutes != null) {
-        const fallbackMin = obs.starttimeMinutes - LAUNCH_GRID_LEAD_MINUTES;
-        return localMinuteToEpochMs(state.tz, localNow, fallbackMin);
+// scheduleNextTrackers — per-adapter trackers cadence. Adapter's
+// trackerIntervalMs (defaults to 15 min) until every non-Z today-class
+// is F or H; hourly after. If every today-class is Z (scrubbed), park
+// to tomorrow morning. Hard 22:00 cutoff parks to tomorrow morning.
+function scheduleNextTrackers(state: CompState, adapter: ScoringSource, localNow: LocalTime, nowMs: number): number {
+    if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE) {
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, MORNING_RESUME_LOCAL_MINUTE);
     }
-    return null;
+    const todaysObs = state.observations.filter((o) => o.isToday);
+    if (todaysObs.length === 0) {
+        // No classes today yet — adapter's normal interval (e.g. SGP 5m,
+        // OAuth/robocontrol 15m) so a freshly-installed class lands soon.
+        return nowMs + applyJitter(adapter.trackerIntervalMs ?? DEFAULT_TRACKER_INTERVAL_MS);
+    }
+    const nonZ = todaysObs.filter((o) => o.status !== 'Z');
+    if (nonZ.length === 0) {
+        // Every today-class is scrubbed — nothing to track till tomorrow.
+        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, MORNING_RESUME_LOCAL_MINUTE);
+    }
+    const allDone = nonZ.every((o) => o.status === 'F' || o.status === 'H');
+    const interval = allDone ? INTERVAL_TRACKERS_DONE_MS : adapter.trackerIntervalMs ?? DEFAULT_TRACKER_INTERVAL_MS;
+    return nowMs + applyJitter(interval);
 }
 
-// scheduleNextPilots — when should the next pilots fetch fire?
-function scheduleNextPilots(state: CompState, localNow: LocalTime, nowMs: number, anyTaskToday: boolean, anyLaunchedToday: boolean): number {
-    if (anyLaunchedToday) {
-        // Done for today — wake at 04:00 local tomorrow so the next
-        // local-day kicks off on schedule.
-        return scheduleAtLocalMinuteTomorrow(state.tz, localNow, 4 * 60);
-    }
-    if (anyTaskToday) {
-        // Hourly until launch.
-        return nowMs + applyJitter(INTERVAL_PILOTS_HOURLY_MS);
-    }
-    // If the comp is inside its date window and the DB is still empty,
-    // retry every ~30 minutes rather than sleeping until the 10am gate.
-    // The urgent condition in computeDecisions re-validates before each
-    // fire, so once pilots land (or the comp falls out of its window)
-    // the normal 10am cadence takes over.
+// scheduleNextPilots — next pilots-fetch time. The "task-day hourly
+// until launch" branch is gone (trackers cadence refreshes the
+// contestants payload as a side effect); we only need to know when to
+// re-arm the daily/urgent gate.
+function scheduleNextPilots(state: CompState, srcState: SourceState, localNow: LocalTime, nowMs: number): number {
     const isActiveToday = //
         state.competitionStart != null && //
         state.competitionEnd != null && //
         state.competitionStart <= localNow.iso && //
         localNow.iso <= state.competitionEnd;
-    const isEmpty = state.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
+    const isEmpty = srcState.lastPilotsFetch === 0 || (state.pilotsInDb ?? 0) === 0;
     const tasksWithoutPilots = (state.tasksInDb ?? 0) > 0 && (state.pilotsInDb ?? 0) === 0;
     if ((isActiveToday || tasksWithoutPilots) && isEmpty) {
         return nowMs + applyJitter(INTERVAL_PILOTS_URGENT_MS);
     }
-    // Pre-task. If we're already past 10:00 today, the next chance is
-    // 10:00 tomorrow. Otherwise wake at 10:00 today.
     if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
         return localMinuteToEpochMsForward(state.tz, localNow, PILOTS_PRETASK_LOCAL_MINUTE);
     }
@@ -394,15 +478,6 @@ function scheduleAtLocalMinuteTomorrow(_tz: string, localNow: LocalTime, targetM
     return localNow.epoch + minutesUntilTomorrow * 60 * 1000 + oneSidedJitter();
 }
 
-// localMinuteToEpochMs — convert "minute X today, in this tz" to an
-// epoch-ms wakeup, applying jitter. If the target is in the past
-// relative to localNow, wraps to tomorrow.
-function localMinuteToEpochMs(_tz: string, localNow: LocalTime, targetMinute: number): number {
-    let delta = targetMinute - localNow.minuteOfDay;
-    if (delta <= 0) delta += 24 * 60;
-    return localNow.epoch + applyJitter(delta * 60 * 1000);
-}
-
 // Stampede-avoidance window for fixed-time wakeups (e.g. the 10:00
 // local daily pilots fetch). All comps in the same tz that wake at
 // the same target minute will land somewhere in [target, target+WINDOW]
@@ -412,6 +487,16 @@ const ONE_SIDED_JITTER_MS = 30 * 60 * 1000;
 
 function oneSidedJitter(): number {
     return Math.floor(Math.random() * ONE_SIDED_JITTER_MS);
+}
+
+// Startup jitter — used by initSourceState to spread first-fetch HTTP
+// across freshly-registered comps without swallowing the FAST tasks
+// cadence (10 min) that the launch window depends on. 30-min one-sided
+// jitter is fine for "tomorrow at 10am" parking but too long here.
+const STARTUP_JITTER_MS = 5 * 60 * 1000;
+
+function startupJitter(): number {
+    return Math.floor(Math.random() * STARTUP_JITTER_MS);
 }
 
 // localMinuteToEpochMsForward — like localMinuteToEpochMs but with
@@ -427,7 +512,8 @@ function localMinuteToEpochMsForward(_tz: string, localNow: LocalTime, targetMin
 // ----- compstatus refresh + first-launch tracking -----
 
 // Read compstatus rows for `compid` and populate state.observations.
-// Also detect L transitions so state.firstLaunch is updated.
+// Also detect L/S/F transitions so state.firstLaunch is seeded, and
+// flip the everFOrHToday gate when any class hits F or H.
 async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: LocalTime): Promise<void> {
     let rows: any[] = [];
     try {
@@ -436,8 +522,10 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
                 cs.class,
                 cs.status,
                 cs.datecode,
+                UNIX_TIMESTAMP(cs.laststatuschange) * 1000 AS laststatusChangeMs,
                 TIME_TO_SEC(t.nostart) AS starttimeSecs,
                 cl.grandprixstart,
+                COUNT(DISTINCT p.compno) AS pilotsInClass,
                 (
                     SELECT
                         CASE
@@ -453,18 +541,17 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
             FROM compstatus cs
             JOIN classes cl ON cl.class = cs.class
             LEFT JOIN tasks t ON t.class = cs.class AND t.datecode = cs.datecode
+            LEFT JOIN pilots p ON p.class = cs.class
             WHERE cl.compid = ${ctx.compid}
+            GROUP BY cs.class, cs.status, cs.datecode, cs.laststatuschange, t.nostart, cl.grandprixstart
         `)) as any[];
     } catch (e) {
         ctx.log(`refreshObservations: query failed for ${ctx.compid}:`, e);
         return;
     }
 
-    // Pull the comp's date window + pilot count in one trip so the
+    // Pull the comp's date window + pilot/task counts in one trip so the
     // urgent-fetch rule can see an up-to-date picture every heartbeat.
-    // Cheap: a single row scan on competition + an indexed COUNT over
-    // pilots for this compid. Failures degrade silently — the urgent
-    // rule falls back to the normal 10am/hourly cadence.
     try {
         const meta = (await ctx.db.query(escape`
             SELECT
@@ -494,11 +581,14 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
 
     const todayDc = localDatecode(state.tz, localNow.epoch);
 
-    // If the local date has rolled over, drop yesterday's first-launch
-    // observations.
+    // Local-date rollover wipes per-day in-memory state.
     if (state.firstLaunchDate !== localNow.iso) {
         state.firstLaunch.clear();
         state.firstLaunchDate = localNow.iso;
+    }
+    if (state.everFOrHTodayDate !== localNow.iso) {
+        state.everFOrHToday = false;
+        state.everFOrHTodayDate = localNow.iso;
     }
 
     const observations: ClassObservation[] = [];
@@ -506,6 +596,7 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
         const status = String(row.status ?? ':');
         const isToday = row.datecode === todayDc;
         const starttimeMinutes = row.starttimeSecs != null ? Math.floor(Number(row.starttimeSecs) / 60) : null;
+        const laststatuschange = row.laststatusChangeMs != null ? Number(row.laststatusChangeMs) : null;
         const obs: ClassObservation = {
             classid: row.class,
             status,
@@ -513,15 +604,39 @@ async function refreshObservations(state: CompState, ctx: SourceCtx, localNow: L
             starttimeMinutes,
             isToday,
             grandprix: row.grandprixstart === 'Y',
-            fullyScored: Number(row.fullyScored) === 1
+            fullyScored: Number(row.fullyScored) === 1,
+            pilotsInClass: Number(row.pilotsInClass ?? 0),
+            laststatuschange
         };
         observations.push(obs);
 
-        // First-launch capture: if status indicates launched and we
-        // haven't recorded a first-L for today, stamp it now.
-        if (isToday && LAUNCHED_STATES.has(status) && !state.firstLaunch.has(obs.classid)) {
-            state.firstLaunch.set(obs.classid, Date.now());
-            ctx.log(`scheduler: first-launch for class ${obs.classid} captured`);
+        if (!isToday) continue;
+
+        // F-or-H-sticky: any today-class that has hit FirstFinisher or
+        // AllHome flips the sticky flag for the day. Cleared on date
+        // rollover above. A class that goes L→S→H quickly without
+        // lingering in F still trips the gate via H.
+        if ((status === 'F' || status === 'H') && !state.everFOrHToday) {
+            state.everFOrHToday = true;
+            ctx.log(`scheduler: everFOrHToday flipped on class ${obs.classid} status=${status}`);
+        }
+
+        // First-launch capture: stamp now() the first time we observe a
+        // launched-status class today. If the in-memory map is empty
+        // (process restart), fall back to the DB's laststatuschange for
+        // statuses L/S/F — the timestamp is the most recent transition,
+        // which for those phases is launch-related and close enough to
+        // anchor the post-launch task window. For H the timestamp is
+        // the all-home transition (much later than launch) — don't use it.
+        if (LAUNCHED_STATES.has(status) && !state.firstLaunch.has(obs.classid)) {
+            const trustLastChange = (status === 'L' || status === 'S' || status === 'F') && laststatuschange != null;
+            if (trustLastChange && laststatuschange != null) {
+                state.firstLaunch.set(obs.classid, laststatuschange);
+                ctx.log(`scheduler: first-launch for class ${obs.classid} seeded from laststatuschange (status=${status})`);
+            } else {
+                state.firstLaunch.set(obs.classid, Date.now());
+                ctx.log(`scheduler: first-launch for class ${obs.classid} captured (status=${status})`);
+            }
         }
     }
 
@@ -558,19 +673,46 @@ const state = new Map<string, CompState>();
 // immediately instead of waiting until 05:00 UTC.
 const lastDiscoveryUtcDate = new Map<string, string>();
 
+// (compid, type) pairs seen on the most recent successful scoringsource
+// read. Used by the next heartbeat to detect (compid, type) entries that
+// vanished without dropDeadCompetition having dropped them — a canary
+// for transient DB issues (connection lost, slave replication gap) or
+// an external row deletion. The dropped set holds entries we removed
+// this process via dropDeadCompetition so the canary doesn't false-flag
+// our own cleanup.
+const previousScoringSourceEntries = new Set<string>();
+const droppedScoringSourceEntries = new Set<string>();
+
+// (compid, type) pairs whose processCompetition is currently running.
+// Heartbeats fire on a fixed setInterval and processCompetition for a
+// SoaringSpot scrape comp can easily exceed the 60 s interval (the
+// process-global SOARINGSPOT rate limiter serialises every fetch on
+// that host), so without a per-comp gate we'd queue overlapping passes
+// for the slow comps AND quick comps like SGP would still be stuck
+// behind them in a serial for-loop. The gate plus Promise.all means
+// SGP/robocontrol get their cadence honoured regardless of whatever's
+// blocked on SoaringSpot.
+const inFlightCompetitions = new Set<string>();
+
 export async function runScheduler(opts: SchedulerOptions): Promise<void> {
     const log = opts.log ?? ((msg: string, ...args: unknown[]) => console.log(msg, ...args));
     const interval = opts.heartbeatMs ?? HEARTBEAT_MS;
 
     log(`scheduler: starting; types=${opts.registry.types().join(',')} heartbeat=${interval}ms`);
 
-    // Run the first heartbeat immediately so a fresh process picks up
-    // work before the first interval elapses.
-    await heartbeat(opts.db, opts.registry, log);
-
+    // Kick off the recurring heartbeat first so it starts ticking even
+    // while the initial pass is still draining the rate-limited
+    // SoaringSpot queue. The per-comp `inFlightCompetitions` gate (in
+    // heartbeat) prevents overlapping processCompetition for the same
+    // (compid, type), so it's safe for setInterval-driven heartbeats
+    // and the initial pass to overlap.
     setInterval(() => {
         heartbeat(opts.db, opts.registry, log).catch((e) => log('scheduler heartbeat failed:', e));
     }, interval);
+
+    // Fire the first heartbeat immediately (no await) so a fresh
+    // process picks up work without waiting a whole interval.
+    heartbeat(opts.db, opts.registry, log).catch((e) => log('scheduler initial heartbeat failed:', e));
 }
 
 async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, ...args: unknown[]) => void): Promise<void> {
@@ -581,22 +723,87 @@ async function heartbeat(db: any, registry: SourceRegistry, log: (msg: string, .
 
     let sources: any[] = [];
     try {
-        sources = (await db.query(escape`SELECT * FROM scoringsource WHERE type IN (${registry.types()})`)) as any[];
+        // Deterministic order (type, then compid) so log streams are
+        // stable across heartbeats. The per-source state split means
+        // iteration order is no longer load-bearing, but stable logs
+        // make audit easier.
+        sources = (await db.query(escape`SELECT * FROM scoringsource WHERE type IN (${registry.types()}) ORDER BY type, compid`)) as any[];
     } catch (e) {
-        log('scheduler: scoringsource read failed:', e);
+        // DB connection / query failure — abort the heartbeat. We
+        // deliberately do NOT touch in-memory state or trigger any
+        // cleanup here: an empty (or unreadable) scoringsource result
+        // must NOT be interpreted as "all comps removed". The next
+        // heartbeat will retry.
+        log('scheduler: scoringsource read failed — aborting heartbeat (in-memory state preserved):', e);
         return;
     }
 
+    // Canary: which (compid, type) entries were present last heartbeat
+    // that aren't here now, excluding ones the scheduler explicitly
+    // dropped? When this fires for a comp you didn't expect to lose, it
+    // points at either an external row delete or a DB read returning
+    // stale/partial results.
+    const currentEntries = new Set<string>();
     for (const src of sources ?? []) {
-        if (!src.compid || !src.url) continue;
-        const adapter = registry.get(src.type);
-        if (!adapter) continue;
-        try {
-            await processCompetition(db, adapter, src, log);
-        } catch (e) {
-            log(`scheduler: competition ${src.compid} failed:`, e);
-        }
+        if (src.compid && src.type) currentEntries.add(`${src.compid}|${src.type}`);
     }
+    for (const prev of previousScoringSourceEntries) {
+        if (currentEntries.has(prev) || droppedScoringSourceEntries.has(prev)) continue;
+        const [compid, type] = prev.split('|');
+        log(`scheduler: ${compid} (${type}) missing from scoringsource read — was present last heartbeat and NOT dropped by the scheduler. Likely DB connection blip or external row removal; in-memory state preserved, will resume when the row returns.`);
+    }
+    previousScoringSourceEntries.clear();
+    for (const e of currentEntries) previousScoringSourceEntries.add(e);
+
+    // Override gate: collect every compid that has an authoritative
+    // `soaringspotkey` row. Any registered source for one of those
+    // compids is skipped below — see OVERRIDE_SOURCE_TYPE. A failed scan
+    // degrades to "no overrides" rather than stalling the heartbeat.
+    const overriddenComps = new Set<string>();
+    try {
+        const rows = (await db.query(escape`SELECT DISTINCT compid FROM scoringsource WHERE type = ${OVERRIDE_SOURCE_TYPE}`)) as any[];
+        for (const r of rows ?? []) {
+            if (r.compid) overriddenComps.add(r.compid);
+        }
+    } catch (e) {
+        // Override scan failure degrades to "no overrides" — adapters
+        // continue firing rather than mis-classifying as suppressed.
+        log('scheduler: override scan failed (treating as no overrides for this heartbeat):', e);
+    }
+
+    // Fan comps out concurrently so a slow SoaringSpot fetch can't
+    // block SGP/robocontrol behind it. The `inFlightCompetitions` gate
+    // skips comps still being processed by an earlier heartbeat — that
+    // matters because processCompetition for a SoaringSpot comp can
+    // exceed the 60 s heartbeat interval (the process-global host
+    // rate limiter serialises every fetch).
+    await Promise.all(
+        (sources ?? []).map(async (src) => {
+            if (!src.compid || !src.url) return;
+            const adapter = registry.get(src.type);
+            if (!adapter) return;
+            // Override gate: a comp with `soaringspotkey` suppresses
+            // its scrape source only. Robocontrol (and any other
+            // tracker-only adapter) is orthogonal and continues firing.
+            if (overriddenComps.has(src.compid) && OVERRIDE_TARGET_TYPES.has(src.type)) {
+                log(`scheduler: skipping ${src.compid} (${src.type}) — overridden by '${OVERRIDE_SOURCE_TYPE}' source`);
+                return;
+            }
+            const key = `${src.compid}|${src.type}`;
+            if (inFlightCompetitions.has(key)) {
+                log(`scheduler: skipping ${src.compid} (${src.type}) — previous heartbeat still in flight`);
+                return;
+            }
+            inFlightCompetitions.add(key);
+            try {
+                await processCompetition(db, adapter, src, log);
+            } catch (e) {
+                log(`scheduler: competition ${src.compid} failed:`, e);
+            } finally {
+                inFlightCompetitions.delete(key);
+            }
+        })
+    );
 }
 
 //
@@ -685,7 +892,7 @@ async function processCompetition(
         tz: st.tz,
         countrycode: st.countrycode,
         db,
-        log: (msg: string, ...args: unknown[]) => log(`[${src.compid}] ${msg}`, ...args),
+        log: (msg: string, ...args: unknown[]) => log(`[${src.compid}/${src.type}] ${msg}`, ...args),
         raw: src
     };
 
@@ -725,62 +932,135 @@ async function processCompetition(
     const localNow = nowInTz(st.tz);
     await refreshObservations(st, ctx, localNow);
 
-    const decisions = computeDecisions(st, localNow, Date.now());
-
-    // Compute "anyTaskToday" / "anyLaunchedToday" once for both the
-    // skipDay predicate and the scheduling.
-    let anyTaskToday = false;
-    let anyLaunchedToday = false;
-    for (const obs of st.observations) {
-        if (!obs.isToday) continue;
-        if (TASK_STATES.has(obs.status)) anyTaskToday = true;
-        if (LAUNCHED_STATES.has(obs.status)) anyLaunchedToday = true;
+    // Look up (or lazily create) the per-source dispatch state for this
+    // adapter type.
+    let srcState = st.perSource.get(src.type);
+    if (!srcState) {
+        srcState = initSourceState(st.tz, localNow);
+        st.perSource.set(src.type, srcState);
     }
 
-    if (decisions.fetchPilots || decisions.fetchResults) {
-        ctx.log(`scheduler: ${decisions.reasons.join(', ')}`);
+    const decisions = computeDecisions(st, srcState, localNow, Date.now(), adapter.activeTasksCadenceMs);
+
+    // skipDay (rule 1) needs to know whether any class has a task today.
+    let anyTaskToday = false;
+    for (const obs of st.observations) {
+        if (obs.isToday && TASK_STATES.has(obs.status)) {
+            anyTaskToday = true;
+            break;
+        }
+    }
+
+    // ----- trackers (per-adapter, evaluated locally) -----
+    //
+    // The trackers stream sits outside computeDecisions because its
+    // cadence is per-source (5m for SGP, 15m for OAuth/robocontrol) and
+    // robocontrol + a primary adapter can both fire for the same compid.
+    // Window opens at 10:00 local — there's nothing worth tracking
+    // before the morning gate that pilots and tasks share.
+    //
+    // Reason label is computed before the fetch so it reflects the
+    // decision (due / wait / off-hours / no-adapter), matching the
+    // pilots/tasks/results pattern computeDecisions uses.
+    let trackersReason: string;
+    if (!adapter.fetchTrackers) {
+        trackersReason = 'trackers:no-adapter';
+    } else if (localNow.minuteOfDay < PILOTS_PRETASK_LOCAL_MINUTE) {
+        trackersReason = 'trackers:before-10am';
+    } else if (localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE) {
+        trackersReason = 'trackers:after-22:00-stop';
+    } else if (Date.now() >= srcState.nextTrackersAt) {
+        trackersReason = 'trackers:due';
+    } else {
+        trackersReason = `trackers:wait-next-due (in ${formatWait(srcState.nextTrackersAt - Date.now())})`;
+    }
+    decisions.reasons.push(trackersReason);
+
+    if (adapter.fetchTrackers && localNow.minuteOfDay >= PILOTS_PRETASK_LOCAL_MINUTE && localNow.minuteOfDay < STOP_RESULTS_LOCAL_MINUTE) {
+        if (Date.now() >= srcState.nextTrackersAt) {
+            try {
+                await adapter.fetchTrackers(ctx);
+            } catch (e) {
+                ctx.log('fetchTrackers threw:', e);
+            }
+            srcState.lastTrackersFetch = Date.now();
+            srcState.nextTrackersAt = scheduleNextTrackers(st, adapter, nowInTz(st.tz), Date.now());
+        }
+    }
+
+    // Always emit decisions reasons so audit has visibility into
+    // "why isn't anything firing" — not just when a fetch fires.
+    ctx.log(`scheduler: ${decisions.reasons.join(', ')}`);
+
+    if (decisions.fetchTasks) {
+        const skipDay = makeSkipDayPredicate(st.tz, localNow, anyTaskToday);
+        const acceptYesterday = srcState.lastResultsLocalDate !== localNow.iso;
+        // On the first task tick of a new local day, drop tasksOnly so the
+        // same fetch also pulls yesterday's results page (one shot to repair
+        // any pilotresult row whose start/finish was written from an earlier
+        // degenerate mid-day scrape). The results-only branch alone is gated
+        // on F/H or 18:00 — too late if yesterday's data needs to be
+        // correct for morning re-runs of findtrackers, etc.
+        const tasksOnly = !acceptYesterday;
+        try {
+            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {tasksOnly, acceptYesterday});
+            if (result?.observedClasses) {
+                srcState.lastTaskObservedClasses = result.observedClasses;
+            }
+            // Refresh observations — a task install promotes compstatus to
+            // 'B', which the next decisions evaluation needs to see.
+            await refreshObservations(st, ctx, nowInTz(st.tz));
+            // Combined morning fetch already touched the results page —
+            // mark today as done so the next task tick reverts to tasks-only
+            // and the standard results-only cadence doesn't double-pull
+            // yesterday. We don't bump nextResultsAt: the results-only
+            // branch should still fire on its own gate (F/H or 18:00).
+            if (!tasksOnly) {
+                srcState.lastResultsFetch = Date.now();
+                srcState.lastResultsLocalDate = localNow.iso;
+            }
+        } catch (e) {
+            ctx.log(`fetchResultsAndTasks (${tasksOnly ? 'tasks-only' : 'tasks+repair-yesterday-results'}) threw:`, e);
+        }
+        srcState.nextTasksAt = scheduleNextTasks(st, nowInTz(st.tz), Date.now(), decisions.tasksCadenceMs);
     }
 
     if (decisions.fetchPilots) {
         try {
             const pilotsResult = await adapter.fetchPilots(ctx);
             if (pilotsResult?.observed && pilotsResult.observed.size > 0) {
-                st.lastPilotObservedClasses = new Set(pilotsResult.observed.keys());
+                srcState.lastPilotObservedClasses = new Set(pilotsResult.observed.keys());
             }
-            st.lastPilotsFetch = Date.now();
-            st.lastPilotsLocalDate = localDateISO(st.tz);
+            srcState.lastPilotsFetch = Date.now();
+            srcState.lastPilotsLocalDate = localDateISO(st.tz);
         } catch (e) {
             ctx.log('fetchPilots threw:', e);
         }
-        // Reschedule whether or not we got results.
-        st.nextPilotsAt = scheduleNextPilots(st, localNow, Date.now(), anyTaskToday, anyLaunchedToday);
+        srcState.nextPilotsAt = scheduleNextPilots(st, srcState, localNow, Date.now());
     }
 
     if (decisions.fetchResults) {
         const skipDay = makeSkipDayPredicate(st.tz, localNow, anyTaskToday);
+        const acceptYesterday = srcState.lastResultsLocalDate !== localNow.iso;
         try {
-            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {tasksOnly: decisions.tasksOnly});
-            // Only prune classes when fetchPilots has given us a trustworthy
-            // "these classes are registered" set this process — otherwise a
-            // staggered task publish (one class has a task, others don't
-            // yet) looks identical to a class being deleted and we'd wipe
-            // pilots for classes that just haven't flown yet.
-            if (st.lastPilotObservedClasses === null) {
+            const result = await adapter.fetchResultsAndTasks(ctx, skipDay, {resultsOnly: true, acceptYesterday});
+            if (srcState.lastPilotObservedClasses === null) {
                 ctx.log('diffAndRemoveClasses: no pilots fetch yet this process; skipping prune');
             } else {
                 const merged = new Set<ClassId>(result.observedClasses);
-                for (const c of st.lastPilotObservedClasses) merged.add(c);
+                for (const c of srcState.lastPilotObservedClasses) merged.add(c);
+                if (srcState.lastTaskObservedClasses) {
+                    for (const c of srcState.lastTaskObservedClasses) merged.add(c);
+                }
                 await diffAndRemoveClasses(db, ctx.log, src.compid, merged);
             }
-            // Refresh observations after the fetch — compstatus may have
-            // been promoted to 'B' by the task install, which changes
-            // the next-due interval.
             await refreshObservations(st, ctx, nowInTz(st.tz));
         } catch (e) {
-            ctx.log('fetchResultsAndTasks threw:', e);
+            ctx.log('fetchResultsAndTasks (results-only) threw:', e);
         }
-        st.lastResultsFetch = Date.now();
-        st.nextResultsAt = scheduleNextResults(st, nowInTz(st.tz), Date.now());
+        srcState.lastResultsFetch = Date.now();
+        srcState.lastResultsLocalDate = localNow.iso;
+        srcState.nextResultsAt = scheduleNextResults(st, nowInTz(st.tz), Date.now());
     }
 
     if (decisions.pruneOldDays) {
@@ -802,7 +1082,12 @@ async function processCompetition(
         try {
             const dropped = await dropDeadCompetition(db, ctx.log, src.compid);
             if (dropped) {
+                ctx.log(`scheduler: dropped competition (cascade complete, no leftover rows). Removing from in-memory state; will not appear in subsequent heartbeats unless re-added to scoringsource.`);
                 state.delete(src.compid);
+                // Remember every (compid, type) tuple we removed so the
+                // heartbeat canary doesn't flag this as an unexpected
+                // disappearance on the next read.
+                droppedScoringSourceEntries.add(`${src.compid}|${src.type}`);
                 return;
             }
         } catch (e) {
@@ -811,14 +1096,17 @@ async function processCompetition(
         st.nextDeadCheckAt = Date.now() + applyJitter(60 * 60 * 1000);
     }
 
-    // If we did neither a pilots nor a results fetch and we don't have
-    // a next-time set yet (fresh process), prime them now so subsequent
-    // heartbeats skip cheaply.
-    if (st.nextPilotsAt === 0) {
-        st.nextPilotsAt = scheduleNextPilots(st, localNow, Date.now(), anyTaskToday, anyLaunchedToday);
+    // Prime any next-due timestamps that didn't already get advanced by
+    // a real fetch this heartbeat — so subsequent heartbeats skip cheaply
+    // rather than re-firing the gate every tick.
+    if (srcState.nextPilotsAt === 0) {
+        srcState.nextPilotsAt = scheduleNextPilots(st, srcState, localNow, Date.now());
     }
-    if (st.nextResultsAt === 0) {
-        st.nextResultsAt = scheduleNextResults(st, localNow, Date.now());
+    if (srcState.nextTasksAt === 0) {
+        srcState.nextTasksAt = scheduleNextTasks(st, localNow, Date.now(), decisions.tasksCadenceMs);
+    }
+    if (srcState.nextResultsAt === 0) {
+        srcState.nextResultsAt = scheduleNextResults(st, localNow, Date.now());
     }
     if (st.nextDeadCheckAt === 0) {
         st.nextDeadCheckAt = Date.now() + applyJitter(60 * 60 * 1000);
@@ -843,6 +1131,7 @@ async function initState(
         ? 0
         : Date.now() + Math.floor(Math.random() * METADATA_JITTER_MS);
     log(`scheduler: registering compid=${src.compid} type=${src.type} tz=${tz}${alreadyKnown ? '' : ` metadataDueAt=+${Math.round((metadataDueAt - Date.now()) / 1000)}s`}`);
+
     return {
         compid: src.compid,
         url: src.url,
@@ -852,23 +1141,44 @@ async function initState(
         countrycode: fields.countrycode,
         metadataLoaded: false,
         metadataDueAt,
-        lastPilotsFetch: 0,
-        lastResultsFetch: 0,
-        lastPilotsLocalDate: null,
-        lastPilotObservedClasses: null,
         competitionStart: null,
         competitionEnd: null,
         pilotsInDb: null,
         tasksInDb: null,
         firstLaunch: new Map(),
         firstLaunchDate: null,
-        // Stagger initial fetches with forward jitter so a restart
-        // doesn't fire every comp on the first heartbeat.
-        nextPilotsAt: Date.now() + oneSidedJitter(),
-        nextResultsAt: Date.now() + oneSidedJitter(),
+        everFOrHToday: false,
+        everFOrHTodayDate: null,
+        perSource: new Map(),
         observations: [],
         lastPruneDay: null,
         nextDeadCheckAt: 0
+    };
+}
+
+// initSourceState — seed a brand-new SourceState. Per-source first-fetch
+// times use forward jitter; if the daemon starts in the night-quiet
+// window (before 08:00 or after 22:00), defer the first fetch to the
+// next morning's MORNING_RESUME_LOCAL_MINUTE so we don't queue up
+// fetches the decision-time gate will then refuse.
+function initSourceState(tz: string, localNow: LocalTime): SourceState {
+    const inNightQuiet = localNow.minuteOfDay < MORNING_RESUME_LOCAL_MINUTE || localNow.minuteOfDay >= STOP_RESULTS_LOCAL_MINUTE;
+    const morningOrJitter = (): number =>
+        inNightQuiet //
+            ? localMinuteToEpochMsForward(tz, localNow, MORNING_RESUME_LOCAL_MINUTE)
+            : Date.now() + startupJitter();
+    return {
+        nextPilotsAt: morningOrJitter(),
+        nextTasksAt: morningOrJitter(),
+        nextResultsAt: morningOrJitter(),
+        nextTrackersAt: morningOrJitter(),
+        lastPilotsFetch: 0,
+        lastResultsFetch: 0,
+        lastTrackersFetch: 0,
+        lastPilotsLocalDate: null,
+        lastResultsLocalDate: null,
+        lastPilotObservedClasses: null,
+        lastTaskObservedClasses: null
     };
 }
 
@@ -887,6 +1197,45 @@ async function readCompetitionFields(db: any, compid: string): Promise<{tz: stri
         };
     } catch {
         return {tz: null, countrycode: null, name: null, sitename: null};
+    }
+}
+
+//
+// dumpSchedulerState — print the full per-comp scheduler state to the
+// daemon log. Wired to SIGUSR1 in bin/ssscrape.ts. Quietest possible
+// in normal operation, on-demand when something looks wrong.
+//
+export function dumpSchedulerState(log: (msg: string, ...args: unknown[]) => void = console.log): void {
+    const nowMs = Date.now();
+    const fmt = (ms: number): string => {
+        if (ms === 0) return '0';
+        const dt = new Date(ms);
+        const deltaSec = Math.round((ms - nowMs) / 1000);
+        return `${dt.toISOString()} (${deltaSec >= 0 ? '+' : ''}${deltaSec}s)`;
+    };
+    log(`scheduler dump: ${state.size} comp(s) tracked, t=${new Date(nowMs).toISOString()}`);
+    for (const [compid, st] of state) {
+        const localNow = nowInTz(st.tz);
+        const hh = Math.floor(localNow.minuteOfDay / 60).toString().padStart(2, '0');
+        const mm = (localNow.minuteOfDay % 60).toString().padStart(2, '0');
+        log(`  [${compid}] tz=${st.tz} localNow=${localNow.iso} ${hh}:${mm}`);
+        log(`    competition: ${st.competitionStart ?? '?'}..${st.competitionEnd ?? '?'} pilotsInDb=${st.pilotsInDb ?? '?'} tasksInDb=${st.tasksInDb ?? '?'}`);
+        log(`    everFOrHToday=${st.everFOrHToday} (date=${st.everFOrHTodayDate ?? 'n/a'}) lastPruneDay=${st.lastPruneDay ?? 'n/a'} nextDeadCheckAt=${fmt(st.nextDeadCheckAt)}`);
+        const fl = [...st.firstLaunch.entries()].map(([c, t]) => `${c}@${new Date(t).toISOString()}`).join(', ');
+        log(`    firstLaunch: ${fl || '(empty)'} firstLaunchDate=${st.firstLaunchDate ?? 'n/a'}`);
+        log(`    observations (${st.observations.length}):`);
+        for (const obs of st.observations) {
+            log(`      ${obs.classid} status=${obs.status} datecode=${obs.datecode ?? '?'} today=${obs.isToday} fullyScored=${obs.fullyScored} pilotsInClass=${obs.pilotsInClass} startMin=${obs.starttimeMinutes ?? '?'}`);
+        }
+        log(`    perSource (${st.perSource.size}):`);
+        for (const [type, src] of st.perSource) {
+            log(`      [${type}] nextPilots=${fmt(src.nextPilotsAt)} nextTasks=${fmt(src.nextTasksAt)} nextResults=${fmt(src.nextResultsAt)} nextTrackers=${fmt(src.nextTrackersAt)}`);
+            log(`              lastPilotsFetch=${fmt(src.lastPilotsFetch)} lastResultsFetch=${fmt(src.lastResultsFetch)} lastTrackersFetch=${fmt(src.lastTrackersFetch)}`);
+            log(`              lastPilotsLocalDate=${src.lastPilotsLocalDate ?? 'n/a'} lastResultsLocalDate=${src.lastResultsLocalDate ?? 'n/a'}`);
+            const pilotObs = src.lastPilotObservedClasses ? [...src.lastPilotObservedClasses].join(',') : 'null';
+            const taskObs = src.lastTaskObservedClasses ? [...src.lastTaskObservedClasses].join(',') : 'null';
+            log(`              lastPilotObservedClasses=${pilotObs} lastTaskObservedClasses=${taskObs}`);
+        }
     }
 }
 

@@ -10,10 +10,16 @@
 // adapters); this file's job is:
 //
 //   1. Boot: load .env.local, open the mysql pool, register adapters.
-//   2. Daemon mode: run the scheduler heartbeat + roboControl interval.
-//   3. CLI one-shot mode: `node dist/bin/ssscrape.js <url> [compid]`
-//      — upsert the scoringsource row for that URL, run the
-//      SoaringSpotScrape adapter once end-to-end, and exit.
+//   2. Daemon mode (no flags): scheduler heartbeat + roboControl loop.
+//   3. CLI one-shot mode: `node dist/bin/ssscrape.js --url <u> [--compid <c>]`
+//      — upsert the scoringsource row, run the SoaringSpotScrape adapter
+//      end-to-end (metadata + pilots + tasks + results), and exit.
+//   4. CLI filter mode: `--compid <c> --class <classid-or-name> --datecode <dc>`
+//      — narrow scrape: skips scoringsource upsert / ensureMetadata /
+//      fetchPilots, and only re-imports the task + results for that
+//      single (class, datecode). URL is looked up from scoringsource
+//      unless --url is also supplied. Bypasses the today-only safety
+//      check so past datecodes work.
 //
 // All of the parsing/upsert logic that used to live here is now in
 // lib/scoring/sources/soaringspotscrape.ts (parsing) and the shared
@@ -24,11 +30,15 @@
 //
 
 import escape from 'sql-template-strings';
+import yargs from 'yargs';
+import {hideBin} from 'yargs/helpers';
 
-import {runScheduler, SourceRegistry} from '../lib/scoring/scheduler';
+import {runScheduler, SourceRegistry, dumpSchedulerState} from '../lib/scoring/scheduler';
 import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape';
 import {SgpSource} from '../lib/scoring/sources/sgp';
-import type {SourceCtx} from '../lib/scoring/source';
+import {SoaringSpotApiSource} from '../lib/scoring/sources/soaringspot';
+import {RobocontrolSource} from '../lib/scoring/sources/robocontrol';
+import type {ScoringSource, SourceCtx} from '../lib/scoring/source';
 import {regeocodeMissingCompetitions} from '../lib/scoring/shared/contestLocation';
 
 const mysql = require('serverless-mysql');
@@ -65,89 +75,6 @@ function deriveCompIdFromUrl(urlString: string): string | null {
     }
 }
 
-//
-// roboControl — independent side-channel for tracker-id updates from
-// the robocontrol HTTP feed. Not part of any scoring source so it stays
-// here as its own loop. Lifted unchanged from the old ssscrape.ts.
-//
-async function roboControl(): Promise<void> {
-    let url: string | null = null;
-    let overwrite = false;
-    if (process.env.ROBOCONTROL_URL) {
-        url = process.env.ROBOCONTROL_URL;
-    }
-
-    if (!url) {
-        const row = (
-            await mysql_db.query(escape`
-                SELECT
-                    url,
-                    overwrite
-                FROM
-                    scoringsource
-                WHERE
-                    type = 'robocontrol'
-            `)
-        )[0] ?? {url: null, overwrite: true};
-        url = row.url;
-        overwrite = row.overwrite ?? true;
-    }
-
-    if (!url) return;
-
-    console.log(`robocontrol url ${url} configured`);
-
-    fetch(url)
-        .then((res) => {
-            if (res.status != 200) {
-                console.log(` ${url}: ${res.status}`);
-                return {};
-            }
-            return res.json();
-        })
-        .then((data: any) => {
-            let location = data;
-            if (data?.message) location = data.message;
-            for (const p of location || []) {
-                if (p.flarm?.length) {
-                    console.log(`updating tracker ${p.cn} to ${p.flarm.join(',')}`);
-                    if (overwrite) {
-                        mysql_db.query(escape`
-                            UPDATE tracker
-                            SET
-                                trackerid = ${p.flarm.join(',')}
-                            WHERE
-                                compno = ${p.cn}
-                        `);
-                    } else {
-                        mysql_db.query(escape`
-                            UPDATE tracker
-                            SET
-                                trackerid = ${p.flarm.join(',')}
-                            WHERE
-                                compno = ${p.cn}
-                                AND trackerid = 'unknown'
-                        `);
-                    }
-                    mysql_db.query(escape`
-                        INSERT INTO
-                            trackerhistory
-                        VALUES
-                            (
-                                ${p.cn},
-                                now(),
-                                ${p.flarm.join(',')},
-                                '',
-                                NULL,
-                                'robocontrol'
-                            )
-                    `);
-                }
-            }
-        })
-        .catch((e) => console.log('robocontrol fetch failed:', e));
-}
-
 async function main(): Promise<void> {
     if (dotenv.config({path: '.env.local'}).error) {
         console.log('New install: no configuration found, or script not being run in the root directory');
@@ -160,66 +87,141 @@ async function main(): Promise<void> {
             database: process.env.MYSQL_DATABASE || 'ogn',
             user: process.env.MYSQL_USER || 'ogn',
             password: process.env.MYSQL_PASSWORD,
-            decimalNumbers: true
+            decimalNumbers: true,
+            // Disable CLIENT_FOUND_ROWS so UPDATE.affectedRows counts
+            // rows actually changed, not rows matched. Callers across
+            // this codebase rely on that semantics (see
+            // lib/scoring/shared/trackers.ts:updateTracker).
+            flags: ['-FOUND_ROWS']
         }
     });
 
     const registry = new SourceRegistry();
     registry.register(new SoaringSpotScrapeSource());
     registry.register(new SgpSource());
+    registry.register(new SoaringSpotApiSource());
+    registry.register(new RobocontrolSource());
     // Future: registry.register(new RstSource());
-    // Future: registry.register(new SoaringSpotApiSource());
 
-    //
-    // CLI one-shot mode:
-    //   node dist/bin/ssscrape.js <soaringspot-url> [compid]
-    //
-    // Bypasses the scheduler. Upserts the scoringsource row and calls
-    // ensureMetadata + fetchPilots + fetchResultsAndTasks once for that
-    // single competition before exiting.
-    //
-    const cliArgs = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-    const urlArg = cliArgs.find((a) => /^https?:\/\//i.test(a));
-    if (urlArg) {
-        const compidArg = cliArgs.find((a) => a !== urlArg);
-        const compid = compidArg || deriveCompIdFromUrl(urlArg);
+    const args = yargs(hideBin(process.argv))
+        .scriptName('ssscrape')
+        .usage('$0 (daemon)\n$0 --url <u> [--compid <c>]                            # full one-shot scrape (soaringspotscrape)\n$0 --compid <c> --class <c> --datecode <d> [--url <u>]   # filter mode: task+results only\n$0 --refetch <compid>                                    # one-shot end-to-end refetch using the configured source type')
+        .option('url', {type: 'string', describe: 'soaringspot competition URL'})
+        .option('compid', {type: 'string', describe: 'competition id (derived from url if omitted)'})
+        .option('class', {type: 'string', describe: 'filter mode: classid or display name'})
+        .option('datecode', {type: 'string', describe: 'filter mode: 3-char datecode (e.g. 6A5)', coerce: (v?: string) => v?.toUpperCase()})
+        .option('refetch', {type: 'string', describe: 'compid to refetch using whatever source type is configured for it'})
+        .check((a) => {
+            const filterMode = !!(a.class || a.datecode);
+            if (filterMode && (!a.class || !a.datecode)) throw new Error('--class and --datecode must be supplied together');
+            if (a.datecode && !/^[0-9][0-9A-Z][0-9A-Z]$/.test(a.datecode)) throw new Error(`--datecode=${a.datecode} doesn't look like a datecode (3 chars: digit + base36 month + base36 day)`);
+            if (filterMode && !a.compid && !a.url) throw new Error('filter mode needs --compid (or --url to derive one)');
+            if (a.refetch && (a.url || a.class || a.datecode)) throw new Error('--refetch cannot be combined with --url/--class/--datecode');
+            return true;
+        })
+        .strict()
+        .help()
+        .parseSync();
+
+    if (args.refetch) {
+        await runOneShotRefetch(args.refetch, registry, mysql_db);
+        setTimeout(() => process.exit(0), 5000);
+        return;
+    }
+
+    const filterMode = !!(args.class && args.datecode);
+    if (args.url || filterMode) {
+        let url = args.url;
+        let compid = args.compid || (url ? deriveCompIdFromUrl(url) : null);
         if (!compid) {
-            console.log(`unable to derive a compid from ${urlArg} — pass one explicitly as the second argument`);
+            console.log('unable to derive a compid — pass --compid explicitly');
             process.exit(1);
         }
 
-        console.log(`one-shot scrape: compid=${compid} url=${urlArg}`);
+        if (filterMode && !url) {
+            const row = (
+                await mysql_db.query(escape`
+                    SELECT url FROM scoringsource
+                    WHERE compid = ${compid} AND type = 'soaringspotscrape'
+                    LIMIT 1
+                `)
+            )[0];
+            if (!row?.url) {
+                console.log(`no scoringsource row found for compid=${compid} — pass --url explicitly`);
+                process.exit(1);
+            }
+            url = row.url;
+        }
 
-        await mysql_db.query(escape`
-            DELETE FROM scoringsource
-            WHERE compid = ${compid} AND type = 'soaringspotscrape'
-        `);
-        await mysql_db.query(escape`
-            INSERT INTO scoringsource (compid, type, url)
-            VALUES (${compid}, 'soaringspotscrape', ${urlArg})
-        `);
+        console.log(`one-shot scrape: compid=${compid} url=${url}${filterMode ? ` filter=class:${args.class} datecode:${args.datecode}` : ''}`);
+
+        if (!filterMode) {
+            await mysql_db.query(escape`
+                DELETE FROM scoringsource
+                WHERE compid = ${compid} AND type = 'soaringspotscrape'
+            `);
+            await mysql_db.query(escape`
+                INSERT INTO scoringsource (compid, type, url)
+                VALUES (${compid}, 'soaringspotscrape', ${url})
+            `);
+        }
 
         try {
             const adapter = new SoaringSpotScrapeSource();
             const ctx: SourceCtx = {
                 compid,
-                url: urlArg,
-                tz: 'Europe/London', // adapter will refine via metadata + tasks
-                countrycode: null, // refreshed below once ensureMetadata has geocoded
+                url: url!,
+                tz: 'Europe/London', // overridden below from the competition row (filter mode) or by ensureMetadata
+                countrycode: null,
                 db: mysql_db,
-                log: (msg, ...args) => console.log(`[${compid}] ${msg}`, ...args),
-                raw: {compid, url: urlArg, type: 'soaringspotscrape'}
+                log: (msg, ...a) => console.log(`[${compid}] ${msg}`, ...a),
+                raw: {compid, url, type: 'soaringspotscrape'}
             };
-            await adapter.ensureMetadata(ctx);
-            const refreshed = (
-                await mysql_db.query(escape`
-                    SELECT tz, countrycode FROM competition WHERE compid = ${compid}
-                `)
-            )[0];
-            if (refreshed?.tz) ctx.tz = refreshed.tz;
-            ctx.countrycode = refreshed?.countrycode ?? null;
-            await adapter.fetchPilots(ctx);
-            await adapter.fetchResultsAndTasks(ctx, () => false);
+
+            if (filterMode) {
+                // Skip ensureMetadata — the contest row already exists and
+                // hitting /pilots+/results+/ on SoaringSpot adds latency
+                // we don't need here. Pull tz / countrycode straight from
+                // the DB.
+                const refreshed = (
+                    await mysql_db.query(escape`
+                        SELECT tz, countrycode FROM competition WHERE compid = ${compid}
+                    `)
+                )[0];
+                if (refreshed?.tz) ctx.tz = refreshed.tz;
+                ctx.countrycode = refreshed?.countrycode ?? null;
+
+                // Resolve the class arg — either a 15-hex classid or the
+                // display name from `classes.classname`.
+                const classRow = (
+                    await mysql_db.query(escape`
+                        SELECT class FROM classes
+                        WHERE compid = ${compid}
+                          AND (class = ${args.class} OR classname = ${args.class})
+                        LIMIT 1
+                    `)
+                )[0];
+                if (!classRow) {
+                    console.log(`no class matching "${args.class}" found for compid=${compid}`);
+                    process.exit(1);
+                }
+                const targetClass = classRow.class;
+                const targetDatecode = args.datecode!;
+                console.log(`filter resolved: class=${targetClass} datecode=${targetDatecode}`);
+                const filterSkipDay = (classid: string, dateCode: string) => classid !== targetClass || dateCode !== targetDatecode;
+                await adapter.fetchResultsAndTasks(ctx, filterSkipDay, {forceResults: true});
+            } else {
+                await adapter.ensureMetadata(ctx);
+                const refreshed = (
+                    await mysql_db.query(escape`
+                        SELECT tz, countrycode FROM competition WHERE compid = ${compid}
+                    `)
+                )[0];
+                if (refreshed?.tz) ctx.tz = refreshed.tz;
+                ctx.countrycode = refreshed?.countrycode ?? null;
+                await adapter.fetchPilots(ctx);
+                await adapter.fetchResultsAndTasks(ctx, () => false);
+            }
             console.log(`scrape complete for compid=${compid}`);
         } catch (e) {
             console.log('scrape failed:', e);
@@ -231,8 +233,23 @@ async function main(): Promise<void> {
         return;
     }
 
-    // Daemon mode: scheduler heartbeat + roboControl loop.
+    // Daemon mode: scheduler heartbeat drives everything — robocontrol
+    // is registered as a tracker-only ScoringSource above and runs on
+    // the same per-competition cadence as the other adapters.
     console.log('Background scoring scraper enabled');
+
+    // SIGUSR1 — on-demand scheduler state dump for troubleshooting.
+    //   kill -USR1 <pid>
+    // prints the per-comp / per-source next-due timestamps, observations,
+    // and sticky flags to the daemon log so "why isn't X firing" can be
+    // answered without restarting.
+    process.on('SIGUSR1', () => {
+        try {
+            dumpSchedulerState(console.log);
+        } catch (e) {
+            console.log('dumpSchedulerState threw:', e);
+        }
+    });
 
     // One-shot sweep at boot: any competition rows whose lt/lg are still
     // NULL/0 get re-geocoded from `sitename`. Fire-and-forget so we don't
@@ -243,11 +260,69 @@ async function main(): Promise<void> {
         db: mysql_db,
         registry
     }).catch((e) => console.log('runScheduler failed:', e));
+}
 
-    roboControl();
-    setInterval(() => {
-        roboControl();
-    }, 3 * 60 * 60 * 1000);
+//
+// runOneShotRefetch — `--refetch <compid>` end-to-end pass. Picks the
+// adapter from whatever scoringsource row exists for the compid:
+// when both a 'soaringspotkey' and 'soaringspotscrape' row exist, the
+// API wins (matches the scheduler's OVERRIDE_SOURCE_TYPE behaviour).
+// Runs ensureMetadata → fetchPilots → fetchResultsAndTasks once, with
+// `forceResults` so a manual refetch can also reimport an off-cycle day.
+//
+async function runOneShotRefetch(compid: string, registry: SourceRegistry, db: any): Promise<void> {
+    const rows = (await db.query(escape`
+        SELECT * FROM scoringsource WHERE compid = ${compid}
+    `)) as any[];
+    if (!rows?.length) {
+        console.log(`no scoringsource rows for compid=${compid}`);
+        process.exit(1);
+    }
+
+    // Prefer the OAuth API row when present — same precedence the
+    // scheduler enforces via OVERRIDE_SOURCE_TYPE.
+    const order = ['soaringspotkey', 'soaringspotscrape', 'sgp'];
+    const sorted = [...rows].sort((a, b) => {
+        const ai = order.indexOf(a.type);
+        const bi = order.indexOf(b.type);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+
+    const src = sorted.find((r) => !!registry.get(r.type));
+    if (!src) {
+        console.log(`no registered adapter for any of: ${sorted.map((r) => r.type).join(', ')}`);
+        process.exit(1);
+    }
+
+    const adapter: ScoringSource = registry.get(src.type)!;
+    const refreshed = (
+        await db.query(escape`SELECT tz, countrycode FROM competition WHERE compid = ${compid}`)
+    )[0];
+    const ctx: SourceCtx = {
+        compid,
+        url: src.url ?? '',
+        tz: refreshed?.tz ?? 'Europe/London',
+        countrycode: refreshed?.countrycode ?? null,
+        db,
+        log: (msg, ...a) => console.log(`[${compid}] ${msg}`, ...a),
+        raw: src
+    };
+
+    console.log(`one-shot refetch: compid=${compid} type=${src.type}`);
+    try {
+        await adapter.ensureMetadata(ctx);
+        const post = (
+            await db.query(escape`SELECT tz, countrycode FROM competition WHERE compid = ${compid}`)
+        )[0];
+        if (post?.tz) ctx.tz = post.tz;
+        ctx.countrycode = post?.countrycode ?? ctx.countrycode;
+        await adapter.fetchPilots(ctx);
+        await adapter.fetchResultsAndTasks(ctx, () => false, {forceResults: true});
+        console.log(`refetch complete for compid=${compid}`);
+    } catch (e) {
+        console.log('refetch failed:', e);
+        process.exit(1);
+    }
 }
 
 main().then(() => {

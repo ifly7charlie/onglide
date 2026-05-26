@@ -22,7 +22,7 @@ import equal from 'fast-deep-equal';
 import type {Options, Epoch, TZ, Compno, ClassName, Datecode} from '../types';
 
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faLinkSlash, faSpinner, faCaretDown, faCaretUp} from '@fortawesome/free-solid-svg-icons';
+import {faLinkSlash, faSpinner, faCaretDown, faCaretUp, faTrophy, faArrowUpRightFromSquare} from '@fortawesome/free-solid-svg-icons';
 
 import {PilotList, Details} from './pilotlist';
 import {TaskDetails, StartlineNotice} from './taskdetails';
@@ -32,8 +32,10 @@ import {Options as OptionsPanel} from './options';
 import {getValidSortOrder} from './pilot-sorting';
 
 import Sponsors from './sponsors';
+import {groupForHost} from './domainGroups';
 
 import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {SubscribeBellMenuItem} from './subscribeBell';
 import {LanguageSwitcher} from './language-switcher';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
 
@@ -53,11 +55,12 @@ function useIsMobile() {
 import {proposedUrl} from './fixupUrls';
 
 import {useWebsocketDecoder} from './useWebsocketDecoder';
+import {triggerVersionCheck} from './autoUpdate';
 
 import PlaybackControls from './playbackcontrols';
 
 import dynamic from 'next/dynamic';
-import {selectAvailableScoreTimes} from '../redux/nowSlice';
+import {selectAvailableScoreTimes, selectLive} from '../redux/nowSlice';
 import {useSelector, useDispatch} from '../redux';
 import {offline} from '../redux/nowSlice';
 import {selectCompByCompid} from '../redux/competitionsSlice';
@@ -113,7 +116,7 @@ export const OgnFeed = memo(
         handicapped: any;
     }) {
         const {pilots, isPLoading} = usePilots(vc);
-        const {t} = useTranslation('common');
+        const {t, i18n} = useTranslation('common');
         //        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
@@ -131,6 +134,7 @@ export const OgnFeed = memo(
         const dispatch = useDispatch();
 
         const availableScores = useSelector(selectAvailableScoreTimes);
+        const live = useSelector(selectLive);
         const compSummary = useSelector(selectCompByCompid(compid));
         const officialDelay = compSummary?.officialDelay ?? 0;
 
@@ -150,6 +154,9 @@ export const OgnFeed = memo(
             shouldReconnect: () => true,
             onOpen: (_a) => {
                 mergeWsStatus({state: 'open', retry: 0});
+                // Daemon (re)connect is our strongest deploy signal — check
+                // if the frontend bundle is now stale relative to the server.
+                triggerVersionCheck();
             },
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
@@ -222,12 +229,11 @@ export const OgnFeed = memo(
 
         // Cache the calculated times and only refresh every 60 seconds
         const status = useMemo(() => {
-            const lang = router.locale ?? 'en';
             return (
-                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, lang, officialDelay)}) + ' | ' : '') + //
+                (wsStatus?.at ? t('connection.updated_at', {time: formatTimes(wsStatus.at, tz, i18n.language, officialDelay, t)}) + ' | ' : '') + //
                 ` <a href='#' title='${t('connection.viewers')}'>${wsStatus.listeners} 👥</a> | <a href='#' title='${t('connection.tracked_planes')}'>${wsStatus.airborne} ✈️  </a>`
             );
-        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, router.locale, officialDelay]);
+        }, [Math.trunc(wsStatus.at / 30), wsStatus.listeners, wsStatus.airborne, vc, t, i18n.language, officialDelay]);
 
         // Scale map to fit the bounds
         const fitBounds = useCallback(() => {
@@ -268,6 +274,19 @@ export const OgnFeed = memo(
             [options, setOptions]
         );
 
+        const selectedClassDisplayStatus = comp?.classes?.find((c: any) => c.class === vc)?.displayStatus;
+        const officialScoresLink =
+            !replayTime && (selectedClassDisplayStatus === 'home' || selectedClassDisplayStatus === 'yesterday') && comp?.mainwebsite ? (
+                <a href={comp.mainwebsite} target="_blank" rel="noopener" className="official-scores-link" title={t('competition.official_scores')}>
+                    <FontAwesomeIcon icon={faTrophy} className="official-scores-icon" />
+                    <span className="official-scores-text">
+                        <span className="official-scores-title">{t('competition.official_scores')}</span>
+                        <span className="official-scores-hint">{t('competition.official_scores_hint')}</span>
+                    </span>
+                    <FontAwesomeIcon icon={faArrowUpRightFromSquare} className="official-scores-external" />
+                </a>
+            ) : null;
+
         const map = (
             <div className={'resizingMap'}>
                 <MApp //
@@ -296,6 +315,7 @@ export const OgnFeed = memo(
                 {valid && connected ? (
                     <PlaybackControls //
                         {...availableScores}
+                        live={live}
                         replayTime={replayTime}
                         setReplayTime={setReplayTime}
                         tz={tz}
@@ -310,33 +330,31 @@ export const OgnFeed = memo(
                     {map}
                     <div className="mobile-top-strip">
                         <div className="mobile-strip-header">
-                            <Link href="/" className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+                            <Link href={groupForHost(window.location.host) ? '/' : 'https://www.onglide.com/'} className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                                 <FontAwesomeIcon icon={faGlobe} />
                             </Link>
                             <div className="mobile-comp-name">{compShortName(comp)}</div>
-                            <button
-                                className="drawer-toggle"
-                                onClick={() => setDrawerOpen((o) => !o)}
-                                aria-expanded={drawerOpen}
-                                title={drawerOpen ? t('drawer.hide_menu') : t('drawer.show_menu')}
-                            >
+                            <button className="drawer-toggle" onClick={() => setDrawerOpen((o) => !o)} aria-expanded={drawerOpen} title={drawerOpen ? t('drawer.hide_menu') : t('drawer.show_menu')}>
                                 <FontAwesomeIcon icon={drawerOpen ? faCaretUp : faCaretDown} />
                             </button>
                         </div>
                         <StartlineNotice vc={vc} tz={tz} replayTime={replayTime} />
                         {valid && connected ? (
-                            <PilotList //
-                                key="pilotList"
-                                pilots={pilots}
-                                selectedPilot={effectiveSelectedCompno}
-                                setSelectedCompno={setCompno}
-                                now={replayTime}
-                                live={availableScores.live}
-                                tz={tz}
-                                options={options}
-                                sortOrder={sortOrder}
-                                horizontal
-                            />
+                            <>
+                                {officialScoresLink}
+                                <PilotList //
+                                    key="pilotList"
+                                    pilots={pilots}
+                                    selectedPilot={effectiveSelectedCompno}
+                                    setSelectedCompno={setCompno}
+                                    now={replayTime}
+                                    live={live}
+                                    tz={tz}
+                                    options={options}
+                                    sortOrder={sortOrder}
+                                    horizontal
+                                />
+                            </>
                         ) : (
                             <div className="mobile-strip-placeholder">{connectionStatus}</div>
                         )}
@@ -375,6 +393,7 @@ export const OgnFeed = memo(
                                     {connectionStatus}
                                 </div>
                             </div>
+                            <SubscribeBellMenuItem compid={comp?.compid} />
                         </div>
                     ) : null}
                     {effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? (
@@ -415,13 +434,14 @@ export const OgnFeed = memo(
                         effectiveSelectedCompno && pilots?.[effectiveSelectedCompno] ? ( //
                             <Details compno={effectiveSelectedCompno} pilot={pilots[effectiveSelectedCompno]} units={options.units} tz={tz} replayTime={replayTime} officialDelay={officialDelay} />
                         ) : (
-                            <Sponsors wsStatus={wsStatus} tz={tz} lang={router.locale ?? 'en'} officialDelay={officialDelay} />
+                            <Sponsors wsStatus={wsStatus} tz={tz} lang={i18n.language} officialDelay={officialDelay} />
                         )
                     }
                 >
                     {valid && connected ? (
                         <div className="sidepanel-section">
                             <StartlineNotice vc={vc} tz={tz} replayTime={replayTime} />
+                            {officialScoresLink}
                             <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped || false} />
                             <PilotList //
                                 key="pilotList"
@@ -429,7 +449,7 @@ export const OgnFeed = memo(
                                 selectedPilot={effectiveSelectedCompno}
                                 setSelectedCompno={setCompno}
                                 now={replayTime}
-                                live={availableScores.live}
+                                live={live}
                                 tz={tz}
                                 options={options}
                                 sortOrder={sortOrder}
@@ -452,10 +472,10 @@ export const OgnFeed = memo(
         o.handicapped === n.handicapped
 );
 
-function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) {
+function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number, t: (k: string) => string) {
     const showDelay = officialDelay > 10;
     const competitionDelay = showDelay
-        ? `<a href="#" title="Tracking is officially delayed for this competition" className="tooltipicon">
+        ? `<a href="#" title="${t('pilot.view_delayed_official')}" className="tooltipicon">
                 <span style={{color: 'grey'}}>
                  &nbsp;+&nbsp;↺&nbsp;${OptionalDurationMM('', officialDelay as Epoch, 'm')}
             </span>
@@ -465,9 +485,9 @@ function formatTimes(time: number, tz: TZ, lang: string, officialDelay: number) 
     const dt = new Date(time * 1000);
     const compTime = dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit'});
     const yourTime = dt.toLocaleTimeString(lang, {hour: '2-digit', minute: '2-digit'});
-    const compPart = `<a href='#' title='competition time'>${compTime} ${competitionDelay} ✈️ </a>`;
+    const compPart = `<a href='#' title='${t('connection.competition_time')}'>${compTime} ${competitionDelay} ✈️ </a>`;
     if (yourTime === compTime) {
         return compPart;
     }
-    return `${compPart} | <a href='#' title='your time'>${yourTime} ⌚️</a>`;
+    return `${compPart} | <a href='#' title='${t('connection.your_time')}'>${yourTime} ⌚️</a>`;
 }

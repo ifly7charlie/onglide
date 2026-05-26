@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
-import {faPlane, faPlaneDeparture, faFlagCheckered, faHouse, faCalendar, faClockRotateLeft, faHourglass, faRoute} from '@fortawesome/free-solid-svg-icons';
+import {faPlane, faPlaneDeparture, faFlagCheckered, faBackwardStep, faCalendar, faClockRotateLeft, faHourglass, faRoute, faBan} from '@fortawesome/free-solid-svg-icons';
 import type {IconDefinition} from '@fortawesome/fontawesome-svg-core';
 
 // Lifecycle of a soaring competition's display state through the day:
@@ -35,7 +35,8 @@ export const STATUS_COLOURS: Record<CompetitionDisplayStatus, [number, number, n
     home: [150, 150, 150, 255],
     notask: [200, 170, 100, 255],
     upcoming: [200, 140, 200, 255],
-    yesterday: [100, 140, 170, 255]
+    yesterday: [100, 140, 170, 255],
+    cancelled: [200, 90, 90, 255]
 };
 
 // Maps each display status to its translation key under the `task_status`
@@ -49,7 +50,8 @@ export const STATUS_LABEL_KEYS: Record<CompetitionDisplayStatus, string> = {
     home: 'task_status.home',
     notask: 'task_status.no_task',
     upcoming: 'task_status.upcoming',
-    yesterday: 'task_status.yesterday'
+    yesterday: 'task_status.yesterday',
+    cancelled: 'task_status.cancelled'
 };
 
 export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
@@ -57,10 +59,11 @@ export const STATUS_ICONS: Record<CompetitionDisplayStatus, IconDefinition> = {
     launching: faPlaneDeparture,
     started: faPlane,
     finishing: faFlagCheckered,
-    home: faHouse,
+    home: faBackwardStep,
     notask: faHourglass,
     upcoming: faCalendar,
-    yesterday: faClockRotateLeft
+    yesterday: faClockRotateLeft,
+    cancelled: faBan
 };
 
 // Optional secondary icon, drawn small in the bottom-right corner of the

@@ -10,15 +10,28 @@ import {Epoch, PositionStatus, EnrichedPosition, EnrichedPositionGenerator, Airf
 import {point as turfPoint} from '@turf/helpers';
 import distance from '@turf/distance';
 
+import {GliderLog, noopGliderLog} from './gliderLog';
+
+// Injected DEM relief lookup. Server scoring chain wires in the real
+// getLocalRelief from getelevationoffset (which uses fs/disk caching and
+// can't run in the browser). Client/test callers leave it default and get
+// the noop — they don't need terrain-aware landout detection. Same pattern
+// as the GliderLog dependency above.
+export type LocalReliefFn = (lat: number, lng: number, radiusPixels?: number) => Promise<number>;
+const noopLocalRelief: LocalReliefFn = async () => -1;
+
 //
 // Get a generator to calculate task status
-export const enrichedPositionGenerator = async function* (airfield: AirfieldLocation, pointGenerator: InOrderGenerator, log?: Function): EnrichedPositionGenerator {
+export const enrichedPositionGenerator = async function* (
+    airfield: AirfieldLocation,
+    pointGenerator: InOrderGenerator,
+    _log?: GliderLog,
+    _localRelief?: LocalReliefFn
+): EnrichedPositionGenerator {
     //
     // Make sure we have some logging
-    if (!log)
-        log = (...a) => {
-            console.log(...a);
-        };
+    const log: GliderLog = _log ?? noopGliderLog;
+    const localRelief: LocalReliefFn = _localRelief ?? noopLocalRelief;
 
     let previousPoint: EnrichedPosition | null = null;
     let point: EnrichedPosition | null = null;
@@ -63,14 +76,31 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
                             (gapLength > 2 * 3600 && previousPoint.g < 400) || // 2h silent at modest altitude: assume landed
                             gapLength > 5 * 3600 // 5h silent at any altitude: assume landed
                         ) {
-                            if (distance(previousPoint.geoJSON!, airfield.point!) < 3) {
+                            if (distance(previousPoint.geoJSON!, airfield.point!) < 5) {
                                 ps = airborneFound ? PositionStatus.Home : PositionStatus.Grid;
                                 log(`epg: ${previousPoint.c} home/grid: ${ps}`);
                                 stationary = true;
-                            } else if (ridgeRunningDistance < 2.5) {
-                                log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance}`);
+                            } else if (gapLength > 2 * 3600) {
+                                // 2h silent overrides ridge-running protection — definitely landed
+                                log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance} (>2h gap)`);
                                 ps = PositionStatus.Landed;
                                 stationary = true;
+                            } else if (ridgeRunningDistance < 2.5) {
+                                // Too little tracked low-altitude movement to call it ridge-running.
+                                // Fall back to terrain: high local relief (~1.1km window) means
+                                // there's ridge-soarable ground at this point, so don't land them
+                                // out just because we haven't accumulated rrd yet. Tile is already
+                                // RAM-cached from the AGL lookup upstream in aprs.ts.
+                                // relief < 0 means the DEM lookup failed — fail flying (don't land
+                                // out on a DEM outage).
+                                const relief = await localRelief(previousPoint.lat, previousPoint.lng, 20);
+                                if (relief > 25 || relief < 0) {
+                                    log(`epg: ${previousPoint.c} not landing out: ridge terrain relief ${relief}m (rrd: ${ridgeRunningDistance})`);
+                                } else {
+                                    log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance} relief: ${relief}m`);
+                                    ps = PositionStatus.Landed;
+                                    stationary = true;
+                                }
                             } else {
                                 log(`epg: ${previousPoint.c} not landing out due to rrd: ${ridgeRunningDistance}`);
                             }
@@ -99,7 +129,7 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
             stationary = false;
 
             if (!point.lng) {
-                console.log(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${JSON.stringify(point)}, prev: ${JSON.stringify(previousPoint)}`);
+                log.error(`${previousPoint?.c ?? 'unknown compno'}: ending EPG ${JSON.stringify(point)}, prev: ${JSON.stringify(previousPoint)}`);
                 return;
             }
 
@@ -166,13 +196,11 @@ export const enrichedPositionGenerator = async function* (airfield: AirfieldLoca
 
             // If pilot has landed and not at home then we can stop scoring altogether
             if (point.ps == PositionStatus.Landed) {
-                console.log(`Completing scoring for ${point.c} as landed out ${JSON.stringify(point)}`);
+                log(`Completing scoring for ${point.c} as landed out ${JSON.stringify(point)}`);
                 return;
             }
         } catch (e) {
-            console.log('Exception in enrichedPositionGenerator');
-            console.log(e);
-            console.log('current:', JSON.stringify(point), 'previous:', JSON.stringify(previousPoint));
+            log.error('Exception in enrichedPositionGenerator', e, 'current:', JSON.stringify(point), 'previous:', JSON.stringify(previousPoint));
         }
     }
 };

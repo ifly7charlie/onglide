@@ -115,25 +115,41 @@ export function bindChannelForInOrderPackets(
                 continue;
             }
 
-            const message = messageQueue[position++];
+            const message = messageQueue[position];
+
+            // Anchor the tick clock to the first message so we don't backfill from epoch 0.
+            if (!hiccup) {
+                hiccup = message.t;
+            }
+
+            // Emit a synthetic tick for every ~60s of gap between messages, before
+            // yielding the position, so the EPG's gap-based landout/home detection runs
+            // at the live tick cadence and stamps the Landed status (and its score) at
+            // the time it occurred rather than at the next received position.
+            let rewound = false;
+            while (message.t - hiccup > 60) {
+                hiccup = (hiccup + 60) as Epoch;
+                const tickRewind = yield {c: compno, _: false, tick: true, t: hiccup};
+                if (messageQueueId !== currentMessageQueueId) return;
+                if (tickRewind) {
+                    log(`${className}/${compno}: rewind to ${tickRewind} (hiccup)`);
+                    for (; tickRewind && position > 0 && position < messageQueue.length && tickRewind < messageQueue[position].t; position--) {}
+                    rewound = true;
+                    break;
+                }
+            }
+            if (rewound) {
+                continue;
+            }
+
+            // Now yield the actual position message
+            position++;
             const nextPoint = yield message;
             if (messageQueueId !== currentMessageQueueId) return;
 
             // If we need to go backwards then do so
             if (nextPoint) {
                 for (position--; nextPoint && position > 0 && position < messageQueue.length && nextPoint < messageQueue[position].t; position--) {}
-            } else {
-                if (message.t - hiccup > 60) {
-                    hiccup = message.t;
-                    const nextPoint = yield {c: compno, _: false, tick: true, t: hiccup};
-                    if (messageQueueId !== currentMessageQueueId) return;
-                    if (nextPoint) {
-                        log(`${className}/${compno}: rewind to ${nextPoint} (hiccup)`);
-
-                        for (position--; nextPoint && position > 0 && position < messageQueue.length && nextPoint < messageQueue[position].t; position--) {}
-                        continue;
-                    }
-                }
             }
         }
 
@@ -161,28 +177,23 @@ export function bindChannelForInOrderPackets(
 
         // Loop till we are told to stop (an exception on yield)
         while (messageQueueId === currentMessageQueueId) {
-            // If we don't have a message we should wait
+            // If we don't have a message we wait first; only emit a tick if the
+            // wait expired without a message. This keeps the tick useful for EPG's
+            // gap-based landout detection without firing one on every real fix.
             if (position >= messageQueue.length) {
-                // We will tick on empty queue with the current real time this flushes out
-                // landouts
-                const nextPoint = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
-                if (messageQueueId !== currentMessageQueueId) return;
-                if (nextPoint) {
-                    // If scoring needs us to rewind we can do that immediately
-                    position = sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
-                    continue;
-                }
-
-                // Otherwise we will wait for next message, or until a timeout has occurred
-                // this may be less than 5 minutes as there can be more than one iterator on an IOG
-                // but it's unlikely
-                const timeout = setTimeout(() => resolveAll(), 300_000);
+                const timeout = setTimeout(() => resolveAll(), 60_000);
                 await new Promise<boolean>((resolve) => resolveNotifications.push(resolve));
                 clearTimeout(timeout);
+                if (messageQueueId !== currentMessageQueueId) return;
 
                 // >= (not ==) because the t=0 reset handler can clear messageQueue
                 // while we're awaiting, leaving position stale and > length.
                 if (position >= messageQueue.length) {
+                    const nextPoint = yield {c: compno, _: true, tick: true, t: (getNow() - inorderAdditionalDelay) as Epoch};
+                    if (messageQueueId !== currentMessageQueueId) return;
+                    if (nextPoint) {
+                        position = sortedIndexBy(messageQueue, {t: nextPoint} as any, (o) => o.t);
+                    }
                     continue;
                 }
             }

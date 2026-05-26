@@ -6,7 +6,8 @@
         "loading_map": "Nalaganje zemljevida...",
         "loading_competitions": "Nalaganje tekem...",
         "back_to_globe": "Nazaj na globus",
-        "language": "Jezik"
+        "language": "Jezik",
+        "update_available": "Na voljo je posodobitev — tapnite za ponovno nalaganje"
     },
     "competition": {
         "live": "V živo",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} pilotov",
         "tracked_pilots": "{{tracked}}/{{total}} pilotov",
         "live_stats": " · {{tracked}}/{{registered}} pilotov · {{flying}} v zraku · {{landed}} pristali",
+        "in_view_only": "Samo vidne",
         "viewers_short": "gledalcev",
         "land_data": "Zemljiški podatki:",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Tapnite za uradne rezultate",
+        "official_scores_hint": "Spodnji podatki so iz sledenja v živo",
+        "notify_subscribe": "Obveščaj me o tem tekmovanju",
+        "notify_unsubscribe": "Prenehaj obveščati",
+        "notify_denied": "Obvestila so v vašem brskalniku blokirana"
     },
     "task": {
         "speed": "Hitrostna naloga",
@@ -57,10 +64,11 @@
         "launching": "Vzletanje",
         "racing": "Tekmovanje",
         "finishing": "Zaključujejo",
-        "home": "Doma",
+        "home": "Ponovi",
         "no_task": "Naloga še ni postavljena",
         "upcoming": "Prihajajoče",
-        "yesterday": "Včeraj"
+        "yesterday": "Ponovi včerajšnji dan",
+        "cancelled": "Odpovedano"
     },
     "pilot": {
         "gridded_waiting": "Na startni mreži, čaka na vzlet",
@@ -169,7 +177,9 @@
         "show_other_classes": "Prikazuje jadralna letala drugih razredov, klikni za prikaz le trenutnega razreda",
         "show_only_current": "Prikaži le izbrani razred, klikni za prikaz tudi drugih razredov",
         "switch_to_metric": "Preklopi na metrične enote",
-        "switch_to_imperial": "Preklopi na imperialne enote"
+        "switch_to_imperial": "Preklopi na imperialne enote",
+        "map_attribution": "Atribucija zemljevida",
+        "close": "Zapri"
     },
     "drawer": {
         "class": "Razred",
@@ -187,6 +197,7 @@
         "competition_time": "tekmovalni čas",
         "your_time": "tvoj čas",
         "live": "V živo",
+        "replay": "Ponovno predvajanje",
         "offline": "Brez povezave",
         "end": "Konec"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Pomagaj prevesti Onglide za jadralno skupnost",
         "translation_help_link_label": "Prispevaj na GitHubu"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nova naloga določena",
+        "task_changed": "{{classname}}: naloga spremenjena",
+        "launching": "{{classname}}: vzleti potekajo",
+        "racing": "{{classname}}: jadralna letala tekmujejo",
+        "finishing": "{{classname}}: pričakujemo prihode"
     }
 }

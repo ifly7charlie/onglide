@@ -9,7 +9,7 @@ import Map, {Source, Layer, useControl, NavigationControl, ScaleControl, MapRef}
 import maplibregl from 'maplibre-gl';
 import {Protocol as PMTilesProtocol} from 'pmtiles';
 
-import {buildMapStyle} from './mapStyle';
+import {buildMapStyle, prefersDarkMode} from './mapStyle';
 
 // Register the pmtiles:// protocol once, client-side only
 if (typeof window !== 'undefined' && !(maplibregl as any).__onglidePmtilesRegistered) {
@@ -99,12 +99,13 @@ export default function MApp(props: {
 
     // Map display style. MapType.street=0, MapType.satellite=1, so the road
     // basemap is active when options.mapType is falsy. mapLight tracks whether
-    // the basemap is light-coloured (true on road, false on satellite) and is
+    // the basemap is light-coloured — true only on the road basemap in light
+    // mode, false on satellite and on the dark-mode road basemap — and is
     // consumed by layer style helpers to pick dark-on-light vs light-on-dark
-    // variants. The earlier `!!options.mapType` was inverted on both flags.
+    // variants.
     const map2d = options.map2d;
     const mapStreet = !options.mapType;
-    const mapLight = mapStreet;
+    const mapLight = mapStreet && !prefersDarkMode();
 
     // Rules & legs etc
     const task = useSelector((state) => selectTask(state, vc));
@@ -117,7 +118,7 @@ export default function MApp(props: {
 
     // Rain Radar
     const router = useRouter();
-    const {t} = useTranslation('common');
+    const {t, i18n} = useTranslation('common');
 
     // Unmount the deck overlay around any route change. The deck.gl
     // MapboxOverlay/MapLibre teardown is racy: when the route changes (e.g.
@@ -146,7 +147,7 @@ export default function MApp(props: {
         };
     }, [router]);
 
-    const lang = router.locale ?? (typeof navigator !== 'undefined' ? (navigator.languages?.[0] ?? navigator.language) : 'en');
+    const lang = i18n.language;
     const radarOverlay = RadarOverlay({options, tz});
 
     // What task are we using on display
@@ -353,6 +354,25 @@ export default function MApp(props: {
         map.dragPan.enable({maxSpeed: 0});
     }, [mapRef?.current]);
 
+    // Disable the 3D terrain drape pass while in 2D mode. The style keeps the
+    // `terrain` source defined so the `hillshade` layer can still sample it,
+    // but `setTerrain(null)` removes the draped-layer render path — which
+    // otherwise runs `_renderTileClippingMasks` twice per paint and keeps
+    // MapLibre re-arming its own RAF as DEM tiles arrive into the drape FBO.
+    useEffect(() => {
+        const map = mapRef?.current?.getMap();
+        if (!map) return;
+        const apply = () => {
+            if (map2d) {
+                if (map.getTerrain()) map.setTerrain(null);
+            } else {
+                if (!map.getTerrain()) map.setTerrain({source: 'terrain', exaggeration: 1});
+            }
+        };
+        if (map.isStyleLoaded()) apply();
+        else map.once('style.load', apply);
+    }, [map2d, mapRef?.current]);
+
     // ======= ZOOM TO TASK EFFECT =========
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
@@ -459,6 +479,30 @@ export default function MApp(props: {
         registerMapIcons(map);
     }, []);
 
+    // MapLibre fires a bare `error` event for tile/sprite/glyph/image
+    // failures — react-map-gl's default handler just console.errors the
+    // Error, so "Failed to Decode Data." arrives with no clue which
+    // resource failed. Pull the source/tile context off the ErrorEvent so
+    // the failing URL is identifiable.
+    const onMapError = useCallback((e: any) => {
+        const err: Error | undefined = e?.error;
+        const tileID = e?.tile?.tileID?.canonical;
+        const source = e?.source ?? (e?.sourceId && mapRef?.current?.getMap?.()?.getSource?.(e.sourceId));
+        // eslint-disable-next-line no-console
+        console.error('[maplibre-error]', err?.message ?? 'unknown map error', {
+            message: err?.message,
+            sourceId: e?.sourceId,
+            sourceType: source?.type,
+            // raster/image sources expose `url`/`tiles`; the failing image
+            // resource is usually one of these.
+            url: (err as any)?.url ?? source?.url,
+            tiles: source?.tiles,
+            tile: tileID ? `${tileID.z}/${tileID.x}/${tileID.y}` : undefined,
+            status: (err as any)?.status,
+            error: err
+        });
+    }, []);
+
     //
     // Colour and style the task based on the selected pilot and their destination
     const [trackLineStyle, turnpointStyleFlat, turnpointStyle] = useMemo(() => {
@@ -521,6 +565,9 @@ export default function MApp(props: {
             for (const layer of style.layers) {
                 if (layer.id === 'contour-line') {
                     map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'none' : 'visible');
+                } else if (layer.id.startsWith('landmark-power-line')) {
+                    // Power lines clutter satellite imagery — street basemap only.
+                    map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
                 } else if ((layer as any).source === 'openmaptiles' && layer.type !== 'symbol') {
                     map.setLayoutProperty(layer.id, 'visibility', mapStreet ? 'visible' : 'none');
                 }
@@ -608,6 +655,7 @@ export default function MApp(props: {
                 initialViewState={{...props.viewport, ...viewOptions}}
                 onMove={onViewStateChange}
                 onLoad={onMapLoad}
+                onError={onMapError}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
                 mapStyle={ONGLIDE_MAP_STYLE}
                 ref={mapRef}

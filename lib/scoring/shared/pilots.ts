@@ -209,6 +209,7 @@ export async function upsertPilot(
         enqueuePortraitRefresh(db, log, pilot.classid, pilot.compno, fainumber);
     }
 
+    const isNew = existing.length === 0;
     try {
         await db.query(escape`
             INSERT INTO
@@ -286,6 +287,9 @@ export async function upsertPilot(
                 registereddt = NOW()
         `);
         accumulator.record(pilot.classid, pilot.compno, pilot.className);
+        if (isNew) {
+            log(`NEW PILOT registered ${pilot.classid}/${pilot.compno} — ${pilot.fullName}${pilot.country ? ` (${pilot.country})` : ''}${pilot.glider ? ` glider=${pilot.glider}` : ''} handicap=${pilot.handicap}`);
+        }
     } catch (e) {
         log(`pilot INSERT failed ${pilotTag(pilot)}:`, e);
     }
@@ -327,12 +331,14 @@ export async function pruneUnseenPilots(
             const label = accumulator.classNames.get(classid) ?? classid;
             log(`pruneUnseenPilots failed for class ${label}:`, e);
         }
-    }
 
-    // Trackers needs a row for each pilot so fill any missing.
-    try {
-        await db.query('INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) select class, compno, "flarm", "unknown" from pilots');
-    } catch (e) {
-        log(`tracker backfill failed:`, e);
+        // Trackers needs a row for each pilot so fill any missing. Scoped to
+        // this class so we don't backfill for other competitions sharing the DB.
+        try {
+            await db.query('INSERT IGNORE INTO tracker ( class, compno, type, trackerid ) SELECT class, compno, "flarm", "unknown" FROM pilots WHERE class = ?', [classid]);
+        } catch (e) {
+            const label = accumulator.classNames.get(classid) ?? classid;
+            log(`tracker backfill failed for class ${label}:`, e);
+        }
     }
 }

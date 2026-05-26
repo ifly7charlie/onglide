@@ -9,6 +9,7 @@ import {convexHull} from '../flightprocessing/convexHull';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 import {computeOptimalGrid} from '../flightprocessing/computeOptimalGrid';
 import {computeSuggestedTrack} from '../flightprocessing/computeSuggestedTrack';
+import {GliderLog, noopGliderLog} from './gliderLog';
 
 /*
  * This is used just for scoring an AAT task
@@ -16,15 +17,30 @@ import {computeSuggestedTrack} from '../flightprocessing/computeSuggestedTrack';
  * It accepts the task object, the tracker object the points to add
  *
  */
+
+// Compact one-line summary of task status — replaces the per-tick full
+// object / JSON dumps. Distances are rounded to 0.1km so GPS creep does
+// not change the string (and so de-dups silently), while leg/sector/
+// penalty transitions and ~0.1km moves still produce a line.
+function aatSummaryLine(label: string, s: CalculatedTaskStatus): string {
+    const n = (v: number | undefined) => (v == null || !isFinite(v as number) ? '-' : (v as number).toFixed(1));
+    const legs = (s.legs || []).map((l) => n(l?.distance)).join(',');
+    return (
+        `AAT/${label} t=${s.t} leg=${s.currentLeg} inSector=${s.inSector ? 1 : 0} inPenalty=${s.inPenalty ? 1 : 0}` +
+        ` start=${s.startFound ? 1 : 0} finish=${s.utcFinish || '-'} fs=${s.flightStatus ?? '-'}` +
+        ` dist=${n(s.distance)} maxP=${n(s.maxPossible)} minP=${n(s.minPossible)} dR=${n(s.distanceRemaining)} legs=[${legs}]`
+    );
+}
+
 //
 // Get a generator to calculate task status
-export const assignedAreaScoringGenerator = async function* (task: Task, taskStatusGenerator: TaskStatusGenerator, _log?: Function): CalculatedTaskGenerator {
-    // Generate log function as it's quite slow to read environment all the time
-    const log = _log
-        ? _log
-        : () => {
-              /**/
-          };
+export const assignedAreaScoringGenerator = async function* (task: Task, taskStatusGenerator: TaskStatusGenerator, _log?: GliderLog): CalculatedTaskGenerator {
+    const log: GliderLog = _log ?? noopGliderLog;
+
+    // Change-detection state for the compact summaries: only emit a line
+    // when the summary actually differs from the last one for that site.
+    let lastTickLine = '';
+    let lastScoredLine = '';
 
     const preparedLegs = task.preparedLegs;
     if (!preparedLegs || !task.legs.length) {
@@ -93,7 +109,11 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     for await (const current of taskStatusGenerator) {
         try {
             const taskStatus = Object.assign(scoredStatus, current);
-            log(taskStatus);
+            const tickLine = aatSummaryLine('tick', taskStatus);
+            if (tickLine !== lastTickLine) {
+                log(tickLine);
+                lastTickLine = tickLine;
+            }
 
             // Wait for the start
             if (!current.startConfirmed && !current.startFound) {
@@ -249,10 +269,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                             const groupPoints = maxGraph.getGroups()[cl];
                             log(
                                 `scoredPoints [t=${taskStatus.t}]: leg=${cl} inSector=${taskStatus.inSector} inPenalty=${taskStatus.inPenalty}` +
-                                    ` groupSize=${groupPoints?.length}` +
-                                    ` hullSize=${aatLegStatus[cl]?.convexHull?.length}` +
-                                    ` penaltyPoints=${aatLegStatus[cl]?.penaltyPoints}` +
-                                    ` points=[${groupPoints?.map((p) => `(${p.lat.toFixed(4)},${p.lng.toFixed(4)},t=${p.t})`).join(', ')}]`
+                                    ` groupSize=${groupPoints?.length} hullSize=${aatLegStatus[cl]?.convexHull?.length} penaltyPoints=${aatLegStatus[cl]?.penaltyPoints}`
                             );
                             scoredPoints = maxGraph.shortestAnyToGroup(taskStatus.currentLeg);
                             const numEdges = scoredPoints.path.length - 1;
@@ -420,14 +437,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
                 }
 
                 // Reverse and output for logging...
-                log('optimal path:', scoredPoints);
+                log('optimalPath', scoredPoints ? `edges=${scoredPoints.path.length} dist=${scoredPoints.distance.toFixed(1)}` : 'none');
 
                 if (!scoredPoints && (taskStatus.inSector || taskStatus.inPenalty)) {
                     log(`optimalGridBaseline [t=${taskStatus.t}]: SKIPPED - no scoredPoints while inSector=${taskStatus.inSector} inPenalty=${taskStatus.inPenalty} currentLeg=${taskStatus.currentLeg}`);
                 }
                 if (scoredPoints) {
                     scoredStatus.distance = sumPath(scoredPoints.path, 0, preparedLegs, !!scoredStatus.utcFinish, (leg, distance, point) => {
-                        log('SSD>', leg, distance, point);
                         scoredStatus.legs[leg].point = point;
                         scoredStatus.legs[leg].distance = distance;
                     });
@@ -520,20 +536,20 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
                 // We don't need necessary precision
             }
-            log('AAT Scoring:');
-            log(JSON.stringify(scoredStatus, stripPoints, 4));
-            log('-------------');
+            const scoredLine = aatSummaryLine('scored', scoredStatus);
+            if (scoredLine !== lastScoredLine) {
+                log(scoredLine);
+                lastScoredLine = scoredLine;
+            }
             yield scoredStatus;
             // Grid changes only on leg entry — clear so subsequent yields don't carry it forward
             // via the Object.assign at the top of the loop. The yielded reference above is
             // already captured by the downstream generator.
             scoredStatus.optimalGrid = [];
         } catch (e) {
-            console.log('Exception in AAT Generator');
-            console.log(e);
-            console.log(JSON.stringify(current, stripPoints, 4));
-            maxGraph.printSummary('maxGraph', console.log);
-            minGraph.printSummary('minGraph', console.log);
+            log.error('Exception in AAT Generator', e, JSON.stringify(current, stripPoints));
+            maxGraph.printSummary('maxGraph', log.error);
+            minGraph.printSummary('minGraph', log.error);
             return;
         }
     }

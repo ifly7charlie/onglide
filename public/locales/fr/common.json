@@ -6,7 +6,8 @@
         "loading_map": "Chargement de la carte...",
         "loading_competitions": "Chargement des compétitions...",
         "back_to_globe": "Retour au globe",
-        "language": "Langue"
+        "language": "Langue",
+        "update_available": "Mise à jour disponible — appuyez pour recharger"
     },
     "competition": {
         "live": "En direct",
@@ -25,9 +26,15 @@
         "pilot_other": "{{count}} pilotes",
         "tracked_pilots": "{{tracked}}/{{total}} pilotes",
         "live_stats": " · {{tracked}}/{{registered}} pilotes · {{flying}} en vol · {{landed}} posés",
+        "in_view_only": "Visibles uniquement",
         "viewers_short": "spectateurs",
         "land_data": "Données terrestres :",
-        "natural_earth": "Natural Earth"
+        "natural_earth": "Natural Earth",
+        "official_scores": "Appuyez pour les résultats officiels",
+        "official_scores_hint": "Les informations ci-dessous proviennent du suivi en direct",
+        "notify_subscribe": "M'avertir de cette compétition",
+        "notify_unsubscribe": "Ne plus m’avertir",
+        "notify_denied": "Les notifications sont bloquées dans votre navigateur"
     },
     "task": {
         "speed": "Épreuve de vitesse",
@@ -57,10 +64,11 @@
         "launching": "Décollage",
         "racing": "En course",
         "finishing": "En finale",
-        "home": "Rentré",
+        "home": "Rejouer",
         "no_task": "Pas encore d'épreuve",
         "upcoming": "À venir",
-        "yesterday": "Hier"
+        "yesterday": "Rejouer hier",
+        "cancelled": "Annulé"
     },
     "pilot": {
         "gridded_waiting": "Aligné, prêt à décoller",
@@ -169,7 +177,9 @@
         "show_other_classes": "Affiche les planeurs des autres classes, cliquer pour n'afficher que la classe courante",
         "show_only_current": "Afficher uniquement la classe sélectionnée, cliquer pour afficher les autres",
         "switch_to_metric": "Passer en unités métriques",
-        "switch_to_imperial": "Passer en unités impériales"
+        "switch_to_imperial": "Passer en unités impériales",
+        "map_attribution": "Attribution de la carte",
+        "close": "Fermer"
     },
     "drawer": {
         "class": "Classe",
@@ -187,6 +197,7 @@
         "competition_time": "heure de la compétition",
         "your_time": "votre heure",
         "live": "Direct",
+        "replay": "Rejouer",
         "offline": "Hors ligne",
         "end": "Fin"
     },
@@ -267,5 +278,12 @@
     "footer": {
         "translation_help": "Aidez à traduire Onglide pour la communauté vélivole",
         "translation_help_link_label": "Contribuer sur GitHub"
+    },
+    "notification": {
+        "task_set": "{{classname}}: nouvelle épreuve définie",
+        "task_changed": "{{classname}}: épreuve modifiée",
+        "launching": "{{classname}}: décollages en cours",
+        "racing": "{{classname}}: planeurs en course",
+        "finishing": "{{classname}}: premières arrivées attendues"
     }
 }

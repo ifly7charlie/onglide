@@ -17,13 +17,14 @@ import type {Options} from '../lib/types';
 import {PathLength, Units, MapType, TaskUp} from '../lib/types';
 import store from '../lib/redux/store';
 import {CompetitionsSocket} from '../lib/react/competitionsSocket';
+import {AutoUpdateBanner} from '../lib/react/autoUpdate';
 
 const defaultOptions: Options = {
     //
     rainRadar: false,
     rainRadarAdvance: 0,
     units: Units.metric,
-    mapType: MapType.satellite,
+    mapType: MapType.street,
     map2d: true,
     taskUp: TaskUp.north,
     follow: true,
@@ -71,6 +72,7 @@ function MyApp({Component, pageProps}) {
     return (
         <Provider store={store}>
             <CompetitionsSocket />
+            <AutoUpdateBanner />
             <Head>
                 <meta name="viewport" content="width=device-width, minimal-ui" />
             </Head>
