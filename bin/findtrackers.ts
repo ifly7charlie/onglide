@@ -87,6 +87,7 @@ interface ClassMatches {
     job: Job;
     results: OfficialResult[];
     matches: TrackerMatch[];
+    scoreMap: ScoreMap;
 }
 
 // A flarmid → pilots that produced a clean (within-tolerance, non-ambiguous)
@@ -95,8 +96,18 @@ interface ClassMatches {
 // case where a flarm unit was moved between gliders during a comp.
 interface CrossClassHit {
     className: ClassName;
+    classDisplay: string;
     compno: Compno;
     name: string;
+    deltaStart: number | null;
+    deltaFinish: number | null;
+    /** This flarmid is currently in the other-class pilot's trackerid list. */
+    assigned: boolean;
+    /** Score breakdown for this (compno, flarmid) in the other class, including prior evidence. */
+    score: ScoreBreakdown;
+    margins: Margins;
+    pilotContested: boolean;
+    flarmidContested: boolean;
 }
 type CrossClassMap = Map<FlarmID, CrossClassHit[]>;
 
@@ -238,16 +249,40 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
             debugFlarmids: debugFlarmids.size ? debugFlarmids : undefined
         });
 
-        classMatches.push({job, results, matches});
+        // Score map (including multi-day prior evidence) is built here in
+        // pass 1 so pass 2 can copy the breakdown for each cross-class hit
+        // onto the CrossClassHit record — the "also matches K in class X"
+        // line needs to show K's score in class X, not D01607's in this class.
+        const priorMap = await loadPriorEvidence(datecode, className);
+        if (priorMap.size) console.log(`  loaded ${priorMap.size} prior pair-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
+        const scoreMap = computeScoreMap(matches, results, ddb, priorMap);
+
+        classMatches.push({job, results, matches, scoreMap});
     }
 
     // Pass 2 — flarmid → unambiguous within-tolerance hits across the group.
+    // Stash the breakdown/margins for the (compno, flarmid) pair from the
+    // hit's own class so we can render quality info on the cross-class line.
     const crossClass: CrossClassMap = new Map();
     for (const cm of classMatches) {
         for (const m of cm.matches) {
             if (!m.withinTolerance || m.ambiguous) continue;
+            const scored = cm.scoreMap.get(scoreKey(m.compno, m.flarmid));
+            if (!scored) continue;
             const arr = crossClass.get(m.flarmid) ?? [];
-            arr.push({className: cm.job.className, compno: m.compno, name: m.name});
+            arr.push({
+                className: cm.job.className,
+                classDisplay: cm.job.classDisplay,
+                compno: m.compno,
+                name: m.name,
+                deltaStart: m.deltaStart,
+                deltaFinish: m.deltaFinish,
+                assigned: m.assigned,
+                score: scored.score,
+                margins: scored.margins,
+                pilotContested: scored.pilotContested,
+                flarmidContested: scored.flarmidContested
+            });
             crossClass.set(m.flarmid, arr);
         }
     }
@@ -256,18 +291,13 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     const summary: GroupSummary = {pilots: 0, matched: 0, ambiguous: 0, proposed: 0, applied: 0};
     const multi = classMatches.length > 1;
     for (const cm of classMatches) {
-        const {job, results, matches} = cm;
+        const {job, results, matches, scoreMap} = cm;
         const {className, datecode} = job;
 
         if (multi) {
             const classLabel = job.classDisplay ? `${job.classDisplay} [${className}]` : className;
             console.log(`\n--- ${classLabel} / ${datecode} — results ---`);
         }
-
-        const priorMap = await loadPriorEvidence(datecode, className);
-        if (priorMap.size) console.log(`  loaded ${priorMap.size} prior pair-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
-
-        const scoreMap = computeScoreMap(matches, results, ddb, priorMap);
 
         // Always print the full report. The score breakdown is useful even
         // for clean pilots (operator can see what's holding the assignment
@@ -607,13 +637,38 @@ function pilotHeaderTag(rows: TrackerMatch[]): string {
     return flags.length ? `   ⚠ ${flags.join('; ')}` : '';
 }
 
-function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined): string[] {
+function crossClassHitsFor(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined): CrossClassHit[] {
     if (!crossClass) return [];
     const all = crossClass.get(flarmid);
     if (!all) return [];
-    return all
-        .filter((h) => h.className !== thisClass)
-        .map((h) => `also matches ${String(h.compno).trim()} in class ${h.className}`);
+    return all.filter((h) => h.className !== thisClass);
+}
+
+/**
+ * Short one-liner per cross-class hit. Used in proposal `reason` strings
+ * (which get joined into a single-line CSV-friendly log entry).
+ */
+function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined): string[] {
+    return crossClassHitsFor(flarmid, thisClass, crossClass).map((h) => {
+        const classLabel = h.classDisplay ? `${h.classDisplay} [${h.className}]` : h.className;
+        const tag = h.assigned ? ' [their assigned ID]' : '';
+        return `also matches ${String(h.compno).trim()} in class ${classLabel}${tag}`;
+    });
+}
+
+/**
+ * Multi-line printout per cross-class hit: header + Δstart/Δfinish + the
+ * other class's score breakdown (S, margins, contribs including any prior
+ * evidence). Used only in the per-pilot report, not in proposal reasons.
+ */
+function describeCrossClassDetailed(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined): string[][] {
+    return crossClassHitsFor(flarmid, thisClass, crossClass).map((h) => {
+        const classLabel = h.classDisplay ? `${h.classDisplay} [${h.className}]` : h.className;
+        const tag = h.assigned ? ' [their assigned ID]' : '';
+        const compno = String(h.compno).trim();
+        const deltas = `Δstart ${fmtDelta(h.deltaStart)}, Δfinish ${fmtDelta(h.deltaFinish)}`;
+        return [`also matches ${compno} in class ${classLabel}${tag}: ${deltas}`, `  ${fmtScore(h.score, h.margins, h.pilotContested, h.flarmidContested)}`];
+    });
 }
 
 type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean; deltaStart: number | null; deltaFinish: number | null}>;
@@ -815,8 +870,10 @@ function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: Officia
         const scored = scoreMap?.get(scoreKey(m.compno, m.flarmid));
         if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested)}`);
         if (thisClass) {
-            for (const line of describeCrossClass(m.flarmid, thisClass, crossClass)) {
-                console.log(`         ↳ ${line}`);
+            for (const lines of describeCrossClassDetailed(m.flarmid, thisClass, crossClass)) {
+                for (const [i, line] of lines.entries()) {
+                    console.log(`         ${i === 0 ? '↳' : ' '} ${line}`);
+                }
             }
         }
     }
