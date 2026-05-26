@@ -354,6 +354,25 @@ export default function MApp(props: {
         map.dragPan.enable({maxSpeed: 0});
     }, [mapRef?.current]);
 
+    // Disable the 3D terrain drape pass while in 2D mode. The style keeps the
+    // `terrain` source defined so the `hillshade` layer can still sample it,
+    // but `setTerrain(null)` removes the draped-layer render path — which
+    // otherwise runs `_renderTileClippingMasks` twice per paint and keeps
+    // MapLibre re-arming its own RAF as DEM tiles arrive into the drape FBO.
+    useEffect(() => {
+        const map = mapRef?.current?.getMap();
+        if (!map) return;
+        const apply = () => {
+            if (map2d) {
+                if (map.getTerrain()) map.setTerrain(null);
+            } else {
+                if (!map.getTerrain()) map.setTerrain({source: 'terrain', exaggeration: 1});
+            }
+        };
+        if (map.isStyleLoaded()) apply();
+        else map.once('style.load', apply);
+    }, [map2d, mapRef?.current]);
+
     // ======= ZOOM TO TASK EFFECT =========
     // If we are supposed to zoom then do this and turn off the flag
     useEffect(() => {
