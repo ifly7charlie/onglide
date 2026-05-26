@@ -309,22 +309,9 @@ async function sendEvents(compid: string, compName: string, events: NotifyEvent[
     }
 }
 
-// Drop every subscription for a competition — called when the comp's context is
-// destroyed (rollover after its final local day).
-export async function purgeSubscriptionsForComp(compid: string, db: any): Promise<void> {
-    try {
-        const result = await db.query(escape`DELETE FROM pushsubscription WHERE compid = ${compid}`);
-        const n = result?.affectedRows ?? 0;
-        if (n > 0) console.log(`pushNotifications: purged ${n} subscription(s) for ${compid} (context teardown)`);
-        for (const key of deferredStarts.keys()) {
-            if (key.startsWith(compid + ':')) deferredStarts.delete(key);
-        }
-    } catch (e) {
-        console.log('pushNotifications: purge failed', e);
-    }
-}
-
-// Safety net for comps removed without a clean context teardown.
+// Each subscription owns its own expiresat — sweep deletes rows past it.
+// Context teardown does NOT purge: a daemon restart or transient discovery
+// gap must not wipe subscribers for a comp that's still running.
 export async function sweepExpiredSubscriptions(db: any): Promise<void> {
     try {
         const result = await db.query(escape`DELETE FROM pushsubscription WHERE expiresat < NOW()`);
