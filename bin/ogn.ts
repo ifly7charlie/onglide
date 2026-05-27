@@ -2282,6 +2282,8 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                             t: new Uint8Array(p.t.buffer, start * 4, length * 4),
                             climbRate: new Uint8Array(p.climbRate.buffer, start, length),
                             agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                            bearing: new Uint8Array(p.bearing.buffer, start * 2, length * 2),
+                            speed: new Uint8Array(p.speed.buffer, start * 2, length * 2),
                             posIndex: length,
                             trackVersion: p.trackVersion
                         };
@@ -2323,6 +2325,8 @@ async function generateRecentPilotTracks(channel: Channel) {
                         t: new Uint8Array(p.t.buffer, start * 4, length * 4),
                         climbRate: new Uint8Array(p.climbRate.buffer, start, length),
                         agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                        bearing: new Uint8Array(p.bearing.buffer, start * 2, length * 2),
+                        speed: new Uint8Array(p.speed.buffer, start * 2, length * 2),
                         posIndex: length,
                         trackVersion: p.trackVersion
                     };

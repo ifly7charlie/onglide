@@ -175,9 +175,15 @@ message PilotTrack {
 	//    bytes leg = 11;
 
     optional bytes agl = 12; // int16
-	
+
 	// This changes if we need to replace the pilot track
 	uint32 trackVersion = 13;
+
+	// Bracket bearing/speed per anchor (for client-side spline smoothing).
+	// bearing: int16, degrees 0–359, or -1 if absent
+	// speed: uint16, kph (truncated to int by the per-tick PilotPosition encoder)
+	optional bytes bearing = 14;
+	optional bytes speed = 15;
 };
 
 message Scores {

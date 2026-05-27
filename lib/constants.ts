@@ -1,5 +1,27 @@
-// How much time between packets is considered to be a gap in the track (seconds)
+// How much time between packets is considered to be a display-side gap
+// in the track (seconds) — at or beyond this the TripsLayer breaks the
+// segment and the gap renders as a visible discontinuity. Strictly
+// greater than SPLINE_DENSE_DT_S, so 21-59s gaps still render as a
+// straight chord (line drawn between anchors with no Hermite-fabricated
+// inner vertices, preserving track continuity at moderate FLARM
+// coverage holes). Display-only — the scoring path uses its own
+// segment notion.
 export const gapLength = 60;
+
+// Spline (display-side Hermite smoother) thresholds. See
+// lib/flightprocessing/spline.ts.
+//
+// SPLINE_DENSE_DT_S: bracket dt at or above this gets NO inner vertices —
+// the don't-fabricate contract (the renderer must show a visible gap).
+// SPLINE_SUB_MIN_DT_S: brackets below this are already smooth as straight
+// chords at display zoom, no need to subdivide.
+// SPLINE_SUB_TARGET_DT_S: aim for one inner vertex every ~2s of bracket dt.
+// SPLINE_SUB_MAX: clamp on inner-vertex count per bracket (safety bound on
+// sidecar memory).
+export const SPLINE_DENSE_DT_S = 20;
+export const SPLINE_SUB_MIN_DT_S = 4;
+export const SPLINE_SUB_TARGET_DT_S = 2;
+export const SPLINE_SUB_MAX = 10;
 
 // How long till pilot is considered offline
 export const offlineTime = 600;

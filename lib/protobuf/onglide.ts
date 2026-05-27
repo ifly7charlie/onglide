@@ -257,6 +257,13 @@ export interface PilotTrack {
     | undefined;
   /** This changes if we need to replace the pilot track */
   trackVersion: number;
+  /**
+   * Bracket bearing/speed per anchor (for client-side spline smoothing).
+   * bearing: int16, degrees 0–359, or -1 if absent
+   * speed: uint16, kph (truncated to int by the per-tick PilotPosition encoder)
+   */
+  bearing?: Uint8Array | undefined;
+  speed?: Uint8Array | undefined;
 }
 
 export interface Scores {
@@ -2876,6 +2883,8 @@ function createBasePilotTrack(): PilotTrack {
     climbRate: undefined,
     agl: undefined,
     trackVersion: 0,
+    bearing: undefined,
+    speed: undefined,
   };
 }
 
@@ -2901,6 +2910,12 @@ export const PilotTrack: MessageFns<PilotTrack> = {
     }
     if (message.trackVersion !== 0) {
       writer.uint32(104).uint32(message.trackVersion);
+    }
+    if (message.bearing !== undefined) {
+      writer.uint32(114).bytes(message.bearing);
+    }
+    if (message.speed !== undefined) {
+      writer.uint32(122).bytes(message.speed);
     }
     return writer;
   },
@@ -2968,6 +2983,22 @@ export const PilotTrack: MessageFns<PilotTrack> = {
           message.trackVersion = reader.uint32();
           continue;
         }
+        case 14: {
+          if (tag !== 114) {
+            break;
+          }
+
+          message.bearing = reader.bytes();
+          continue;
+        }
+        case 15: {
+          if (tag !== 122) {
+            break;
+          }
+
+          message.speed = reader.bytes();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -2986,6 +3017,8 @@ export const PilotTrack: MessageFns<PilotTrack> = {
       climbRate: isSet(object.climbRate) ? bytesFromBase64(object.climbRate) : undefined,
       agl: isSet(object.agl) ? bytesFromBase64(object.agl) : undefined,
       trackVersion: isSet(object.trackVersion) ? globalThis.Number(object.trackVersion) : 0,
+      bearing: isSet(object.bearing) ? bytesFromBase64(object.bearing) : undefined,
+      speed: isSet(object.speed) ? bytesFromBase64(object.speed) : undefined,
     };
   },
 
@@ -3012,6 +3045,12 @@ export const PilotTrack: MessageFns<PilotTrack> = {
     if (message.trackVersion !== 0) {
       obj.trackVersion = Math.round(message.trackVersion);
     }
+    if (message.bearing !== undefined) {
+      obj.bearing = base64FromBytes(message.bearing);
+    }
+    if (message.speed !== undefined) {
+      obj.speed = base64FromBytes(message.speed);
+    }
     return obj;
   },
 
@@ -3027,6 +3066,8 @@ export const PilotTrack: MessageFns<PilotTrack> = {
     message.climbRate = object.climbRate ?? undefined;
     message.agl = object.agl ?? undefined;
     message.trackVersion = object.trackVersion ?? 0;
+    message.bearing = object.bearing ?? undefined;
+    message.speed = object.speed ?? undefined;
     return message;
   },
 };

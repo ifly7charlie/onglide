@@ -310,9 +310,32 @@ export interface DeckData {
     agl: Int16Array;
     t: Uint32Array;
     climbRate: Int8Array;
+    // Per-anchor bracket bearing (degrees 0–359) and speed (kph × 10).
+    // bearing[i] === -1 means absent (OGN packet without course).
+    bearing: Int16Array;
+    speed: Uint16Array;
     posIndex: number;
     segmentIndex?: number;
     trackVersion: number;
+    // Optional sidecar of Hermite-subdivided vertices for display only.
+    // Built by lib/flightprocessing/spline.ts; renderers should source from
+    // `deck.smoothed ?? deck`. Scoring path never reads it.
+    smoothed?: SmoothedDeck;
+}
+
+export interface SmoothedDeck {
+    positions: Float32Array;
+    indices?: Uint32Array;
+    agl: Int16Array;
+    t: Uint32Array;
+    climbRate: Int8Array;
+    // For each smoothed vertex, the index of the anchor it is emitted FOR
+    // (the bracket's END anchor — inner vertices share the end anchor's
+    // index, anchors themselves have their own index). Used for incremental
+    // truncation: drop smoothed vertices whose anchorIndex >= fromAnchor.
+    anchorIndex: Uint32Array;
+    posIndex: number;
+    segmentIndex?: number;
 }
 
 export interface VarioData {

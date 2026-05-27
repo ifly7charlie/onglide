@@ -188,6 +188,20 @@ const statistics = {
 };
 
 // Keep track of the aircraft requested
+// Per-flarmid offset sample buffer used by the stickyPrimary picker in
+// processMessageQueue. Each time both primary and a secondary flarmid
+// produce a record in the same t-bucket we push one sample; the median
+// over the last STICKY_OFFSET_WINDOW samples is the offset applied to
+// secondary records during primary-gap fill. Median is robust against
+// the single-sample GPS noise that wrecks a simple running mean.
+export interface FlarmOffsetState {
+    dLats: number[];
+    dLngs: number[];
+    dAlts: number[];
+    cursor: number; // next write index modulo window
+    count: number; // total samples ever taken (capped at window for median)
+}
+
 export interface Aircraft {
     compno: Compno;
     className: ClassName;
@@ -209,6 +223,17 @@ export interface Aircraft {
     lastSent?: InterimPositionMessage;
     lastMoved: number;
     lastTick: Epoch;
+
+    // stickyPrimary picker state — see processMessageQueue. lastPrimaryTime
+    // is the t of the most recent accepted primary record; bucket processing
+    // skips secondary-only buckets unless (t - lastPrimaryTime) exceeds
+    // STICKY_GAP_FILL_S, which keeps secondary GPS noise out of dense
+    // primary regions. flarmOffsets accumulates per-secondary-flarmid offset
+    // samples (collected whenever primary and secondary co-occur in the same
+    // bucket) used to subtract the static GPS-unit-to-GPS-unit bias when a
+    // secondary record fills a primary gap.
+    lastPrimaryTime?: Epoch;
+    flarmOffsets?: Map<FlarmID, FlarmOffsetState>;
 
     //    kf?: any; // altitude smoothing
     stationary: number; // consecutive stationary fixes
@@ -1229,6 +1254,157 @@ export async function processPacket(packet: aprsPacket) {
 
 //
 
+// stickyPrimary picker constants. STICKY_GAP_FILL_S mirrors the
+// GAP_FILL_THRESHOLD_S in lib/fusion/stickyPrimary.ts (the offline
+// reference). STICKY_OFFSET_WINDOW is the running-median window for
+// per-secondary-flarmid offset estimation; the bake-off used 1:1 matched
+// pairwise samples and median over all available pairs, but in the
+// streaming path we don't keep the full history, so a 64-sample circular
+// buffer is the memory-bounded equivalent. STICKY_MIN_PAIRS gates
+// whether to apply offset correction at all — below this we emit
+// secondary records uncorrected (preferring "raw secondary" to
+// "ill-estimated offset").
+const STICKY_GAP_FILL_S = 15;
+const STICKY_OFFSET_WINDOW = 64;
+const STICKY_MIN_PAIRS = 5;
+
+function speedSanityOk(point: InterimPositionMessage, lastSent: InterimPositionMessage): boolean {
+    const dT = point.t - lastSent.t;
+    if (dT <= 0) return false;
+    const dH_km = distHaversine(point, lastSent);
+    const dV = point.a - lastSent.a;
+    const dSH = (3600 * dH_km) / dT;
+    const dSV = Math.abs(dV / dT);
+    return dSH < (point.s || 160) * 2.3 && dSV < 30;
+}
+
+function medianOf(xs: number[]): number {
+    if (xs.length === 0) return 0;
+    const sorted = xs.slice().sort((a, b) => a - b);
+    const m = sorted.length;
+    return m % 2 === 0 ? (sorted[m / 2 - 1] + sorted[m / 2]) / 2 : sorted[(m - 1) / 2];
+}
+
+function pushOffsetSample(state: FlarmOffsetState, dLat: number, dLng: number, dAlt: number): void {
+    const i = state.cursor;
+    if (state.count < STICKY_OFFSET_WINDOW) {
+        state.dLats.push(dLat);
+        state.dLngs.push(dLng);
+        state.dAlts.push(dAlt);
+        state.count++;
+    } else {
+        state.dLats[i] = dLat;
+        state.dLngs[i] = dLng;
+        state.dAlts[i] = dAlt;
+    }
+    state.cursor = (i + 1) % STICKY_OFFSET_WINDOW;
+}
+
+function getOrInitOffset(aircraft: Aircraft, f: FlarmID): FlarmOffsetState {
+    if (!aircraft.flarmOffsets) aircraft.flarmOffsets = new Map();
+    let s = aircraft.flarmOffsets.get(f);
+    if (!s) {
+        s = {dLats: [], dLngs: [], dAlts: [], cursor: 0, count: 0};
+        aircraft.flarmOffsets.set(f, s);
+    }
+    return s;
+}
+
+// Within one flarmid's bucket, dedup receiver duplicates. Two stations
+// hearing the same FLARM transmission produce byte-identical records;
+// the speed sanity filter doesn't differentiate them. Pick deterministically
+// (prefer same `o` as lastSent for stability, else first by `o` sort).
+function pickWithinFlarmid(bucket: InterimPositionMessage[], lastSent: InterimPositionMessage | undefined): InterimPositionMessage | undefined {
+    if (bucket.length === 0) return undefined;
+    if (bucket.length === 1) return bucket[0];
+    const lastO = lastSent?.o;
+    if (lastO) {
+        const match = bucket.find((b) => b.o === lastO);
+        if (match) return match;
+    }
+    return bucket.slice().sort((a, b) => (a.o ?? '').localeCompare(b.o ?? ''))[0];
+}
+
+function pickStickyPrimary(
+    aircraft: Aircraft, //
+    duplicates: InterimPositionMessage[],
+    lastSent: InterimPositionMessage | undefined,
+    t: Epoch
+): InterimPositionMessage | undefined {
+    // Group by flarmid. In the single-flarmid case the byFlarm map has one
+    // entry and we fall through to "pick from primary bucket" trivially.
+    const byFlarm = new Map<FlarmID, InterimPositionMessage[]>();
+    for (const p of duplicates) {
+        let g = byFlarm.get(p.f);
+        if (!g) {
+            g = [];
+            byFlarm.set(p.f, g);
+        }
+        g.push(p);
+    }
+
+    const primaryFlarmid = aircraft.trackers[0];
+    const primaryBucket = primaryFlarmid ? byFlarm.get(primaryFlarmid) : undefined;
+
+    // If primary is present in this bucket: pick from it, opportunistically
+    // collect offset samples from any secondaries co-occurring at the same t.
+    if (primaryBucket && primaryBucket.length > 0) {
+        const picked = pickWithinFlarmid(primaryBucket, lastSent);
+        if (!picked) return undefined;
+        if (lastSent && !speedSanityOk(picked, lastSent)) return undefined;
+        aircraft.lastPrimaryTime = t;
+        // Update per-secondary offset estimates: each secondary record at
+        // the same t against the just-picked primary record is one sample.
+        for (const [f, bucket] of byFlarm) {
+            if (f === primaryFlarmid) continue;
+            const sec = pickWithinFlarmid(bucket, lastSent);
+            if (!sec) continue;
+            const state = getOrInitOffset(aircraft, f);
+            pushOffsetSample(state, sec.lat - picked.lat, sec.lng - picked.lng, sec.a - picked.a);
+        }
+        return picked;
+    }
+
+    // Primary absent from this bucket. Only emit a secondary if the
+    // primary has been silent long enough that we're really in a gap.
+    const sincePrimary = aircraft.lastPrimaryTime != null ? t - aircraft.lastPrimaryTime : Infinity;
+    if (sincePrimary <= STICKY_GAP_FILL_S) {
+        // Still inside the primary's coverage — don't pollute with secondary GPS noise.
+        // BUT if we have never seen primary at all (lastPrimaryTime undefined → Infinity
+        // → skip this branch), we DO fall through to picking a secondary so the session
+        // can bootstrap. That handles cases where the primary is silent for the day
+        // (operator switched to backup device).
+        return undefined;
+    }
+
+    // Gap-fill: pick the densest secondary bucket.
+    let bestF: FlarmID | undefined;
+    let bestBucket: InterimPositionMessage[] | undefined;
+    for (const [f, bucket] of byFlarm) {
+        if (f === primaryFlarmid) continue; // primary already handled (absent here)
+        if (!bestBucket || bucket.length > bestBucket.length) {
+            bestF = f;
+            bestBucket = bucket;
+        }
+    }
+    if (!bestF || !bestBucket) return undefined;
+    const picked = pickWithinFlarmid(bestBucket, lastSent);
+    if (!picked) return undefined;
+    // Apply offset correction if we have enough samples for this secondary.
+    const offsetState = aircraft.flarmOffsets?.get(bestF);
+    let emitted = picked;
+    if (offsetState && offsetState.count >= STICKY_MIN_PAIRS) {
+        emitted = {
+            ...picked,
+            lat: picked.lat - medianOf(offsetState.dLats),
+            lng: picked.lng - medianOf(offsetState.dLngs),
+            a: picked.a - medianOf(offsetState.dAlts)
+        };
+    }
+    if (lastSent && !speedSanityOk(emitted, lastSent)) return undefined;
+    return emitted;
+}
+
 //
 // This iterates through the queue on a regular basis and deals with each point
 // it also ensures time order and is where you can perform filtering for positioning
@@ -1269,37 +1445,19 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         const duplicates = messages.slice(position, duplicatePosition);
         position = duplicatePosition;
 
-        // If we have many we need to reduce this to one
-        // we take smallest difference in position, or if the same the smallest vertical difference from
-        // previously selected point. If point is the same then don't prefer it.
-        const sortedPoint = !lastSent
-            ? null
-            : duplicates
-                  .map((point) => {
-                      const dH = distHaversine(point, lastSent!);
-                      const dV = point.a - lastSent!.a;
-                      const dG = point.g - lastSent!.g;
-                      const dT = point.t - lastSent!.t;
-                      return {
-                          ...point,
-                          dH: dH * 1000,
-                          dV,
-                          dG,
-                          dT,
-                          dSH: (3600 * dH) / dT, //km/s
-                          dSV: Math.abs(dV / dT) // m/s
-                      };
-                  })
-                  // Quickly remove faster than 300kph Horizontal or 30m/s Vertical
-                  // as they can't possible be correct (point.s is the flarm reported speed)
-                  .filter((point) => point.dSH < (point.s || 160) * 2.3 && point.dSV < 30)
-                  // Then sort them by amount of change
-                  .sort((a, b) => (Math.abs(a.dH - b.dH) > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
-                  .at(0);
-
-        // Take the first one, if we don't have one then we can just do nothing for now
-        // don't bypass the filtering for jumps by assuming null sortedPoint means take first point
-        const point = lastSent ? sortedPoint : duplicates.at(0);
+        // stickyPrimary picker. For pilots with one flarmid this collapses
+        // to exact (f, t) dedup. For pilots with multiple flarmids it picks
+        // the canonical primary (aircraft.trackers[0]) when present and only
+        // falls back to a secondary when the primary has been silent for
+        // longer than STICKY_GAP_FILL_S. Secondaries are offset-corrected
+        // against the primary using a running per-flarmid median. Reference:
+        // lib/fusion/stickyPrimary.ts (batch variant, validated by the
+        // offline bake-off; this is the streaming-per-bucket equivalent).
+        //
+        // Speed sanity filter (>300 kph horizontal or >30 m/s vertical jump
+        // from lastSent) is retained — it catches GPS glitches independent
+        // of the dedup decision.
+        const point = pickStickyPrimary(aircraft, duplicates, lastSent, t as Epoch);
         if (!point) {
             continue;
         }
@@ -1317,7 +1475,9 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // path below can fire. Raw GPS altitude (a) jitters by a few metres even
         // when parked, so compare g (AGL, rounded to the metre) and allow a small
         // horizontal tolerance for GPS drift.
-        const noMovement = sortedPoint ? sortedPoint.dH < 5 && Math.abs(sortedPoint.dG) < 3 : false;
+        const pickedDH_m = distHaversine(point, lastSent) * 1000;
+        const pickedDG = point.g - lastSent.g;
+        const noMovement = pickedDH_m < 5 && Math.abs(pickedDG) < 3;
 
         // We haven't picked one because we have had no movement but we have had packets.
         // Note: aircraft.lastMoved starts at 0 and is only set once the glider actually
@@ -1325,7 +1485,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // value on the first stationary detection. That's intentional — it arms the
         // ground state immediately for gliders that were already parked when the
         // session started.
-        const stationaryTime = noMovement && sortedPoint ? sortedPoint.t - aircraft.lastMoved : 0;
+        const stationaryTime = noMovement ? point.t - aircraft.lastMoved : 0;
 
         if (stationaryTime > 60) {
             // If we had been stationary for a while and we are low enough to be on the ground

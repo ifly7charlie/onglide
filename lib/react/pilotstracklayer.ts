@@ -55,6 +55,9 @@ export function pilotsTrackLayer(
         if (!p || !p.posIndex) {
             return;
         }
+        // Render from the smoothed (Hermite-subdivided) sidecar when
+        // present; the anchor arrays remain authoritative for scoring.
+        const s = p.smoothed ?? p;
 
         const currentTime = props.replayTime || latestUpdate;
         const clipStartAt = (startTimes[compno]?.startUtc ?? Infinity) - 30;
@@ -73,15 +76,15 @@ export function pilotsTrackLayer(
             id: compno + p.trackVersion,
             compno: compno,
             data: {
-                length: p.segmentIndex, // note this is not segmentIndex-1 (segmentIndex is one we are in, indices[segmentIndex] is defined)
-                startIndices: p.indices,
-                numberOfPoints: p.posIndex,
-                t: p.t,
-                v: p.climbRate,
-                g: p.agl,
-                p: p.positions,
+                length: s.segmentIndex, // note this is not segmentIndex-1 (segmentIndex is one we are in, indices[segmentIndex] is defined)
+                startIndices: s.indices,
+                numberOfPoints: s.posIndex,
+                t: s.t,
+                v: s.climbRate,
+                g: s.agl,
+                p: s.positions,
                 attributes: {
-                    getPath: {value: p.positions, size: 3},
+                    getPath: {value: s.positions, size: 3},
                     getTimestamps: {value: track.deckAdditional.tr, size: 1},
                     getColor
                 }
@@ -109,7 +112,7 @@ export function pilotsTrackLayer(
             // as this is a path layer the primary data structure is segments - we only need to redraw the last segment
             _dataDiff: (newData: any, oldData: any) => [{startRow: oldData.length - 1, endRow: newData.length}],
             updateTriggers: {
-                getPath: [p.posIndex, clipStartAt],
+                getPath: [s.posIndex, clipStartAt],
                 getColor: [mapLight, complexColours[sortKey] ? sortKey : 'normal', mapLight, selected, fullPaths],
                 getTimestamps: [track.deckAdditional?.tr?.length],
                 getWidth: selected
