@@ -6,10 +6,10 @@
 // covered.
 //
 // --delay-stats reports the distribution of receive-delay d (= writeTime - t)
-// and the count of packets that would have been delivered *after* the inorder
-// cursor under each candidate total-delay setting. The defaults to check
-// against are 10 (NEXT_PUBLIC_COMPETITION_DELAY) and 16 (10 + the
-// inorderAdditionalDelay of 6).
+// and the count of packets that would have been delivered *after* the
+// display-path cursor under each candidate total-delay setting. The defaults
+// to check against are NEXT_PUBLIC_COMPETITION_DELAY (compDelay) and
+// compDelay + aprsAdditionalDelay (the actual PMQ drop threshold in aprs.ts).
 //
 
 import yargs from 'yargs';
@@ -18,7 +18,7 @@ import Mysql from 'serverless-mysql';
 import * as dotenv from 'dotenv';
 
 import {d, getDelay} from '../lib/now';
-import {inorderAdditionalDelay} from '../lib/constants';
+import {aprsAdditionalDelay} from '../lib/constants';
 import type {ClassName, Compno, Epoch, FlarmID} from '../lib/types';
 import {loadPointsForIds, scanAll} from '../lib/webworkers/pointlog';
 
@@ -30,7 +30,9 @@ const mysql = Mysql({
         database: process.env.MYSQL_DATABASE,
         user: process.env.MYSQL_USER,
         password: process.env.MYSQL_PASSWORD,
-        decimalNumbers: true
+        decimalNumbers: true,
+        // affectedRows = changed rows, not matched rows.
+        flags: ['-FOUND_ROWS']
     },
     onError: (e: unknown) => console.error('mysql error', e),
     onConnectError: (x: unknown) => console.error('mysql connect error', x),
@@ -40,8 +42,8 @@ const mysql = Mysql({
 // Thresholds for the delay-stats tables. The same offsets are emitted twice:
 // once absolute (0..120s of raw d) and once shifted by the comp's official
 // delay (compDelay+0..compDelay+120) so the comp's own cursor window is the
-// reference point. compDelay + inorderAdditionalDelay is folded into the
-// absolute table and annotated.
+// reference point. compDelay + aprsAdditionalDelay is folded into the
+// absolute table and annotated — that is the actual display-path cursor.
 const THRESHOLD_OFFSETS = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120];
 
 async function run() {
@@ -54,6 +56,7 @@ async function run() {
         .option('summary', {type: 'boolean', description: 'one row per flarm id: oldest, newest, count, rate'})
         .option('delay-stats', {type: 'boolean', description: 'distribution of receive-delay d (writeTime - t) and per-setting late count'})
         .option('burst-stats', {type: 'boolean', description: 'shape of PMQ-induced drops per flarm: cursor jumps (a fresh packet bumps lastTime past late ones), drop victims per jump, longest emit-gap vs raw-gap (visual dead zones)'})
+        .option('comp-delay', {type: 'number', description: 'override competition.delayseconds / env compDelay (seconds). Sets the simulation cushion (eligibleAt = max(arrival, t + compDelay))'})
         .help()
         .alias('help', 'h').argv;
 
@@ -77,7 +80,10 @@ async function run() {
         console.error(`resolved ${ctx.flarmIds.size} flarm id(s) from DB: ${[...ctx.flarmIds].sort().join(', ') || '(none)'}`);
         console.error(`comp delay: ${compDelaySource}`);
     }
-    const effectiveCompDelay = compDelay ?? (getDelay() as number);
+    const effectiveCompDelay = (args['comp-delay'] as number | undefined) ?? compDelay ?? (getDelay() as number);
+    if (args['comp-delay'] != null) {
+        console.error(`comp delay: overridden via --comp-delay=${args['comp-delay']}`);
+    }
 
     const makeIter = () =>
         flarmIds.size > 0
@@ -87,7 +93,7 @@ async function run() {
     if (args['delay-stats']) {
         await delayStats(makeIter(), effectiveCompDelay);
     } else if (args['burst-stats']) {
-        await burstStats(makeIter());
+        await burstStats(makeIter(), effectiveCompDelay);
     } else if (args.summary) {
         await summary(makeIter());
     } else {
@@ -181,43 +187,63 @@ async function delayStats(iter: AsyncIterable<any>, compDelay: number) {
         printRow(overall);
     }
 
-    const compTotal = compDelay + inorderAdditionalDelay;
+    const compTotal = compDelay + aprsAdditionalDelay;
     const sortedKeys = [...overall.buckets.keys()].sort((a, b) => a - b);
     const total = overall.count;
 
     console.log('');
-    console.log(`packets delivered *after* the cursor (d > threshold) — absolute thresholds (compDelay=${compDelay}s, +inorderAdditionalDelay=${inorderAdditionalDelay}s ⇒ total=${compTotal}s):`);
+    console.log(`packets delivered *after* the cursor (d > threshold) — absolute thresholds (compDelay=${compDelay}s, +aprsAdditionalDelay=${aprsAdditionalDelay}s ⇒ total=${compTotal}s):`);
     const absoluteThresholds = [...new Set([...THRESHOLD_OFFSETS, compDelay, compTotal])].filter((t) => t >= 0).sort((a, b) => a - b);
-    printThresholdTable(sortedKeys, overall.buckets, total, absoluteThresholds, (t) => (t === compTotal ? ' ← compDelay + inorderAdditionalDelay (inorder cursor)' : t === compDelay ? ' ← compDelay (public clock)' : ''));
+    printThresholdTable(sortedKeys, overall.buckets, total, absoluteThresholds, (t) => (t === compTotal ? ' ← compDelay + aprsAdditionalDelay (display-path cursor)' : t === compDelay ? ' ← compDelay (public clock)' : ''));
 
     console.log('');
     console.log(`packets delivered *after* the cursor (d > threshold) — relative to official delay (compDelay + N, with N from 0..${THRESHOLD_OFFSETS[THRESHOLD_OFFSETS.length - 1]}s):`);
     const relativeThresholds = THRESHOLD_OFFSETS.map((n) => compDelay + n);
     printThresholdTable(sortedKeys, overall.buckets, total, relativeThresholds, (t) => {
         const n = t - compDelay;
-        return n === inorderAdditionalDelay ? ` ← compDelay + inorderAdditionalDelay (inorder cursor) [N=${n}]` : ` [N=${n}]`;
+        return n === aprsAdditionalDelay ? ` ← compDelay + aprsAdditionalDelay (display-path cursor) [N=${n}]` : ` [N=${n}]`;
     });
 
     console.log('');
     console.log(`stream out-of-order packets (t < max t seen for the same flarm, regardless of delay): ${overall.streamOOO} / ${total} (${((100 * overall.streamOOO) / total).toFixed(2)}%)`);
 }
 
-// Simulate the PMQ drop rule (drop a packet whose t ≤ aircraft.lastTime when
-// it arrives) per flarm, and characterise the shape of the resulting drops.
+// Simulate the PMQ drop rule per flarm, and characterise the shape of the
+// resulting drops on the display path.
 //
 // PMQ doesn't drop on delay magnitude — a flarm whose packets are uniformly
 // 25 s late still makes it through, because each packet's t > the previous
 // emitted t. Drops only happen when a *fresher* packet jumps lastTime past
 // timestamps that haven't yet been emitted (the late ones become victims).
 //
+// The display-path cushion is compDelay + aprsAdditionalDelay (the latter is
+// applied at aprs.ts:1248 inside PMQ before the BroadcastChannel emit that
+// feeds the websocket). The simulator below uses just compDelay as its cushion
+// and exposes --comp-delay to sweep larger values — so to compare "with the
+// current aprsAdditionalDelay" pass --comp-delay $((10 + 15)).
+// We model each packet's eligibility as:
+//
+//     eligibleAt(p) = max(p.writeTime, p.t + compDelay)
+//
+// — fresh packets (low d) are cushion-bound and end up sorted in t-order;
+// late packets (d > compDelay) are arrival-bound and slip *later* in emit
+// order than their timestamp would suggest, which is precisely how they
+// become drop victims. We then walk packets in (eligibleAt, t) order and
+// apply the drop rule (`emit iff t > lastTime`).
+//
 // What we report per flarm:
 //   - jumps:            count of fresh emits that bumped lastTime by > 1 s
 //   - longestJump(s):   the worst single jump (cursor moved this many seconds
 //                       in one step — those seconds of track are at risk)
-//   - drops:            packets PMQ would never forward (t ≤ lastTime on arrival)
-//   - clusters / max:   30-s-merged groupings of dropped timestamps. Few large
-//                       clusters → bursty / receiver-driven; many tiny ones →
-//                       scattered.
+//   - drops:            packets the simulator drops (t ≤ lastTime at emit)
+//   - dup:              subset of drops whose t was already emitted (a different
+//                       receiver relaying the same fix). Benign — PMQ's same-t
+//                       dedup at aprs.ts:1264-1298 picks one of them anyway.
+//                       drops − dup = unique fixes actually lost.
+//   - clusters / max:   30-s-merged groupings of *unique* dropped timestamps
+//                       (duplicates excluded — they don't create dead zones).
+//                       Few large clusters → bursty / receiver-driven; many
+//                       tiny ones → scattered.
 //   - longestEmitGap:   longest interval between consecutive *emitted*
 //                       timestamps. This is what the front-end track shows
 //                       as "no data" between two vertices.
@@ -230,6 +256,7 @@ interface BurstProfile {
     raw: number;
     emitted: number;
     dropped: number;
+    droppedDuplicates: number; // subset whose t was already emitted (relays of same fix)
     jumpCount: number;
     longestJumpSeconds: number;
     totalJumpedSeconds: number;
@@ -240,20 +267,26 @@ interface BurstProfile {
     longestDropClusterSeconds: number; // span of that cluster
 }
 
-interface BurstState {
-    prof: BurstProfile;
-    maxEmittedT: number;
-    emittedTs: number[]; // monotonic (only push when t > maxEmittedT)
-    rawTs: number[]; // need to sort at the end (arrival order ≠ t order)
-    droppedTs: number[]; // need to sort at the end
+interface Packet {
+    t: number;
+    eligibleAt: number; // max(writeTime, t + cushion)
 }
 
-async function burstStats(iter: AsyncIterable<any>) {
+interface BurstState {
+    prof: BurstProfile;
+    packets: Packet[]; // collect everything; sort by eligibleAt then t at finalisation
+}
+
+async function burstStats(iter: AsyncIterable<any>, compDelay: number) {
+    const cushion = compDelay; // sweep larger via --comp-delay; production cushion is compDelay + aprsAdditionalDelay
     const flarms = new Map<string, BurstState>();
 
     for await (const msg of iter) {
         const id = (msg.f ?? '??????') as string;
         const t = msg.t | 0;
+        const dVal = (msg.d ?? 0) | 0;
+        const writeTime = t + dVal;
+        const eligibleAt = Math.max(writeTime, t + cushion);
         let s = flarms.get(id);
         if (!s) {
             s = {
@@ -262,6 +295,7 @@ async function burstStats(iter: AsyncIterable<any>) {
                     raw: 0,
                     emitted: 0,
                     dropped: 0,
+                    droppedDuplicates: 0,
                     jumpCount: 0,
                     longestJumpSeconds: 0,
                     totalJumpedSeconds: 0,
@@ -271,29 +305,12 @@ async function burstStats(iter: AsyncIterable<any>) {
                     largestDropCluster: 0,
                     longestDropClusterSeconds: 0
                 },
-                maxEmittedT: -Infinity,
-                emittedTs: [],
-                rawTs: [],
-                droppedTs: []
+                packets: []
             };
             flarms.set(id, s);
         }
         s.prof.raw++;
-        s.rawTs.push(t);
-        if (t > s.maxEmittedT) {
-            const jump = s.maxEmittedT === -Infinity ? 0 : t - s.maxEmittedT;
-            if (jump > 1) {
-                s.prof.jumpCount++;
-                s.prof.totalJumpedSeconds += jump - 1;
-                if (jump > s.prof.longestJumpSeconds) s.prof.longestJumpSeconds = jump;
-            }
-            s.maxEmittedT = t;
-            s.prof.emitted++;
-            s.emittedTs.push(t);
-        } else {
-            s.prof.dropped++;
-            s.droppedTs.push(t);
-        }
+        s.packets.push({t, eligibleAt});
     }
 
     if (flarms.size === 0) {
@@ -301,12 +318,12 @@ async function burstStats(iter: AsyncIterable<any>) {
         return;
     }
 
-    for (const s of flarms.values()) finaliseBurstState(s);
+    for (const s of flarms.values()) simulateAndFinalise(s);
 
-    console.log(`PMQ drop simulation (per-flarm; arrival-order walk; drop iff t ≤ maxEmittedT)`);
+    console.log(`PMQ drop simulation (per-flarm; walk in (eligibleAt, t) order; cushion = compDelay = ${cushion}s; drop iff t ≤ maxEmittedT)`);
     console.log(`drop-cluster merge window = ${DROP_CLUSTER_MERGE_SEC}s; gaps in seconds`);
     console.log('');
-    console.log('flarm    raw   emit   drop  jumps  longestJump  totalJumped  clusters  biggestCluster(pkts/span)  longestEmitGap  longestRawGap');
+    console.log('flarm    raw   emit   drop    dup  jumps  longestJump  totalJumped  clusters  biggestCluster(pkts/span)  longestEmitGap  longestRawGap');
     const sorted = [...flarms.values()].sort((a, b) => (a.prof.flarmId < b.prof.flarmId ? -1 : 1));
     for (const s of sorted) printBurstRow(s.prof);
 
@@ -317,17 +334,51 @@ async function burstStats(iter: AsyncIterable<any>) {
     }
 }
 
-function finaliseBurstState(s: BurstState) {
-    s.rawTs.sort((a, b) => a - b);
-    s.droppedTs.sort((a, b) => a - b);
-    // emittedTs already monotonic (only pushed when t > maxEmittedT in arrival order).
-    s.prof.longestEmitGap = longestConsecutiveGap(s.emittedTs);
-    s.prof.longestRawGap = longestConsecutiveGap(s.rawTs);
+function simulateAndFinalise(s: BurstState) {
+    // Emit order: (eligibleAt, t). Stable on t within same eligibleAt so PMQ's
+    // intra-tick t-ordered emission is preserved.
+    s.packets.sort((a, b) => a.eligibleAt - b.eligibleAt || a.t - b.t);
+
+    let maxEmittedT = -Infinity;
+    const emittedSet = new Set<number>();
+    const emittedTs: number[] = [];
+    const droppedTs: number[] = [];
+
+    for (const pkt of s.packets) {
+        if (pkt.t > maxEmittedT) {
+            const jump = maxEmittedT === -Infinity ? 0 : pkt.t - maxEmittedT;
+            if (jump > 1) {
+                s.prof.jumpCount++;
+                s.prof.totalJumpedSeconds += jump - 1;
+                if (jump > s.prof.longestJumpSeconds) s.prof.longestJumpSeconds = jump;
+            }
+            maxEmittedT = pkt.t;
+            s.prof.emitted++;
+            emittedTs.push(pkt.t);
+            emittedSet.add(pkt.t);
+        } else {
+            s.prof.dropped++;
+            if (emittedSet.has(pkt.t)) {
+                s.prof.droppedDuplicates++;
+            } else {
+                droppedTs.push(pkt.t);
+            }
+        }
+    }
+
+    // emittedTs accumulates in emit order — for gap-on-the-track analysis we
+    // want consecutive timestamps in time order. Each emit advances
+    // maxEmittedT, so emittedTs is already monotonic — but we sort defensively.
+    emittedTs.sort((a, b) => a - b);
+    droppedTs.sort((a, b) => a - b);
+
+    s.prof.longestEmitGap = longestConsecutiveGap(emittedTs);
+    s.prof.longestRawGap = longestConsecutiveGap(s.packets.map((p) => p.t).sort((a, b) => a - b));
 
     let clusterStart = -1;
     let clusterEnd = -1;
     let clusterCount = 0;
-    for (const t of s.droppedTs) {
+    for (const t of droppedTs) {
         if (clusterStart < 0 || t - clusterEnd > DROP_CLUSTER_MERGE_SEC) {
             if (clusterStart >= 0) closeCluster(s.prof, clusterStart, clusterEnd, clusterCount);
             clusterStart = t;
@@ -364,6 +415,7 @@ function aggregateBurstProfiles(profiles: BurstProfile[]): BurstProfile {
         raw: 0,
         emitted: 0,
         dropped: 0,
+        droppedDuplicates: 0,
         jumpCount: 0,
         longestJumpSeconds: 0,
         totalJumpedSeconds: 0,
@@ -377,6 +429,7 @@ function aggregateBurstProfiles(profiles: BurstProfile[]): BurstProfile {
         agg.raw += p.raw;
         agg.emitted += p.emitted;
         agg.dropped += p.dropped;
+        agg.droppedDuplicates += p.droppedDuplicates;
         agg.jumpCount += p.jumpCount;
         agg.totalJumpedSeconds += p.totalJumpedSeconds;
         agg.dropClusters += p.dropClusters;
@@ -394,7 +447,7 @@ function aggregateBurstProfiles(profiles: BurstProfile[]): BurstProfile {
 function printBurstRow(p: BurstProfile) {
     const cluster = p.largestDropCluster > 0 ? `${p.largestDropCluster}/${p.longestDropClusterSeconds}s` : '-';
     console.log(
-        `${p.flarmId.padEnd(6)}  ${String(p.raw).padStart(5)}  ${String(p.emitted).padStart(5)}  ${String(p.dropped).padStart(5)}  ${String(p.jumpCount).padStart(5)}  ${String(p.longestJumpSeconds).padStart(11)}  ${String(p.totalJumpedSeconds).padStart(11)}  ${String(p.dropClusters).padStart(8)}  ${cluster.padStart(25)}  ${String(p.longestEmitGap).padStart(14)}  ${String(p.longestRawGap).padStart(13)}`
+        `${p.flarmId.padEnd(6)}  ${String(p.raw).padStart(5)}  ${String(p.emitted).padStart(5)}  ${String(p.dropped).padStart(5)}  ${String(p.droppedDuplicates).padStart(5)}  ${String(p.jumpCount).padStart(5)}  ${String(p.longestJumpSeconds).padStart(11)}  ${String(p.totalJumpedSeconds).padStart(11)}  ${String(p.dropClusters).padStart(8)}  ${cluster.padStart(25)}  ${String(p.longestEmitGap).padStart(14)}  ${String(p.longestRawGap).padStart(13)}`
     );
 }
 
