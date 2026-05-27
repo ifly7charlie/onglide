@@ -58,6 +58,7 @@ import buffer from '@turf/buffer';
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
 import {pilotsTrackLayer} from './pilotstracklayer';
+import {useInterpolatedNow} from './useInterpolatedNow';
 import {homeLocationLayer} from './homeLocationLayer';
 //import {turnpointLayer} from './turnpointlayer';
 
@@ -114,7 +115,12 @@ export default function MApp(props: {
     const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc, props.selectedHandicap));
     const startOpen = useSelector((state) => selectStartOpen(state, vc));
 
-    const pilotTrackLayer = pilotsTrackLayer(props, latestUpdate, options.sortKey, map2d, mapLight, options.fullPaths);
+    // Smooth the cursor between WebSocket updates; both the trail (TripsLayer
+    // currentTime) and the marker (IconLayer getPosition via selectAllPositions)
+    // read this so they stay in sync.
+    const liveNow = useInterpolatedNow(latestUpdate, props.replayTime);
+
+    const pilotTrackLayer = pilotsTrackLayer(props, liveNow, options.sortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
     const router = useRouter();
@@ -545,7 +551,7 @@ export default function MApp(props: {
 
     const onClick = useCallback((a, _b) => measure.click(a), [measure.enabled]);
 
-    const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime ?? latestUpdate);
+    const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime ?? liveNow);
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);

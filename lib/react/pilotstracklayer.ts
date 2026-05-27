@@ -32,7 +32,7 @@ const c = {
 
 export function pilotsTrackLayer(
     props: {selectedCompno: Compno; setSelectedCompno: Function; replayTime: Epoch}, //
-    latestUpdate: Epoch,
+    liveNow: Epoch,
     sortKey: SortKey,
     map2d: boolean,
     mapLight: boolean,
@@ -59,7 +59,7 @@ export function pilotsTrackLayer(
         // present; the anchor arrays remain authoritative for scoring.
         const s = p.smoothed ?? p;
 
-        const currentTime = props.replayTime || latestUpdate;
+        const currentTime = props.replayTime || liveNow;
         const clipStartAt = (startTimes[compno]?.startUtc ?? Infinity) - 30;
 
         // For all but selected gliders just show most recent track
@@ -79,7 +79,6 @@ export function pilotsTrackLayer(
                 length: s.segmentIndex, // note this is not segmentIndex-1 (segmentIndex is one we are in, indices[segmentIndex] is defined)
                 startIndices: s.indices,
                 numberOfPoints: s.posIndex,
-                t: s.t,
                 v: s.climbRate,
                 g: s.agl,
                 p: s.positions,

@@ -19,18 +19,19 @@ const aheight = (v: number) => colourMaps[clamp(Math.log(Math.max(v >> 5, 0)))];
 // the raw anchor arrays otherwise. RGB is computed per-vertex from the
 // (interpolated) agl/climb so colour gradients stay continuous along
 // smoothed sections.
-function vhSource(glider: DisplayPilotTrackData): {t: Uint32Array; agl: Int16Array; climbRate: Int8Array; posIndex: number} {
-    return glider.deck.smoothed ?? glider.deck;
-}
-
+//
+// `tr` is Float32 fractional seconds-from-baseline (referenceDate). Smoothed
+// sources already store t in those units; raw fallback is epoch-seconds and
+// gets baseline-subtracted here.
 export function initaliseVH(glider: DisplayPilotTrackData): void {
-    const src = vhSource(glider);
+    const smoothed = glider.deck.smoothed;
+    const src = smoothed ?? glider.deck;
     const len = src.posIndex;
-    const tr = new Uint32Array(len);
+    const tr = new Float32Array(len);
     const climbArr = new Uint8Array(len * 3);
     const aheightArr = new Uint8Array(len * 3);
     for (let i = 0; i < len; i++) {
-        tr[i] = src.t[i] - referenceDate;
+        tr[i] = smoothed ? src.t[i] : src.t[i] - referenceDate;
         climbArr.set(climb(src.climbRate[i]), i * 3);
         aheightArr.set(aheight(src.agl[i]), i * 3);
     }

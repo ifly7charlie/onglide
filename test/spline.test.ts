@@ -1,7 +1,16 @@
 import {describe, test, expect} from 'vitest';
 import {buildSmoothedDeck, extendSmoothedDeck} from '../lib/flightprocessing/spline';
 import {getEmptyDeck, generateIndices} from '../lib/flightprocessing/incremental';
+import {referenceDate, setReferenceDate} from '../lib/flightprocessing/referenceDate';
 import {Compno, DeckData, PilotTrackData} from '../lib/types';
+
+// SmoothedDeck.t is Float32 fractional-seconds-from-referenceDate. At
+// production scale (anchor t ≈ epoch-seconds, referenceDate ~10 days earlier)
+// the subtraction lands in ~0–864000 where Float32 gives ~0.06s precision.
+// Tests below use small anchor t values (1000-1200ish), so we anchor
+// referenceDate near them — otherwise Float32 precision at -1.7e9 would
+// collapse the inner-vertex t values and break monotonicity assertions.
+setReferenceDate(1000);
 
 // Build a DeckData by walking a list of synthetic anchors and stuffing
 // them into the raw arrays directly (avoids exercising mergePoint's gap
@@ -57,14 +66,58 @@ describe('spline', () => {
         expect(lat).toBeLessThan(chordLat);
     });
 
-    test('bracket dt >= SPLINE_DENSE_DT_S emits no inner vertices', () => {
+    test('bracket dt > gapLength produces a segment break (no inner vertices, no chord across the break)', () => {
+        // 120s gap → far past gapLength=60 → isSegmentBreak triggers and
+        // the bracket is treated as a fresh segment start (no Hermite, no
+        // chord across the gap from the prior anchor).
         const deck = makeDeck([
             {t: 1000, lat: 50, lng: 0, alt: 1000, bearing: 90, speed: 80},
-            {t: 1025, lat: 50.002, lng: 0.002, alt: 1020, bearing: 0, speed: 80}
+            {t: 1120, lat: 50.002, lng: 0.002, alt: 1020, bearing: 0, speed: 80}
         ]);
         buildSmoothedDeck(deck);
-        // 25s > DENSE_DT_S=20s → anchor-only.
         expect(deck.smoothed!.posIndex).toBe(2);
+        expect(deck.smoothed!.segmentIndex).toBe(2);
+    });
+
+    test('bracket dt in [SPLINE_TANGENT_CAP_S, gapLength) still emits inner vertices, but tangent magnitude is capped', () => {
+        // 30s bracket: above the tangent cap (20s) but below gapLength (60s).
+        // Inner vertices ARE emitted (unlike the old behaviour where this
+        // would have been chord-only); the curve respects the bearings but
+        // can't deviate further from the chord than ~20s × velocity at each
+        // end. Sanity check: at u=0.5 the inner vertex sits closer to the
+        // chord midpoint than a full-tangent Hermite would have placed it.
+        const deck = makeDeck([
+            {t: 1000, lat: 50, lng: 0, alt: 1000, bearing: 90, speed: 80},
+            {t: 1030, lat: 50.003, lng: 0.003, alt: 1030, bearing: 0, speed: 80}
+        ]);
+        buildSmoothedDeck(deck);
+        const s = deck.smoothed!;
+        // Expect at least one inner vertex.
+        expect(s.posIndex).toBeGreaterThan(2);
+        // Tangent-cap sanity: a non-capped Hermite at u=0.5 with these
+        // tangents would put the curve substantially off the chord; the
+        // capped version stays within a 20s × 80 kph ≈ 440 m envelope from
+        // the chord. Convert that into degrees: ~0.004° at this latitude.
+        // Pick the middle inner vertex by time and verify its offset from
+        // the chord midpoint is below the envelope.
+        let mid = -1;
+        let bestDt = Infinity;
+        const chordT = (1000 + 1030) / 2 - referenceDate;
+        for (let i = 0; i < s.posIndex; i++) {
+            const dt = Math.abs(s.t[i] - chordT);
+            if (dt < bestDt) {
+                bestDt = dt;
+                mid = i;
+            }
+        }
+        expect(mid).toBeGreaterThan(0);
+        const midLng = s.positions[mid * 3];
+        const midLat = s.positions[mid * 3 + 1];
+        const chordLng = (0 + 0.003) / 2;
+        const chordLat = (50 + 50.003) / 2;
+        const offset = Math.hypot(midLng - chordLng, midLat - chordLat);
+        // Envelope corresponds to ~440 m at this latitude.
+        expect(offset).toBeLessThan(0.005);
     });
 
     test('bracket dt < SPLINE_SUB_MIN_DT_S emits no inner vertices', () => {
@@ -122,8 +175,9 @@ describe('spline', () => {
         // The simplest check: walk smoothed.anchorIndex and confirm we
         // never see anchorIndex=2 except for anchor 2 itself.
         let interpolatedFromAnchor2 = 0;
+        const anchor2T = deck.t[2] - referenceDate;
         for (let i = 0; i < s.posIndex; i++) {
-            if (s.anchorIndex[i] === 2 && s.t[i] !== deck.t[2]) interpolatedFromAnchor2++;
+            if (s.anchorIndex[i] === 2 && Math.abs(s.t[i] - anchor2T) > 1e-3) interpolatedFromAnchor2++;
         }
         expect(interpolatedFromAnchor2).toBe(0);
     });
@@ -190,5 +244,30 @@ describe('spline', () => {
         const deck = makeDeck([{t: 1000, lat: 50, lng: 0, alt: 1000}]);
         buildSmoothedDeck(deck);
         expect(deck.smoothed!.posIndex).toBe(1);
+    });
+
+    test('inner vertices carry sub-second timing instead of rounded seconds', () => {
+        // 10s bracket → at least one inner vertex with fractional t. With
+        // SPLINE_SUB_TARGET_DT_S=2 the loop targets N=5 inner positions, so
+        // u values 1/5, 2/5, 3/5, 4/5 produce inner t deltas 2, 4, 6, 8s
+        // from prevAnchor — all integer, *unhelpful for this test*. Use a
+        // 5s bracket → N=3 → inner u in {1/3, 2/3} → deltas 5/3, 10/3 →
+        // baseline-relative t values are non-integer.
+        const deck = makeDeck([
+            {t: 1000, lat: 50, lng: 0, alt: 1000, bearing: 90, speed: 80},
+            {t: 1005, lat: 50.0005, lng: 0.0005, alt: 1005, bearing: 0, speed: 80}
+        ]);
+        buildSmoothedDeck(deck);
+        const s = deck.smoothed!;
+        expect(s.posIndex).toBeGreaterThan(2);
+        const anchor0T = 1000 - referenceDate;
+        // Inner vertices must have non-integer deltas from the anchor — the
+        // old Math.round would have collapsed these to whole seconds.
+        let sawFractional = false;
+        for (let i = 1; i < s.posIndex - 1; i++) {
+            const delta = s.t[i] - anchor0T;
+            if (Math.abs(delta - Math.round(delta)) > 0.01) sawFractional = true;
+        }
+        expect(sawFractional).toBe(true);
     });
 });

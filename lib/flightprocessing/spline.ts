@@ -1,6 +1,7 @@
-import {gapLength, SPLINE_DENSE_DT_S, SPLINE_SUB_MIN_DT_S, SPLINE_SUB_TARGET_DT_S, SPLINE_SUB_MAX, deckPointIncrement, deckSegmentIncrement} from '../constants';
+import {gapLength, SPLINE_TANGENT_CAP_S, SPLINE_SUB_MIN_DT_S, SPLINE_SUB_TARGET_DT_S, SPLINE_SUB_MAX, deckPointIncrement, deckSegmentIncrement} from '../constants';
 import {DeckData, SmoothedDeck} from '../types';
 import {resize} from './incremental';
+import {referenceDate} from './referenceDate';
 
 // Build a Hermite-subdivided sidecar from a DeckData's anchor arrays.
 //
@@ -10,16 +11,19 @@ import {resize} from './incremental';
 // the bracket dt so the curve enters/leaves at the reported physical
 // speed.
 //
-// Don't-fabricate contract: between anchors with dt >= SPLINE_DENSE_DT_S
-// (typically 20s), no inner vertices are emitted — the renderer shows a
-// visible gap rather than a fabricated arc spanning unknown territory.
-// For dt < SPLINE_SUB_MIN_DT_S (4s) a straight chord between anchors is
-// already smooth at display zoom, so no inner vertices either.
-//
-// Segment handling: when the anchor-side deck has a segment boundary
-// between two consecutive anchors (deck.indices contains the higher
-// anchor index), the smoothed sidecar mirrors that break and never
-// emits an arc across it.
+// Don't-fabricate contract is layered:
+//   - dt < SPLINE_SUB_MIN_DT_S (4s): no subdivision needed — a straight
+//     chord between anchors is already smooth at display zoom.
+//   - SPLINE_SUB_MIN_DT_S <= dt: emit inner vertices, but cap the tangent
+//     scaling at SPLINE_TANGENT_CAP_S (20s). Below the cap, the Hermite
+//     follows the reported (bearing, speed) tightly. Above it, the tangent
+//     term saturates and the curve can deviate from the chord by at most
+//     ~SPLINE_TANGENT_CAP_S × velocity at each end — enough to round
+//     thermal-exit corners using the reported bearings without inventing
+//     long arcs through coverage holes.
+//   - dt >= gapLength: the deck-side segment break (isSegmentBreak) cuts
+//     the line entirely — no inner vertices and no chord either, the
+//     renderer shows a visible gap.
 
 const METRES_PER_DEG_LAT = 111320;
 const DEG2RAD = Math.PI / 180;
@@ -44,7 +48,7 @@ function emptySmoothed(initialCapacity: number): SmoothedDeck {
         positions: new Float32Array(initialCapacity * 3),
         indices: new Uint32Array(deckSegmentIncrement),
         agl: new Int16Array(initialCapacity),
-        t: new Uint32Array(initialCapacity),
+        t: new Float32Array(initialCapacity),
         climbRate: new Int8Array(initialCapacity),
         anchorIndex: new Uint32Array(initialCapacity),
         posIndex: 0,
@@ -56,7 +60,7 @@ function ensureCapacity(s: SmoothedDeck, needed: number): void {
     if (needed <= s.t.length) return;
     const target = Math.max(needed, s.t.length + deckPointIncrement);
     s.positions = resize(Float32Array, s.positions, target * 3);
-    s.t = resize(Uint32Array, s.t, target);
+    s.t = resize(Float32Array, s.t, target);
     s.agl = resize(Int16Array, s.agl, target);
     s.climbRate = resize(Int8Array, s.climbRate, target);
     s.anchorIndex = resize(Uint32Array, s.anchorIndex, target);
@@ -96,7 +100,7 @@ function emitAnchor(deck: DeckData, s: SmoothedDeck, anchor: number, prevAnchor:
     if (prevAnchor < 0) {
         // First anchor — emit as-is.
         ensureCapacity(s, s.posIndex + 1);
-        pushVertex(s, deck.positions[anchor * 3], deck.positions[anchor * 3 + 1], deck.positions[anchor * 3 + 2], deck.agl[anchor], deck.climbRate[anchor], deck.t[anchor], anchor);
+        pushVertex(s, deck.positions[anchor * 3], deck.positions[anchor * 3 + 1], deck.positions[anchor * 3 + 2], deck.agl[anchor], deck.climbRate[anchor], deck.t[anchor] - referenceDate, anchor);
         return s.posIndex;
     }
 
@@ -106,9 +110,13 @@ function emitAnchor(deck: DeckData, s: SmoothedDeck, anchor: number, prevAnchor:
     const sp0 = deck.speed[prevAnchor];
     const sp1 = deck.speed[anchor];
 
-    // Subdivision gate: dense bracket, both ends have valid bearing/speed,
-    // and dt is in the "interesting" window.
-    const subdividable = dt >= SPLINE_SUB_MIN_DT_S && dt < SPLINE_DENSE_DT_S && b0 >= 0 && b1 >= 0 && sp0 > 0 && sp1 > 0;
+    // Subdivision gate: bracket is long enough that a chord would have a
+    // visible corner, and both ends have valid bearing/speed for the
+    // Hermite tangents. The previous version also required dt below
+    // SPLINE_TANGENT_CAP_S — that's now handled by clamping the tangent
+    // magnitude inside the loop instead, so 20-60s brackets still get
+    // intermediate vertices (just with bounded deviation from the chord).
+    const subdividable = dt >= SPLINE_SUB_MIN_DT_S && b0 >= 0 && b1 >= 0 && sp0 > 0 && sp1 > 0;
 
     if (subdividable) {
         const lat0 = deck.positions[prevAnchor * 3 + 1];
@@ -124,6 +132,11 @@ function emitAnchor(deck: DeckData, s: SmoothedDeck, anchor: number, prevAnchor:
         // Vertical velocity: same value at both ends (mean climb).
         const vAlt = (alt1 - alt0) / dt;
         const climb = deck.climbRate[anchor];
+        // Tangent-scaling term. For short brackets equals dt (natural
+        // Hermite). For long brackets saturates so the tangent's reach into
+        // the curve stays bounded — preventing fabricated arcs through
+        // coverage holes while still rounding corners at the endpoints.
+        const tangentDt = Math.min(dt, SPLINE_TANGENT_CAP_S);
         const N = Math.min(SPLINE_SUB_MAX, Math.max(1, Math.ceil(dt / SPLINE_SUB_TARGET_DT_S)));
         ensureCapacity(s, s.posIndex + N);
         for (let i = 1; i < N; i++) {
@@ -134,11 +147,13 @@ function emitAnchor(deck: DeckData, s: SmoothedDeck, anchor: number, prevAnchor:
             const h10 = u3 - 2 * u2 + u;
             const h01 = -2 * u3 + 3 * u2;
             const h11 = u3 - u2;
-            const lng = h00 * lng0 + h10 * dt * v0.vLng + h01 * lng1 + h11 * dt * v1.vLng;
-            const lat = h00 * lat0 + h10 * dt * v0.vLat + h01 * lat1 + h11 * dt * v1.vLat;
-            const alt = h00 * alt0 + h10 * dt * vAlt + h01 * alt1 + h11 * dt * vAlt;
+            const lng = h00 * lng0 + h10 * tangentDt * v0.vLng + h01 * lng1 + h11 * tangentDt * v1.vLng;
+            const lat = h00 * lat0 + h10 * tangentDt * v0.vLat + h01 * lat1 + h11 * tangentDt * v1.vLat;
+            const alt = h00 * alt0 + h10 * tangentDt * vAlt + h01 * alt1 + h11 * tangentDt * vAlt;
             const agl = Math.round(agl0 + (agl1 - agl0) * u);
-            const t = Math.round(deck.t[prevAnchor] + u * dt);
+            // Fractional seconds-from-baseline. Float32 SmoothedDeck.t carries
+            // the sub-second portion that previously got Math.round'd away.
+            const t = deck.t[prevAnchor] + u * dt - referenceDate;
             pushVertex(s, lng, lat, alt, agl, climb, t, anchor);
         }
     } else {
@@ -146,7 +161,7 @@ function emitAnchor(deck: DeckData, s: SmoothedDeck, anchor: number, prevAnchor:
     }
 
     // Always emit the anchor itself.
-    pushVertex(s, deck.positions[anchor * 3], deck.positions[anchor * 3 + 1], deck.positions[anchor * 3 + 2], deck.agl[anchor], deck.climbRate[anchor], deck.t[anchor], anchor);
+    pushVertex(s, deck.positions[anchor * 3], deck.positions[anchor * 3 + 1], deck.positions[anchor * 3 + 2], deck.agl[anchor], deck.climbRate[anchor], deck.t[anchor] - referenceDate, anchor);
     return s.posIndex;
 }
 

@@ -327,7 +327,11 @@ export interface SmoothedDeck {
     positions: Float32Array;
     indices?: Uint32Array;
     agl: Int16Array;
-    t: Uint32Array;
+    // Display-side time: fractional seconds since referenceDate. Float32 has
+    // ~0.06s precision at the 10-day baseline-relative scale, plenty for the
+    // TripsLayer animation cursor. Picking adds referenceDate back to recover
+    // epoch-seconds (lib/react/ogntripslayer.ts).
+    t: Float32Array;
     climbRate: Int8Array;
     // For each smoothed vertex, the index of the anchor it is emitted FOR
     // (the bracket's END anchor — inner vertices share the end anchor's
@@ -374,7 +378,9 @@ export type SortKey =
 
 export interface DisplayPilotTrackData extends PilotTrackData {
     deckAdditional: {
-        tr: Uint32Array;
+        // Float32 fractional seconds-from-referenceDate. Built in
+        // lib/react/deckvh.ts; passed straight to TripsLayer's getTimestamps.
+        tr: Float32Array;
         climb: Uint8Array;
         aheight: Uint8Array;
     };

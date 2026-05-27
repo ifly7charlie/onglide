@@ -38,6 +38,7 @@ import {buildSmoothedDeck, extendSmoothedDeck} from '../flightprocessing/spline'
 
 import {sortedIndexNumber} from '../util/binarySearch';
 import {initaliseVH} from '../react/deckvh';
+import {referenceDate} from '../flightprocessing/referenceDate';
 
 interface TracksSliceState {
     className: ClassName;
@@ -143,6 +144,45 @@ function findDisplayIndex(deck: DeckData, t: Epoch | undefined) {
     return deck.t[nextPoint] > t && nextPoint > 0 ? nextPoint - 1 : nextPoint;
 }
 
+// Position at fractional t, interpolated from the Hermite-smoothed sidecar
+// when present (so the marker follows the same curve as the trail), or
+// linearly between raw anchors otherwise. Snaps to the last vertex past
+// the end. Returns a fresh tuple suitable for an IconLayer getPosition.
+function interpolatedPositionAt(deck: DeckData, t: Epoch | undefined): [number, number, number] {
+    const smoothed = deck.smoothed;
+    if (smoothed && smoothed.posIndex > 1) {
+        const sLen = smoothed.posIndex;
+        // smoothed.t is Float32 fractional seconds-from-baseline
+        const tr = (t ?? Infinity) - referenceDate;
+        if (tr >= smoothed.t[sLen - 1]) {
+            const i = sLen - 1;
+            return [smoothed.positions[i * 3], smoothed.positions[i * 3 + 1], smoothed.positions[i * 3 + 2]];
+        }
+        const next = sortedIndexNumber(smoothed.t.subarray(0, sLen), tr);
+        const prev = next > 0 ? next - 1 : 0;
+        const dt = smoothed.t[next] - smoothed.t[prev];
+        const u = dt > 0 ? (tr - smoothed.t[prev]) / dt : 0;
+        return [
+            smoothed.positions[prev * 3] + u * (smoothed.positions[next * 3] - smoothed.positions[prev * 3]),
+            smoothed.positions[prev * 3 + 1] + u * (smoothed.positions[next * 3 + 1] - smoothed.positions[prev * 3 + 1]),
+            smoothed.positions[prev * 3 + 2] + u * (smoothed.positions[next * 3 + 2] - smoothed.positions[prev * 3 + 2])
+        ];
+    }
+    // Raw fallback — linear between integer-second anchors.
+    const idx = findDisplayIndex(deck, t);
+    const next = idx + 1;
+    if (next >= deck.posIndex || t === undefined) {
+        return [deck.positions[idx * 3], deck.positions[idx * 3 + 1], deck.positions[idx * 3 + 2]];
+    }
+    const dt = deck.t[next] - deck.t[idx];
+    const u = dt > 0 ? (t - deck.t[idx]) / dt : 0;
+    return [
+        deck.positions[idx * 3] + u * (deck.positions[next * 3] - deck.positions[idx * 3]),
+        deck.positions[idx * 3 + 1] + u * (deck.positions[next * 3 + 1] - deck.positions[idx * 3 + 1]),
+        deck.positions[idx * 3 + 2] + u * (deck.positions[next * 3 + 2] - deck.positions[idx * 3 + 2])
+    ];
+}
+
 // Data for vario display
 const _selectAllAverageClimb = createSelector(
     [
@@ -189,7 +229,7 @@ const _selectAllPositions = createSelector(
                 g: deck.agl[displayIndex],
                 a: deck.positions[displayIndex * 3 + 2],
                 t: deck.t[displayIndex],
-                position: [...deck.positions.subarray(displayIndex * 3, displayIndex * 3 + 3)]
+                position: interpolatedPositionAt(deck, t)
             };
         });
     }

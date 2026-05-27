@@ -11,16 +11,26 @@ export const gapLength = 60;
 // Spline (display-side Hermite smoother) thresholds. See
 // lib/flightprocessing/spline.ts.
 //
-// SPLINE_DENSE_DT_S: bracket dt at or above this gets NO inner vertices —
-// the don't-fabricate contract (the renderer must show a visible gap).
-// SPLINE_SUB_MIN_DT_S: brackets below this are already smooth as straight
-// chords at display zoom, no need to subdivide.
-// SPLINE_SUB_TARGET_DT_S: aim for one inner vertex every ~2s of bracket dt.
-// SPLINE_SUB_MAX: clamp on inner-vertex count per bracket (safety bound on
-// sidecar memory).
-export const SPLINE_DENSE_DT_S = 20;
-export const SPLINE_SUB_MIN_DT_S = 4;
-export const SPLINE_SUB_TARGET_DT_S = 2;
+// SPLINE_TANGENT_CAP_S: cap on the bracket-dt term scaling each anchor's
+// velocity tangent in the Hermite curve. For bracket dt below this, the
+// Hermite uses the natural `dt × v` tangent magnitude and the curve
+// follows the reported bearings tightly (the "thermal looks like a
+// thermal" win). For dt above this, the tangent term saturates so the
+// curve can't deviate arbitrarily far from the chord — long brackets
+// round their endpoints but stay close to a straight line through the
+// middle. The hard segment-break (no line drawn at all) is gapLength.
+// SPLINE_SUB_MIN_DT_S: brackets below this aren't subdivided. Set to
+// 0.5 so 1Hz input always subdivides — anything denser is already at
+// display resolution.
+// SPLINE_SUB_TARGET_DT_S: target output vertex spacing. 0.5 = 2Hz output
+// — drives sub-second cursor sweep on dense input. Lower for finer
+// (0.2 = 5Hz, 0.1 = 10Hz).
+// SPLINE_SUB_MAX: clamp on inner-vertex count per bracket. Caps the worst
+// case (long coverage gaps) so memory stays bounded at SPLINE_SUB_MAX ×
+// anchor count.
+export const SPLINE_TANGENT_CAP_S = 20;
+export const SPLINE_SUB_MIN_DT_S = 0.5;
+export const SPLINE_SUB_TARGET_DT_S = 0.5;
 export const SPLINE_SUB_MAX = 10;
 
 // How long till pilot is considered offline
