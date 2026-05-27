@@ -432,6 +432,13 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
     // recorded). Without them the start-scan window is computed only
     // over finishers, and the rest of the pipeline never sees the landout
     // pilot's flarmid as a candidate.
+    //
+    // Pre-09:00 local starts are treated as unknown — scoring occasionally
+    // emits a bogus early-morning pr.start (often near 00:00) when the
+    // upstream scorer hasn't reconciled the day yet. Including those produces
+    // delta_start values in the tens of thousands of seconds that overflow
+    // the trackerhistory column and contaminate the score map. Soaring tasks
+    // don't start before 09:00 local in practice, so this filter is safe.
     const rows = await mysql.query<
         {
             compno: Compno;
@@ -460,6 +467,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
          WHERE pr.class    = ${className}
            AND pr.datecode = ${datecode}
            AND pr.start    IS NOT NULL AND pr.start  <> '00:00:00'
+           AND pr.start    >= '09:00:00'
     `);
     return rows.map((r) => ({
         compno: r.compno,
