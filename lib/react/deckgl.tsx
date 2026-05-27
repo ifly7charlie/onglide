@@ -27,9 +27,11 @@ import {TaskUp} from '../types';
 import {distanceLineLabelStyle} from './distanceLine';
 
 import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
-import {selectPilotScore, selectAllScores, selectOptimalGrid} from '../redux/scoresSlice';
-import {selectPilotPosition, selectLatestUpdate} from '../redux/tracksSlice';
+import {selectPilotScore, selectAllScores, selectOptimalGrid, selectAllTimes} from '../redux/scoresSlice';
+import {selectPilotPosition, selectLatestUpdate, selectAllPositions} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
+import {useStore} from 'react-redux';
+import type {RootState} from '../redux/store';
 import {ErrorBoundary} from 'react-error-boundary';
 
 import {assembleHullLine} from './hullLine';
@@ -38,10 +40,15 @@ import {useOptimalGridLayers, OptimalGridSources} from './optimalGridLayers';
 function DeckGLOverlay(
     props: MapboxOverlayProps & {
         interleaved?: boolean;
+        overlayRef?: React.MutableRefObject<MapboxOverlay | null>;
     }
 ) {
-    const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(props));
-    overlay.setProps(props);
+    const {overlayRef, ...overlayProps} = props;
+    const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(overlayProps));
+    overlay.setProps(overlayProps);
+    // Expose the overlay to the parent so the RAF cursor loop can call
+    // overlay.setProps imperatively without going through React render.
+    if (overlayRef) overlayRef.current = overlay;
     return null;
 }
 
@@ -57,9 +64,54 @@ import buffer from '@turf/buffer';
 
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
-import {pilotsTrackLayer} from './pilotstracklayer';
-import {useInterpolatedNow} from './useInterpolatedNow';
+import {pilotsTrackLayer, computeTripsFiltering} from './pilotstracklayer';
+import {OgnTripsLayer} from './ogntripslayer';
 import {homeLocationLayer} from './homeLocationLayer';
+
+// Imperative cursor animation. Driven from a useEffect-owned RAF loop that
+// updates only the time-sensitive layers via overlay.setProps — bypasses the
+// React reconciliation + MapboxOverlay full-array diff that would otherwise
+// fire on every tick. Knobs:
+//   DISPLAY_LAG_S    cursor sits this far behind latestUpdate so incoming
+//                    websocket updates land ahead of the cursor (no snap).
+//   TICK_INTERVAL_MS minimum wall time between cursor advances; throttles
+//                    the MapLibre repaint rate.
+//   MAX_CATCHUP_S    snap forward if the cursor falls badly behind (tab
+//                    backgrounded for a long time).
+const DISPLAY_LAG_S = 10;
+const TICK_INTERVAL_MS = 1000 / 5; // 5 Hz
+const MAX_CATCHUP_S = 30;
+
+// Walks the overlay's current layer array, clones the time-sensitive layers
+// with new currentTime / data, leaves the rest as same-reference (deck.gl
+// reconciliation early-outs on identical refs). Called from a RAF callback —
+// no React reconciliation happens.
+function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow: Epoch, fullPaths: any, selectedCompno: Compno) {
+    const props = (overlay as any).props;
+    const layers = props?.layers;
+    if (!Array.isArray(layers) || layers.length === 0) return;
+
+    // selectAllTimes returns an empty object for live mode (t = undefined);
+    // pass undefined here for the same reason.
+    const startTimes = selectAllTimes(state, undefined);
+    let positionsForLabels: any = null;
+
+    const updated = layers.map((layer: any) => {
+        if (!layer) return layer;
+        if (layer instanceof OgnTripsLayer) {
+            const compno = (layer.props as any).compno as Compno;
+            const selected = compno === selectedCompno;
+            const clipStartAt = (startTimes[compno]?.startUtc ?? Infinity) - 30;
+            return layer.clone(computeTripsFiltering(liveNow, clipStartAt, fullPaths, selected));
+        }
+        if (layer.id === 'labels') {
+            if (!positionsForLabels) positionsForLabels = selectAllPositions(state, liveNow);
+            return layer.clone({data: positionsForLabels});
+        }
+        return layer;
+    });
+    overlay.setProps({layers: updated});
+}
 //import {turnpointLayer} from './turnpointlayer';
 
 import {registerMapIcons} from './mapIcons';
@@ -115,10 +167,69 @@ export default function MApp(props: {
     const taskGeoJSON = useSelector((state) => selectTaskGeoJSON(state, vc, props.selectedHandicap));
     const startOpen = useSelector((state) => selectStartOpen(state, vc));
 
-    // Smooth the cursor between WebSocket updates; both the trail (TripsLayer
-    // currentTime) and the marker (IconLayer getPosition via selectAllPositions)
-    // read this so they stay in sync.
-    const liveNow = useInterpolatedNow(latestUpdate, props.replayTime);
+    // Imperative cursor state. Updated by the RAF effect below (no React
+    // re-render); read here at render time so any layer rebuild caused by
+    // real data changes starts from the current cursor position.
+    const overlayRef = useRef<MapboxOverlay | null>(null);
+    const store = useStore<RootState>();
+    const liveStateRef = useRef<{display: number; lastWallMs: number; target: number}>({display: 0, lastWallMs: 0, target: 0});
+
+    // Track latestUpdate (integer-second WebSocket cadence) → shift the
+    // RAF target without restarting the loop. First-time bootstrap seeds
+    // the display value too so the cursor doesn't jump on the first tick.
+    useEffect(() => {
+        if (!latestUpdate) return;
+        const state = liveStateRef.current;
+        state.target = latestUpdate - DISPLAY_LAG_S;
+        if (state.display === 0) {
+            state.display = state.target;
+            state.lastWallMs = performance.now();
+        }
+    }, [latestUpdate]);
+
+    // Imperative RAF loop. Throttled to TICK_INTERVAL_MS, advances the cursor
+    // at wall-clock rate (capped to target), then clones only the time-sensitive
+    // layers and calls overlay.setProps directly — no React render, no full
+    // layer-array diff.
+    useEffect(() => {
+        if (props.replayTime) return; // replay drives currentTime exactly; no RAF needed
+        let raf = 0;
+        let lastTickMs = 0;
+        const loop = () => {
+            if (!document.hidden && overlayRef.current) {
+                const wallNow = performance.now();
+                if (wallNow - lastTickMs >= TICK_INTERVAL_MS) {
+                    lastTickMs = wallNow;
+                    const state = liveStateRef.current;
+                    if (state.target) {
+                        const dt = (wallNow - state.lastWallMs) / 1000;
+                        state.lastWallMs = wallNow;
+                        let next = state.display + dt;
+                        if (next > state.target) next = state.target;
+                        if (state.target - next > MAX_CATCHUP_S) next = state.target;
+                        state.display = next;
+                        applyCursorAnimation(overlayRef.current, store.getState(), next as Epoch, options.fullPaths, selectedCompno);
+                    }
+                }
+            }
+            raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+
+        const onVisibility = () => {
+            if (!document.hidden) liveStateRef.current.lastWallMs = performance.now();
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+
+        return () => {
+            cancelAnimationFrame(raf);
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
+    }, [props.replayTime, options.fullPaths, selectedCompno, store]);
+
+    // Initial cursor value for React-driven layer creation. The RAF loop
+    // overrides this within ~100ms; this just avoids a one-frame stale flash.
+    const liveNow = (liveStateRef.current.display || latestUpdate - DISPLAY_LAG_S) as Epoch;
 
     const pilotTrackLayer = pilotsTrackLayer(props, liveNow, options.sortKey, map2d, mapLight, options.fullPaths);
 
@@ -699,6 +810,7 @@ export default function MApp(props: {
                     onDragStart={onDragStart}
                     layers={valid && !unmounting ? ([...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
                     interleaved={true}
+                    overlayRef={overlayRef}
                 />
                 {debouncedScore && options.constructionLines && debouncedScore.scoredGeoJSON ? (
                     <>

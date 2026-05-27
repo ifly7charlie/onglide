@@ -18,6 +18,18 @@ import {referenceDate} from '../flightprocessing/referenceDate';
 
 const complexColours = {height: true, aheight: true, climb: true};
 
+// Time-derived TripsLayer props for one pilot. Recomputed both at React
+// render time (when data changes) and from the RAF loop in deckgl.tsx
+// (when only the cursor time changes — same arithmetic, no React work).
+export function computeTripsFiltering(currentTime: number, clipStartAt: number, fullPaths: PathLength, selected: boolean) {
+    return {
+        currentTime: currentTime - referenceDate - 2,
+        fadeTrail: fullPaths == PathLength.recent || (fullPaths == PathLength.selectedFull && !selected) || currentTime <= clipStartAt,
+        trailLength: recentTrackLength,
+        startTime: currentTime > clipStartAt ? clipStartAt - 5 - referenceDate : 0
+    };
+}
+
 const selectedColour = [255, 0, 255];
 const c = {
     light: {
@@ -62,13 +74,10 @@ export function pilotsTrackLayer(
         const currentTime = props.replayTime || liveNow;
         const clipStartAt = (startTimes[compno]?.startUtc ?? Infinity) - 30;
 
-        // For all but selected gliders just show most recent track
-        const tripsFiltering = {
-            currentTime: currentTime - referenceDate - 2,
-            fadeTrail: fullPaths == PathLength.recent || (fullPaths == PathLength.selectedFull && !selected) || currentTime <= clipStartAt,
-            trailLength: recentTrackLength,
-            startTime: currentTime > clipStartAt ? clipStartAt - 5 - referenceDate : 0
-        };
+        // For all but selected gliders just show most recent track. The same
+        // arithmetic is re-run from deckgl.tsx's RAF loop to imperatively
+        // bump currentTime/startTime without a React re-render.
+        const tripsFiltering = computeTripsFiltering(currentTime, clipStartAt, fullPaths, selected);
 
         const getColor = sortKey == 'climb' ? {value: track.deckAdditional.climb, size: 3} : sortKey == 'aheight' ? {value: track.deckAdditional.aheight, size: 3} : undefined;
 

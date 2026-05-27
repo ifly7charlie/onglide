@@ -121,12 +121,14 @@ describe('spline', () => {
     });
 
     test('bracket dt < SPLINE_SUB_MIN_DT_S emits no inner vertices', () => {
+        // SUB_MIN_DT_S = 0.5 → use a bracket below that. The makeDeck DeckData
+        // uses Uint32 t, so we'd need fractional t support to test < 1s — but
+        // a 0s self-bracket is enough to exercise the gate.
         const deck = makeDeck([
             {t: 1000, lat: 50, lng: 0, alt: 1000, bearing: 90, speed: 80},
-            {t: 1002, lat: 50.0001, lng: 0.0001, alt: 1002, bearing: 0, speed: 80}
+            {t: 1000, lat: 50.0001, lng: 0.0001, alt: 1002, bearing: 0, speed: 80}
         ]);
         buildSmoothedDeck(deck);
-        // 2s < SUB_MIN_DT_S=4s → straight chord is fine, no inner vertices.
         expect(deck.smoothed!.posIndex).toBe(2);
     });
 
