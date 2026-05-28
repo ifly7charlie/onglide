@@ -256,6 +256,15 @@ export interface Aircraft {
     lastPrimaryTime?: Epoch;
     flarmOffsets?: Map<StreamId, FlarmOffsetState>;
 
+    // Per-StreamId tally maintained as packets land in this aircraft's
+    // queue (in processPacket / flushLoads dispatch). Drives the
+    // /status/trackers operator page so the snapshot picker doesn't have
+    // to re-scan `messages` every tick. Counts packets received (not
+    // emitted) — a high count for an untrusted stream is the signal that
+    // a real device is broadcasting but its positions don't track the
+    // primary.
+    streamsSeen?: Map<StreamId, {count: number; lastT: Epoch}>;
+
     //    kf?: any; // altitude smoothing
     stationary: number; // consecutive stationary fixes
     // Capped 0-10 ground-state counter. Saturated to 10 while the
@@ -298,7 +307,37 @@ export interface UncorrelatedTrackerEvent {
     madAltM: number;
     sampleCount: number;
 }
-export type AprsWorkerEvent = UncorrelatedTrackerEvent;
+
+// Snapshot of per-pilot tracker state for the operator status page.
+// Pushed from the worker every TRACKER_STATUS_SNAPSHOT_MS so the main
+// thread cache stays fresh without a request/response round-trip.
+export interface TrackerSnapshotEntry {
+    compno: Compno;
+    className: ClassName;
+    datecode: Datecode;
+    // aircraft.trackers — combined StreamIds. High byte 0 means the
+    // configured-but-not-yet-promoted placeholder; primaryUpgraded
+    // signals whether the first packet has bumped it to the actual src.
+    configured: StreamId[];
+    // Every (src, fid) we've actually seen for this aircraft, with
+    // received packet count and last-seen epoch.
+    observed: Array<{
+        f: StreamId;
+        count: number;
+        lastT: Epoch;
+        sampleCount: number; // offset pair samples against primary (0 if no overlap yet)
+        untrusted: boolean;
+        isPrimary: boolean;
+    }>;
+    lastEmittedT?: Epoch; // aircraft.lastTime — most recent emitted fix
+}
+export interface TrackerStatusEvent {
+    type: 'trackerStatus';
+    snapshotT: Epoch; // worker wall-clock when this snapshot was built
+    pilots: TrackerSnapshotEntry[];
+}
+
+export type AprsWorkerEvent = UncorrelatedTrackerEvent | TrackerStatusEvent;
 
 // All active airfields with their elevation. Populated from the initial
 // config and updated at runtime via AprsCommandEnum.setAirfields.
@@ -613,6 +652,10 @@ export class AprsController {
     }
 }
 
+// Snapshot cadence drives the staleness of /status/trackers, which uses
+// a 30 s auto-refresh meta tag — keep them aligned.
+const TRACKER_STATUS_SNAPSHOT_MS = 30_000;
+
 if (!isMainThread && parentPort) {
     console.log('Started APRS worker thread');
 
@@ -656,6 +699,46 @@ if (!isMainThread && parentPort) {
     });
 
     openLog().then(() => startAprsListener(<AprsListenerConfig>workerData));
+
+    // Push a snapshot of per-pilot tracker state to the main thread every
+    // TRACKER_STATUS_SNAPSHOT_MS for the /status/trackers operator page.
+    // Cheap to build (O(aircraft) × O(streams per aircraft)) and only
+    // includes pilots that have been registered for tracking.
+    setInterval(emitTrackerStatusSnapshot, TRACKER_STATUS_SNAPSHOT_MS);
+}
+
+function emitTrackerStatusSnapshot(): void {
+    if (!parentPort) return;
+    const now = Math.floor(Date.now() / 1000) as Epoch;
+    const pilots: TrackerSnapshotEntry[] = [];
+    for (const key in allAircraft) {
+        const ac = allAircraft[key as ClassName_Compno];
+        const primary = ac.trackers[0];
+        const observed: TrackerSnapshotEntry['observed'] = [];
+        if (ac.streamsSeen) {
+            for (const [f, info] of ac.streamsSeen) {
+                const off = ac.flarmOffsets?.get(f);
+                observed.push({
+                    f,
+                    count: info.count,
+                    lastT: info.lastT,
+                    sampleCount: off?.count ?? 0,
+                    untrusted: !!off?.untrusted,
+                    isPrimary: f === primary
+                });
+            }
+            observed.sort((a, b) => b.lastT - a.lastT);
+        }
+        pilots.push({
+            compno: ac.compno,
+            className: ac.className,
+            datecode: ac.datecode,
+            configured: ac.trackers.slice(),
+            observed,
+            lastEmittedT: ac.lastTime as Epoch | undefined
+        });
+    }
+    parentPort.postMessage({type: 'trackerStatus', snapshotT: now, pilots} satisfies TrackerStatusEvent);
 }
 
 //
@@ -1072,6 +1155,11 @@ interface LoadTarget {
     // expanded task bbox so multi-comp shared FLARM IDs don't pollute the
     // wrong queue at registration time.
     airfield: Airfield;
+    // Aircraft reference so flushLoads can bump streamsSeen for the
+    // backfilled records — the per-aircraft tally that drives
+    // /status/trackers should reflect history loaded from pointlog as
+    // well as live packets.
+    aircraft: Aircraft;
 }
 
 async function flushLoads() {
@@ -1090,7 +1178,7 @@ async function flushLoads() {
     let minSince = Infinity;
     for (const b of batch) {
         if (b.since < minSince) minSince = b.since;
-        const target: LoadTarget = {queue: b.queue, compno: b.glider.compno, since: b.since, airfield: b.glider.airfield};
+        const target: LoadTarget = {queue: b.queue, compno: b.glider.compno, since: b.since, airfield: b.glider.airfield, aircraft: b.glider};
         for (const id of b.flarmIds) {
             allIds.add(id);
             const fid24 = fidFromFlarm(id);
@@ -1120,6 +1208,7 @@ async function flushLoads() {
                 // each point to whichever comp(s) actually contain it.
                 if (target.airfield.bbox && !pointInBbox(target.airfield.bbox, baseMessage.lat, baseMessage.lng)) continue;
                 target.queue.push({...baseMessage, c: target.compno, ad: distHaversine(baseMessage, target.airfield.point)});
+                bumpStreamSeen(target.aircraft, raw.f, raw.t as Epoch);
                 dispatched++;
             }
         }
@@ -1330,6 +1419,23 @@ export async function processPacket(packet: aprsPacket) {
         } else {
             messageQueue.push(perAircraftMessage);
         }
+        bumpStreamSeen(aircraft, fCombined, perAircraftMessage.t);
+    }
+}
+
+// Maintain the per-aircraft (StreamId → count + lastT) tally that backs
+// the /status/trackers snapshot. Updated as packets land in the
+// aircraft's queue — captures every stream that has produced at least
+// one fix for this pilot, independent of whether it's currently trusted
+// or used by pickStickyPrimary.
+function bumpStreamSeen(aircraft: Aircraft, f: StreamId, t: Epoch): void {
+    if (!aircraft.streamsSeen) aircraft.streamsSeen = new Map();
+    const cur = aircraft.streamsSeen.get(f);
+    if (cur) {
+        cur.count++;
+        if (t > cur.lastT) cur.lastT = t;
+    } else {
+        aircraft.streamsSeen.set(f, {count: 1, lastT: t});
     }
 }
 

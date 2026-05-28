@@ -82,7 +82,7 @@ function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
 }
 
 // Launch our listener
-import {AprsController, AirfieldSpec, type AprsWorkerEvent} from '../lib/webworkers/aprs';
+import {AprsController, AirfieldSpec, type AprsWorkerEvent, type TrackerSnapshotEntry} from '../lib/webworkers/aprs';
 import {fidHexOf, fidLabel, srcPrefixOf} from '../lib/webworkers/pointlog';
 
 import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
@@ -3098,13 +3098,207 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     }
 }
 
-// Handle structured events posted by the APRS worker. Currently the
-// only event is `uncorrelated` — fired once when pickStickyPrimary's MAD
-// gate decides a secondary stream isn't tracking the primary (e.g. a
-// Naviter device left at the airfield while the FLR flies the task).
-// We persist the decision to trackerhistory so evidence-analysis tooling
-// can surface it; the worker itself has no DB handle.
+// Latest tracker-status snapshot pushed by the APRS worker every
+// TRACKER_STATUS_SNAPSHOT_MS. Keyed by ClassName_Compno so the
+// /status/trackers route can render grouped-by-class with O(1) lookup.
+const trackerStatusByKey = new Map<ClassName_Compno, TrackerSnapshotEntry>();
+let trackerStatusSnapshotT: Epoch = 0 as Epoch;
+
+// Minimal HTML escape — the page renders a small known set of fields
+// (compno, class, hex IDs, numbers) so we just need to prevent stray
+// markup from operator-controlled glider names / class names breaking
+// the layout. Not a general-purpose escape.
+function escHtml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]!);
+}
+
+// Render the /status/trackers page from the latest worker snapshot +
+// main-side per-glider scoring state. Plain HTML + a tiny inline style
+// so it's readable in a terminal browser as well as in Chrome. 30 s
+// auto-refresh aligns with the worker's snapshot cadence.
+function renderTrackerStatusPage(): string {
+    const now = Math.floor(Date.now() / 1000);
+    const snapshotAgeS = trackerStatusSnapshotT ? now - trackerStatusSnapshotT : null;
+
+    // Resolve className → {compid, classname (human label)} from the
+    // channels map (the only place that carries the human class label).
+    // Pilots whose className doesn't have an active channel land in an
+    // "unassigned" group.
+    const classMeta = new Map<ClassName, {compid: string; classname: string}>();
+    for (const cname in channels) {
+        const ch = channels[cname as ChannelName];
+        if (!classMeta.has(ch.className)) classMeta.set(ch.className, {compid: ch.compid, classname: ch.classname});
+    }
+
+    // Group pilots: compid → className → entries.
+    const byComp = new Map<string, Map<ClassName, TrackerSnapshotEntry[]>>();
+    for (const entry of trackerStatusByKey.values()) {
+        const meta = classMeta.get(entry.className);
+        const compid = meta?.compid ?? '(unassigned)';
+        let classMap = byComp.get(compid);
+        if (!classMap) {
+            classMap = new Map();
+            byComp.set(compid, classMap);
+        }
+        let bucket = classMap.get(entry.className);
+        if (!bucket) {
+            bucket = [];
+            classMap.set(entry.className, bucket);
+        }
+        bucket.push(entry);
+    }
+
+    // Stable display order: by competition name (falling back to compid),
+    // then by className inside each comp.
+    const compOrder = [...byComp.keys()].sort((a, b) => {
+        const an = contexts[a]?.summary?.name ?? a;
+        const bn = contexts[b]?.summary?.name ?? b;
+        return an.localeCompare(bn);
+    });
+
+    const statusLabels: Record<Glider['scoredStatus'], string> = {S: 'started', F: 'finished', H: 'home'};
+    const out: string[] = [];
+    out.push('<!doctype html><html lang="en"><head><meta charset="utf-8"><title>onglide tracker status</title>');
+    out.push('<meta http-equiv="refresh" content="30">');
+    out.push('<style>');
+    out.push('body{font-family:-apple-system,Segoe UI,Helvetica,sans-serif;font-size:13px;margin:1em;color:#111}');
+    out.push('h1{font-size:1.2em;margin:0 0 .25em}');
+    out.push('h2{font-size:1.1em;margin:1.5em 0 .25em;border-bottom:2px solid #999}');
+    out.push('h3{font-size:1em;margin:1em 0 .25em;border-bottom:1px solid #ccc}');
+    out.push('p.meta{color:#666;margin:.25em 0 1em}');
+    out.push('p.protocols{color:#444;margin:.25em 0 .5em;font-size:.95em}');
+    out.push('table{border-collapse:collapse;width:100%;margin-bottom:1em}');
+    out.push('th,td{padding:3px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}');
+    out.push('th{background:#f4f4f4;font-weight:600}');
+    out.push('tr:nth-child(even) td{background:#fafafa}');
+    out.push('.untrusted{color:#a40000;font-weight:600}');
+    out.push('.primary{font-weight:600}');
+    out.push('.muted{color:#888}');
+    out.push('.stale{color:#a40000}');
+    out.push('.tag{display:inline-block;background:#eef;border:1px solid #ccd;border-radius:3px;padding:0 5px;margin:0 3px 2px 0;font-size:.9em}');
+    out.push('</style></head><body>');
+    out.push(`<h1>onglide tracker status</h1>`);
+    out.push(`<p class="meta">snapshot ${snapshotAgeS === null ? 'pending' : snapshotAgeS + 's ago'} · ${trackerStatusByKey.size} pilot${trackerStatusByKey.size === 1 ? '' : 's'} tracked · auto-refresh 30 s</p>`);
+    out.push('<p class="meta"><strong>◆</strong> = primary stream (operator-configured first) · <strong>n</strong> = packets received from this stream · <strong>age</strong> = seconds since last fix from this stream · <strong>pairs</strong> = co-occurrences with primary in the MAD trust buffer (need 20+ to evaluate, 64 max)</p>');
+
+    if (compOrder.length === 0) {
+        out.push('<p class="muted">no pilots tracked yet — waiting for first worker snapshot.</p>');
+    }
+
+    // Overall protocol summary across all pilots — quick "is anything
+    // weird arriving today" eyeball check.
+    const globalProto = countProtocols([...trackerStatusByKey.values()]);
+    if (globalProto.length) {
+        out.push('<p class="protocols"><strong>all protocols in use:</strong> ' + globalProto.map(([k, v]) => `<span class="tag">${escHtml(k)} ${v}</span>`).join('') + '</p>');
+    }
+
+    for (const compid of compOrder) {
+        const compName = contexts[compid]?.summary?.name ?? null;
+        const classMap = byComp.get(compid)!;
+        const compEntries: TrackerSnapshotEntry[] = [];
+        for (const bucket of classMap.values()) compEntries.push(...bucket);
+
+        const compHeader = compName ? `${escHtml(compName)} <span class="muted">(${escHtml(compid)})</span>` : `<span class="muted">${escHtml(compid)}</span>`;
+        out.push(`<h2>${compHeader}</h2>`);
+        const compProto = countProtocols(compEntries);
+        if (compProto.length) {
+            out.push('<p class="protocols"><strong>protocols:</strong> ' + compProto.map(([k, v]) => `<span class="tag">${escHtml(k)} ${v}</span>`).join('') + '</p>');
+        }
+
+        const classNames = [...classMap.keys()].sort();
+        for (const className of classNames) {
+            const meta = classMeta.get(className);
+            const classLabel = meta ? `${escHtml(meta.classname)} <span class="muted">(${escHtml(String(className))})</span>` : escHtml(String(className));
+            const pilots = classMap.get(className)!.slice().sort((a, b) => String(a.compno).localeCompare(String(b.compno)));
+
+            out.push(`<h3>${classLabel} <span class="muted">— ${pilots.length} pilot${pilots.length === 1 ? '' : 's'}</span></h3>`);
+            out.push('<table><thead><tr>');
+            out.push('<th>compno</th><th>status</th><th>last fix</th><th>configured</th><th>observed streams</th>');
+            out.push('</tr></thead><tbody>');
+            for (const p of pilots) {
+                const key = makeClassname_Compno(p);
+                const g = gliders[key];
+                const statusLabel = g?.scoredStatus ? statusLabels[g.scoredStatus] : '';
+                const ageStr = p.lastEmittedT ? `${now - p.lastEmittedT}s` : '—';
+                const ageClass = p.lastEmittedT && now - p.lastEmittedT > 120 ? ' class="stale"' : '';
+
+                // For each configured tracker, list the protocols we've
+                // actually seen for that 24-bit device. Configured slots
+                // start with high byte 0 (no src yet); on first match
+                // pickStickyPrimary promotes index 0 to the observed
+                // combined value, but other slots keep the placeholder —
+                // so the prefix would be missing here. We pull the
+                // observed protocols from the streams list instead, so
+                // the operator sees e.g. "DD9C70 (FLR, NAV)".
+                const configured = p.configured.length
+                    ? p.configured
+                          .map((cf) => {
+                              const cfid24 = (cf & 0xffffff) >>> 0;
+                              const cfHex = cfid24.toString(16).toUpperCase().padStart(6, '0');
+                              const protos = new Set<string>();
+                              for (const s of p.observed) {
+                                  if (((s.f & 0xffffff) >>> 0) !== cfid24) continue;
+                                  const code = (s.f >>> 24) & 0xff;
+                                  protos.add(code === 0 ? '?' : srcPrefixOf(s.f) ?? '?');
+                              }
+                              return protos.size ? `${cfHex} <span class="muted">(${[...protos].sort().join(', ')})</span>` : `${cfHex} <span class="muted">(no fix)</span>`;
+                          })
+                          .join('<br>')
+                    : '<span class="muted">—</span>';
+
+                const streams = p.observed
+                    .map((s) => {
+                        const label = escHtml(fidLabel(s.f));
+                        const ageS = now - s.lastT;
+                        const cls = s.untrusted ? 'untrusted' : s.isPrimary ? 'primary' : '';
+                        const badge = s.untrusted ? ' [uncorrelated]' : s.isPrimary ? ' ◆' : '';
+                        return `<span class="${cls}">${label}${badge}</span> <span class="muted">n=${s.count} age=${ageS}s${s.sampleCount ? ` pairs=${s.sampleCount}` : ''}</span>`;
+                    })
+                    .join('<br>');
+
+                out.push('<tr>');
+                out.push(`<td>${escHtml(String(p.compno))}</td>`);
+                out.push(`<td>${escHtml(statusLabel)}</td>`);
+                out.push(`<td${ageClass}>${ageStr}</td>`);
+                out.push(`<td>${configured}</td>`);
+                out.push(`<td>${streams || '<span class="muted">—</span>'}</td>`);
+                out.push('</tr>');
+            }
+            out.push('</tbody></table>');
+        }
+    }
+
+    out.push('</body></html>');
+    return out.join('');
+}
+
+// Count distinct (prefix → number of streams) across a set of pilot
+// snapshots. A "stream" is one (src, fid) combination; one pilot can
+// contribute several rows (e.g. FLR + NAV). Code 0 = legacy / unknown
+// prefix shows up as the empty string in the prefix slot — relabel as
+// '?' so the operator can spot pre-source-prefix records arriving.
+function countProtocols(entries: TrackerSnapshotEntry[]): Array<[string, number]> {
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+        for (const s of entry.observed) {
+            const code = (s.f >>> 24) & 0xff;
+            const key = code === 0 ? '?' : srcPrefixOf(s.f) ?? '?';
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+// Handle structured events posted by the APRS worker.
 function handleAprsWorkerEvent(e: AprsWorkerEvent): void {
+    if (e.type === 'trackerStatus') {
+        trackerStatusByKey.clear();
+        for (const p of e.pilots) {
+            trackerStatusByKey.set(makeClassname_Compno(p), p);
+        }
+        trackerStatusSnapshotT = e.snapshotT;
+        return;
+    }
     if (e.type !== 'uncorrelated') return;
     if (readOnly) return;
     const secHex = fidHexOf(e.secondary);
@@ -3403,6 +3597,37 @@ function setupWebSocketServer(server) {
     });
 }
 
+// Basic-auth gate for all /status routes. Credentials come from
+// .env.local — OGN_STATUS_USER / OGN_STATUS_PASS. If either is unset the
+// gate fails closed: every /status request returns 503 with a clear
+// "configure these env vars" message, so an operator never accidentally
+// exposes the dashboard unauthenticated.
+function requireStatusAuth(req: any, res: any): boolean {
+    const user = process.env.OGN_STATUS_USER;
+    const pass = process.env.OGN_STATUS_PASS;
+    if (!user || !pass) {
+        res.writeHead(503, {'Content-Type': 'text/plain'});
+        res.end('OGN_STATUS_USER / OGN_STATUS_PASS not set in .env.local — /status disabled');
+        return false;
+    }
+    const hdr = req.headers?.authorization ?? '';
+    if (hdr.startsWith('Basic ')) {
+        const decoded = Buffer.from(hdr.slice(6), 'base64').toString('utf8');
+        const sep = decoded.indexOf(':');
+        if (sep > 0) {
+            const u = decoded.slice(0, sep);
+            const p = decoded.slice(sep + 1);
+            if (u === user && p === pass) return true;
+        }
+    }
+    res.writeHead(401, {
+        'WWW-Authenticate': 'Basic realm="onglide status", charset="UTF-8"',
+        'Content-Type': 'text/plain'
+    });
+    res.end('Authentication required');
+    return false;
+}
+
 function setupOgnWebServer(req, res) {
     const headers = {
         'Access-Control-Allow-Origin': '*',
@@ -3417,11 +3642,24 @@ function setupOgnWebServer(req, res) {
         return;
     }
 
-    // health check
+    // Health check stays unauthenticated so upstream probes (load
+    // balancers, container orchestration, monitoring) don't need
+    // credentials. Every *other* /status* route is gated.
     if (req?.url == '/status') {
         console.log('request for status - ok');
         res.writeHead(200, headers);
         res.end(http.STATUS_CODES[200]);
+        return;
+    }
+
+    if (typeof req?.url === 'string' && req.url.startsWith('/status')) {
+        if (!requireStatusAuth(req, res)) return;
+    }
+
+    if (req?.url == '/status/trackers') {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.writeHead(200, headers);
+        res.end(renderTrackerStatusPage());
         return;
     }
 

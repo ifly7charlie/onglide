@@ -20,7 +20,7 @@ import * as dotenv from 'dotenv';
 import {d, getDelay} from '../lib/now';
 import {aprsAdditionalDelay} from '../lib/constants';
 import type {ClassName, Compno, Epoch, FlarmID} from '../lib/types';
-import {loadPointsForIds, scanAll} from '../lib/webworkers/pointlog';
+import {fidLabel, loadPointsForIds, scanAll} from '../lib/webworkers/pointlog';
 
 dotenv.config({path: '.env.local'});
 
@@ -98,7 +98,7 @@ async function run() {
         await summary(makeIter());
     } else {
         for await (const m of makeIter() as AsyncGenerator<any>) {
-            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.g}m  ${m.c ?? '??????'} (${m.f})  ${m.lat},${m.lng}`);
+            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.g}m  ${m.c ?? '??????'} (${fidLabel(m.f ?? 0)})  ${m.lat},${m.lng}`);
         }
     }
 
@@ -116,7 +116,7 @@ interface PerFlarm {
 async function summary(iter: AsyncIterable<any>) {
     const stats = new Map<string, PerFlarm>();
     for await (const msg of iter) {
-        const id = (msg.f ?? '??????') as string;
+        const id = fidLabel(msg.f ?? 0);
         let s = stats.get(id);
         if (!s) {
             s = {flarmId: id, count: 0, oldest: Infinity, newest: 0};
@@ -160,7 +160,7 @@ async function delayStats(iter: AsyncIterable<any>, compDelay: number) {
     const overall = mkStat('*');
 
     for await (const msg of iter) {
-        const id = (msg.f ?? '??????') as string;
+        const id = fidLabel(msg.f ?? 0);
         const dVal = (msg.d ?? 0) | 0;
         const t = msg.t | 0;
         const writeTime = t + dVal;
@@ -282,7 +282,7 @@ async function burstStats(iter: AsyncIterable<any>, compDelay: number) {
     const flarms = new Map<string, BurstState>();
 
     for await (const msg of iter) {
-        const id = (msg.f ?? '??????') as string;
+        const id = fidLabel(msg.f ?? 0);
         const t = msg.t | 0;
         const dVal = (msg.d ?? 0) | 0;
         const writeTime = t + dVal;
