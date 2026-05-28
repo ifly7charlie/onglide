@@ -32,11 +32,13 @@ import {makeGetNow, d} from '../now';
 import {PositionMessage, StreamId} from '../types';
 interface InterimPositionMessage extends PositionMessage {
     //    aircraft: Aircraft;
-    // Combined StreamId: low 24 bits = flarmid hex, high 8 bits = source-
-    // prefix enum (FLR=1, ICA=2, OGN=3, NAV=4, …). Two streams with the
-    // same 6-hex but different source prefix are legitimately different
-    // fix streams (different GPS chip) and land in their own
-    // stickyPrimary bucket.
+    // Combined StreamId: low 24 bits = flarmid hex, high 8 bits =
+    // protocol enum (OGFLR=1, OGNAVI=2, OGNTRK=3, …) — the OGN APRS
+    // destCallsign, identifying the uploader / processing pipeline the
+    // packet travelled through. Two streams with the same 6-hex but
+    // different protocol arrived via different paths (e.g. the same
+    // FLARM relayed via Naviter cloud vs. heard directly by an OGN
+    // radio gateway) and land in their own stickyPrimary bucket.
     f: StreamId;
     o: string; // sender
     ad: number; // airfield distance
@@ -223,8 +225,8 @@ export interface Aircraft {
     className: ClassName;
     // Stream identifiers for this aircraft. At configure time the high
     // byte is 0 (we only know the 6-hex device) — that's effectively
-    // "primary, src TBD". pickStickyPrimary upgrades the entry to the
-    // first observed combined value on first match, so subsequent
+    // "primary, protocol TBD". pickStickyPrimary upgrades the entry to
+    // the first observed combined value on first match, so subsequent
     // bucket comparisons are direct equality.
     trackers: StreamId[];
 
@@ -510,7 +512,7 @@ let pendingLoads: PendingLoad[] = [];
 let loadTimer: NodeJS.Timeout | null = null;
 
 // Our persistence
-import {appendPoint, closeLog, fidFromFlarm, fidLabel, loadPointsForIds, openLog, packFlarmId, srcCodeFor} from './pointlog';
+import {appendPoint, closeLog, fidFromFlarm, fidLabel, loadPointsForIds, openLog, packFlarmId, protoCodeFor} from './pointlog';
 
 // 24-bit fid (low 24 bits of a combined StreamId) as a 6-hex uppercase
 // string. Used when crossing from the combined StreamId
@@ -1291,13 +1293,23 @@ export async function processPacket(packet: aprsPacket) {
     // The trackers[] map is still keyed by 6-hex device identity (same
     // FLARM device through any relay path is the same configured tracker
     // for a pilot). The stream identifier we hand to the fusion pipeline
-    // is the combined uint32 — same 6-hex but a different source prefix
-    // (FLR vs ICA vs NAV …) means a different GPS chip, which lands in
-    // its own stickyPrimary bucket.
+    // is the combined uint32 — same 6-hex but a different protocol
+    // (OGFLR vs OGNAVI vs OGNTRK …) means a different upload pipeline
+    // (e.g. radio gateway vs. Naviter cloud relay), with different
+    // latency and accuracy characteristics, so it lands in its own
+    // stickyPrimary bucket. The 3-char SRC prefix (FLR/ICA/OGN/…) is
+    // just the device's address-type namespace and is deliberately NOT
+    // used here.
     const sourceCallsign = packet.sourceCallsign ?? '';
     const flarmId = sourceCallsign.slice(-6) as FlarmID;
-    const srcCode = srcCodeFor(sourceCallsign.slice(0, 3));
-    const fCombined = packFlarmId(fidFromFlarm(flarmId), srcCode);
+    // OGN-Delay pipeline keeps the original dstcall (e.g. OGNTRK) but
+    // stamps OGNDELAY* into the digipeater path and gates the q-construct
+    // via DLY2APRS. Same physical device but a very different upload
+    // pipeline — synthesise the OGNDLY proto code so direct and delayed
+    // streams land in their own stickyPrimary buckets.
+    const isDelayed = packet.digipeaters?.some((d) => d.callsign === 'OGNDELAY' || d.callsign === 'DLY2APRS') ?? false;
+    const protoCode = isDelayed ? protoCodeFor('OGNDLY') : protoCodeFor(packet.destCallsign);
+    const fCombined = packFlarmId(fidFromFlarm(flarmId), protoCode);
 
     if (!packet.latitude || !packet.longitude || !flarmId || !packet.timestamp || !packet.altitude) {
         statistics.invalidPacket++;

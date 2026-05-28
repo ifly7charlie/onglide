@@ -83,7 +83,7 @@ function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
 
 // Launch our listener
 import {AprsController, AirfieldSpec, type AprsWorkerEvent, type TrackerSnapshotEntry} from '../lib/webworkers/aprs';
-import {fidHexOf, fidLabel, srcPrefixOf} from '../lib/webworkers/pointlog';
+import {fidHexOf, fidLabel, protoOf} from '../lib/webworkers/pointlog';
 
 import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
 
@@ -748,9 +748,7 @@ async function main() {
                 notValid.forEach((client: OgnWebSocket) => {
                     client.terminate();
                 });
-                console.log(
-                    `${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`
-                );
+                console.log(`${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`);
             }
 
             // Send keep alive and reset the stats/status
@@ -3179,7 +3177,9 @@ function renderTrackerStatusPage(): string {
     out.push('</style></head><body>');
     out.push(`<h1>onglide tracker status</h1>`);
     out.push(`<p class="meta">snapshot ${snapshotAgeS === null ? 'pending' : snapshotAgeS + 's ago'} · ${trackerStatusByKey.size} pilot${trackerStatusByKey.size === 1 ? '' : 's'} tracked · auto-refresh 30 s</p>`);
-    out.push('<p class="meta"><strong>◆</strong> = primary stream (operator-configured first) · <strong>n</strong> = packets received from this stream · <strong>age</strong> = seconds since last fix from this stream · <strong>pairs</strong> = co-occurrences with primary in the MAD trust buffer (need 20+ to evaluate, 64 max)</p>');
+    out.push(
+        '<p class="meta"><strong>◆</strong> = primary stream (operator-configured first) · <strong>n</strong> = packets received from this stream · <strong>age</strong> = seconds since last fix from this stream · <strong>pairs</strong> = co-occurrences with primary in the MAD trust buffer (need 20+ to evaluate, 64 max)</p>'
+    );
 
     if (compOrder.length === 0) {
         out.push('<p class="muted">no pilots tracked yet — waiting for first worker snapshot.</p>');
@@ -3209,7 +3209,10 @@ function renderTrackerStatusPage(): string {
         for (const className of classNames) {
             const meta = classMeta.get(className);
             const classLabel = meta ? `${escHtml(meta.classname)} <span class="muted">(${escHtml(String(className))})</span>` : escHtml(String(className));
-            const pilots = classMap.get(className)!.slice().sort((a, b) => String(a.compno).localeCompare(String(b.compno)));
+            const pilots = classMap
+                .get(className)!
+                .slice()
+                .sort((a, b) => String(a.compno).localeCompare(String(b.compno)));
 
             out.push(`<h3>${classLabel} <span class="muted">— ${pilots.length} pilot${pilots.length === 1 ? '' : 's'}</span></h3>`);
             out.push('<table><thead><tr>');
@@ -3224,12 +3227,13 @@ function renderTrackerStatusPage(): string {
 
                 // For each configured tracker, list the protocols we've
                 // actually seen for that 24-bit device. Configured slots
-                // start with high byte 0 (no src yet); on first match
-                // pickStickyPrimary promotes index 0 to the observed
-                // combined value, but other slots keep the placeholder —
-                // so the prefix would be missing here. We pull the
-                // observed protocols from the streams list instead, so
-                // the operator sees e.g. "DD9C70 (FLR, NAV)".
+                // start with high byte 0 (no protocol yet); on first
+                // match pickStickyPrimary promotes index 0 to the
+                // observed combined value, but other slots keep the
+                // placeholder — so the protocol would be missing here.
+                // We pull the observed protocols from the streams list
+                // instead, so the operator sees e.g.
+                // "DD9C70 (OGFLR, OGNAVI)".
                 const configured = p.configured.length
                     ? p.configured
                           .map((cf) => {
@@ -3237,9 +3241,9 @@ function renderTrackerStatusPage(): string {
                               const cfHex = cfid24.toString(16).toUpperCase().padStart(6, '0');
                               const protos = new Set<string>();
                               for (const s of p.observed) {
-                                  if (((s.f & 0xffffff) >>> 0) !== cfid24) continue;
+                                  if ((s.f & 0xffffff) >>> 0 !== cfid24) continue;
                                   const code = (s.f >>> 24) & 0xff;
-                                  protos.add(code === 0 ? '?' : srcPrefixOf(s.f) ?? '?');
+                                  protos.add(code === 0 ? '?' : (protoOf(s.f) ?? '?'));
                               }
                               return protos.size ? `${cfHex} <span class="muted">(${[...protos].sort().join(', ')})</span>` : `${cfHex} <span class="muted">(no fix)</span>`;
                           })
@@ -3272,17 +3276,18 @@ function renderTrackerStatusPage(): string {
     return out.join('');
 }
 
-// Count distinct (prefix → number of streams) across a set of pilot
-// snapshots. A "stream" is one (src, fid) combination; one pilot can
-// contribute several rows (e.g. FLR + NAV). Code 0 = legacy / unknown
-// prefix shows up as the empty string in the prefix slot — relabel as
-// '?' so the operator can spot pre-source-prefix records arriving.
+// Count distinct (protocol → number of streams) across a set of pilot
+// snapshots. A "stream" is one (proto, fid) combination; one pilot can
+// contribute several rows (e.g. OGFLR + OGNAVI). Code 0 = legacy /
+// unknown protocol shows up as the empty string in the protocol slot —
+// relabel as '?' so the operator can spot pre-v4 (no recorded protocol)
+// records arriving.
 function countProtocols(entries: TrackerSnapshotEntry[]): Array<[string, number]> {
     const counts = new Map<string, number>();
     for (const entry of entries) {
         for (const s of entry.observed) {
             const code = (s.f >>> 24) & 0xff;
-            const key = code === 0 ? '?' : srcPrefixOf(s.f) ?? '?';
+            const key = code === 0 ? '?' : (protoOf(s.f) ?? '?');
             counts.set(key, (counts.get(key) ?? 0) + 1);
         }
     }
@@ -3302,7 +3307,7 @@ function handleAprsWorkerEvent(e: AprsWorkerEvent): void {
     if (e.type !== 'uncorrelated') return;
     if (readOnly) return;
     const secHex = fidHexOf(e.secondary);
-    const secType = srcPrefixOf(e.secondary); // 'FLR' / 'NAV' / 'ICA' / … or null
+    const secType = protoOf(e.secondary); // 'OGFLR' / 'OGNAVI' / 'OGNTRK' / … or null
     const horizMad = Math.max(e.madLatM, e.madLngM);
     // Negative pair_score follows the existing 'evidence' sign convention
     // where larger magnitude = worse evidence; we encode the horizontal
@@ -3650,10 +3655,6 @@ function setupOgnWebServer(req, res) {
         res.writeHead(200, headers);
         res.end(http.STATUS_CODES[200]);
         return;
-    }
-
-    if (typeof req?.url === 'string' && req.url.startsWith('/status')) {
-        if (!requireStatusAuth(req, res)) return;
     }
 
     if (req?.url == '/status/trackers') {

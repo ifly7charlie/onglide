@@ -3,7 +3,7 @@ import {promises as fsp, readdirSync, openSync, closeSync, readSync, statSync} f
 import * as path from 'path';
 import * as os from 'os';
 
-import {openLog, appendPoint, closeLog, loadPoints, __testGetActiveStream, serializeRecord, deserializeRecord, binarySearchForTs, parseFileHeader, FILE_HEADER_SIZE, RECORD_SIZE, packFlarmId, fidFromFlarm, srcCodeFor} from '../lib/webworkers/pointlog';
+import {openLog, appendPoint, closeLog, loadPoints, __testGetActiveStream, serializeRecord, deserializeRecord, binarySearchForTs, parseFileHeader, FILE_HEADER_SIZE, RECORD_SIZE, packFlarmId, fidFromFlarm, protoCodeFor} from '../lib/webworkers/pointlog';
 
 async function freshEnv(sub: string, rotateMb = 100, retainHours = 24): Promise<string> {
     const dir = path.join(os.tmpdir(), `onglide-pointlog-${sub}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -14,8 +14,8 @@ async function freshEnv(sub: string, rotateMb = 100, retainHours = 24): Promise<
     return dir;
 }
 
-function makeMsg(t: number, flarmId: string, sender: string = 'TEST', srcPrefix: string = ''): any {
-    const f = packFlarmId(fidFromFlarm(flarmId), srcCodeFor(srcPrefix));
+function makeMsg(t: number, flarmId: string, sender: string = 'TEST', proto: string = ''): any {
+    const f = packFlarmId(fidFromFlarm(flarmId), protoCodeFor(proto));
     return {t, f, o: sender, c: flarmId, lat: 50 + Math.random() * 0.1, lng: -1 + Math.random() * 0.1, a: 1000, g: 500, b: 90, s: 100, l: null, d: 0, ad: 0};
 }
 
@@ -275,7 +275,7 @@ describe('pointlog-v8', () => {
         const N = 1000;
         const base = 1700000000;
         const records: Buffer[] = [];
-        // File header (must match FILE_FORMAT_VERSION = 2 and RECORD_SIZE)
+        // File header (must accept legacy version 2 and current RECORD_SIZE)
         const fileHeader = Buffer.alloc(FILE_HEADER_SIZE);
         Buffer.from('ONG8', 'ascii').copy(fileHeader, 0);
         fileHeader.writeUInt16LE(2, 4);
@@ -332,44 +332,44 @@ describe('pointlog-v8', () => {
         for (const m of got) expect(m.f & 0xffffff).toBe(expectedFid);
     });
 
-    test('src enum round-trip: known prefix encodes/decodes; unknown → 255', () => {
-        const msg = makeMsg(1700000400, 'DD89C9', 'TEST', 'FLR');
+    test('proto enum round-trip: known destCall encodes/decodes; unknown → 255', () => {
+        const msg = makeMsg(1700000400, 'DD89C9', 'TEST', 'OGFLR');
         const rec = serializeRecord(msg);
         const round = deserializeRecord(rec, 0) as any;
-        // Combined StreamId = (srcCode << 24) | fid24; src code for FLR = 1.
+        // Combined StreamId = (protoCode << 24) | fid24; proto code for OGFLR = 1.
         expect(round.f).toBe(msg.f);
-        expect((round.f >>> 24) & 0xff).toBe(srcCodeFor('FLR'));
+        expect((round.f >>> 24) & 0xff).toBe(protoCodeFor('OGFLR'));
         expect(round.f & 0xffffff).toBe(fidFromFlarm('DD89C9'));
 
-        const msgUnknown = makeMsg(1700000500, 'AAAAAA', 'TEST', 'XYZ');
+        const msgUnknown = makeMsg(1700000500, 'AAAAAA', 'TEST', 'OGXYZQ');
         const recU = serializeRecord(msgUnknown);
         const roundU = deserializeRecord(recU, 0) as any;
-        // Unrecognised non-empty prefix → 255 (sentinel for "saw a prefix
-        // we don't have in the table yet").
+        // Unrecognised non-empty destCall → 255 (sentinel for "saw a
+        // protocol we don't have in the table yet").
         expect((roundU.f >>> 24) & 0xff).toBe(255);
     });
 
-    test('fid pre-filter masks src: same 24-bit fid via two prefixes both match', async () => {
-        dir = await freshEnv('srcmask');
+    test('fid pre-filter masks proto: same 24-bit fid via two protocols both match', async () => {
+        dir = await freshEnv('protomask');
         await openLog();
         const baseT = 1700000000;
-        // 100 FLR + 100 ICA for the same 24-bit fid; 100 records of a
+        // 100 OGFLR + 100 OGNAVI for the same 24-bit fid; 100 records of a
         // different fid as noise. Filter on 'AABBCC' must pull all 200
-        // matching records regardless of src.
-        for (let i = 0; i < 100; i++) appendPoint(makeMsg(baseT + i, 'AABBCC', 'TEST', 'FLR'));
-        for (let i = 0; i < 100; i++) appendPoint(makeMsg(baseT + 100 + i, 'AABBCC', 'TEST', 'ICA'));
-        for (let i = 0; i < 100; i++) appendPoint(makeMsg(baseT + 200 + i, 'DD89C9', 'TEST', 'FLR'));
+        // matching records regardless of protocol.
+        for (let i = 0; i < 100; i++) appendPoint(makeMsg(baseT + i, 'AABBCC', 'TEST', 'OGFLR'));
+        for (let i = 0; i < 100; i++) appendPoint(makeMsg(baseT + 100 + i, 'AABBCC', 'TEST', 'OGNAVI'));
+        for (let i = 0; i < 100; i++) appendPoint(makeMsg(baseT + 200 + i, 'DD89C9', 'TEST', 'OGFLR'));
         await closeLog();
 
         const got: any[] = [];
         for await (const m of loadPoints({flarmId: 'AABBCC' as any, since: baseT})) got.push(m);
         expect(got.length).toBe(200);
-        const srcs = new Set(got.map((m) => (m.f >>> 24) & 0xff));
-        expect(srcs.has(srcCodeFor('FLR'))).toBe(true);
-        expect(srcs.has(srcCodeFor('ICA'))).toBe(true);
+        const protos = new Set(got.map((m) => (m.f >>> 24) & 0xff));
+        expect(protos.has(protoCodeFor('OGFLR'))).toBe(true);
+        expect(protos.has(protoCodeFor('OGNAVI'))).toBe(true);
     });
 
-    test('v2 file (legacy, high byte = 0) decodes under v3 reader with src=0', async () => {
+    test('v2 file (legacy, high byte = 0) decodes under v4 reader with proto=0', async () => {
         dir = await fspMkTmp('v2legacy');
         const file = path.join(dir, 'aprs-h-1-1700000000.bin');
         // Hand-craft a v2 header + one record (high byte of f forced to 0,
@@ -379,8 +379,9 @@ describe('pointlog-v8', () => {
         fileHeader.writeUInt16LE(2, 4); // version 2 (legacy)
         fileHeader.writeUInt16LE(RECORD_SIZE, 6);
         const msg = makeMsg(1700000123, 'DD89C9');
-        // Force the legacy shape: drop the src byte from msg.f so the disk
-        // word is just the 24-bit fid (the v2 writer never wrote a src).
+        // Force the legacy shape: drop the proto byte from msg.f so the
+        // disk word is just the 24-bit fid (the v2 writer never wrote a
+        // high byte).
         msg.f = msg.f & 0xffffff;
         const rec = serializeRecord(msg);
         await fsp.writeFile(file, Buffer.concat([fileHeader, rec]));
@@ -389,7 +390,35 @@ describe('pointlog-v8', () => {
         const got: any[] = [];
         for await (const m of loadPoints({flarmId: 'DD89C9' as any, since: 0})) got.push(m);
         expect(got.length).toBe(1);
-        expect((got[0].f >>> 24) & 0xff).toBe(0); // src code 0 = legacy / unknown
+        expect((got[0].f >>> 24) & 0xff).toBe(0); // proto code 0 = legacy / unknown
+        expect(got[0].f & 0xffffff).toBe(fidFromFlarm('DD89C9'));
+    });
+
+    test('v3 file (legacy, high byte = address-type code) decodes under v4 reader with high byte masked to 0', async () => {
+        dir = await fspMkTmp('v3legacy');
+        const file = path.join(dir, 'aprs-h-1-1700000000.bin');
+        // Hand-craft a v3 header + one record. v3 stored the address-type
+        // prefix code (FLR=1) in the high byte. Under v4 semantics the
+        // high byte now means protocol — we can't recover the protocol
+        // that wasn't recorded, so the v4 reader masks the high byte to 0.
+        const fileHeader = Buffer.alloc(FILE_HEADER_SIZE);
+        Buffer.from('ONG8', 'ascii').copy(fileHeader, 0);
+        fileHeader.writeUInt16LE(3, 4); // version 3 (legacy)
+        fileHeader.writeUInt16LE(RECORD_SIZE, 6);
+        // Construct a record with the v3 high-byte semantics: stamp '1'
+        // (the old FLR address-type code) into the high byte directly.
+        const msg = makeMsg(1700000123, 'DD89C9');
+        msg.f = ((1 << 24) | (fidFromFlarm('DD89C9') & 0xffffff)) >>> 0;
+        const rec = serializeRecord(msg);
+        await fsp.writeFile(file, Buffer.concat([fileHeader, rec]));
+
+        process.env.DB_PATH = dir;
+        const got: any[] = [];
+        for await (const m of loadPoints({flarmId: 'DD89C9' as any, since: 0})) got.push(m);
+        expect(got.length).toBe(1);
+        // v3 stored an address-type code (1=FLR); under v4 semantics the
+        // protocol can't be recovered, so the high byte reads as 0.
+        expect((got[0].f >>> 24) & 0xff).toBe(0);
         expect(got[0].f & 0xffffff).toBe(fidFromFlarm('DD89C9'));
     });
 });
