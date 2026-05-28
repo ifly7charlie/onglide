@@ -135,9 +135,22 @@ const PROTO_TO_CODE: Record<string, number> = {
 const CODE_TO_PROTO: string[] = [];
 for (const [proto, code] of Object.entries(PROTO_TO_CODE)) CODE_TO_PROTO[code] = proto;
 
+// OGN destination callsigns carry an optional format-version suffix
+// (Naviter spec: `OGNAVI-<version>`; in the wild also seen without the
+// dash, e.g. `OGFLR7` for OGFLR format version 7). Try the literal
+// first — that keeps uploader names that legitimately end in digits
+// (OGLT24) intact — then fall back to stripping a trailing `-?\d+`.
+const PROTO_VERSION_SUFFIX = /-?\d+$/;
 export function protoCodeFor(destCallsign: string | undefined | null): number {
     if (!destCallsign) return 0;
-    return PROTO_TO_CODE[destCallsign] ?? 255;
+    const literal = PROTO_TO_CODE[destCallsign];
+    if (literal != null) return literal;
+    const base = destCallsign.replace(PROTO_VERSION_SUFFIX, '');
+    if (base !== destCallsign) {
+        const stripped = PROTO_TO_CODE[base];
+        if (stripped != null) return stripped;
+    }
+    return 255;
 }
 
 // Pack a 24-bit flarmid + protocol code into the combined StreamId

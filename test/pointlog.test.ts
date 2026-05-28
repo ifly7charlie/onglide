@@ -332,6 +332,21 @@ describe('pointlog-v8', () => {
         for (const m of got) expect(m.f & 0xffffff).toBe(expectedFid);
     });
 
+    test('proto enum strips format-version suffix from destCallsign', () => {
+        // OGN destinations carry an optional format-version suffix. All
+        // versions of a given uploader must map to the same protocol code.
+        expect(protoCodeFor('OGFLR')).toBe(protoCodeFor('OGFLR7'));
+        expect(protoCodeFor('OGNAVI')).toBe(protoCodeFor('OGNAVI1'));
+        expect(protoCodeFor('OGNAVI')).toBe(protoCodeFor('OGNAVI-1'));
+        expect(protoCodeFor('OGNTRK')).toBe(protoCodeFor('OGNTRK-2'));
+        // Numbers in the base identifier itself (LT24, ADSB) must NOT be
+        // stripped — they're part of the uploader name. Only a trailing
+        // version suffix gets removed (the regex requires the digit run
+        // to be at end-of-string).
+        expect(protoCodeFor('OGLT24')).not.toBe(255);
+        expect(protoCodeFor('OGADSB')).not.toBe(255);
+    });
+
     test('proto enum round-trip: known destCall encodes/decodes; unknown → 255', () => {
         const msg = makeMsg(1700000400, 'DD89C9', 'TEST', 'OGFLR');
         const rec = serializeRecord(msg);
