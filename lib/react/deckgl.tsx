@@ -76,7 +76,7 @@ const TICK_INTERVAL_MS = 1000 / DISPLAY_CURSOR_TICK_HZ;
 // with new currentTime / data, leaves the rest as same-reference (deck.gl
 // reconciliation early-outs on identical refs). Called from a RAF callback —
 // no React reconciliation happens.
-function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow: Epoch, fullPaths: any, selectedCompno: Compno) {
+function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow: Epoch, fullPaths: any, selectedCompno: Compno, hoveredCompno: Compno | null) {
     const props = (overlay as any).props;
     const layers = props?.layers;
     if (!Array.isArray(layers) || layers.length === 0) return;
@@ -90,9 +90,9 @@ function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow:
         if (!layer) return layer;
         if (layer instanceof OgnTripsLayer) {
             const compno = (layer.props as any).compno as Compno;
-            const selected = compno === selectedCompno;
+            const showFull = compno === selectedCompno || compno === hoveredCompno;
             const clipStartAt = (startTimes[compno]?.startUtc ?? Infinity) - 30;
-            return layer.clone(computeTripsFiltering(liveNow, clipStartAt, fullPaths, selected));
+            return layer.clone(computeTripsFiltering(liveNow, clipStartAt, fullPaths, showFull));
         }
         if (layer.id === 'labels') {
             if (!positionsForLabels) positionsForLabels = selectAllPositions(state, liveNow);
@@ -114,6 +114,7 @@ export default function MApp(props: {
     setFollow: Function;
     vc: ClassName;
     selectedCompno: Compno;
+    hoveredCompno?: Compno | null;
     selectedHandicap: number;
     setSelectedCompno: (compno: Compno) => void;
     tz: TZ;
@@ -164,10 +165,29 @@ export default function MApp(props: {
     const store = useStore<RootState>();
     const liveStateRef = useRef<{display: number; lastWallMs: number; target: number}>({display: 0, lastWallMs: 0, target: 0});
 
+    // Hover changes frequently; read it via a ref so the RAF loop below
+    // doesn't restart on every mouseenter/leave.
+    const hoveredRef = useRef<Compno | null>(null);
+    hoveredRef.current = props.hoveredCompno ?? null;
+
+    // Brief size pulse on first hover. Two React renders (grow → shrink),
+    // deck.gl's getSize transition tweens the rendered size smoothly between
+    // them. Cleared on hover end.
+    const [hoverFlash, setHoverFlash] = useState<{compno: Compno; phase: 'grow' | 'shrink'} | null>(null);
+    useEffect(() => {
+        const compno = props.hoveredCompno;
         if (!compno) {
             setHoverFlash(null);
+            return;
+        }
+        setHoverFlash({compno, phase: 'grow'});
+        const t1 = setTimeout(() => setHoverFlash({compno, phase: 'shrink'}), 220);
+        const t2 = setTimeout(() => setHoverFlash(null), 480);
+        return () => {
+            clearTimeout(t1);
             clearTimeout(t2);
         };
+    }, [props.hoveredCompno]);
 
     // Track latestUpdate (integer-second WebSocket cadence) → shift the
     // RAF target without restarting the loop. First-time bootstrap seeds
@@ -175,7 +195,7 @@ export default function MApp(props: {
     useEffect(() => {
         if (!latestUpdate) return;
         const state = liveStateRef.current;
-        state.target = latestUpdate - DISPLAY_LAG_S;
+        state.target = latestUpdate - DISPLAY_CURSOR_LAG_S;
         if (state.display === 0) {
             state.display = state.target;
             state.lastWallMs = performance.now();
@@ -201,9 +221,9 @@ export default function MApp(props: {
                         state.lastWallMs = wallNow;
                         let next = state.display + dt;
                         if (next > state.target) next = state.target;
-                        if (state.target - next > MAX_CATCHUP_S) next = state.target;
+                        if (state.target - next > DISPLAY_CURSOR_MAX_CATCHUP_S) next = state.target;
                         state.display = next;
-                        applyCursorAnimation(overlayRef.current, store.getState(), next as Epoch, options.fullPaths, selectedCompno);
+                        applyCursorAnimation(overlayRef.current, store.getState(), next as Epoch, options.fullPaths, selectedCompno, hoveredRef.current);
                     }
                 }
             }
@@ -224,8 +244,9 @@ export default function MApp(props: {
 
     // Initial cursor value for React-driven layer creation. The RAF loop
     // overrides this within ~100ms; this just avoids a one-frame stale flash.
-    const liveNow = (liveStateRef.current.display || latestUpdate - DISPLAY_LAG_S) as Epoch;
+    const liveNow = (liveStateRef.current.display || latestUpdate - DISPLAY_CURSOR_LAG_S) as Epoch;
 
+    const pilotTrackLayer = pilotsTrackLayer(props, liveNow, options.sortKey, map2d, mapLight, options.fullPaths, props.hoveredCompno ?? null);
 
     // Rain Radar
     const router = useRouter();
@@ -656,7 +677,7 @@ export default function MApp(props: {
 
     const onClick = useCallback((a, _b) => measure.click(a), [measure.enabled]);
 
-    const pilotLayer = pilotsLayer(selectedCompno, props.setSelectedCompno, props.replayTime ?? liveNow);
+    const pilotLayer = pilotsLayer(selectedCompno, props.hoveredCompno ?? null, hoverFlash, props.setSelectedCompno, props.replayTime ?? liveNow);
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
@@ -803,7 +824,7 @@ export default function MApp(props: {
                     onClick={onClick}
                     onDragStart={onDragStart}
                     layers={valid && !unmounting ? ([...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
-                    interleaved={true}
+                    interleaved={false}
                     overlayRef={overlayRef}
                 />
                 {debouncedScore && options.constructionLines && debouncedScore.scoredGeoJSON ? (

@@ -705,7 +705,8 @@ const Pilot = memo(function Pilot({
     blocked,
     vertical,
     position,
-    onClick
+    onClick,
+    setHoveredCompno
 }: //
 {
     pilot: API_ClassName_Pilots_PilotDetail;
@@ -718,14 +719,18 @@ const Pilot = memo(function Pilot({
     vertical?: boolean;
     position?: number;
     onClick: any;
+    setHoveredCompno?: (compno: Compno | null) => void;
 }) {
+    const onMouseEnter = setHoveredCompno ? () => setHoveredCompno(compno) : undefined;
+    const onMouseLeave = setHoveredCompno ? () => setHoveredCompno(null) : undefined;
+
     // Pilots whose tracker is blocked (DDB / FlarmNet Permit-Livetracking
     // declined) are surfaced without their name to respect the opt-out.
     const linkTitle = blocked ? compno : compno + ': ' + pilot?.name;
     if (vertical) {
         const className = selected ? 'pilot-row pilothovercapture selected' : 'pilot-row pilothovercapture';
         return (
-            <li className={className} key={compno}>
+            <li className={className} key={compno} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
                 <a href="#" title={linkTitle} onClick={() => onClick(compno)}>
                     <span className="pilot-row-left">
                         <span className="pilot-row-position">{position != null ? `${position}.` : ''}</span>
@@ -747,7 +752,7 @@ const Pilot = memo(function Pilot({
     const displayName = blocked ? '' : shortenPairName(pilot?.name);
 
     return (
-        <li className={className} key={compno}>
+        <li className={className} key={compno} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
             <a href="#" title={linkTitle} onClick={() => onClick(compno)}>
                 <div className="pilot-strip-compno">
                     {pilot?.country ? <span className="pilot-strip-flag">{isoCountryCodeToFlagEmoji(pilot.country)}</span> : null}
@@ -773,6 +778,7 @@ export const PilotList = memo(function PilotList({
     pilots,
     selectedPilot,
     setSelectedCompno,
+    setHoveredCompno,
     options,
     sortOrder,
     now,
@@ -784,6 +790,7 @@ export const PilotList = memo(function PilotList({
     pilots: API_ClassName_Pilots;
     selectedPilot: Compno;
     setSelectedCompno: Function;
+    setHoveredCompno?: (compno: Compno | null) => void;
     options: Options;
     live: boolean;
     sortOrder: string;
@@ -826,6 +833,7 @@ export const PilotList = memo(function PilotList({
                 vertical={vertical}
                 position={idx + 1}
                 onClick={onClick}
+                setHoveredCompno={setHoveredCompno}
             />
         );
     });

@@ -14,18 +14,21 @@ function svgToDataURL(svg: string) {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function faToData(f: any, compno: Compno, selected: boolean) {
+type IconVariant = 'normal' | 'selected' | 'hovered';
+
+const variantStyle: Record<IconVariant, {stroke: string; strokeWidth: number; text: string}> = {
+    normal: {stroke: '#070f', strokeWidth: 20, text: 'black'},
+    selected: {stroke: '#f0f', strokeWidth: 30, text: '#f0f'},
+    hovered: {stroke: '#fa0', strokeWidth: 30, text: '#fa0'}
+};
+
+function faToData(f: any, compno: Compno, variant: IconVariant) {
     const size = compno.length > 3 ? 160 : 210;
-    return !selected
-        ? svgToDataURL(`\
+    const s = variantStyle[variant];
+    return svgToDataURL(`\
 <svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="black" stroke="#000" viewBox="0 0 ${f.icon[0]} ${f.icon[1]}">
-<path fill="white" stroke="#070f" stroke-width="20" d="${f.icon[4]}"/>
-<text x="50%" y="44%" dominant-baseline="middle" text-anchor="middle" fill="black" font-size="${size}">${compno}</text>
-</svg>`)
-        : svgToDataURL(`\
-<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg" fill="black" stroke="#000" viewBox="0 0 ${f.icon[0]} ${f.icon[1]}">
-<path fill="white" stroke="#f0f" stroke-width="30" d="${f.icon[4]}"/>
-<text x="50%" y="44%" dominant-baseline="middle" text-anchor="middle" fill="#f0f" font-size="${size}">${compno}</text>
+<path fill="white" stroke="${s.stroke}" stroke-width="${s.strokeWidth}" d="${f.icon[4]}"/>
+<text x="50%" y="44%" dominant-baseline="middle" text-anchor="middle" fill="${s.text}" font-size="${size}">${compno}</text>
 </svg>`);
 }
 
@@ -42,8 +45,11 @@ type AtlasState = {
     iconMapping: Record<string, {x: number; y: number; width: number; height: number; anchorY: number; mask: boolean}>;
 };
 
+const VARIANT_PREFIX: Record<IconVariant, string> = {normal: '', selected: 'S/', hovered: 'H/'};
+const VARIANTS: IconVariant[] = ['normal', 'selected', 'hovered'];
+
 async function buildAtlas(compnos: Compno[]): Promise<AtlasState> {
-    const total = compnos.length * 2;
+    const total = compnos.length * VARIANTS.length;
     const rows = Math.max(1, Math.ceil(total / ATLAS_COLS));
     const canvas = document.createElement('canvas');
     canvas.width = ATLAS_COLS * ICON_SIZE;
@@ -55,9 +61,9 @@ async function buildAtlas(compnos: Compno[]): Promise<AtlasState> {
 
     let idx = 0;
     for (const compno of compnos) {
-        for (const selected of [false, true]) {
-            const id = selected ? 'S/' + compno : compno;
-            const url = faToData(faLocationPin, compno, selected);
+        for (const variant of VARIANTS) {
+            const id = VARIANT_PREFIX[variant] + compno;
+            const url = faToData(faLocationPin, compno, variant);
             const x = (idx % ATLAS_COLS) * ICON_SIZE;
             const y = Math.floor(idx / ATLAS_COLS) * ICON_SIZE;
             iconMapping[id] = {x, y, width: ICON_SIZE, height: ICON_SIZE, anchorY: ICON_SIZE, mask: false};
@@ -80,7 +86,12 @@ async function buildAtlas(compnos: Compno[]): Promise<AtlasState> {
     return {key: compnos.join(','), iconAtlas: canvas.toDataURL('image/png'), iconMapping};
 }
 
-export function pilotsLayer(selectedCompno: Compno, setSelectedCompno: (compno: Compno) => void, now: Epoch) {
+export type HoverFlash = {compno: Compno; phase: 'grow' | 'shrink'} | null;
+
+const BASE_ICON_SIZE = 35;
+const FLASH_PEAK_SIZE = 65;
+
+export function pilotsLayer(selectedCompno: Compno, hoveredCompno: Compno | null, hoverFlash: HoverFlash, setSelectedCompno: (compno: Compno) => void, now: Epoch) {
     const data = useSelector((state) => selectAllPositions(state, now));
 
     // Stable key for the pilot list so we only rebuild the atlas when pilots
@@ -110,14 +121,18 @@ export function pilotsLayer(selectedCompno: Compno, setSelectedCompno: (compno: 
         iconAtlas: atlas.iconAtlas,
         iconMapping: atlas.iconMapping,
         getColor: (d) => (now - d.t > offlineTime ? [0, 0, 0, 96] : [0, 0, 0, 255]),
-        getSize: (_d) => 35,
-        getIcon: (d) => (d.compno === selectedCompno ? 'S/' + d.compno : d.compno),
+        getSize: (d) => (hoverFlash?.compno === d.compno && hoverFlash.phase === 'grow' ? FLASH_PEAK_SIZE : BASE_ICON_SIZE),
+        getIcon: (d) => (d.compno === selectedCompno ? 'S/' + d.compno : d.compno === hoveredCompno ? 'H/' + d.compno : d.compno),
         onClick: (i) => {
             setSelectedCompno(i.object?.compno || '');
         },
         updateTriggers: {
-            getIcon: [selectedCompno],
+            getIcon: [selectedCompno, hoveredCompno],
+            getSize: [hoverFlash?.compno, hoverFlash?.phase],
             getPosition: [now]
+        },
+        transitions: {
+            getSize: {duration: 220, easing: (t: number) => 1 - (1 - t) * (1 - t)}
         },
         pickable: true
     });
