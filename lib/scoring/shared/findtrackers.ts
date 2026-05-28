@@ -14,6 +14,17 @@
 import type {Task, Compno, Epoch, BasePositionMessage, AltitudeAMSL, FlarmID} from '../../types';
 import {PreparedTurnpoint} from '../../flightprocessing/preparedTurnpoint';
 import {loadPointsForIds} from '../../webworkers/pointlog';
+
+// 24-bit fid of a StreamId as the 6-hex FlarmID. findtrackers operates at
+// device identity (one flarmid → one pilot); the src byte is for upstream
+// fusion, not for matching, so we mask it off before joining against the
+// FlarmID-keyed state maps.
+function fidHex(streamId: number): FlarmID {
+    return (streamId & 0xffffff)
+        .toString(16)
+        .toUpperCase()
+        .padStart(6, '0') as FlarmID;
+}
 import {Bbox, taskBbox, expandBbox, pointInBbox} from '../../flightprocessing/taskBbox';
 
 import {MAX_FLARM_DIST_KM, DEFAULT_MAX_GAP_SEC, DEFAULT_REORDER_WINDOW_SEC, DEFAULT_TOLERANCE_SEC} from '../../constants';
@@ -368,7 +379,7 @@ async function scanLine(
     };
 
     for await (const msg of loadPointsForIds({since, until})) {
-        const f = msg.f;
+        const f = fidHex(msg.f);
         if (excludeFlarmids.has(f)) continue;
         const sStats = getStats(f);
         if (sStats.firstSeenT < 0 || msg.t < sStats.firstSeenT) sStats.firstSeenT = msg.t;

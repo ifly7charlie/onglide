@@ -36,6 +36,15 @@ export type Datecode = string & As<'Datecode'>;
 
 export type FlarmID = string & As<'FlarmID'>;
 
+// Combined 32-bit stream identifier carried through the ingest + fusion
+// pipeline. Low 24 bits = the 6-hex flarmid; high 8 bits = source-prefix
+// enum (FLR=1, ICA=2, OGN=3, NAV=4, …; see lib/webworkers/pointlog.ts).
+// Two packets that share the 6-hex but came from a different GPS chip
+// family produce different StreamIds and land in their own bucket inside
+// stickyPrimary. Branded so a bare `number` (e.g. an epoch or array index)
+// can't be accidentally substituted at a call site that expects a stream.
+export type StreamId = number & As<'StreamId'>;
+
 export type StartTime = string & As<'StartTime'>;
 export type Duration = string & As<'Duration'>;
 

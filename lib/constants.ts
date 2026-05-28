@@ -33,6 +33,24 @@ export const SPLINE_SUB_MIN_DT_S = 0.5;
 export const SPLINE_SUB_TARGET_DT_S = 0.5;
 export const SPLINE_SUB_MAX = 10;
 
+// Display-cursor RAF interpolation (lib/react/deckgl.tsx). The imperative
+// RAF loop advances a fractional epoch-seconds cursor at wall-clock rate,
+// driving TripsLayer currentTime and the IconLayer pilot marker.
+//
+// DISPLAY_CURSOR_LAG_S: cursor sits this far behind the latest WebSocket
+// update so incoming updates always land ahead of it — the advance is
+// continuous; updates just shift the target forward, never the cursor.
+// Bigger = smoother under jitter / late updates; smaller = less latency.
+// DISPLAY_CURSOR_TICK_HZ: throttle on cursor advances per second. Each
+// tick clones the time-sensitive layers and calls overlay.setProps, which
+// drives a MapLibre repaint. Trade tick rate ↔ CPU/GPU load;
+// DISPLAY_CURSOR_MAX_CATCHUP_S: if the cursor falls more than this far
+// behind the target (tab backgrounded for a long time, first update after
+// a gap), snap forward instead of grinding through wall-clock catch-up.
+export const DISPLAY_CURSOR_LAG_S = 7;
+export const DISPLAY_CURSOR_TICK_HZ = 5;
+export const DISPLAY_CURSOR_MAX_CATCHUP_S = 30;
+
 // How long till pilot is considered offline
 export const offlineTime = 600;
 

@@ -20,7 +20,20 @@ import {GliderLog, noopGliderLog} from '../lib/webworkers/gliderLog';
 
 import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
-import {loadPoints} from '../lib/webworkers/pointlog';
+import {fidFromFlarm, loadPoints, packFlarmId, type LoggedMessage} from '../lib/webworkers/pointlog';
+
+import type {FusionStrategy} from '../lib/smoothing/types';
+import {bestSingle} from '../lib/fusion/bestSingle';
+import {concatDedup} from '../lib/fusion/concatDedup';
+import {stickyPrimary} from '../lib/fusion/stickyPrimary';
+import {minChangeBucket} from '../lib/fusion/minChangeBucket';
+
+const FUSIONS: Record<string, FusionStrategy> = {
+    bestSingle,
+    concatDedup,
+    stickyPrimary,
+    minChangeBucket
+};
 import {fromDateCode, competitionStartForDatecode} from '../lib/datecode';
 
 import escape from 'sql-template-strings';
@@ -95,6 +108,10 @@ const argv = yargs(hideBin(process.argv))
     .option('verbose', {
         type: 'boolean',
         describe: 'output logging of interim scores'
+    })
+    .option('fusion', {
+        type: 'string',
+        describe: `apply a fusion strategy to loaded pointlog records before scoring (default: none — feed all records sorted by t). Options: ${Object.keys(FUSIONS).join(', ')}`
     })
     .strict()
     .help()
@@ -172,11 +189,12 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     // path ever did consult it.
     const stubAirfield: Airfield = {compid: '', point: {lat: 0, lng: 0}, elevation: 0 as any, officialDelay: 0 as any, getNow: () => Date.now() as any};
 
+    const configuredHexIds = trackerDb.split(',').filter((s) => s) as FlarmID[];
     const glider: Aircraft = {
         compno,
         className: className,
         airfield: stubAirfield,
-        trackers: trackerDb.split(',') as FlarmID[],
+        trackers: configuredHexIds.map((id) => packFlarmId(fidFromFlarm(id), 0)),
 
         datecode,
         tzoffset,
@@ -199,13 +217,44 @@ async function runScore(datecode: Datecode, className: ClassName, compno: Compno
     const since = competitionStartForDatecode(datecode, tzoffset);
     const until = since + 24 * 3600;
 
-    for (const id of [...new Set(glider.trackers)]) {
-        console.log('load tracker', glider.compno, id);
-        for await (const msg of loadPoints({flarmId: id, since, until})) {
-            const m = msg as any;
-            if (typeof m.d === 'number' && m.d > 1200) continue;
-            m.c = compno;
+    if (argv.fusion) {
+        // Group raw records by (flarmId, station) and run a fusion strategy
+        // before feeding scoring — same shape as the eval harness uses.
+        const streams = new Map<string, LoggedMessage[]>();
+        for (const id of [...new Set(configuredHexIds)]) {
+            console.log('load tracker', glider.compno, id);
+            for await (const msg of loadPoints({flarmId: id, since, until})) {
+                const m = msg as LoggedMessage;
+                if (typeof m.d === 'number' && m.d > 1200) continue;
+                const key = `${m.f}/${m.o}`;
+                let bucket = streams.get(key);
+                if (!bucket) {
+                    bucket = [];
+                    streams.set(key, bucket);
+                }
+                bucket.push(m);
+            }
+        }
+        const fusion = FUSIONS[argv.fusion];
+        if (!fusion) {
+            console.error(`unknown fusion '${argv.fusion}'; options: ${Object.keys(FUSIONS).join(', ')}`);
+            process.exit(2);
+        }
+        const result = fusion.fuse(streams);
+        for (const m of result.records) {
+            (m as any).c = compno;
             interimQueue.push(m);
+        }
+        log(`${className}/${compno}: fusion=${fusion.name} reduced raw to ${result.records.length} records`);
+    } else {
+        for (const id of [...new Set(configuredHexIds)]) {
+            console.log('load tracker', glider.compno, id);
+            for await (const msg of loadPoints({flarmId: id, since, until})) {
+                const m = msg as any;
+                if (typeof m.d === 'number' && m.d > 1200) continue;
+                m.c = compno;
+                interimQueue.push(m);
+            }
         }
     }
     interimQueue.sort((a, b) => a.t - b.t);

@@ -6,14 +6,14 @@
 //
 //   File header (16 bytes):
 //     0  4  magic       "ONG8"
-//     4  2  version     uint16 LE  (= 2)
+//     4  2  version     uint16 LE  (= 3; reader also accepts 2)
 //     6  2  recSize     uint16 LE  (= 36)
 //     8  8  reserved    zeros
 //
 //   Record N at offset 16 + N * 36. Layout:
 //     0   4   writeTime  uint32 LE   (= t + d at append; monotonic; binary-search key)
 //     4   2   d          int16  LE   (signed delay; t = writeTime - d)
-//     6   4   f          uint32 LE   (= parseInt(msg.f, 16); also serves as fid filter key)
+//     6   4   f          uint32 LE   (low 24 bits = flarmid hex; high 8 bits = src enum)
 //    10  10   o          10 ASCII    (sender callsign, zero-padded; truncated if > 10 chars)
 //    20   4   lat        int32  LE   (= round(msg.lat * 1e7); 1.1 cm grid)
 //    24   4   lng        int32  LE
@@ -26,8 +26,17 @@
 // math, no decode on the probe path. The 2-byte d lets the scanner compute
 // t = writeTime - d for the per-record `since`/`until` filter before any
 // further decode. d is signed because backfill replays and receiver clock
-// skew can produce t > writeTime. The 4-byte f at offset 6 lets the scanner
-// reject non-matching flarm IDs without touching the rest of the record.
+// skew can produce t > writeTime.
+//
+// The 4-byte f at offset 6 carries TWO pieces of information packed:
+// low 24 bits = the 6-hex flarmid, high 8 bits = source-prefix enum
+// (FLR=1, ICA=2, OGN=3, NAV=4, …) identifying the GPS source family.
+// Two packets with the same 6-hex but different source prefix are
+// legitimately different fix streams (different GPS chip on, possibly,
+// the same plane), so the combined uint32 is carried through the pipeline
+// as the stream identifier. Matchers that only care about device identity
+// mask with `& 0xFFFFFF`. v2 files (pre-source-prefix) have high byte 0
+// and decode correctly as "unknown source".
 //
 // The file is monotonic in writeTime (each record is appended at writer-now)
 // but NOT in t — and for a given writeTime there is no guarantee that t is
@@ -44,19 +53,98 @@ import {createWriteStream, WriteStream, promises as fsp, openSync, closeSync, re
 import * as path from 'path';
 import * as os from 'os';
 
-import type {PositionMessage, FlarmID} from '../types';
+import type {PositionMessage, FlarmID, StreamId} from '../types';
 
-export type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
+// LoggedMessage.f is the combined StreamId: low 24 bits = flarmid hex,
+// high 8 bits = source-prefix enum (see srcCodeFor / CODE_TO_SRC).
+export type LoggedMessage = Omit<PositionMessage, 'c'> & {f: StreamId; c?: PositionMessage['c']; o: string; ad?: number; d?: number};
 
 // ---------- format constants ----------
 
 const FILE_MAGIC = Buffer.from('ONG8', 'ascii');
-const FILE_FORMAT_VERSION = 2;
+const FILE_FORMAT_VERSION = 3;
+const FILE_FORMAT_VERSION_LEGACY = 2; // v2 files (pre-source-prefix) decode under v3 with src=0
 export const FILE_HEADER_SIZE = 16;
 export const RECORD_SIZE = 36;
 const O_FIELD_LEN = 10;
 const D_MIN = -0x8000;
 const D_MAX = 0x7fff;
+
+// ---------- source-prefix enum ----------
+// The 3-letter prefix on an APRS source callsign identifies the GPS source
+// family. Codes 1..21 cover everything we've seen in production samples
+// under ogn-aprs-protocol/aprsspec/. Code 0 = unknown / legacy (no prefix
+// was recorded). Code 255 = a non-empty prefix that isn't in the table —
+// future trackers that show up before this table is extended.
+const SRC_TO_CODE: Record<string, number> = {
+    FLR: 1,
+    ICA: 2,
+    OGN: 3,
+    NAV: 4,
+    FNT: 5,
+    FNO: 6,
+    AIR: 7,
+    SKY: 8,
+    FMT: 9,
+    LT2: 10,
+    SPI: 11,
+    WGL: 12,
+    ADL: 13,
+    CAP: 14,
+    APK: 15,
+    MTK: 16,
+    EVA: 17,
+    PUR: 18,
+    WMN: 19,
+    NEM: 20,
+    FXC: 21
+};
+const CODE_TO_SRC: string[] = [];
+for (const [prefix, code] of Object.entries(SRC_TO_CODE)) CODE_TO_SRC[code] = prefix;
+
+export function srcCodeFor(prefix: string): number {
+    if (!prefix) return 0;
+    return SRC_TO_CODE[prefix] ?? 255;
+}
+
+// Pack a 24-bit flarmid + src-prefix code into the combined StreamId
+// carried in the `f` field. Both inputs are masked / truncated to their
+// slots so callers can pass raw values without pre-validation.
+export function packFlarmId(fid24: number, srcCode: number): StreamId {
+    return (((fid24 & 0xffffff) | ((srcCode & 0xff) << 24)) >>> 0) as StreamId;
+}
+
+// Human-readable "SRC:HEX" / "HEX" for logs and CLI dumps. src code 0
+// (unknown / legacy) prints just the 6-hex; an unknown non-zero code
+// renders as "?:HEX" so unrecognised prefixes are visible rather than
+// silently dropped.
+export function fidLabel(combined: StreamId | number): string {
+    const code = (combined >>> 24) & 0xff;
+    const hex = (combined & 0xffffff).toString(16).toUpperCase().padStart(6, '0');
+    if (code === 0) return hex;
+    const prefix = CODE_TO_SRC[code];
+    return prefix ? `${prefix}:${hex}` : `?:${hex}`;
+}
+
+// Decoded source prefix string for a combined StreamId, or null if the
+// high byte is 0 (legacy / unknown). Distinct from `fidLabel` which
+// returns the full "PREFIX:HEX" — this returns just the prefix part for
+// callers that want the two columns separately (e.g. trackerhistory's
+// flarmid / flarmtype split).
+export function srcPrefixOf(combined: StreamId | number): string | null {
+    const code = (combined >>> 24) & 0xff;
+    return code === 0 ? null : CODE_TO_SRC[code] ?? null;
+}
+
+// 6-hex flarmid string for a combined StreamId (low 24 bits, uppercase,
+// zero-padded). Pair with `srcPrefixOf` when persisting the (fid, type)
+// pair into separate DB columns.
+export function fidHexOf(combined: StreamId | number): string {
+    return (combined & 0xffffff)
+        .toString(16)
+        .toUpperCase()
+        .padStart(6, '0');
+}
 
 // Chunk size for sequential scan reads. 4096 × 36 B = 144 KB per syscall —
 // amortises read cost; doesn't affect file layout (the file is exactly
@@ -217,7 +305,12 @@ export function parseFileHeader(buf: Buffer): {version: number; recSize: number}
     if (buf.compare(FILE_MAGIC, 0, 4, 0, 4) !== 0) throw new Error(`pointlog: bad magic (got ${buf.subarray(0, 4).toString('hex')})`);
     const version = buf.readUInt16LE(4);
     const recSize = buf.readUInt16LE(6);
-    if (version !== FILE_FORMAT_VERSION) throw new Error(`pointlog: unsupported version ${version}`);
+    // v3 introduces the src-prefix byte in the high byte of f. v2 records
+    // are binary-compatible (high byte was always 0) and decode as src=0
+    // under v3 semantics.
+    if (version !== FILE_FORMAT_VERSION && version !== FILE_FORMAT_VERSION_LEGACY) {
+        throw new Error(`pointlog: unsupported version ${version}`);
+    }
     if (recSize !== RECORD_SIZE) throw new Error(`pointlog: unexpected recSize ${recSize} (expected ${RECORD_SIZE})`);
     return {version, recSize};
 }
@@ -234,11 +327,13 @@ const OFF_G = 30;
 const OFF_B = 32;
 const OFF_S = 34;
 
-// Parse a 6-hex flarm ID to a uint32. Production flarmids are always 6-hex
-// (OGN protocol), so this round-trips cleanly. `| 0` coerces NaN to 0 in
-// the unexpected non-hex case.
+// Parse a 6-hex flarm ID to a 24-bit uint32. Production flarmids are
+// always 6-hex (OGN protocol), so this round-trips cleanly. `| 0` coerces
+// NaN to 0 in the unexpected non-hex case. The result fits in 24 bits;
+// callers that want the combined value pair it with a src code via
+// packFlarmId().
 export function fidFromFlarm(flarm: string): number {
-    return parseInt(flarm, 16) | 0;
+    return (parseInt(flarm, 16) | 0) & 0xffffff;
 }
 
 // Serialize one message into a 36-byte record. Throws only if d falls
@@ -246,13 +341,15 @@ export function fidFromFlarm(flarm: string): number {
 export function serializeRecord(msg: LoggedMessage): Buffer {
     const d = ((msg.d ?? 0) as number) | 0;
     if (d < D_MIN || d > D_MAX) {
-        throw new Error(`pointlog: d=${d} out of int16 range for flarm=${msg.f} t=${msg.t}`);
+        throw new Error(`pointlog: d=${d} out of int16 range for flarm=${fidLabel(msg.f)} t=${msg.t}`);
     }
     const writeTime = (msg.t + d) >>> 0;
     const rec = Buffer.alloc(RECORD_SIZE);
     rec.writeUInt32LE(writeTime, OFF_WRITE_TIME);
     rec.writeInt16LE(d, OFF_D);
-    rec.writeUInt32LE(fidFromFlarm(msg.f), OFF_F);
+    // `>>> 0` keeps the high-bit-set case (e.g. src code 0x80+) unsigned;
+    // a stray `& 0xffffffff` here would silently convert back to int32.
+    rec.writeUInt32LE(msg.f >>> 0, OFF_F);
     // 10-byte fixed ASCII slot for the sender. `write` truncates anything
     // longer than 10 chars and leaves zero padding after a short value
     // (Buffer.alloc above filled with zeros). The aprs.ts dedup tiebreaker
@@ -268,14 +365,14 @@ export function serializeRecord(msg: LoggedMessage): Buffer {
     return rec;
 }
 
-// Decode a record from the given offset into a LoggedMessage. Reconstructed
-// fields: t (= writeTime - d), f (uppercase hex), c (= f, for dumptracks),
-// l (always null, matches what the writer always stored).
+// Decode a record from the given offset into a LoggedMessage. The
+// combined uint32 f is yielded as-is: low 24 bits = flarmid hex, high 8
+// bits = src enum. Consumers that want a human-readable form call
+// fidLabel(); ones that want device identity only mask with `& 0xFFFFFF`.
 export function deserializeRecord(buf: Buffer, offset: number): LoggedMessage {
     const writeTime = buf.readUInt32LE(offset + OFF_WRITE_TIME);
     const d = buf.readInt16LE(offset + OFF_D);
-    const fid = buf.readUInt32LE(offset + OFF_F);
-    const f = fid.toString(16).toUpperCase().padStart(6, '0');
+    const f = buf.readUInt32LE(offset + OFF_F);
     // ASCII slot is zero-padded — strip the trailing zeros.
     let oEnd = offset + OFF_O + O_FIELD_LEN;
     while (oEnd > offset + OFF_O && buf[oEnd - 1] === 0) oEnd--;
@@ -290,7 +387,6 @@ export function deserializeRecord(buf: Buffer, offset: number): LoggedMessage {
         t: writeTime - d,
         d,
         f,
-        c: f, // dumptracks fallback; aprs.ts reload overwrites with target.compno
         o,
         lat,
         lng,
@@ -698,9 +794,12 @@ async function* scanFileRecords(fullPath: string, q: {since: number; until?: num
                 // `continue`, don't `return`, so the rest of the scan stands.
                 if (q.until != null && t > q.until) continue;
                 // Fast flarm-ID pre-filter — single uint32 read, no further
-                // decode for the ~97% of records that don't match.
+                // decode for the ~97% of records that don't match. The
+                // disk word packs (src << 24 | fid24); the filter is
+                // device-level (24-bit fid only), so mask off the src
+                // byte before the set lookup.
                 if (fidSet) {
-                    const fid = buf.readUInt32LE(recOff + OFF_F);
+                    const fid = buf.readUInt32LE(recOff + OFF_F) & 0xffffff;
                     if (!fidSet.has(fid)) continue;
                 }
                 yield deserializeRecord(buf, recOff);

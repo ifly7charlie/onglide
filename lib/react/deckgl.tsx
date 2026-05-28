@@ -68,19 +68,9 @@ import {pilotsTrackLayer, computeTripsFiltering} from './pilotstracklayer';
 import {OgnTripsLayer} from './ogntripslayer';
 import {homeLocationLayer} from './homeLocationLayer';
 
-// Imperative cursor animation. Driven from a useEffect-owned RAF loop that
-// updates only the time-sensitive layers via overlay.setProps — bypasses the
-// React reconciliation + MapboxOverlay full-array diff that would otherwise
-// fire on every tick. Knobs:
-//   DISPLAY_LAG_S    cursor sits this far behind latestUpdate so incoming
-//                    websocket updates land ahead of the cursor (no snap).
-//   TICK_INTERVAL_MS minimum wall time between cursor advances; throttles
-//                    the MapLibre repaint rate.
-//   MAX_CATCHUP_S    snap forward if the cursor falls badly behind (tab
-//                    backgrounded for a long time).
-const DISPLAY_LAG_S = 10;
-const TICK_INTERVAL_MS = 1000 / 5; // 5 Hz
-const MAX_CATCHUP_S = 30;
+import {DISPLAY_CURSOR_LAG_S, DISPLAY_CURSOR_TICK_HZ, DISPLAY_CURSOR_MAX_CATCHUP_S} from '../constants';
+
+const TICK_INTERVAL_MS = 1000 / DISPLAY_CURSOR_TICK_HZ;
 
 // Walks the overlay's current layer array, clones the time-sensitive layers
 // with new currentTime / data, leaves the rest as same-reference (deck.gl
@@ -174,6 +164,11 @@ export default function MApp(props: {
     const store = useStore<RootState>();
     const liveStateRef = useRef<{display: number; lastWallMs: number; target: number}>({display: 0, lastWallMs: 0, target: 0});
 
+        if (!compno) {
+            setHoverFlash(null);
+            clearTimeout(t2);
+        };
+
     // Track latestUpdate (integer-second WebSocket cadence) → shift the
     // RAF target without restarting the loop. First-time bootstrap seeds
     // the display value too so the cursor doesn't jump on the first tick.
@@ -231,7 +226,6 @@ export default function MApp(props: {
     // overrides this within ~100ms; this just avoids a one-frame stale flash.
     const liveNow = (liveStateRef.current.display || latestUpdate - DISPLAY_LAG_S) as Epoch;
 
-    const pilotTrackLayer = pilotsTrackLayer(props, liveNow, options.sortKey, map2d, mapLight, options.fullPaths);
 
     // Rain Radar
     const router = useRouter();

@@ -82,7 +82,8 @@ function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
 }
 
 // Launch our listener
-import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
+import {AprsController, AirfieldSpec, type AprsWorkerEvent} from '../lib/webworkers/aprs';
+import {fidHexOf, fidLabel, srcPrefixOf} from '../lib/webworkers/pointlog';
 
 import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
 
@@ -485,6 +486,7 @@ async function main() {
     // One APRS worker for the whole process. Airfields are added by
     // createCompetitionContext as each competition starts.
     aprsController = new AprsController({airfields: []});
+    aprsController.onWorkerEvent = handleAprsWorkerEvent;
 
     // Wait until we can see at least one competition before we start the
     // web server. After that the discovery loop runs on the 60s tick and
@@ -3094,6 +3096,36 @@ async function processAprsMessage(className: string, channel: Channel, message: 
         }
         channel.statistics.totalPackets++;
     }
+}
+
+// Handle structured events posted by the APRS worker. Currently the
+// only event is `uncorrelated` — fired once when pickStickyPrimary's MAD
+// gate decides a secondary stream isn't tracking the primary (e.g. a
+// Naviter device left at the airfield while the FLR flies the task).
+// We persist the decision to trackerhistory so evidence-analysis tooling
+// can surface it; the worker itself has no DB handle.
+function handleAprsWorkerEvent(e: AprsWorkerEvent): void {
+    if (e.type !== 'uncorrelated') return;
+    if (readOnly) return;
+    const secHex = fidHexOf(e.secondary);
+    const secType = srcPrefixOf(e.secondary); // 'FLR' / 'NAV' / 'ICA' / … or null
+    const horizMad = Math.max(e.madLatM, e.madLngM);
+    // Negative pair_score follows the existing 'evidence' sign convention
+    // where larger magnitude = worse evidence; we encode the horizontal
+    // MAD as the magnitude. margin carries the altitude MAD separately.
+    db.query(
+        escape`
+            INSERT INTO trackerhistory
+                (compno, changed, flarmid, flarmtype, method, class, datecode,
+                 pair_score, margin)
+            VALUES
+                (${e.compno}, now(), ${secHex}, ${secType},
+                 'uncorrelated', ${e.className}, ${String(e.datecode)},
+                 ${-horizMad}, ${e.madAltM})
+        `
+    ).catch((err: any) => {
+        console.log(`trackerhistory uncorrelated insert failed ${e.className}/${e.compno} ${fidLabel(e.secondary)}: ${err?.message ?? err}`);
+    });
 }
 
 // If we don't know the glider then we need to figure out who it is and make sure we
