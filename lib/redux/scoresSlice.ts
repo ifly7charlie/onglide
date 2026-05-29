@@ -34,6 +34,7 @@ interface ScoresSliceState {
     loading: Record<Epoch, string>; // request id for requests to load - we only remove on error (so it retries) otherwise
     scoreId: string; //  copy of track version set when loading something
     // leave the ID in the structure so we don't keep trying to get missing scores
+    scoresScoreId: string; // scoreId at which `scores` was last reconciled (full-snapshot prune); lags scoreId by one dispatch
 }
 
 // Define the initial state using that type
@@ -43,7 +44,8 @@ const initialState: ScoresSliceState = {
     historical: {},
     optimalGrids: {},
     loading: {},
-    scoreId: ''
+    scoreId: '',
+    scoresScoreId: ''
 };
 
 // Find the old scores
@@ -67,7 +69,10 @@ export const scoresSlice = createSlice({
                     historical: {},
                     optimalGrids: {},
                     loading: {},
-                    scoreId
+                    scoreId,
+                    // scores is empty for the new class, so mark it reconciled at this
+                    // scoreId — the next snapshot merges in, no spurious prune.
+                    scoresScoreId: scoreId
                 };
             }
             // If the score id has changed then we need to reset everything historical
@@ -317,6 +322,25 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     if (action.payload.scoreId != state.scoreId) {
         return;
     }
+
+    // The first scores payload at a new scoreId is the full snapshot that the
+    // daemon bundles with the identifiers message that bumped scoreId (sendAllScores
+    // on connect, sendIdentifiersToAll on _live). updateClassAction advanced
+    // state.scoreId in the prior dispatch; scoresScoreId still lags, so this branch
+    // fires exactly once per scoreId — never on a per-pilot live delta (those share
+    // the current scoreId). Drop any pilot the snapshot no longer lists: that's a
+    // pilot removed from the class. Done in this same reducer as the merge below, so
+    // there's no empty-scores render in between.
+    if (state.scoresScoreId != action.payload.scoreId) {
+        state.scoresScoreId = action.payload.scoreId;
+        for (const compno in state.scores) {
+            if (!(compno in action.payload.pilots)) {
+                delete state.scores[compno];
+                delete state.optimalGrids[compno];
+            }
+        }
+    }
+
     const result = state.scores ?? {};
     for (const compno in action.payload.pilots) {
         const score: PilotScore = action.payload.pilots[compno];
