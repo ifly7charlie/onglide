@@ -44,6 +44,12 @@ export interface OfficialResult {
     startUtc: Epoch;
     finishUtc: Epoch | null; // null for landout pilots (no recorded finish time)
     glidertype: string; // pilots.glidertype, '' when unset; used for the weak DDB aircraft_model match
+    // Identity facets for cross-comp evidence (collection + scoring). Defaults
+    // ('' / 0) when unset; the identity layer treats those as absent.
+    homeclub: string; // pilots.homeclub
+    country: string; // pilots.country (2-letter), '' when unset
+    fai: number; // pilots.fai (0/synthetic when unresolved)
+    greg: string; // pilots.greg (ICAO registration), '' when unset
 }
 
 export interface TrackerMatch {

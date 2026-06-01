@@ -177,5 +177,32 @@ export const TRACKER_SCORE_WEIGHTS = {
     ddbCn: 1.5,
     ddbGlider: 0.3, // weak — many pilots in a comp share a glider type, so this just rules out wildly mismatched gliders
     baseline: 1.0, // flarmid in current tracker.trackerid for (class, compno)
-    prior: 1.0 // already in nats; sum of decayed prior-day two-sided margins (signed — may be negative)
+    prior: 1.0, // already in nats; sum of decayed prior-day two-sided margins (signed — may be negative)
+    // ---- Cross-competition identity evidence (lib/scoring/shared/identity.ts) ----
+    // These come from what we've previously associated with this flarmid in
+    // OTHER competitions (the flarmid ≈ the aircraft; pilots are clues). They
+    // stack additively like ddbCn/ddbGlider. Independent of `prior`, which is
+    // same-comp/class-scoped. The aircraft-stable facets (greg/glider) anchor;
+    // the pilot facets (name/fai/club) say which pilot flew it. Sum (~4) sits
+    // below the same-day geometric stack so it informs but never overrides
+    // today's actual track. greg/fai/name discriminate; the rest only nudge.
+    xcGreg: 1.5, // candidate greg == aircraft greg, or flarmid is its permanent ICAO address — strongest
+    xcFai: 1.2, // candidate real-FAI == a prior pilot clue's FAI — precise public id
+    xcName: 1.2, // best privacy-preserving name-token overlap [0,1] — same crew flying again
+    xcGlider: 0.4, // candidate glider key == aircraft glider key — many share a type
+    xcClub: 0.4, // candidate club hash == a prior pilot clue's club hash — clubs are shared
+    xcCompno: 0.3, // candidate compno == aircraft's last-seen compno — usually consistent but not unique
+    xcCountry: 0.2 // candidate country == aircraft country — huge equivalence class, mild corroboration
 } as const;
+
+// Real FAI ranking ids are below this; synthetic placeholders (assigned
+// before name resolution) are >= FAI_SYNTHETIC_FLOOR (3,000,000). Only a real
+// id is worth storing/matching as cross-comp identity evidence.
+export const FAI_REAL_MAX = 300000;
+
+// Generic placeholder / team tokens stripped during name tokenisation
+// (lib/scoring/shared/identity.ts). A "name" like "Team A" reduces to no
+// usable tokens — it can't identify a person, so it contributes no name
+// evidence. Real shared crews ("Smith / Jones", "Buddy & Claude") still keep
+// both pilots' tokens.
+export const NAME_STOPWORDS = new Set(['team', 'syndicate', 'group', 'club', 'the', 'and', 'crew', 'flying']);

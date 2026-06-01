@@ -394,6 +394,51 @@ CREATE TABLE `trackerhistory` (
   KEY `idx_class_datecode_method` (`class`, `datecode`, `method`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+--
+-- Cross-competition identity evidence. Unlike `tracker`/`trackerhistory`
+-- (keyed on the transient classid and cleaned up at comp end), these tables
+-- persist across competitions: the FLARM id is the aircraft, accumulated from
+-- confident findtrackers matches only, never for DDB-blocked devices. No raw
+-- pilot names or club names are stored — only keyed HMAC hashes. See
+-- lib/scoring/shared/identity.ts.
+--
+
+DROP TABLE IF EXISTS `flarm_aircraft`;
+CREATE TABLE `flarm_aircraft` (
+  `flarmid` char(6) NOT NULL COMMENT 'uppercase 6-hex device id (the aircraft)',
+  `glider_key` varchar(16) DEFAULT NULL COMMENT 'gliderEquivalent key() of glider type (not sensitive)',
+  `greg` char(12) DEFAULT NULL COMMENT 'normalised registration when pilot.greg present (public)',
+  `country` char(2) DEFAULT NULL COMMENT 'resolved 2-letter country',
+  `compno` char(4) DEFAULT NULL COMMENT 'most-recently-observed comp number (weak — usually consistent, not unique)',
+  `is_icao_id` char(1) DEFAULT 'N' COMMENT 'Y when the flarmid is the aircraft permanent ICAO 24-bit address',
+  `observations` int(11) NOT NULL DEFAULT '1',
+  `first_seen` datetime DEFAULT NULL,
+  `last_seen` datetime DEFAULT NULL,
+  PRIMARY KEY (`flarmid`),
+  KEY `idx_greg` (`greg`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp flarmid->aircraft evidence; no raw names/clubs';
+
+DROP TABLE IF EXISTS `flarm_pilot`;
+CREATE TABLE `flarm_pilot` (
+  `flarmid` char(6) NOT NULL,
+  `pilot_key` char(32) NOT NULL COMMENT 'HMAC over (sorted name token hashes + fai + country); dedupes one crew',
+  `club_hash` char(32) DEFAULT NULL COMMENT 'HMAC of normalised home club; never the raw club',
+  `fai` int(11) DEFAULT NULL COMMENT 'real FAI id only (>0 and <300000)',
+  `observations` int(11) NOT NULL DEFAULT '1',
+  `first_seen` datetime DEFAULT NULL,
+  `last_seen` datetime DEFAULT NULL,
+  PRIMARY KEY (`flarmid`,`pilot_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp pilot clues per flarmid (a club glider yields many)';
+
+DROP TABLE IF EXISTS `flarm_pilot_nametoken`;
+CREATE TABLE `flarm_pilot_nametoken` (
+  `flarmid` char(6) NOT NULL,
+  `pilot_key` char(32) NOT NULL,
+  `token_hash` char(32) NOT NULL COMMENT 'HMAC of one normalised name token; partial overlap = partial match',
+  PRIMARY KEY (`flarmid`,`pilot_key`,`token_hash`),
+  KEY `idx_token` (`token_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Per-clue HMAC name tokens; idx_token serves part-2 reverse lookup';
+
 
 DROP TABLE IF EXISTS `movements`;
 CREATE TABLE `movements` (
