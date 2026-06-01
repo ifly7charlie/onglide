@@ -72,6 +72,22 @@ export interface Signals {
     baselineMatch: boolean;
     /** Sum of decayed prior-day two-sided margins for this (compno, flarmid) within the same comp. Already in nats; signed — negative when a prior day's match lost to a competing candidate. */
     priorNats: number;
+
+    // --- Cross-competition identity evidence (from OTHER comps; flarmid ≈ aircraft) ---
+    /** Candidate greg == the flarmid's known aircraft greg, OR the flarmid IS the aircraft's permanent ICAO address matching it. Aircraft-permanent → strongest. */
+    xcGregMatch: boolean;
+    /** Candidate glider key == the flarmid's known aircraft glider key. */
+    xcGliderMatch: boolean;
+    /** Candidate compno == the flarmid's last-seen aircraft compno (weak — usually consistent but not unique). */
+    xcCompnoMatch: boolean;
+    /** Best privacy-preserving name-token overlap in [0,1] over the flarmid's prior pilot clues. null when no clue carried name tokens. Partial overlap (e.g. a solo pilot vs an "A & B" crew) scores < a full match. */
+    xcNameOverlap: number | null;
+    /** Candidate real-FAI == a prior pilot clue's FAI (the best-overlap clue). */
+    xcFaiMatch: boolean;
+    /** Candidate club hash == a prior pilot clue's club hash (the best-overlap clue). */
+    xcClubMatch: boolean;
+    /** Candidate country == the flarmid's known aircraft country. */
+    xcCountryMatch: boolean;
 }
 
 export interface ScoreBreakdown {
@@ -85,6 +101,13 @@ export interface ScoreBreakdown {
     ddbGlider: number;
     baseline: number;
     prior: number;
+    xcGreg: number;
+    xcGlider: number;
+    xcCompno: number;
+    xcName: number;
+    xcFai: number;
+    xcClub: number;
+    xcCountry: number;
     total: number;
 }
 
@@ -145,6 +168,16 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
     const sDdbGlider = s.ddbGliderMatch ? 1 : 0;
     const sBaseline = s.baselineMatch ? 1 : 0;
 
+    // Cross-comp identity: booleans → {0,1}; name overlap is already a [0,1]
+    // fraction (best over the flarmid's prior pilot clues, partial < full).
+    const sXcGreg = s.xcGregMatch ? 1 : 0;
+    const sXcGlider = s.xcGliderMatch ? 1 : 0;
+    const sXcCompno = s.xcCompnoMatch ? 1 : 0;
+    const sXcName = s.xcNameOverlap === null ? 0 : sat(s.xcNameOverlap);
+    const sXcFai = s.xcFaiMatch ? 1 : 0;
+    const sXcClub = s.xcClubMatch ? 1 : 0;
+    const sXcCountry = s.xcCountryMatch ? 1 : 0;
+
     const breakdown: ScoreBreakdown = {
         deltaStart: weights.deltaStart * sStart,
         deltaFinish: weights.deltaFinish * sFinish,
@@ -156,6 +189,13 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         ddbGlider: weights.ddbGlider * sDdbGlider,
         baseline: weights.baseline * sBaseline,
         prior: weights.prior * s.priorNats,
+        xcGreg: weights.xcGreg * sXcGreg,
+        xcGlider: weights.xcGlider * sXcGlider,
+        xcCompno: weights.xcCompno * sXcCompno,
+        xcName: weights.xcName * sXcName,
+        xcFai: weights.xcFai * sXcFai,
+        xcClub: weights.xcClub * sXcClub,
+        xcCountry: weights.xcCountry * sXcCountry,
         total: 0
     };
     breakdown.total =
@@ -168,7 +208,14 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         breakdown.ddbCn +
         breakdown.ddbGlider +
         breakdown.baseline +
-        breakdown.prior;
+        breakdown.prior +
+        breakdown.xcGreg +
+        breakdown.xcGlider +
+        breakdown.xcCompno +
+        breakdown.xcName +
+        breakdown.xcFai +
+        breakdown.xcClub +
+        breakdown.xcCountry;
     return breakdown;
 }
 

@@ -1,6 +1,6 @@
 import {describe, test, expect} from 'vitest';
 import {scoreSignals, computeMargins, decayPrior, summarisePrior, inBboxRatio, passesCandidateFilter, type Signals} from '../lib/scoring/shared/trackerScore';
-import {DEFAULT_TOLERANCE_SEC, DEFAULT_DIST_TOLERANCE_KM, DEFAULT_INBBOX_FULL_COUNT, LEGACY_PRIOR_NATS, DEFAULT_PRIOR_DECAY_DAYS} from '../lib/constants';
+import {DEFAULT_TOLERANCE_SEC, DEFAULT_DIST_TOLERANCE_KM, DEFAULT_INBBOX_FULL_COUNT, LEGACY_PRIOR_NATS, DEFAULT_PRIOR_DECAY_DAYS, TRACKER_SCORE_WEIGHTS} from '../lib/constants';
 
 const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     deltaStart: null,
@@ -17,6 +17,13 @@ const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     ddbGliderMatch: false,
     baselineMatch: false,
     priorNats: 0,
+    xcGregMatch: false,
+    xcGliderMatch: false,
+    xcCompnoMatch: false,
+    xcNameOverlap: null,
+    xcFaiMatch: false,
+    xcClubMatch: false,
+    xcCountryMatch: false,
     ...over
 });
 
@@ -130,6 +137,47 @@ describe('scoreSignals', () => {
         const withPrior = scoreSignals(baseSignals({priorNats: 1.5}));
         expect(withPrior.prior).toBeCloseTo(1.5, 6);
         expect(withPrior.total).toBeCloseTo(1.5, 6);
+    });
+
+    // ---- Cross-competition identity signals --------------------------------
+    test('each cross-comp boolean contributes exactly its weight and nothing else', () => {
+        const greg = scoreSignals(baseSignals({xcGregMatch: true}));
+        expect(greg.xcGreg).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcGreg, 6);
+        expect(greg.total).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcGreg, 6);
+
+        const fai = scoreSignals(baseSignals({xcFaiMatch: true}));
+        expect(fai.xcFai).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcFai, 6);
+
+        const club = scoreSignals(baseSignals({xcClubMatch: true}));
+        expect(club.xcClub).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcClub, 6);
+
+        const glider = scoreSignals(baseSignals({xcGliderMatch: true}));
+        expect(glider.xcGlider).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcGlider, 6);
+
+        const compno = scoreSignals(baseSignals({xcCompnoMatch: true}));
+        expect(compno.xcCompno).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcCompno, 6);
+
+        const country = scoreSignals(baseSignals({xcCountryMatch: true}));
+        expect(country.xcCountry).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcCountry, 6);
+    });
+
+    test('xcNameOverlap scales linearly with the overlap fraction', () => {
+        const full = scoreSignals(baseSignals({xcNameOverlap: 1.0}));
+        const half = scoreSignals(baseSignals({xcNameOverlap: 0.5}));
+        expect(full.xcName).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcName, 6);
+        expect(half.xcName).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcName * 0.5, 6);
+        expect(full.total).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xcName, 6);
+    });
+
+    test('null xcNameOverlap contributes 0 (absence is not a penalty)', () => {
+        const b = scoreSignals(baseSignals({xcNameOverlap: null}));
+        expect(b.xcName).toBe(0);
+        expect(b.total).toBe(0);
+    });
+
+    test('cross-comp signals stack additively with each other and with same-comp signals', () => {
+        const b = scoreSignals(baseSignals({deltaStart: 0, xcGregMatch: true, xcNameOverlap: 1.0, xcFaiMatch: true}));
+        expect(b.total).toBeCloseTo(1.0 + TRACKER_SCORE_WEIGHTS.xcGreg + TRACKER_SCORE_WEIGHTS.xcName + TRACKER_SCORE_WEIGHTS.xcFai, 6);
     });
 });
 
