@@ -5,6 +5,8 @@
 // Units: nats. Score = Σ wᵢ · sᵢ where sᵢ ∈ [0,1] is a saturating support
 // function and wᵢ is the per-signal weight. Missing signals contribute 0,
 // never negative — contradictions emerge by competing pairs scoring more.
+// The sole exception is `prior`, which carries a signed margin from earlier
+// task days and may be negative (a past loss to a competitor stays negative).
 
 import {
     DEFAULT_TOLERANCE_SEC,
@@ -68,7 +70,7 @@ export interface Signals {
     ddbGliderMatch: boolean;
     /** This flarmid is currently in the operator-set tracker.trackerid for the pilot. */
     baselineMatch: boolean;
-    /** Sum of decayed prior-day pair_scores for this (compno, flarmid) within the same comp. Already in nats. */
+    /** Sum of decayed prior-day two-sided margins for this (compno, flarmid) within the same comp. Already in nats; signed — negative when a prior day's match lost to a competing candidate. */
     priorNats: number;
 }
 
@@ -177,9 +179,10 @@ export function decayPrior(scoreNats: number, ageDays: number, knees: ScoreKnees
 }
 
 /** Sum of decayed prior contributions for one (compno, flarmid) pair. Each
- *  row carries a score (use `null` to signal a legacy row that gets the
- *  caller-supplied legacy weight) and an age expressed in task-days
+ *  row carries a signed margin (use `null` to signal a legacy row that gets
+ *  the caller-supplied legacy weight) and an age expressed in task-days
  *  (calendar days are *not* used — comp rest days shouldn't decay priors).
+ *  A negative margin decays toward 0 from below, preserving its sign.
  */
 export function summarisePrior(rows: {scoreNats: number | null; taskDaysAgo: number}[], legacyNats: number, knees: ScoreKnees = DEFAULT_KNEES): number {
     let total = 0;

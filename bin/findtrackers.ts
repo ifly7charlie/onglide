@@ -287,6 +287,11 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         }
     }
 
+    // Task-twin classes (same comp/day, identical turnpoint sequence): a
+    // cross-class hit between them for the same compno is the same glider,
+    // not a "moved glider" conflict. Computed once for the whole group.
+    const twinMap = classMatches.length > 1 ? await loadTaskTwins(classMatches.map((cm) => cm.job.className), classMatches[0].job.datecode) : new Map<ClassName, Set<ClassName>>();
+
     // Pass 3 — per-class results and proposals.
     const summary: GroupSummary = {pilots: 0, matched: 0, ambiguous: 0, proposed: 0, applied: 0};
     const multi = classMatches.length > 1;
@@ -318,7 +323,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
             continue;
         }
 
-        const proposals = computeProposals(matches, scoreMap, crossClass, className);
+        const proposals = computeProposals(matches, scoreMap, crossClass, className, twinMap.get(className) ?? new Set<ClassName>());
         summary.proposed += proposals.length;
 
         const accepted = proposals.length //
@@ -471,40 +476,48 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
     }));
 }
 
-// Load prior pair-score evidence for one (class, datecode), keyed by
-// `${compno}|${flarmid}`. Decay is on the *task-day* timeline (not
-// calendar days) so weather/rest days don't erode priors. Rows whose
-// pair_score is NULL — typically legacy 'ognddb' / 'pilot' / 'startline'
-// rows from before the score columns existed — get LEGACY_PRIOR_NATS as
-// a fixed positive prior, then decay normally. The task-day list comes
-// from the `tasks` table; rows whose datecode isn't in that list are
-// silently dropped (they're not part of this class's task sequence).
+// Load prior evidence for one (class, datecode), keyed by
+// `${compno}|${flarmid}`. The prior signal is the stored two-sided
+// `margin` (chosen − best competing candidate), NOT the raw pair_score:
+// it is already centred at 0, so an indeterminate day (no clear winner)
+// contributes ≈0, a day this pair confidently beat its rivals contributes
+// positive, and a day it *lost* to a competitor contributes negative — a
+// genuine negative association we want to carry forward. (pair_score is
+// always ≥0 and so could never express a negative.) Decay is on the
+// *task-day* timeline (not calendar days) so weather/rest days don't
+// erode priors. Rows whose margin is NULL — typically legacy 'ognddb' /
+// 'pilot' / 'startline' rows from before the score columns existed — get
+// LEGACY_PRIOR_NATS as a fixed positive prior (a past confirmation), then
+// decay normally.
 //
-// Scope is per-class. `tasks` and `trackerhistory` are both keyed by
-// `class` (compid is reached via the `classes` join elsewhere) so we
-// filter directly on class without joining classes here.
+// The task-day ordering is derived from the distinct datecodes that
+// actually carry evidence in `trackerhistory` for this class (plus the
+// day being scanned). It is NOT taken from `tasks`: by design `tasks`
+// holds only the current day's task per class, so it can never supply
+// the prior days' ranks — using it dropped every prior. Days that left
+// no evidence (rest/weather days) simply don't appear in the ordering,
+// which is exactly the task-day-not-calendar-day decay we want.
+// Datecodes are hex-ish and sort chronologically as plain strings.
+//
+// Scope is per-class. `class` is the only key here; the comp is implied
+// because every datecode for a given class belongs to one competition
+// and tracks the same physical glider.
 type PriorMap = Map<string, number>;
 let priorEvidenceUnavailable = false; // latched after first schema failure so we don't spam the log
 async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName): Promise<PriorMap> {
     if (priorEvidenceUnavailable) return new Map();
-    let taskDayRows: {datecode: Datecode}[] = [];
-    let priorRows: {compno: Compno; flarmid: string; datecode: string; pair_score: number | null; method: string}[] = [];
+    let priorRows: {compno: Compno; flarmid: string; datecode: string; margin: number | null; method: string}[] = [];
     try {
-        taskDayRows = await mysql.query<{datecode: Datecode}[]>(escape`
-            SELECT DISTINCT datecode FROM tasks
-            WHERE class = ${className} AND datecode IS NOT NULL
-            ORDER BY datecode
-        `);
         priorRows = await mysql.query<
             {
                 compno: Compno;
                 flarmid: string;
                 datecode: string;
-                pair_score: number | null;
+                margin: number | null;
                 method: string;
             }[]
         >(escape`
-            SELECT compno, flarmid, datecode, pair_score, method
+            SELECT compno, flarmid, datecode, margin, method
             FROM trackerhistory
             WHERE class = ${className}
               AND datecode IS NOT NULL
@@ -524,10 +537,13 @@ async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName
         }
         throw e;
     }
+    // Rank the evidence-bearing datecodes (current day included) by string
+    // order so taskDaysAgo counts task days, not calendar days.
+    const days = new Set<string>([String(currentDatecode)]);
+    for (const r of priorRows) days.add(String(r.datecode));
     const taskDayIndex = new Map<string, number>();
-    taskDayRows.forEach((r, i) => taskDayIndex.set(String(r.datecode), i));
-    const currentRank = taskDayIndex.get(String(currentDatecode));
-    if (currentRank === undefined) return new Map();
+    [...days].sort().forEach((d, i) => taskDayIndex.set(d, i));
+    const currentRank = taskDayIndex.get(String(currentDatecode))!; // always present — seeded above
 
     const grouped = new Map<string, {scoreNats: number | null; taskDaysAgo: number}[]>();
     for (const r of priorRows) {
@@ -537,7 +553,7 @@ async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName
         if (taskDaysAgo < 0) continue;
         const key = `${String(r.compno)}|${r.flarmid}`;
         const arr = grouped.get(key) ?? [];
-        arr.push({scoreNats: r.pair_score === null ? null : Number(r.pair_score), taskDaysAgo});
+        arr.push({scoreNats: r.margin === null ? null : Number(r.margin), taskDaysAgo});
         grouped.set(key, arr);
     }
 
@@ -546,6 +562,49 @@ async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName
         out.set(key, summarisePrior(rows, LEGACY_PRIOR_NATS));
     }
     return out;
+}
+
+// Two classes in the same comp/day are "task twins" when their flown task
+// has the same ordered turnpoint sequence (by legno). That happens when one
+// physical fleet is scored under two class definitions (e.g. a combined and
+// a handicap class) — the same glider legitimately flies in both, under the
+// same compno. A flarmid matching that pilot in a twin class is therefore
+// NOT a cross-class "moved glider" conflict and must not drive removal of
+// the (correct) assignment. The task `hash` column can't be used to detect
+// this — it includes free-text comments — so we compare the ntrigraph
+// sequence directly. Returns className → set of its twin classNames.
+//
+// Scope is one (compid, datecode) group: we query taskleg by datecode, then
+// keep only the classes in this group, so twins are never matched across
+// competitions even if a datecode is shared.
+async function loadTaskTwins(classNames: ClassName[], datecode: Datecode): Promise<Map<ClassName, Set<ClassName>>> {
+    const twins = new Map<ClassName, Set<ClassName>>();
+    if (classNames.length < 2) return twins;
+    const inGroup = new Set<string>(classNames.map(String));
+    const rows = await mysql.query<{class: ClassName; sig: string | null}[]>(escape`
+        SELECT tl.class AS class,
+               GROUP_CONCAT(tl.ntrigraph ORDER BY tl.legno) AS sig
+        FROM taskleg tl
+        JOIN tasks t ON t.taskid = tl.taskid AND t.flown = 'Y'
+        WHERE tl.datecode = ${String(datecode)}
+        GROUP BY tl.class, tl.taskid
+    `);
+    const bySig = new Map<string, ClassName[]>();
+    for (const r of rows) {
+        if (r.sig === null || !inGroup.has(String(r.class))) continue;
+        const arr = bySig.get(r.sig) ?? [];
+        arr.push(r.class);
+        bySig.set(r.sig, arr);
+    }
+    for (const classes of bySig.values()) {
+        if (classes.length < 2) continue;
+        for (const c of classes) {
+            const set = twins.get(c) ?? new Set<ClassName>();
+            for (const other of classes) if (other !== c) set.add(other);
+            twins.set(c, set);
+        }
+    }
+    return twins;
 }
 
 function fmtDelta(d: number | null): string {
@@ -642,6 +701,14 @@ function crossClassHitsFor(flarmid: FlarmID, thisClass: ClassName, crossClass: C
     const all = crossClass.get(flarmid);
     if (!all) return [];
     return all.filter((h) => h.className !== thisClass);
+}
+
+// Cross-class hits that represent a genuine "moved glider" conflict — i.e.
+// excluding hits to a task-twin class for the *same* compno, which are just
+// the same glider scored in two classes (see loadTaskTwins). A hit to a twin
+// class under a *different* compno is still a real conflict and kept.
+function conflictingCrossClassHits(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined, twinClasses: Set<ClassName>, compno: Compno): CrossClassHit[] {
+    return crossClassHitsFor(flarmid, thisClass, crossClass).filter((h) => !(twinClasses.has(h.className) && h.compno === compno));
 }
 
 /**
@@ -953,7 +1020,7 @@ function parseCurrentIds(raw: string): FlarmID[] {
     return out;
 }
 
-function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName): Proposal[] {
+function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName, twinClasses: Set<ClassName>): Proposal[] {
     const byPilot = new Map<Compno, TrackerMatch[]>();
     const byFlarm = new Map<FlarmID, TrackerMatch[]>();
     for (const m of matches) {
@@ -1076,7 +1143,7 @@ function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClas
         const STRONG_NEGATIVE_RATIO = 0.1;
         const removeIds = new Set<FlarmID>();
         for (const m of assignedBad) {
-            const crossClassHit = describeCrossClass(m.flarmid, thisClass, crossClass).length > 0;
+            const crossClassHit = conflictingCrossClassHits(m.flarmid, thisClass, crossClass, twinClasses, compno).length > 0;
             const total = (m.diag?.inBboxPackets ?? 0) + (m.diag?.bboxRejectedPackets ?? 0);
             const ratio = total > 0 ? (m.diag?.inBboxPackets ?? 0) / total : 0;
             const lowRatio = total > 0 && ratio <= STRONG_NEGATIVE_RATIO;
