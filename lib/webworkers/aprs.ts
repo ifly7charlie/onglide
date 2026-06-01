@@ -27,7 +27,7 @@ import {getElevationOffset} from '../getelevationoffset';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {makeGetNow, d} from '../now';
+import {makeGetNow, d, readOnly} from '../now';
 
 import {PositionMessage} from '../types';
 interface InterimPositionMessage extends PositionMessage {
@@ -570,7 +570,10 @@ if (!isMainThread && parentPort) {
         }
     });
 
-    openLog().then(() => startAprsListener(<AprsListenerConfig>workerData));
+    // readOnly (REPLAY_DB / OGN_READ_ONLY) must not mutate the point log —
+    // skip opening the write stream entirely so no file is created and the
+    // per-packet appendPoint below short-circuits.
+    (readOnly ? Promise.resolve() : openLog()).then(() => startAprsListener(<AprsListenerConfig>workerData));
 }
 
 //
@@ -1185,8 +1188,9 @@ export async function processPacket(packet: aprsPacket) {
 
     // Persist every packet, known or unknown. Downstream trackers for any
     // competition can later backfill from the log regardless of whether
-    // someone was tracking this flarmid at the time it arrived.
-    appendPoint(message);
+    // someone was tracking this flarmid at the time it arrived. Suppressed in
+    // readOnly mode (REPLAY_DB / OGN_READ_ONLY) — no write stream is open.
+    if (!readOnly) appendPoint(message);
 
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough. Dispatch goes to the
