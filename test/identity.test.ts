@@ -6,6 +6,7 @@ import {
     hashClub,
     gliderKeyOf,
     validFai,
+    hashFai,
     normaliseGreg,
     normaliseCountry,
     normaliseCompno,
@@ -88,6 +89,16 @@ describe('facet validation', () => {
         expect(validFai(null)).toBeNull();
     });
 
+    test('hashFai hashes real ids and is null for synthetic/blank — never the raw number', () => {
+        const h = hashFai(12345, SECRET);
+        expect(h).toMatch(/^[0-9a-f]{32}$/);
+        expect(h).not.toContain('12345');
+        expect(hashFai(12345, SECRET)).toBe(hashFai(12345, SECRET)); // deterministic
+        expect(hashFai(12345, SECRET)).not.toBe(hashFai(54321, SECRET));
+        expect(hashFai(0, SECRET)).toBeNull();
+        expect(hashFai(3_000_001, SECRET)).toBeNull();
+    });
+
     test('normaliseGreg strips punctuation and uppercases', () => {
         expect(normaliseGreg('G-DEAR')).toBe('GDEAR');
         expect(normaliseGreg('')).toBeNull();
@@ -131,7 +142,8 @@ describe('fingerprintFromPilot / pilotKey', () => {
         expect(f.nameTokenHashes.length).toBe(2);
         expect(f.gliderKey).toBe('VENTUS3');
         expect(f.country).toBe('GB');
-        expect(f.fai).toBe(12345);
+        expect(f.faiHash).toBe(hashFai(12345, SECRET));
+        expect(f.faiHash).toMatch(/^[0-9a-f]{32}$/);
         expect(f.greg).toBe('GABCD');
         expect(f.compno).toBe('A1');
         expect(f.isIcaoId).toBe(true);
@@ -192,12 +204,13 @@ describe('xcSignals', () => {
         gliderKey: null,
         country: null,
         compno: null,
-        fai: null,
+        faiHash: null,
         greg: null,
         isIcaoId: false,
         ...over
     });
     const tokens = (name: string) => hashNameTokens(name, SECRET);
+    const faiH = (n: number) => hashFai(n, SECRET);
 
     test('no aircraft and no pilots → empty block', () => {
         const s = xcSignals(facets({nameTokenHashes: tokens('Alice Smith')}), null, []);
@@ -207,22 +220,22 @@ describe('xcSignals', () => {
 
     test('full name overlap scores 1.0', () => {
         const cand = facets({nameTokenHashes: tokens('Alice Smith')});
-        const prior: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, fai: null};
+        const prior: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, faiHash: null};
         const s = xcSignals(cand, null, [prior]);
         expect(s.xcNameOverlap).toBeCloseTo(1.0, 6);
     });
 
     test('solo pilot vs an "A & B" two-seater crew scores ~0.5 (partial)', () => {
         const cand = facets({nameTokenHashes: tokens('Alice Smith')});
-        const crew: PilotEvidence = {tokenHashes: tokens('Alice Smith / Bob Jones'), clubHash: null, fai: null};
+        const crew: PilotEvidence = {tokenHashes: tokens('Alice Smith / Bob Jones'), clubHash: null, faiHash: null};
         const s = xcSignals(cand, null, [crew]);
         // candidate has 2 tokens, crew has 4, shared 2 → 2/max(2,4)=0.5
         expect(s.xcNameOverlap).toBeCloseTo(0.5, 6);
     });
 
     test('null overlap when candidate has no name tokens', () => {
-        const cand = facets({fai: 999});
-        const prior: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, fai: 999};
+        const cand = facets({faiHash: faiH(999)});
+        const prior: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, faiHash: faiH(999)};
         const s = xcSignals(cand, null, [prior]);
         expect(s.xcNameOverlap).toBeNull();
         expect(s.xcFaiMatch).toBe(true); // fai still matches the best clue
@@ -237,10 +250,19 @@ describe('xcSignals', () => {
         expect(s.xcCountryMatch).toBe(true);
     });
 
+    test('glider match is forgiving of descriptor suffixes (winglets, span, etc.)', () => {
+        const cand = facets({gliderKey: gliderKeyOf('Standard Cirrus')!});
+        const a = {gliderKey: gliderKeyOf('Standard Cirrus Winglets')!, greg: null, country: null, compno: null, isIcaoId: false};
+        expect(xcSignals(cand, a, []).xcGliderMatch).toBe(true);
+        // genuinely different models do not match
+        const b = {gliderKey: gliderKeyOf('Ventus 2')!, greg: null, country: null, compno: null, isIcaoId: false};
+        expect(xcSignals(facets({gliderKey: gliderKeyOf('Ventus 3')!}), b, []).xcGliderMatch).toBe(false);
+    });
+
     test('best clue supplies the booleans — fai dominates clue selection', () => {
-        const cand = facets({nameTokenHashes: tokens('Alice Smith'), fai: 555, clubHash: hashClub('Lasham Gliding', SECRET)});
-        const wrongName: PilotEvidence = {tokenHashes: tokens('Zoe Other'), clubHash: hashClub('Lasham Gliding', SECRET), fai: 555};
-        const rightName: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, fai: null};
+        const cand = facets({nameTokenHashes: tokens('Alice Smith'), faiHash: faiH(555), clubHash: hashClub('Lasham Gliding', SECRET)});
+        const wrongName: PilotEvidence = {tokenHashes: tokens('Zoe Other'), clubHash: hashClub('Lasham Gliding', SECRET), faiHash: faiH(555)};
+        const rightName: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, faiHash: null};
         const s = xcSignals(cand, null, [wrongName, rightName]);
         // fai match (weight 2 in selection) wins → booleans from wrongName clue
         expect(s.xcFaiMatch).toBe(true);

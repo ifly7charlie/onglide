@@ -200,6 +200,11 @@ export const TRACKER_SCORE_WEIGHTS = {
 // id is worth storing/matching as cross-comp identity evidence.
 export const FAI_REAL_MAX = 300000;
 
+// Cross-comp identity evidence is forgotten if not reconfirmed within this many
+// months. last_seen is bumped on every confident re-collection; rows older than
+// this are excluded at scoring time and periodically purged by findtrackers.
+export const IDENTITY_EXPIRY_MONTHS = 18;
+
 // Generic placeholder / team tokens stripped during name tokenisation
 // (lib/scoring/shared/identity.ts). A "name" like "Team A" reduces to no
 // usable tokens — it can't identify a person, so it contributes no name

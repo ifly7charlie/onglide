@@ -22,7 +22,7 @@
 //
 
 import {createHmac} from 'crypto';
-import {gliderKey, cleanRegistration} from '../../ddb';
+import {gliderKey, gliderEquivalent, cleanRegistration} from '../../ddb';
 import {FAI_REAL_MAX, NAME_STOPWORDS} from '../../constants';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +121,14 @@ export function validFai(fai: number | null | undefined): number | null {
     return n;
 }
 
+// HMAC of a real FAI id. The FAI id resolves directly to a named pilot on the
+// public ranking site, so it's effectively a name — we store only the keyed
+// hash, never the number. null for unresolved/synthetic ids.
+export function hashFai(fai: number | null | undefined, secret: string = identitySecret()): string | null {
+    const v = validFai(fai);
+    return v === null ? null : hmac(`fai:${v}`, secret);
+}
+
 // Registration → A-Z0-9 uppercase (reuses the DDB normaliser). null when empty.
 export function normaliseGreg(greg: string | null | undefined): string | null {
     const g = cleanRegistration(greg).toUpperCase();
@@ -197,7 +205,7 @@ export interface IdentityFacets {
     gliderKey: string | null;
     country: string | null;
     compno: string | null;
-    fai: number | null;
+    faiHash: string | null; // HMAC of a real FAI id (never the raw number)
     greg: string | null;
     isIcaoId: boolean;
 }
@@ -220,7 +228,7 @@ export function fingerprintFromPilot(p: PilotIdentityInput, secret: string = ide
         gliderKey: gliderKeyOf(p.glidertype),
         country: normaliseCountry(p.country),
         compno: normaliseCompno(p.compno),
-        fai: validFai(p.fai),
+        faiHash: hashFai(p.fai, secret),
         greg: normaliseGreg(p.greg),
         isIcaoId: flarmidIsIcao(p.flarmid)
     };
@@ -230,16 +238,16 @@ export function fingerprintFromPilot(p: PilotIdentityInput, secret: string = ide
 // tokenises to nothing (e.g. "Team A") with no FAI and no club isn't worth a
 // pilot-clue row — the aircraft attributes are still collected separately.
 export function hasPilotEvidence(f: IdentityFacets): boolean {
-    return f.nameTokenHashes.length > 0 || f.fai !== null || f.clubHash !== null;
+    return f.nameTokenHashes.length > 0 || f.faiHash !== null || f.clubHash !== null;
 }
 
 // Stable dedupe key for one pilot clue under a flarmid: HMAC over the sorted
-// name token hashes + fai + country. The same crew next comp reproduces the
-// same key; two unrelated pilots sharing a comp number get different keys
+// name token hashes + fai hash + country. The same crew next comp reproduces
+// the same key; two unrelated pilots sharing a comp number get different keys
 // (compno is deliberately NOT part of it). Two-seater token sets are
 // order-independent because hashNameTokens sorts.
 export function pilotKey(f: IdentityFacets, secret: string = identitySecret()): string {
-    const canon = `${f.nameTokenHashes.join(',')}|${f.fai ?? ''}|${f.country ?? ''}`;
+    const canon = `${f.nameTokenHashes.join(',')}|${f.faiHash ?? ''}|${f.country ?? ''}`;
     return hmac(`pilot:${canon}`, secret);
 }
 
@@ -294,7 +302,7 @@ export interface AircraftEvidence {
 export interface PilotEvidence {
     tokenHashes: string[];
     clubHash: string | null;
-    fai: number | null;
+    faiHash: string | null;
 }
 
 // The cross-comp signal block produced for one candidate pilot against a
@@ -339,7 +347,11 @@ export function xcSignals(candidate: IdentityFacets, aircraft: AircraftEvidence 
     if (!aircraft && (!pilots || !pilots.length)) return {...EMPTY_XC};
 
     const xcGregMatch = !!candidate.greg && !!aircraft?.greg && candidate.greg === aircraft.greg;
-    const xcGliderMatch = !!candidate.gliderKey && !!aircraft?.gliderKey && candidate.gliderKey === aircraft.gliderKey;
+    // Forgiving prefix match (not exact equality): the same airframe's glider is
+    // entered inconsistently across comps — "Standard Cirrus" vs "Standard
+    // Cirrus Winglets", "Ventus" vs "Ventus 3". gliderEquivalent treats one
+    // model key being a prefix of the other as a match.
+    const xcGliderMatch = !!candidate.gliderKey && !!aircraft?.gliderKey && gliderEquivalent(candidate.gliderKey, aircraft.gliderKey);
     const xcCompnoMatch = !!candidate.compno && !!aircraft?.compno && candidate.compno === aircraft.compno;
     const xcCountryMatch = !!candidate.country && !!aircraft?.country && candidate.country === aircraft.country;
 
@@ -348,7 +360,7 @@ export function xcSignals(candidate: IdentityFacets, aircraft: AircraftEvidence 
     let best: {clue: PilotEvidence; overlap: number; fai: boolean; club: boolean} | null = null;
     for (const clue of pilots ?? []) {
         const overlap = tokenOverlap(candidate.nameTokenHashes, clue.tokenHashes);
-        const fai = candidate.fai !== null && clue.fai !== null && candidate.fai === clue.fai;
+        const fai = !!candidate.faiHash && !!clue.faiHash && candidate.faiHash === clue.faiHash;
         const club = !!candidate.clubHash && !!clue.clubHash && candidate.clubHash === clue.clubHash;
         const rank = (fai ? 2 : 0) + overlap + (club ? 0.1 : 0);
         const bestRank = best ? (best.fai ? 2 : 0) + best.overlap + (best.club ? 0.1 : 0) : -1;

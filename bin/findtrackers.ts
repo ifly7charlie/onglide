@@ -30,7 +30,7 @@ import {
     type PilotEvidence,
     type XcSignalBlock
 } from '../lib/scoring/shared/identity';
-import {LEGACY_PRIOR_NATS, DEFAULT_LEDGER_MIN_NATS, DEFAULT_AUTO_MARGIN_NATS, DEFAULT_SCORE_MIN_NATS} from '../lib/constants';
+import {LEGACY_PRIOR_NATS, DEFAULT_LEDGER_MIN_NATS, DEFAULT_AUTO_MARGIN_NATS, DEFAULT_SCORE_MIN_NATS, IDENTITY_EXPIRY_MONTHS} from '../lib/constants';
 
 import prompts from 'prompts';
 import escape from 'sql-template-strings';
@@ -195,6 +195,9 @@ async function main() {
         totalAmbiguous = 0,
         totalProposed = 0,
         totalApplied = 0;
+
+    // Housekeeping: drop cross-comp identity evidence not reconfirmed in 18mo.
+    await purgeExpiredIdentity();
 
     for (const group of groupJobs(jobs)) {
         const s = await processGroup(group, debugFlarmidsArg, debugCompnosArg, tolerance, interactive, ddb);
@@ -685,17 +688,21 @@ async function loadPriorAircraft(flarmids: FlarmID[]): Promise<PriorAircraftMap>
     if (!identityEnabled || identityTablesUnavailable || !flarmids.length) return out;
     const ids = Array.from(new Set(flarmids.map((f) => String(f).toUpperCase())));
     try {
+        // Exclude evidence not reconfirmed within IDENTITY_EXPIRY_MONTHS — stale
+        // associations (sold gliders, swapped units) shouldn't keep scoring.
         const aircraftRows = await mysql.query<{flarmid: string; glider_key: string | null; greg: string | null; country: string | null; compno: string | null; is_icao_id: string | null}[]>(
-            escape`SELECT flarmid, glider_key, greg, country, compno, is_icao_id FROM flarm_aircraft WHERE flarmid IN (${ids})`
+            escape`SELECT flarmid, glider_key, greg, country, compno, is_icao_id FROM flarm_aircraft WHERE flarmid IN (${ids}) AND last_seen >= DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`
         );
-        const pilotRows = await mysql.query<{flarmid: string; pilot_key: string; club_hash: string | null; fai: number | null}[]>(escape`SELECT flarmid, pilot_key, club_hash, fai FROM flarm_pilot WHERE flarmid IN (${ids})`);
+        const pilotRows = await mysql.query<{flarmid: string; pilot_key: string; club_hash: string | null; fai_hash: string | null}[]>(
+            escape`SELECT flarmid, pilot_key, club_hash, fai_hash FROM flarm_pilot WHERE flarmid IN (${ids}) AND last_seen >= DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`
+        );
         const tokenRows = await mysql.query<{flarmid: string; pilot_key: string; token_hash: string}[]>(escape`SELECT flarmid, pilot_key, token_hash FROM flarm_pilot_nametoken WHERE flarmid IN (${ids})`);
 
         // pilot clues, keyed flarmid → pilot_key → evidence (tokens filled next).
         const byFlarm = new Map<string, Map<string, PilotEvidence>>();
         for (const p of pilotRows) {
             const m = byFlarm.get(p.flarmid) ?? new Map<string, PilotEvidence>();
-            m.set(p.pilot_key, {tokenHashes: [], clubHash: p.club_hash, fai: p.fai === null ? null : Number(p.fai)});
+            m.set(p.pilot_key, {tokenHashes: [], clubHash: p.club_hash, faiHash: p.fai_hash});
             byFlarm.set(p.flarmid, m);
         }
         for (const t of tokenRows) {
@@ -723,6 +730,35 @@ async function loadPriorAircraft(flarmids: FlarmID[]): Promise<PriorAircraftMap>
         throw e;
     }
     return out;
+}
+
+// Forget cross-comp evidence not reconfirmed within IDENTITY_EXPIRY_MONTHS.
+// Run once per invocation (not per class). Tokens for expired clues go first
+// (FK-less), then the expired clues, then expired aircraft. Idempotent —
+// after the first sweep there's nothing left to delete.
+async function purgeExpiredIdentity(): Promise<void> {
+    if (!identityEnabled || identityTablesUnavailable || argv['dry-run']) return;
+    try {
+        const t = mysql.transaction();
+        t.query(escape`
+            DELETE FROM flarm_pilot_nametoken
+             WHERE (flarmid, pilot_key) IN (
+                   SELECT flarmid, pilot_key FROM flarm_pilot
+                    WHERE last_seen < DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH))
+        `);
+        t.query(escape`DELETE FROM flarm_pilot   WHERE last_seen < DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`);
+        t.query(escape`DELETE FROM flarm_aircraft WHERE last_seen < DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`);
+        const res: any = await t.commit();
+        const pilots = Number(res?.[1]?.affectedRows ?? 0);
+        const aircraft = Number(res?.[2]?.affectedRows ?? 0);
+        if (aircraft || pilots) console.log(`identity-evidence: expired ${aircraft} aircraft / ${pilots} pilot clue${pilots === 1 ? '' : 's'} (not reconfirmed in ${IDENTITY_EXPIRY_MONTHS} months)`);
+    } catch (e) {
+        if (isMissingSchema(e)) {
+            identityTablesUnavailable = true;
+            return;
+        }
+        throw e;
+    }
 }
 
 // Cross-comp signal block for one match's (pilot, flarmid). Empty when the
@@ -810,14 +846,14 @@ async function writeAircraftEvidence(
             const pk = pilotKey(facets);
             t.query(escape`
                 INSERT INTO flarm_pilot
-                    (flarmid, pilot_key, club_hash, fai, observations, first_seen, last_seen)
+                    (flarmid, pilot_key, club_hash, fai_hash, observations, first_seen, last_seen)
                 VALUES
-                    (${fid}, ${pk}, ${facets.clubHash}, ${facets.fai}, 1, now(), now())
+                    (${fid}, ${pk}, ${facets.clubHash}, ${facets.faiHash}, 1, now(), now())
                 ON DUPLICATE KEY UPDATE
                     observations = observations + 1,
                     last_seen    = now(),
                     club_hash    = COALESCE(VALUES(club_hash), club_hash),
-                    fai          = COALESCE(VALUES(fai), fai)
+                    fai_hash     = COALESCE(VALUES(fai_hash), fai_hash)
             `);
             for (const th of facets.nameTokenHashes) {
                 t.query(escape`INSERT IGNORE INTO flarm_pilot_nametoken (flarmid, pilot_key, token_hash) VALUES (${fid}, ${pk}, ${th})`);
