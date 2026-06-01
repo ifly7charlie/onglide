@@ -746,6 +746,27 @@ function describeCrossClassDetailed(flarmid: FlarmID, thisClass: ClassName, cros
     });
 }
 
+/**
+ * Multi-line printout per *same-class* contender: other pilots in this class
+ * whose track also matches this flarmid. The cross-class annotation only
+ * covers other classes, so without this a tracker that two same-class pilots
+ * both claim (e.g. near-simultaneous starters) shows no hint that the flarmid
+ * already belongs to — and strongly matches — another pilot. Flags the peer's
+ * assigned ID and shows its score so the stronger claim is obvious.
+ */
+function describeSameClassDetailed(m: TrackerMatch, byFlarmid: Map<FlarmID, TrackerMatch[]>, scoreMap?: ScoreMap): string[][] {
+    const peers = (byFlarmid.get(m.flarmid) ?? []).filter((p) => p.compno !== m.compno);
+    return peers.map((p) => {
+        const compno = String(p.compno).trim();
+        const tag = p.assigned ? ' [their assigned ID]' : '';
+        const deltas = `Δstart ${fmtDelta(p.deltaStart)}, Δfinish ${fmtDelta(p.deltaFinish)}`;
+        const lines = [`also matches ${compno} in this class${tag}: ${deltas}`];
+        const scored = scoreMap?.get(scoreKey(p.compno, p.flarmid));
+        if (scored) lines.push(`  ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested)}`);
+        return lines;
+    });
+}
+
 type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean; deltaStart: number | null; deltaFinish: number | null}>;
 const scoreKey = (compno: Compno, flarmid: FlarmID) => `${compno}|${flarmid}`;
 
@@ -873,12 +894,17 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolera
         console.log(`  (no matches, no assigned-tracker reports)`);
         return;
     }
-    // Group by compno
+    // Group by compno; also by flarmid so a candidate can be annotated with
+    // the other same-class pilots that match the same tracker.
     const byPilot = new Map<Compno, TrackerMatch[]>();
+    const byFlarmid = new Map<FlarmID, TrackerMatch[]>();
     for (const m of matches) {
         const arr = byPilot.get(m.compno) ?? [];
         arr.push(m);
         byPilot.set(m.compno, arr);
+        const arrF = byFlarmid.get(m.flarmid) ?? [];
+        arrF.push(m);
+        byFlarmid.set(m.flarmid, arrF);
     }
 
     // Sort compnos: pilots needing attention (assigned-outside-tolerance,
@@ -894,7 +920,7 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolera
     });
 
     for (const compno of compnos) {
-        printPilotMatches(compno, byPilot.get(compno)!, results, tolerance, scoreMap, crossClass, thisClass);
+        printPilotMatches(compno, byPilot.get(compno)!, results, tolerance, scoreMap, crossClass, thisClass, byFlarmid);
     }
 }
 
@@ -927,7 +953,7 @@ function fmtPeers(peers: {compno: Compno; name: string; dt: number}[]): string {
     return peers.length > max ? `${head}, +${peers.length - max} more` : head;
 }
 
-function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], tolerance: number, scoreMap?: ScoreMap, crossClass?: CrossClassMap, thisClass?: ClassName): void {
+function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], tolerance: number, scoreMap?: ScoreMap, crossClass?: CrossClassMap, thisClass?: ClassName, byFlarmid?: Map<FlarmID, TrackerMatch[]>): void {
     if (!arr.length) return;
     const r = results.find((x) => x.compno === compno);
     console.log(`  ${String(compno).padEnd(4)}${pilotHeaderTag(arr)}`);
@@ -944,6 +970,13 @@ function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: Officia
         if (m.diag) console.log(`         · ${fmtDiag(m.diag)}`);
         const scored = scoreMap?.get(scoreKey(m.compno, m.flarmid));
         if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested)}`);
+        if (byFlarmid) {
+            for (const lines of describeSameClassDetailed(m, byFlarmid, scoreMap)) {
+                for (const [i, line] of lines.entries()) {
+                    console.log(`         ${i === 0 ? '↳' : ' '} ${line}`);
+                }
+            }
+        }
         if (thisClass) {
             for (const lines of describeCrossClassDetailed(m.flarmid, thisClass, crossClass)) {
                 for (const [i, line] of lines.entries()) {
@@ -1227,6 +1260,15 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
     if (!proposals.length) return [];
     console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
 
+    // Built from the full match set so the per-proposal view (which filters
+    // to one pilot) can still annotate same-class contenders for a flarmid.
+    const byFlarmid = new Map<FlarmID, TrackerMatch[]>();
+    for (const m of matches) {
+        const arrF = byFlarmid.get(m.flarmid) ?? [];
+        arrF.push(m);
+        byFlarmid.set(m.flarmid, arrF);
+    }
+
     const accepted: Proposal[] = [];
     let acceptAll = false;
     for (let i = 0; i < proposals.length; i++) {
@@ -1239,7 +1281,8 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
             tolerance,
             scoreMap,
             crossClass,
-            thisClass
+            thisClass,
+            byFlarmid
         );
 
         if (acceptAll) {
