@@ -27,7 +27,7 @@ import {getElevationOffset} from '../getelevationoffset';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {makeGetNow, d} from '../now';
+import {makeGetNow, d, readOnly} from '../now';
 
 import {PositionMessage, StreamId} from '../types';
 interface InterimPositionMessage extends PositionMessage {
@@ -700,7 +700,10 @@ if (!isMainThread && parentPort) {
         }
     });
 
-    openLog().then(() => startAprsListener(<AprsListenerConfig>workerData));
+    // readOnly (REPLAY_DB / OGN_READ_ONLY) must not mutate the point log —
+    // skip opening the write stream entirely so no file is created and the
+    // per-packet appendPoint below short-circuits.
+    (readOnly ? Promise.resolve() : openLog()).then(() => startAprsListener(<AprsListenerConfig>workerData));
 
     // Push a snapshot of per-pilot tracker state to the main thread every
     // TRACKER_STATUS_SNAPSHOT_MS for the /status/trackers operator page.
@@ -1392,8 +1395,9 @@ export async function processPacket(packet: aprsPacket) {
 
     // Persist every packet, known or unknown. Downstream trackers for any
     // competition can later backfill from the log regardless of whether
-    // someone was tracking this flarmid at the time it arrived.
-    appendPoint(message);
+    // someone was tracking this flarmid at the time it arrived. Suppressed in
+    // readOnly mode (REPLAY_DB / OGN_READ_ONLY) — no write stream is open.
+    if (!readOnly) appendPoint(message);
 
     // If it is undefined then we will enrich and send to the
     // airfield channel if it's close enough. Dispatch goes to the
@@ -1555,7 +1559,9 @@ export function checkSecondaryOffset(aircraft: Aircraft, secF: StreamId, state: 
     const over = dLat_m > STICKY_OFFSET_LOG_LAT_M || dLng_m > STICKY_OFFSET_LOG_LAT_M || dAlt_m > STICKY_OFFSET_LOG_ALT_M;
     if (over && !state.loggedOver) {
         state.loggedOver = true;
-        console.log(`aprs: stream offset ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} dLat=${dLat_m.toFixed(0)}m dLng=${dLng_m.toFixed(0)}m dAlt=${dAlt_m.toFixed(0)}m (n=${state.count})`);
+        console.log(
+            `aprs: stream offset ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} dLat=${dLat_m.toFixed(0)}m dLng=${dLng_m.toFixed(0)}m dAlt=${dAlt_m.toFixed(0)}m (n=${state.count})`
+        );
     } else if (!over && state.loggedOver) {
         state.loggedOver = false;
         console.log(`aprs: stream offset cleared ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} (n=${state.count})`);
@@ -1575,7 +1581,9 @@ export function checkSecondaryOffset(aircraft: Aircraft, secF: StreamId, state: 
 // the rejection in trackerhistory. We don't write to the DB from the
 // worker — it doesn't hold a mysql handle.
 function recordUncorrelatedTracker(aircraft: Aircraft, primaryF: StreamId, secF: StreamId, madLatM: number, madLngM: number, madAltM: number, sampleCount: number): void {
-    console.log(`aprs: tracker uncorrelated ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} madLat=${madLatM.toFixed(0)}m madLng=${madLngM.toFixed(0)}m madAlt=${madAltM.toFixed(0)}m (n=${sampleCount})`);
+    console.log(
+        `aprs: tracker uncorrelated ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} madLat=${madLatM.toFixed(0)}m madLng=${madLngM.toFixed(0)}m madAlt=${madAltM.toFixed(0)}m (n=${sampleCount})`
+    );
     if (parentPort) {
         parentPort.postMessage({
             type: 'uncorrelated',
@@ -1632,7 +1640,7 @@ function pickStickyPrimary(
     // not the src that would actually report). On first match, upgrade
     // the placeholder to the actual combined value so subsequent equality
     // tests against bucket keys are direct.
-    if (primaryFlarmid !== undefined && (primaryFlarmid >>> 24) === 0) {
+    if (primaryFlarmid !== undefined && primaryFlarmid >>> 24 === 0) {
         const fid24 = primaryFlarmid & 0xffffff;
         for (const f of byFlarm.keys()) {
             if ((f & 0xffffff) === fid24) {

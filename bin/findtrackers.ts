@@ -319,7 +319,13 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     // Task-twin classes (same comp/day, identical turnpoint sequence): a
     // cross-class hit between them for the same compno is the same glider,
     // not a "moved glider" conflict. Computed once for the whole group.
-    const twinMap = classMatches.length > 1 ? await loadTaskTwins(classMatches.map((cm) => cm.job.className), classMatches[0].job.datecode) : new Map<ClassName, Set<ClassName>>();
+    const twinMap =
+        classMatches.length > 1
+            ? await loadTaskTwins(
+                  classMatches.map((cm) => cm.job.className),
+                  classMatches[0].job.datecode
+              )
+            : new Map<ClassName, Set<ClassName>>();
 
     // Pass 3 — per-class results and proposals.
     const summary: GroupSummary = {pilots: 0, matched: 0, ambiguous: 0, proposed: 0, applied: 0};
@@ -475,6 +481,13 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
     // recorded). Without them the start-scan window is computed only
     // over finishers, and the rest of the pipeline never sees the landout
     // pilot's flarmid as a candidate.
+    //
+    // Pre-09:00 local starts are treated as unknown — scoring occasionally
+    // emits a bogus early-morning pr.start (often near 00:00) when the
+    // upstream scorer hasn't reconciled the day yet. Including those produces
+    // delta_start values in the tens of thousands of seconds that overflow
+    // the trackerhistory column and contaminate the score map. Soaring tasks
+    // don't start before 09:00 local in practice, so this filter is safe.
     const rows = await mysql.query<
         {
             compno: Compno;
@@ -511,6 +524,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
          WHERE pr.class    = ${className}
            AND pr.datecode = ${datecode}
            AND pr.start    IS NOT NULL AND pr.start  <> '00:00:00'
+           AND pr.start    >= '09:00:00'
     `);
     return rows.map((r) => ({
         compno: r.compno,
@@ -802,14 +816,7 @@ function countGoodMatches(matches: TrackerMatch[], scoreMap: ScoreMap, ddb: Reco
 // Aircraft attributes (glider/greg/country/compno) upsert per flarmid; pilot
 // clues (name tokens, club, fai) accumulate per distinct identity. DDB-blocked
 // devices are skipped entirely — no aircraft row, no pilot clue, no tokens.
-async function writeAircraftEvidence(
-    job: Job,
-    matches: TrackerMatch[],
-    scoreMap: ScoreMap,
-    accepted: Proposal[],
-    candidateFacets: Map<Compno, IdentityFacets>,
-    ddb: Record<string, DDBEntry> | null
-): Promise<number> {
+async function writeAircraftEvidence(job: Job, matches: TrackerMatch[], scoreMap: ScoreMap, accepted: Proposal[], candidateFacets: Map<Compno, IdentityFacets>, ddb: Record<string, DDBEntry> | null): Promise<number> {
     if (!identityEnabled || identityTablesUnavailable) return 0;
     const acceptedPairs = new Set<string>();
     for (const p of accepted) for (const id of p.addedIds) acceptedPairs.add(scoreKey(p.compno, id));
@@ -1270,7 +1277,16 @@ function fmtPeers(peers: {compno: Compno; name: string; dt: number}[]): string {
     return peers.length > max ? `${head}, +${peers.length - max} more` : head;
 }
 
-function printPilotMatches(compno: Compno, arr: TrackerMatch[], results: OfficialResult[], tolerance: number, scoreMap?: ScoreMap, crossClass?: CrossClassMap, thisClass?: ClassName, byFlarmid?: Map<FlarmID, TrackerMatch[]>): void {
+function printPilotMatches(
+    compno: Compno,
+    arr: TrackerMatch[],
+    results: OfficialResult[],
+    tolerance: number,
+    scoreMap?: ScoreMap,
+    crossClass?: CrossClassMap,
+    thisClass?: ClassName,
+    byFlarmid?: Map<FlarmID, TrackerMatch[]>
+): void {
     if (!arr.length) return;
     const r = results.find((x) => x.compno === compno);
     console.log(`  ${String(compno).padEnd(4)}${pilotHeaderTag(arr)}`);

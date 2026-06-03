@@ -2282,7 +2282,6 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                     const start = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), firstPointTime), p.posIndex - 3), 0);
                     const end = Math.max(Math.min(sortedIndexNumber(p.t.subarray(0, p.posIndex), now), p.posIndex - 2), 0);
                     const length = end - start;
-                    //                        console.log(`${compno}: ${end} - ${start} = ${length}, ${d(p.t[start])} => ${d(p.t[end])}, posIndex: ${p.posIndex} ,${d(glider.utcStart ?? 0)}`);
                     if (length) {
                         result[glider.compno] = {
                             compno: glider.compno,
@@ -2747,7 +2746,10 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
     // as inWindow. Replay mode bypasses live wall-clock checks.
     const todayLocalIso = (() => {
         const tzoffset = sum.tzoffset || 0;
-        return new Date(Date.now() + tzoffset * 1000).toISOString().slice(0, 10);
+        // getNow() honours REPLAY (replayBase + elapsed); Date.now() would
+        // pin "today" to the real wall-clock day and demote every historical
+        // class to notask/yesterday during a replay.
+        return new Date((getNow() + tzoffset) * 1000).toISOString().slice(0, 10);
     })();
     const todayDatecode = toDateCode(new Date(todayLocalIso));
     const yesterdayLocalIso = new Date(new Date(todayLocalIso).getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
