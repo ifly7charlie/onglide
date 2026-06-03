@@ -1175,7 +1175,15 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
 
     let droppedGliders = 0;
     for (const key of Object.keys(gliders)) {
-        if (gliders[key as ClassName_Compno].compid === competition.compid) {
+        const g = gliders[key as ClassName_Compno];
+        if (g.compid === competition.compid) {
+            // Drop the glider from the APRS worker's allAircraft map too —
+            // nothing else issues untrackGlider for a destroyed comp, so
+            // without this they leak forever (still scored against APRS and
+            // still listed on /status/trackers under "(unassigned)").
+            if (g.dbTrackerId && g.dbTrackerId != 'unknown' && g.dbTrackerId != 'blocked') {
+                aprsController?.untrackGlider(g.compno, g.className, g.channelName, g.dbTrackerId);
+            }
             delete gliders[key as ClassName_Compno];
             droppedGliders++;
         }
