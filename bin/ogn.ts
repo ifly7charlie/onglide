@@ -3660,6 +3660,9 @@ function setupOgnWebServer(req, res) {
     }
 
     if (req?.url == '/status/trackers') {
+        if (!requireStatusAuth(req, res)) {
+            return;
+        }
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.writeHead(200, headers);
         res.end(renderTrackerStatusPage());
