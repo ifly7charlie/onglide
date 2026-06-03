@@ -629,9 +629,13 @@ function warnIdentityDisabledOnce(): void {
     identityWarned = true;
     console.warn('  (IDENTITY_HMAC_SECRET unset — cross-comp identity signals disabled this run)');
 }
-function isMissingSchema(e: any): boolean {
+// ONLY a genuinely-absent table counts as "not migrated yet" (a legitimate
+// silent skip until the migration is applied). A column mismatch — e.g. the
+// flarm_* tables exist but predate the fai→fai_hash change — is a real bug we
+// must NOT swallow; it falls through and is reported by main().catch.
+function isMissingTable(e: any): boolean {
     const msg = String(e?.code ?? e?.message ?? e);
-    return /Unknown column|BAD_FIELD_ERROR|ER_BAD_FIELD|doesn't exist|ER_NO_SUCH_TABLE|no such table/i.test(msg);
+    return /ER_NO_SUCH_TABLE|no such table|doesn't exist/i.test(msg);
 }
 
 const EMPTY_XC_BLOCK: XcSignalBlock = {
@@ -722,8 +726,8 @@ async function loadPriorAircraft(flarmids: FlarmID[]): Promise<PriorAircraftMap>
             out.set(key, {aircraft: {gliderKey: null, greg: null, country: null, compno: null, isIcaoId: false}, pilots: Array.from(m.values())});
         }
     } catch (e) {
-        if (isMissingSchema(e)) {
-            console.warn(`  (cross-comp identity schema not applied yet — skipping identity this run. Apply conf/sql/migrations/20260601_flarm_aircraft.sql to enable.)`);
+        if (isMissingTable(e)) {
+            console.warn(`  (cross-comp identity tables don't exist yet — skipping identity this run. Apply conf/sql/migrations/20260601_flarm_aircraft.sql to enable.)`);
             identityTablesUnavailable = true;
             return new Map();
         }
@@ -753,7 +757,7 @@ async function purgeExpiredIdentity(): Promise<void> {
         const aircraft = Number(res?.[2]?.affectedRows ?? 0);
         if (aircraft || pilots) console.log(`identity-evidence: expired ${aircraft} aircraft / ${pilots} pilot clue${pilots === 1 ? '' : 's'} (not reconfirmed in ${IDENTITY_EXPIRY_MONTHS} months)`);
     } catch (e) {
-        if (isMissingSchema(e)) {
+        if (isMissingTable(e)) {
             identityTablesUnavailable = true;
             return;
         }
@@ -865,8 +869,8 @@ async function writeAircraftEvidence(
     try {
         await t.commit();
     } catch (e) {
-        if (isMissingSchema(e)) {
-            console.warn(`  (cross-comp identity schema not applied yet — collection skipped. Apply conf/sql/migrations/20260601_flarm_aircraft.sql to enable.)`);
+        if (isMissingTable(e)) {
+            console.warn(`  (cross-comp identity tables don't exist yet — collection skipped. Apply conf/sql/migrations/20260601_flarm_aircraft.sql to enable.)`);
             identityTablesUnavailable = true;
             return 0;
         }

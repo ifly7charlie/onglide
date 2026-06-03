@@ -138,6 +138,22 @@ Vector basemap is a single self-hosted `.pmtiles` file served over HTTP range re
 - The Next.js version pinned here **is not safe to expose directly** — always run behind Apache/Cloudflare (see `readme.md`).
 - `readme.md` (lowercase) is the operator's deployment guide. It documents env vars (`NEXT_PUBLIC_PMTILES_URL`, `MYSQL_PASSWORD`, `SOARINGSPOT_*`, `ROBOCONTROL_URL`, etc.), Planetiler invocations for pmtiles, and the docker-compose topology (`mysql`, `soaringspot`, `ogn`, `next`, `apache`).
 
+## Error handling
+
+Catch errors only to handle a *specific, expected* condition; report everything else loudly. The failure mode to avoid is a broad catch that swallows a real bug as if it were the expected case — it turns a crash into a silent no-op that wastes far more time to diagnose than the original error would have. These principles hold everywhere; **where an unexpected error goes differs by execution context** (below).
+
+- Make the catch predicate as narrow as the condition it handles. Example: a migration-not-applied skip should match a genuinely-absent table (`ER_NO_SUCH_TABLE`) **only** — *not* `Unknown column`, which means the table exists but is the wrong shape (a real bug). See `isMissingTable` in `bin/findtrackers.ts`; same shape as the `EADDRINUSE`-only catch in `bin/ogn.ts` (rethrows anything else).
+- An unexpected error must never be downgraded to a warning or quietly ignored — it either crashes (CLI) or aborts just its unit of work *with a logged reason* (daemon). Never both swallowed and unlogged.
+- A latched "feature unavailable" flag (e.g. `identityTablesUnavailable`, `priorEvidenceUnavailable`) must only ever be set by the narrow expected-condition branch. If it can also latch on an unexpected error, one swallowed failure silences the feature for the whole run.
+- When a code path legitimately does nothing, say so on stdout (counts, "skipped: <reason>"). A run that produces no output and no error must be indistinguishable from success only when it *was* success.
+
+**CLI / one-shot tools** (`bin/findtrackers.ts`, `bin/rst.ts`, `ssscrape --refetch`/arg-validation): an unexpected error should propagate to the top-level `main().catch` → `console.error` + **non-zero exit**, or `process.exit(1)` at the handling site. A failed one-shot must exit non-zero so the caller/cron sees it.
+
+**Long-running daemons** (`bin/ogn.ts` tick loop, `bin/ssscrape.ts` scheduler): a single bad unit of work must **not** crash the process. The catch boundary is the loop body — per-competition, per-packet, per-heartbeat — not the top level:
+- Wrap each unit and continue: `for (const comp of …) { try { await tickCompetition(comp) } catch (e) { console.error(\`tickCompetition(${comp.compid}) failed:\`, e) } }` (`bin/ogn.ts`). Always log with the identifying context (compid / datecode / flarmid) so the failing unit is identifiable.
+- Background/fire-and-forget work uses `.catch((e) => console.log('<name> failed', e))` (the sweeps, `runScheduler`, `notifyCompetitionDelta`) — log and keep serving.
+- Reserve `process.exit` for signal-driven graceful shutdown (`handleExit`) and unrecoverable startup failures — not for routine per-iteration errors.
+
 # IMPORTANT
 
 *DO NOT SPECULATE ABOUT HOW COMPETITIONS WORK IN COMMENTS - include information only if provided in discussion or review of rules*
