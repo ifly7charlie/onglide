@@ -396,14 +396,30 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
     //    const state = original(draft);
     const tracks = action.payload;
 
-    if (tracks.baseTime) {
-        state.baseTime = tracks.baseTime as Epoch;
-    }
     console.log(
         `track data received (${action.source ?? 'live'}): ${Object.values(tracks.pilots)
             .map((p) => `${p.compno}:${p.t?.length}`)
-            .join(',')}`
+            .join(',')} state.baseTime: ${state.baseTime}, tracks.baseTime: ${tracks.baseTime}`
     );
+
+    if (tracks.baseTime) {
+        state.baseTime = tracks.baseTime as Epoch;
+    }
+
+    // The 'websocket' residual from generateRecentPilotTracks is a complete roster of
+    // the class's current gliders (a placeholder entry is sent even for pilots with no
+    // recent points), so a pilot absent from it has been removed from the class — drop
+    // its deck data before merging the current set in below. Only the residual is a full
+    // roster: the 'downloaded' snapshot is a windowed subset and live point updates (no
+    // source) are partial, so neither prunes. Guard on a non-empty roster so a transient
+    // empty message can't wipe every track.
+    if (action.source === 'websocket' && Object.keys(tracks.pilots).length > 0) {
+        for (const compno in state.tracks) {
+            if (!(compno in tracks.pilots)) {
+                delete state.tracks[compno];
+            }
+        }
+    }
 
     // Go through all of them and update the track version while including the data if required
     state.trackVersion = Object.entries(tracks.pilots)
