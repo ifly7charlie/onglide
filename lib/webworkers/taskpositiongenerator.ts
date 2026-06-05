@@ -110,6 +110,20 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             if (isEnrichedTick(current.value)) {
                 // Copy any changes to flight status across
                 status.flightStatus = current.value.ps;
+
+                // A landout is detected on a tick (EPG's gap-based check), and the
+                // triggering tick already carries the time the landout occurred — the
+                // hiccup time on a replay/rescore, getNow()-inorderAdditionalDelay when
+                // live. On the *transition into* Landed only (measured against the last
+                // emitted tick, as the ok check below does), advance status.t to that
+                // tick time so the landout emerges as a distinct, later score instead of
+                // colliding with the last fix's timestamp: scoreChanged drops a same-t
+                // score, and that timestamp may already sit in an immutable scorehistory
+                // chunk the browser will never refetch. Routine ticks (and the sticky
+                // subsequent Landed ticks) leave status.t pinned to the last real fix.
+                if (status.flightStatus == PositionStatus.Landed && lastTickStatus?.flightStatus != PositionStatus.Landed) {
+                    status.t = current.value.t;
+                }
                 // Now see if things have changed
                 const progress = (status?.closestDistanceToNext ?? 0) - (lastTickStatus?.closestDistanceToNext ?? 0);
                 let ok =
