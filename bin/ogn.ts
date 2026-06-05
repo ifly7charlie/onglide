@@ -902,7 +902,8 @@ async function discoverCompetitions(): Promise<{active: any[]; upcoming: any[]}>
                           JOIN classes cl2 ON cl2.class = t.class
                           WHERE cl2.compid = c.compid AND t.flown = 'Y') AS currentTaskCount
                   FROM competition c
-                  WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)`;
+                  WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)
+                    AND COALESCE(c.disable, 'N') != 'Y'`;
     const rows: any[] = envCompId //
         ? await db.query<any[]>(base + ' AND c.compid = ?', [envCompId])
         : await db.query<any[]>(base);

@@ -61,6 +61,7 @@ CREATE TABLE `competition` (
   `trackingconsent` char(1) DEFAULT 'N' COMMENT 'Y = comp has obtained explicit livetracking consent from pilots; bypass DDB tracked=N block',
   `delayseconds` int(11) DEFAULT NULL COMMENT 'official tracking delay in seconds; NULL = inherit NEXT_PUBLIC_COMPETITION_DELAY env (default 10)',
   `pushnotifications` char(1) DEFAULT 'N' COMMENT 'Y = Web Push status notifications enabled for this competition',
+  `disable` char(1) DEFAULT 'N' COMMENT 'Y = competition is hidden: not displayed or loaded by ogn.ts',
   PRIMARY KEY (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 
