@@ -73,21 +73,14 @@ export interface Signals {
     /** Sum of decayed prior-day two-sided margins for this (compno, flarmid) within the same comp. Already in nats; signed — negative when a prior day's match lost to a competing candidate. */
     priorNats: number;
 
-    // --- Cross-competition identity evidence (from OTHER comps; flarmid ≈ aircraft) ---
-    /** Candidate greg == the flarmid's known aircraft greg, OR the flarmid IS the aircraft's permanent ICAO address matching it. Aircraft-permanent → strongest. */
-    xcGregMatch: boolean;
-    /** Candidate glider key == the flarmid's known aircraft glider key. */
-    xcGliderMatch: boolean;
-    /** Candidate compno == the flarmid's last-seen aircraft compno (weak — usually consistent but not unique). */
-    xcCompnoMatch: boolean;
-    /** Best privacy-preserving name-token overlap in [0,1] over the flarmid's prior pilot clues. null when no clue carried name tokens. Partial overlap (e.g. a solo pilot vs an "A & B" crew) scores < a full match. */
-    xcNameOverlap: number | null;
-    /** Candidate real-FAI == a prior pilot clue's FAI (the best-overlap clue). */
-    xcFaiMatch: boolean;
-    /** Candidate club hash == a prior pilot clue's club hash (the best-overlap clue). */
-    xcClubMatch: boolean;
-    /** Candidate country == the flarmid's known aircraft country. */
-    xcCountryMatch: boolean;
+    /**
+     * Cross-competition identity evidence, already collapsed to a single value
+     * in nats by `xcEvidenceScore` (lib/scoring/shared/identity.ts): the
+     * confidence-scaled, age-decayed identity match from the single best PRIOR
+     * competition (the current comp is excluded). 0 when there's no qualifying
+     * prior evidence. The per-facet detail is carried separately for display.
+     */
+    xcNats: number;
 }
 
 export interface ScoreBreakdown {
@@ -101,13 +94,7 @@ export interface ScoreBreakdown {
     ddbGlider: number;
     baseline: number;
     prior: number;
-    xcGreg: number;
-    xcGlider: number;
-    xcCompno: number;
-    xcName: number;
-    xcFai: number;
-    xcClub: number;
-    xcCountry: number;
+    xc: number; // weights.xc × xcNats — cross-comp identity, single value
     total: number;
 }
 
@@ -168,16 +155,6 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
     const sDdbGlider = s.ddbGliderMatch ? 1 : 0;
     const sBaseline = s.baselineMatch ? 1 : 0;
 
-    // Cross-comp identity: booleans → {0,1}; name overlap is already a [0,1]
-    // fraction (best over the flarmid's prior pilot clues, partial < full).
-    const sXcGreg = s.xcGregMatch ? 1 : 0;
-    const sXcGlider = s.xcGliderMatch ? 1 : 0;
-    const sXcCompno = s.xcCompnoMatch ? 1 : 0;
-    const sXcName = s.xcNameOverlap === null ? 0 : sat(s.xcNameOverlap);
-    const sXcFai = s.xcFaiMatch ? 1 : 0;
-    const sXcClub = s.xcClubMatch ? 1 : 0;
-    const sXcCountry = s.xcCountryMatch ? 1 : 0;
-
     const breakdown: ScoreBreakdown = {
         deltaStart: weights.deltaStart * sStart,
         deltaFinish: weights.deltaFinish * sFinish,
@@ -189,13 +166,9 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         ddbGlider: weights.ddbGlider * sDdbGlider,
         baseline: weights.baseline * sBaseline,
         prior: weights.prior * s.priorNats,
-        xcGreg: weights.xcGreg * sXcGreg,
-        xcGlider: weights.xcGlider * sXcGlider,
-        xcCompno: weights.xcCompno * sXcCompno,
-        xcName: weights.xcName * sXcName,
-        xcFai: weights.xcFai * sXcFai,
-        xcClub: weights.xcClub * sXcClub,
-        xcCountry: weights.xcCountry * sXcCountry,
+        // Cross-comp identity already collapsed to a single nats value by
+        // xcEvidenceScore (confidence-scaled, age-decayed, best prior comp).
+        xc: weights.xc * s.xcNats,
         total: 0
     };
     breakdown.total =
@@ -209,14 +182,19 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         breakdown.ddbGlider +
         breakdown.baseline +
         breakdown.prior +
-        breakdown.xcGreg +
-        breakdown.xcGlider +
-        breakdown.xcCompno +
-        breakdown.xcName +
-        breakdown.xcFai +
-        breakdown.xcClub +
-        breakdown.xcCountry;
+        breakdown.xc;
     return breakdown;
+}
+
+/**
+ * Physical-track confidence of a match, in nats — the parts of the breakdown
+ * that measure the actual tracked flight (Δstart/Δfinish, distance-at-time,
+ * in-area presence, pre-launch). Deliberately EXCLUDES prior, baseline, ddb*
+ * and xc so this value can be stored as cross-comp evidence confidence without
+ * feeding back on itself across competitions.
+ */
+export function physicalMatchScore(b: ScoreBreakdown): number {
+    return b.deltaStart + b.deltaFinish + b.distAtStart + b.distAtFinish + b.inBbox + b.preLaunch;
 }
 
 /** Decay a single prior pair_score by its age in days. */

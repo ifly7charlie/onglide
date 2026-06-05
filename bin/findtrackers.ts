@@ -15,7 +15,7 @@ import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/typ
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
-import {scoreSignals, computeMargins, summarisePrior, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
+import {scoreSignals, computeMargins, summarisePrior, physicalMatchScore, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
 import {loadMergedDDB, gliderEquivalent, isBlocked, type DDBEntry} from '../lib/ddb';
 import {
     fingerprintFromPilot,
@@ -24,11 +24,11 @@ import {
     flarmidIsIcao,
     resolveCountries,
     resolvePilotCountry,
-    xcSignals,
+    xcEvidenceScore,
     type IdentityFacets,
-    type AircraftEvidence,
     type PilotEvidence,
-    type XcSignalBlock
+    type PerCompEvidence,
+    type XcEvidence
 } from '../lib/scoring/shared/identity';
 import {LEGACY_PRIOR_NATS, DEFAULT_LEDGER_MIN_NATS, DEFAULT_AUTO_MARGIN_NATS, DEFAULT_SCORE_MIN_NATS, IDENTITY_EXPIRY_MONTHS} from '../lib/constants';
 
@@ -126,6 +126,7 @@ interface CrossClassHit {
     margins: Margins;
     pilotContested: boolean;
     flarmidContested: boolean;
+    xcFacets: string[];
 }
 type CrossClassMap = Map<FlarmID, CrossClassHit[]>;
 
@@ -281,7 +282,10 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         // fingerprint and load what we've previously associated with the
         // candidate flarmids in OTHER comps. Disabled (empty) without a secret.
         const candidateFacets = buildCandidateFacets(results, job);
-        const priorAircraft = await loadPriorAircraft(matches.map((m) => m.flarmid));
+        const priorAircraft = await loadPriorAircraft(
+            matches.map((m) => m.flarmid),
+            job.compid
+        );
         if (priorAircraft.size) console.log(`  loaded cross-comp identity for ${priorAircraft.size} flarmid${priorAircraft.size === 1 ? '' : 's'}`);
 
         const scoreMap = computeScoreMap(matches, results, ddb, priorMap, candidateFacets, priorAircraft);
@@ -310,7 +314,8 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
                 score: scored.score,
                 margins: scored.margins,
                 pilotContested: scored.pilotContested,
-                flarmidContested: scored.flarmidContested
+                flarmidContested: scored.flarmidContested,
+                xcFacets: scored.xcFacets
             });
             crossClass.set(m.flarmid, arr);
         }
@@ -652,21 +657,9 @@ function isMissingTable(e: any): boolean {
     return /ER_NO_SUCH_TABLE|no such table|doesn't exist/i.test(msg);
 }
 
-const EMPTY_XC_BLOCK: XcSignalBlock = {
-    xcGregMatch: false,
-    xcGliderMatch: false,
-    xcCompnoMatch: false,
-    xcNameOverlap: null,
-    xcFaiMatch: false,
-    xcClubMatch: false,
-    xcCountryMatch: false
-};
-
-interface PriorAircraft {
-    aircraft: AircraftEvidence;
-    pilots: PilotEvidence[];
-}
-type PriorAircraftMap = Map<FlarmID, PriorAircraft>;
+// Per-flarmid cross-comp evidence: one PerCompEvidence per OTHER competition the
+// aircraft flew in (the current comp is excluded at load time).
+type PriorAircraftMap = Map<FlarmID, PerCompEvidence[]>;
 
 // Build each pilot's cross-comp fingerprint for one class. Resolves the
 // country once across the roster (comp-country fallback when >90% single-
@@ -699,45 +692,58 @@ function buildCandidateFacets(results: OfficialResult[], job: Job): Map<Compno, 
     return out;
 }
 
-// Bulk-load prior cross-comp evidence for the candidate flarmids (one query
-// per table). The store is comp-agnostic — cross-comp matching is the point.
-async function loadPriorAircraft(flarmids: FlarmID[]): Promise<PriorAircraftMap> {
+// Bulk-load prior cross-comp evidence for the candidate flarmids, grouped per
+// source competition. EXCLUDES the current comp (`currentCompid`) so the comp's
+// own earlier days can't reinforce its pilots — that within-comp continuity is
+// the separate trackerhistory `prior`. Also excludes evidence older than the
+// retention window.
+async function loadPriorAircraft(flarmids: FlarmID[], currentCompid: string): Promise<PriorAircraftMap> {
     const out: PriorAircraftMap = new Map();
     if (!identityEnabled || identityTablesUnavailable || !flarmids.length) return out;
     const ids = Array.from(new Set(flarmids.map((f) => String(f).toUpperCase())));
     try {
-        // Exclude evidence not reconfirmed within IDENTITY_EXPIRY_MONTHS — stale
-        // associations (sold gliders, swapped units) shouldn't keep scoring.
-        const aircraftRows = await mysql.query<{flarmid: string; glider_key: string | null; greg: string | null; country: string | null; compno: string | null; is_icao_id: string | null}[]>(
-            escape`SELECT flarmid, glider_key, greg, country, compno, is_icao_id FROM flarm_aircraft WHERE flarmid IN (${ids}) AND last_seen >= DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`
+        const aircraftRows = await mysql.query<{flarmid: string; compid: string; glider_key: string | null; greg: string | null; country: string | null; compno: string | null; is_icao_id: string | null; match_score: number | null; last_seen_ms: number}[]>(
+            escape`SELECT flarmid, compid, glider_key, greg, country, compno, is_icao_id, match_score,
+                          UNIX_TIMESTAMP(last_seen) * 1000 AS last_seen_ms
+                     FROM flarm_aircraft
+                    WHERE flarmid IN (${ids}) AND compid <> ${currentCompid}
+                      AND last_seen >= DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`
         );
-        const pilotRows = await mysql.query<{flarmid: string; pilot_key: string; club_hash: string | null; fai_hash: string | null}[]>(
-            escape`SELECT flarmid, pilot_key, club_hash, fai_hash FROM flarm_pilot WHERE flarmid IN (${ids}) AND last_seen >= DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`
+        const pilotRows = await mysql.query<{flarmid: string; pilot_key: string; compid: string; club_hash: string | null; fai_hash: string | null}[]>(
+            escape`SELECT flarmid, pilot_key, compid, club_hash, fai_hash
+                     FROM flarm_pilot
+                    WHERE flarmid IN (${ids}) AND compid <> ${currentCompid}
+                      AND last_seen >= DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`
         );
+        // Tokens are name-derived (comp-independent), keyed by (flarmid, pilot_key).
         const tokenRows = await mysql.query<{flarmid: string; pilot_key: string; token_hash: string}[]>(escape`SELECT flarmid, pilot_key, token_hash FROM flarm_pilot_nametoken WHERE flarmid IN (${ids})`);
 
-        // pilot clues, keyed flarmid → pilot_key → evidence (tokens filled next).
-        const byFlarm = new Map<string, Map<string, PilotEvidence>>();
-        for (const p of pilotRows) {
-            const m = byFlarm.get(p.flarmid) ?? new Map<string, PilotEvidence>();
-            m.set(p.pilot_key, {tokenHashes: [], clubHash: p.club_hash, faiHash: p.fai_hash});
-            byFlarm.set(p.flarmid, m);
-        }
+        const tokensByPilot = new Map<string, string[]>(); // `${flarmid}|${pilot_key}` → tokens
         for (const t of tokenRows) {
-            const pe = byFlarm.get(t.flarmid)?.get(t.pilot_key);
-            if (pe) pe.tokenHashes.push(t.token_hash);
+            const k = `${t.flarmid}|${t.pilot_key}`;
+            const arr = tokensByPilot.get(k) ?? [];
+            arr.push(t.token_hash);
+            tokensByPilot.set(k, arr);
+        }
+        // pilot clues, keyed (flarmid, compid) → pilot_key → evidence.
+        const pilotsByComp = new Map<string, PilotEvidence[]>(); // `${flarmid}|${compid}`
+        for (const p of pilotRows) {
+            const k = `${p.flarmid}|${p.compid}`;
+            const arr = pilotsByComp.get(k) ?? [];
+            arr.push({tokenHashes: tokensByPilot.get(`${p.flarmid}|${p.pilot_key}`) ?? [], clubHash: p.club_hash, faiHash: p.fai_hash});
+            pilotsByComp.set(k, arr);
         }
         for (const a of aircraftRows) {
-            out.set(a.flarmid.toUpperCase() as FlarmID, {
+            const fid = a.flarmid.toUpperCase() as FlarmID;
+            const arr = out.get(fid) ?? [];
+            arr.push({
+                compid: a.compid,
                 aircraft: {gliderKey: a.glider_key, greg: a.greg, country: a.country, compno: a.compno, isIcaoId: a.is_icao_id === 'Y'},
-                pilots: Array.from(byFlarm.get(a.flarmid)?.values() ?? [])
+                pilots: pilotsByComp.get(`${a.flarmid}|${a.compid}`) ?? [],
+                matchScore: a.match_score === null ? null : Number(a.match_score),
+                lastSeenMs: Number(a.last_seen_ms)
             });
-        }
-        // pilot rows without an aircraft row (shouldn't happen, but be safe).
-        for (const [flarmid, m] of byFlarm) {
-            const key = flarmid.toUpperCase() as FlarmID;
-            if (out.has(key)) continue;
-            out.set(key, {aircraft: {gliderKey: null, greg: null, country: null, compno: null, isIcaoId: false}, pilots: Array.from(m.values())});
+            out.set(fid, arr);
         }
     } catch (e) {
         if (isMissingTable(e)) {
@@ -751,25 +757,29 @@ async function loadPriorAircraft(flarmids: FlarmID[]): Promise<PriorAircraftMap>
 }
 
 // Forget cross-comp evidence not reconfirmed within IDENTITY_EXPIRY_MONTHS.
-// Run once per invocation (not per class). Tokens for expired clues go first
-// (FK-less), then the expired clues, then expired aircraft. Idempotent —
-// after the first sweep there's nothing left to delete.
+// Run once per invocation (not per class). Delete the expired per-comp pilot
+// clues and aircraft rows FIRST, then garbage-collect name tokens that no
+// surviving clue references — tokens are shared across a pilot's per-comp rows
+// (comp-independent), so they must be reference-counted, not deleted by the
+// expired-row set (which would strip tokens from a same-pilot clue that's still
+// live in another comp). Idempotent — after the first sweep nothing's left.
 async function purgeExpiredIdentity(): Promise<void> {
     if (!identityEnabled || identityTablesUnavailable || argv['dry-run']) return;
     try {
         const t = mysql.transaction();
-        t.query(escape`
-            DELETE FROM flarm_pilot_nametoken
-             WHERE (flarmid, pilot_key) IN (
-                   SELECT flarmid, pilot_key FROM flarm_pilot
-                    WHERE last_seen < DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH))
-        `);
         t.query(escape`DELETE FROM flarm_pilot   WHERE last_seen < DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`);
         t.query(escape`DELETE FROM flarm_aircraft WHERE last_seen < DATE_SUB(NOW(), INTERVAL ${IDENTITY_EXPIRY_MONTHS} MONTH)`);
+        t.query(escape`
+            DELETE tok FROM flarm_pilot_nametoken tok
+             WHERE NOT EXISTS (
+                   SELECT 1 FROM flarm_pilot p
+                    WHERE p.flarmid = tok.flarmid AND p.pilot_key = tok.pilot_key)
+        `);
         const res: any = await t.commit();
-        const pilots = Number(res?.[1]?.affectedRows ?? 0);
-        const aircraft = Number(res?.[2]?.affectedRows ?? 0);
-        if (aircraft || pilots) console.log(`identity-evidence: expired ${aircraft} aircraft / ${pilots} pilot clue${pilots === 1 ? '' : 's'} (not reconfirmed in ${IDENTITY_EXPIRY_MONTHS} months)`);
+        const pilots = Number(res?.[0]?.affectedRows ?? 0);
+        const aircraft = Number(res?.[1]?.affectedRows ?? 0);
+        const tokens = Number(res?.[2]?.affectedRows ?? 0);
+        if (aircraft || pilots || tokens) console.log(`identity-evidence: expired ${aircraft} aircraft / ${pilots} pilot clue${pilots === 1 ? '' : 's'} / ${tokens} orphaned token${tokens === 1 ? '' : 's'} (not reconfirmed in ${IDENTITY_EXPIRY_MONTHS} months)`);
     } catch (e) {
         if (isMissingTable(e)) {
             identityTablesUnavailable = true;
@@ -779,13 +789,15 @@ async function purgeExpiredIdentity(): Promise<void> {
     }
 }
 
-// Cross-comp signal block for one match's (pilot, flarmid). Empty when the
-// candidate has no fingerprint (identity disabled) or the flarmid has no prior.
-function computeXcBlock(m: TrackerMatch, candidateFacets: Map<Compno, IdentityFacets>, priorAircraft: PriorAircraftMap): XcSignalBlock {
+// Cross-comp identity evidence for one match's (pilot, flarmid): the single
+// confidence-scaled, age-decayed best prior comp. Empty when the candidate has
+// no fingerprint (identity disabled) or the flarmid has no prior-comp evidence.
+const EMPTY_XC: XcEvidence = {nats: 0, facets: [], compid: null};
+function computeXcBlock(m: TrackerMatch, candidateFacets: Map<Compno, IdentityFacets>, priorAircraft: PriorAircraftMap, nowMs: number): XcEvidence {
     const cand = candidateFacets.get(m.compno);
-    const prior = priorAircraft.get(m.flarmid);
-    if (!cand || !prior) return EMPTY_XC_BLOCK;
-    return xcSignals(cand, prior.aircraft, prior.pilots);
+    const perComp = priorAircraft.get(m.flarmid);
+    if (!cand || !perComp || !perComp.length) return EMPTY_XC;
+    return xcEvidenceScore(cand, perComp, nowMs);
 }
 
 // A (pilot, flarmid) pair confident enough to seed cross-comp evidence. Either
@@ -821,32 +833,40 @@ async function writeAircraftEvidence(job: Job, matches: TrackerMatch[], scoreMap
     const acceptedPairs = new Set<string>();
     for (const p of accepted) for (const id of p.addedIds) acceptedPairs.add(scoreKey(p.compno, id));
 
-    const good = new Map<string, {compno: Compno; flarmid: FlarmID}>();
+    // The physical-track match confidence (nats) we store as this comp's
+    // evidence strength — never the prior/identity-inflated total (see
+    // physicalMatchScore), so evidence can't feed back on itself across comps.
+    const good = new Map<string, {compno: Compno; flarmid: FlarmID; matchScore: number}>();
     for (const m of matches) {
         const key = scoreKey(m.compno, m.flarmid);
         if (good.has(key)) continue;
-        if (!isGoodMatch(m, scoreMap.get(key), acceptedPairs)) continue;
-        good.set(key, {compno: m.compno, flarmid: m.flarmid});
+        const scored = scoreMap.get(key);
+        if (!isGoodMatch(m, scored, acceptedPairs)) continue;
+        good.set(key, {compno: m.compno, flarmid: m.flarmid, matchScore: scored ? physicalMatchScore(scored.score) : 0});
     }
     if (!good.size) return 0;
 
+    const compid = job.compid;
     const t = mysql.transaction();
     let n = 0;
-    for (const {compno, flarmid} of good.values()) {
+    for (const {compno, flarmid, matchScore} of good.values()) {
         // Never collect blocked devices, nor any detail about their pilots.
         if (isBlocked(ddbLookup(ddb, flarmid), job.trackingconsent)) continue;
         const facets = candidateFacets.get(compno);
         if (!facets) continue;
         const fid = String(flarmid).toUpperCase();
         const isIcao = flarmidIsIcao(fid) ? 'Y' : 'N';
+        // GREATEST keeps the best confidence the comp ever produced for this
+        // pair — "updates as the competition goes on" without ever regressing.
         t.query(escape`
             INSERT INTO flarm_aircraft
-                (flarmid, glider_key, greg, country, compno, is_icao_id, observations, first_seen, last_seen)
+                (flarmid, compid, glider_key, greg, country, compno, is_icao_id, match_score, observations, first_seen, last_seen)
             VALUES
-                (${fid}, ${facets.gliderKey}, ${facets.greg}, ${facets.country}, ${facets.compno}, ${isIcao}, 1, now(), now())
+                (${fid}, ${compid}, ${facets.gliderKey}, ${facets.greg}, ${facets.country}, ${facets.compno}, ${isIcao}, ${matchScore}, 1, now(), now())
             ON DUPLICATE KEY UPDATE
                 observations = observations + 1,
                 last_seen    = now(),
+                match_score  = GREATEST(COALESCE(match_score, 0), VALUES(match_score)),
                 glider_key   = COALESCE(VALUES(glider_key), glider_key),
                 greg         = COALESCE(VALUES(greg), greg),
                 country      = COALESCE(VALUES(country), country),
@@ -857,12 +877,13 @@ async function writeAircraftEvidence(job: Job, matches: TrackerMatch[], scoreMap
             const pk = pilotKey(facets);
             t.query(escape`
                 INSERT INTO flarm_pilot
-                    (flarmid, pilot_key, club_hash, fai_hash, observations, first_seen, last_seen)
+                    (flarmid, pilot_key, compid, club_hash, fai_hash, match_score, observations, first_seen, last_seen)
                 VALUES
-                    (${fid}, ${pk}, ${facets.clubHash}, ${facets.faiHash}, 1, now(), now())
+                    (${fid}, ${pk}, ${compid}, ${facets.clubHash}, ${facets.faiHash}, ${matchScore}, 1, now(), now())
                 ON DUPLICATE KEY UPDATE
                     observations = observations + 1,
                     last_seen    = now(),
+                    match_score  = GREATEST(COALESCE(match_score, 0), VALUES(match_score)),
                     club_hash    = COALESCE(VALUES(club_hash), club_hash),
                     fai_hash     = COALESCE(VALUES(fai_hash), fai_hash)
             `);
@@ -1057,7 +1078,7 @@ function describeCrossClassDetailed(flarmid: FlarmID, thisClass: ClassName, cros
         const tag = h.assigned ? ' [their assigned ID]' : '';
         const compno = String(h.compno).trim();
         const deltas = `Δstart ${fmtDelta(h.deltaStart)}, Δfinish ${fmtDelta(h.deltaFinish)}`;
-        return [`also matches ${compno} in class ${classLabel}${tag}: ${deltas}`, `  ${fmtScore(h.score, h.margins, h.pilotContested, h.flarmidContested)}`];
+        return [`also matches ${compno} in class ${classLabel}${tag}: ${deltas}`, `  ${fmtScore(h.score, h.margins, h.pilotContested, h.flarmidContested, h.xcFacets)}`];
     });
 }
 
@@ -1077,12 +1098,12 @@ function describeSameClassDetailed(m: TrackerMatch, byFlarmid: Map<FlarmID, Trac
         const deltas = `Δstart ${fmtDelta(p.deltaStart)}, Δfinish ${fmtDelta(p.deltaFinish)}`;
         const lines = [`also matches ${compno} in this class${tag}: ${deltas}`];
         const scored = scoreMap?.get(scoreKey(p.compno, p.flarmid));
-        if (scored) lines.push(`  ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested)}`);
+        if (scored) lines.push(`  ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested, scored.xcFacets)}`);
         return lines;
     });
 }
 
-type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean; deltaStart: number | null; deltaFinish: number | null}>;
+type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean; deltaStart: number | null; deltaFinish: number | null; xcFacets: string[]}>;
 const scoreKey = (compno: Compno, flarmid: FlarmID) => `${compno}|${flarmid}`;
 
 // Build per-pair scores and two-sided margins from the matches we already
@@ -1103,18 +1124,21 @@ function computeScoreMap(
     for (const r of results) resultByCompno.set(r.compno, r);
 
     const breakdownByKey = new Map<string, ScoreBreakdown>();
+    const xcFacetsByKey = new Map<string, string[]>();
     const scoreByPilot = new Map<Compno, number[]>();
     const scoreByFlarmid = new Map<FlarmID, number[]>();
+    const nowMs = Date.now();
 
     for (const m of matches) {
         const r = resultByCompno.get(m.compno);
         const ddbEntry = ddbLookup(ddb, m.flarmid);
         const link = ddbLinkFor(ddbEntry, m.compno, r?.glidertype ?? '');
         const priorNats = priorMap.get(scoreKey(m.compno, m.flarmid)) ?? 0;
-        const xc = computeXcBlock(m, candidateFacets, priorAircraft);
+        const xc = computeXcBlock(m, candidateFacets, priorAircraft, nowMs);
         const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc);
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
+        xcFacetsByKey.set(scoreKey(m.compno, m.flarmid), xc.facets);
         const arrP = scoreByPilot.get(m.compno) ?? [];
         arrP.push(breakdown.total);
         scoreByPilot.set(m.compno, arrP);
@@ -1143,7 +1167,8 @@ function computeScoreMap(
             pilotContested: peerPilot.length > 1,
             flarmidContested: peerFlarmid.length > 1,
             deltaStart: m.deltaStart,
-            deltaFinish: m.deltaFinish
+            deltaFinish: m.deltaFinish,
+            xcFacets: xcFacetsByKey.get(scoreKey(m.compno, m.flarmid)) ?? []
         });
     }
     return out;
@@ -1192,7 +1217,7 @@ function ddbLinkFromBreakdown(b: ScoreBreakdown | undefined): 'none' | 'cn' | 'g
     return cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none';
 }
 
-function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcSignalBlock): Signals {
+function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence): Signals {
     const d = m.diag;
     return {
         deltaStart: m.deltaStart,
@@ -1209,7 +1234,7 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: 
         ddbGliderMatch: link.glider,
         baselineMatch: m.assigned,
         priorNats,
-        ...xc
+        xcNats: xc.nats
     };
 }
 
@@ -1302,7 +1327,7 @@ function printPilotMatches(
         console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
         if (m.diag) console.log(`         · ${fmtDiag(m.diag)}`);
         const scored = scoreMap?.get(scoreKey(m.compno, m.flarmid));
-        if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested)}`);
+        if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested, scored.xcFacets)}`);
         if (byFlarmid) {
             for (const lines of describeSameClassDetailed(m, byFlarmid, scoreMap)) {
                 for (const [i, line] of lines.entries()) {
@@ -1320,7 +1345,7 @@ function printPilotMatches(
     }
 }
 
-function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boolean, flarmidContested: boolean): string {
+function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boolean, flarmidContested: boolean, xcFacets: string[] = []): string {
     const parts: string[] = [];
     parts.push(`S=${score.total.toFixed(2)}`);
     if (!pilotContested && !flarmidContested) {
@@ -1341,13 +1366,9 @@ function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boole
     if (score.ddbGlider > 0) contribs.push(`ddbGlider=${score.ddbGlider.toFixed(2)}`);
     if (score.baseline > 0) contribs.push(`base=${score.baseline.toFixed(2)}`);
     if (score.prior !== 0) contribs.push(`prior=${score.prior.toFixed(2)}`);
-    if (score.xcName > 0) contribs.push(`xcName=${score.xcName.toFixed(2)}`);
-    if (score.xcGreg > 0) contribs.push(`xcGreg=${score.xcGreg.toFixed(2)}`);
-    if (score.xcFai > 0) contribs.push(`xcFai=${score.xcFai.toFixed(2)}`);
-    if (score.xcGlider > 0) contribs.push(`xcGlider=${score.xcGlider.toFixed(2)}`);
-    if (score.xcClub > 0) contribs.push(`xcClub=${score.xcClub.toFixed(2)}`);
-    if (score.xcCompno > 0) contribs.push(`xcCompno=${score.xcCompno.toFixed(2)}`);
-    if (score.xcCountry > 0) contribs.push(`xcCountry=${score.xcCountry.toFixed(2)}`);
+    // Single cross-comp identity contribution, with the facets that fired in the
+    // chosen prior comp (xcEvidenceScore already excluded the current comp).
+    if (score.xc > 0) contribs.push(`xc=${score.xc.toFixed(2)}${xcFacets.length ? ` [${xcFacets.join(',')}]` : ''}`);
     if (contribs.length) parts.push(`[${contribs.join(' ')}]`);
     return parts.join('  ');
 }

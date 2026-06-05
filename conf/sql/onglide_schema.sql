@@ -407,29 +407,33 @@ CREATE TABLE `trackerhistory` (
 DROP TABLE IF EXISTS `flarm_aircraft`;
 CREATE TABLE `flarm_aircraft` (
   `flarmid` char(6) NOT NULL COMMENT 'uppercase 6-hex device id (the aircraft)',
+  `compid` varchar(40) NOT NULL COMMENT 'source competition — lets scoring exclude the current comp',
   `glider_key` varchar(48) DEFAULT NULL COMMENT 'gliderEquivalent key() of glider type (not sensitive; digitless names key to the full string)',
   `greg` char(12) DEFAULT NULL COMMENT 'normalised registration when pilot.greg present (public)',
   `country` char(2) DEFAULT NULL COMMENT 'resolved 2-letter country',
-  `compno` char(4) DEFAULT NULL COMMENT 'most-recently-observed comp number (weak — usually consistent, not unique)',
+  `compno` char(4) DEFAULT NULL COMMENT 'comp number in this comp (weak — usually consistent, not unique)',
   `is_icao_id` char(1) DEFAULT 'N' COMMENT 'Y when the flarmid is the aircraft permanent ICAO 24-bit address',
+  `match_score` float DEFAULT NULL COMMENT 'best physical-track match confidence (nats) this comp produced for this aircraft',
   `observations` int(11) NOT NULL DEFAULT '1',
   `first_seen` datetime DEFAULT NULL,
   `last_seen` datetime DEFAULT NULL,
-  PRIMARY KEY (`flarmid`),
+  PRIMARY KEY (`flarmid`,`compid`),
   KEY `idx_greg` (`greg`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp flarmid->aircraft evidence; no raw names/clubs';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp flarmid->aircraft evidence, per source comp; no raw names/clubs';
 
 DROP TABLE IF EXISTS `flarm_pilot`;
 CREATE TABLE `flarm_pilot` (
   `flarmid` char(6) NOT NULL,
   `pilot_key` char(32) NOT NULL COMMENT 'HMAC over (sorted name token hashes + fai hash + country); dedupes one crew',
+  `compid` varchar(40) NOT NULL COMMENT 'source competition — lets scoring exclude the current comp',
   `club_hash` char(32) DEFAULT NULL COMMENT 'HMAC of normalised home club; never the raw club',
   `fai_hash` char(32) DEFAULT NULL COMMENT 'HMAC of a real FAI id (>0 and <300000); never the raw number',
+  `match_score` float DEFAULT NULL COMMENT 'best physical-track match confidence (nats) this comp produced for this pilot+aircraft',
   `observations` int(11) NOT NULL DEFAULT '1',
   `first_seen` datetime DEFAULT NULL,
   `last_seen` datetime DEFAULT NULL,
-  PRIMARY KEY (`flarmid`,`pilot_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp pilot clues per flarmid (a club glider yields many)';
+  PRIMARY KEY (`flarmid`,`pilot_key`,`compid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp pilot clues per flarmid, per source comp (a club glider yields many)';
 
 DROP TABLE IF EXISTS `flarm_pilot_nametoken`;
 CREATE TABLE `flarm_pilot_nametoken` (

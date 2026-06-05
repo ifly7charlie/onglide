@@ -23,7 +23,7 @@
 
 import {createHmac} from 'crypto';
 import {gliderKey, gliderEquivalent, cleanRegistration} from '../../ddb';
-import {FAI_REAL_MAX, NAME_STOPWORDS} from '../../constants';
+import {FAI_REAL_MAX, NAME_STOPWORDS, TRACKER_SCORE_WEIGHTS, IDENTITY_DECAY_MONTHS, IDENTITY_CONF_FULL_NATS} from '../../constants';
 
 // ---------------------------------------------------------------------------
 // Secret
@@ -305,27 +305,30 @@ export interface PilotEvidence {
     faiHash: string | null;
 }
 
-// The cross-comp signal block produced for one candidate pilot against a
-// flarmid's stored evidence. Shape matches the xc* fields on `Signals`.
-export interface XcSignalBlock {
-    xcGregMatch: boolean;
-    xcGliderMatch: boolean;
-    xcCompnoMatch: boolean;
-    xcNameOverlap: number | null;
-    xcFaiMatch: boolean;
-    xcClubMatch: boolean;
-    xcCountryMatch: boolean;
+// One competition's stored evidence for a flarmid: the aircraft row, its pilot
+// clues, the physical-track confidence that comp produced, and when it was last
+// confirmed (epoch ms) for age decay. Assembled by the caller from the per-comp
+// rows of flarm_aircraft / flarm_pilot.
+export interface PerCompEvidence {
+    compid: string;
+    aircraft: AircraftEvidence | null;
+    pilots: PilotEvidence[];
+    matchScore: number | null; // physical-track nats stored for this (flarmid, comp)
+    lastSeenMs: number; // epoch ms of the row's last_seen, for age decay
 }
 
-const EMPTY_XC: XcSignalBlock = {
-    xcGregMatch: false,
-    xcGliderMatch: false,
-    xcCompnoMatch: false,
-    xcNameOverlap: null,
-    xcFaiMatch: false,
-    xcClubMatch: false,
-    xcCountryMatch: false
-};
+// Result of scoring a candidate against a flarmid's cross-comp evidence: a
+// single nats value (confidence-scaled, age-decayed, best prior comp), the list
+// of facets that fired in that comp (for the operator's breakdown line), and
+// which comp won. nats is 0 / facets empty / compid null when nothing qualifies.
+export interface XcEvidence {
+    nats: number;
+    facets: string[];
+    compid: string | null;
+}
+
+const MONTH_MS = (365.25 / 12) * 24 * 3600 * 1000;
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
 // Szymkiewicz–Simpson-ish overlap with a `max` denominator: |C∩P| / max(|C|,|P|).
 // A solo pilot matching one half of a stored "A & B" crew scores ≈0.5; an exact
@@ -338,27 +341,42 @@ function tokenOverlap(candidate: string[], prior: string[]): number {
     return shared / Math.max(candidate.length, prior.length);
 }
 
-// Build the cross-comp signal block for a candidate pilot against one flarmid's
-// stored aircraft + pilot-clue evidence. Aircraft facets (greg/glider/compno/
-// country) compare against the single aircraft row; pilot facets (name/fai/club)
-// come from the single best-matching clue so they describe one coherent pilot —
-// a real FAI match dominates clue selection even when names don't tokenise.
-export function xcSignals(candidate: IdentityFacets, aircraft: AircraftEvidence | null, pilots: PilotEvidence[]): XcSignalBlock {
-    if (!aircraft && (!pilots || !pilots.length)) return {...EMPTY_XC};
+const W = TRACKER_SCORE_WEIGHTS;
 
-    const xcGregMatch = !!candidate.greg && !!aircraft?.greg && candidate.greg === aircraft.greg;
+// Identity-match strength of a candidate against ONE comp's evidence, in nats,
+// using the xc* facet weights as relative importances, plus the list of facets
+// that fired. Aircraft facets (greg/glider/compno/country) compare against the
+// aircraft row; pilot facets (name/fai/club) come from the single best-matching
+// clue so they describe one coherent pilot — a real FAI match dominates clue
+// selection even when names don't tokenise.
+function identityMatch(candidate: IdentityFacets, ev: PerCompEvidence): {nats: number; facets: string[]} {
+    const facets: string[] = [];
+    let nats = 0;
+    const a = ev.aircraft;
+
+    if (!!candidate.greg && !!a?.greg && candidate.greg === a.greg) {
+        nats += W.xcGreg;
+        facets.push('greg');
+    }
     // Forgiving prefix match (not exact equality): the same airframe's glider is
-    // entered inconsistently across comps — "Standard Cirrus" vs "Standard
-    // Cirrus Winglets", "Ventus" vs "Ventus 3". gliderEquivalent treats one
-    // model key being a prefix of the other as a match.
-    const xcGliderMatch = !!candidate.gliderKey && !!aircraft?.gliderKey && gliderEquivalent(candidate.gliderKey, aircraft.gliderKey);
-    const xcCompnoMatch = !!candidate.compno && !!aircraft?.compno && candidate.compno === aircraft.compno;
-    const xcCountryMatch = !!candidate.country && !!aircraft?.country && candidate.country === aircraft.country;
+    // entered inconsistently across comps ("Standard Cirrus" vs "… Winglets").
+    if (!!candidate.gliderKey && !!a?.gliderKey && gliderEquivalent(candidate.gliderKey, a.gliderKey)) {
+        nats += W.xcGlider;
+        facets.push('glider');
+    }
+    if (!!candidate.compno && !!a?.compno && candidate.compno === a.compno) {
+        nats += W.xcCompno;
+        facets.push('compno');
+    }
+    if (!!candidate.country && !!a?.country && candidate.country === a.country) {
+        nats += W.xcCountry;
+        facets.push('country');
+    }
 
-    // Pick the best pilot clue: FAI match dominates (a precise id), then name
-    // overlap, then a club match as a faint tiebreak.
+    // Best pilot clue: FAI match dominates (a precise id), then name overlap,
+    // then a club match as a faint tiebreak.
     let best: {clue: PilotEvidence; overlap: number; fai: boolean; club: boolean} | null = null;
-    for (const clue of pilots ?? []) {
+    for (const clue of ev.pilots ?? []) {
         const overlap = tokenOverlap(candidate.nameTokenHashes, clue.tokenHashes);
         const fai = !!candidate.faiHash && !!clue.faiHash && candidate.faiHash === clue.faiHash;
         const club = !!candidate.clubHash && !!clue.clubHash && candidate.clubHash === clue.clubHash;
@@ -366,19 +384,44 @@ export function xcSignals(candidate: IdentityFacets, aircraft: AircraftEvidence 
         const bestRank = best ? (best.fai ? 2 : 0) + best.overlap + (best.club ? 0.1 : 0) : -1;
         if (rank > bestRank) best = {clue, overlap, fai, club};
     }
-
-    if (!best) {
-        return {...EMPTY_XC, xcGregMatch, xcGliderMatch, xcCompnoMatch, xcCountryMatch};
+    if (best) {
+        const haveNames = candidate.nameTokenHashes.length > 0 && best.clue.tokenHashes.length > 0;
+        if (haveNames && best.overlap > 0) {
+            nats += W.xcName * clamp01(best.overlap);
+            facets.push('name');
+        }
+        if (best.fai) {
+            nats += W.xcFai;
+            facets.push('fai');
+        }
+        if (best.club) {
+            nats += W.xcClub;
+            facets.push('club');
+        }
     }
-    // Overlap is only meaningful when both sides actually carry name tokens.
-    const haveNames = candidate.nameTokenHashes.length > 0 && best.clue.tokenHashes.length > 0;
-    return {
-        xcGregMatch,
-        xcGliderMatch,
-        xcCompnoMatch,
-        xcNameOverlap: haveNames ? best.overlap : null,
-        xcFaiMatch: best.fai,
-        xcClubMatch: best.club,
-        xcCountryMatch
-    };
+    return {nats, facets};
+}
+
+// Score a candidate pilot against a flarmid's cross-comp evidence. For each
+// prior comp, blend the facet matches into identity nats and scale by that
+// comp's physical-match confidence (saturating) and its age (exponential decay).
+// Take the single BEST comp (argmax of identity × confidence) — repeat
+// appearances don't stack. The caller must already have excluded the current
+// competition from `perComp`.
+export function xcEvidenceScore(candidate: IdentityFacets, perComp: PerCompEvidence[], nowMs: number): XcEvidence {
+    let winner: XcEvidence | null = null;
+    let bestProduct = 0;
+    for (const ev of perComp ?? []) {
+        const {nats: identityNats, facets} = identityMatch(candidate, ev);
+        if (identityNats <= 0) continue; // candidate doesn't match this comp's evidence at all
+        const score = ev.matchScore ?? 0;
+        const ageMonths = Math.max(0, (nowMs - ev.lastSeenMs) / MONTH_MS);
+        const conf = clamp01(score / IDENTITY_CONF_FULL_NATS) * Math.exp(-ageMonths / IDENTITY_DECAY_MONTHS);
+        const product = identityNats * conf;
+        if (product > bestProduct) {
+            bestProduct = product;
+            winner = {nats: product, facets, compid: ev.compid};
+        }
+    }
+    return winner ?? {nats: 0, facets: [], compid: null};
 }

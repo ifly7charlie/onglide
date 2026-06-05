@@ -180,20 +180,21 @@ export const TRACKER_SCORE_WEIGHTS = {
 
     prior: 1.0, // already in nats; sum of decayed prior-day two-sided margins (signed — may be negative)
     // ---- Cross-competition identity evidence (lib/scoring/shared/identity.ts) ----
-    // These come from what we've previously associated with this flarmid in
-    // OTHER competitions (the flarmid ≈ the aircraft; pilots are clues). They
-    // stack additively like ddbCn/ddbGlider. Independent of `prior`, which is
-    // same-comp/class-scoped. The aircraft-stable facets (greg/glider) anchor;
-    // the pilot facets (name/fai/club) say which pilot flew it. Sum (~4) sits
-    // below the same-day geometric stack so it informs but never overrides
-    // today's actual track. greg/fai/name discriminate; the rest only nudge.
+    // Identity evidence from OTHER competitions (the current comp is excluded —
+    // within-comp continuity is `prior`). `xcEvidenceScore` blends the per-facet
+    // signals below into one `identityNats` for each prior comp, scales it by
+    // that comp's physical-match confidence and its age, takes the single best
+    // comp, and feeds the result back as one number weighted by `xc`. The seven
+    // `xc*` below are therefore facet IMPORTANCES (consumed by identity.ts), not
+    // independent breakdown lines. greg/fai/name discriminate; the rest nudge.
     xcGreg: 1.5, // candidate greg == aircraft greg, or flarmid is its permanent ICAO address — strongest
     xcFai: 1.2, // candidate real-FAI == a prior pilot clue's FAI — precise public id
     xcName: 1.2, // best privacy-preserving name-token overlap [0,1] — same crew flying again
     xcGlider: 0.4, // candidate glider key == aircraft glider key — many share a type
     xcClub: 0.4, // candidate club hash == a prior pilot clue's club hash — clubs are shared
-    xcCompno: 0.3, // candidate compno == aircraft's last-seen compno — usually consistent but not unique
-    xcCountry: 0.2 // candidate country == aircraft country — huge equivalence class, mild corroboration
+    xcCompno: 0.3, // candidate compno == aircraft compno — usually consistent but not unique
+    xcCountry: 0.2, // candidate country == aircraft country — huge equivalence class, mild corroboration
+    xc: 1.0 // overall weight applied to the single confidence-scaled xcEvidenceScore nats
 } as const;
 
 // Real FAI ranking ids are below this; synthetic placeholders (assigned
@@ -205,6 +206,17 @@ export const FAI_REAL_MAX = 300000;
 // months. last_seen is bumped on every confident re-collection; rows older than
 // this are excluded at scoring time and periodically purged by findtrackers.
 export const IDENTITY_EXPIRY_MONTHS = 18;
+
+// Exponential decay timescale (months) for cross-comp identity evidence within
+// the retention window: contribution × exp(-ageMonths / IDENTITY_DECAY_MONTHS).
+// 9 → an 18-month-old match (the expiry edge) is already down to ~e^-2 ≈ 0.14.
+export const IDENTITY_DECAY_MONTHS = 9;
+
+// Stored physical-track match_score (nats) at which a prior comp's evidence is
+// trusted at full strength: confidence = saturate(match_score / this). A clean
+// both-sided match (~4–5 nats) saturates; a shaky start-only one (~2.4 nats)
+// is discounted to ~0.8 — weaker historical matches contribute proportionally less.
+export const IDENTITY_CONF_FULL_NATS = 3;
 
 // Generic placeholder / team tokens stripped during name tokenisation
 // (lib/scoring/shared/identity.ts). A "name" like "Team A" reduces to no

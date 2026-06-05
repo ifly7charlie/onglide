@@ -16,10 +16,12 @@ import {
     pilotKey,
     resolveCountries,
     resolvePilotCountry,
-    xcSignals,
+    xcEvidenceScore,
     type IdentityFacets,
-    type PilotEvidence
+    type PilotEvidence,
+    type PerCompEvidence
 } from '../lib/scoring/shared/identity';
+import {TRACKER_SCORE_WEIGHTS, IDENTITY_CONF_FULL_NATS, IDENTITY_DECAY_MONTHS} from '../lib/constants';
 
 const SECRET = 'test-secret-do-not-use-in-prod';
 const OTHER = 'a-different-secret';
@@ -197,7 +199,11 @@ describe('resolveCountries / resolvePilotCountry', () => {
     });
 });
 
-describe('xcSignals', () => {
+describe('xcEvidenceScore', () => {
+    const W = TRACKER_SCORE_WEIGHTS;
+    const NOW = 1_700_000_000_000; // fixed "now" epoch ms
+    const monthsAgoMs = (months: number) => NOW - months * ((365.25 / 12) * 24 * 3600 * 1000);
+
     const facets = (over: Partial<IdentityFacets> = {}): IdentityFacets => ({
         nameTokenHashes: [],
         clubHash: null,
@@ -211,61 +217,89 @@ describe('xcSignals', () => {
     });
     const tokens = (name: string) => hashNameTokens(name, SECRET);
     const faiH = (n: number) => hashFai(n, SECRET);
-
-    test('no aircraft and no pilots → empty block', () => {
-        const s = xcSignals(facets({nameTokenHashes: tokens('Alice Smith')}), null, []);
-        expect(s.xcNameOverlap).toBeNull();
-        expect(s.xcGregMatch).toBe(false);
+    // One prior comp's evidence with a single pilot clue. Fresh (no age decay)
+    // and full confidence unless overridden.
+    const comp = (over: Partial<PerCompEvidence> = {}, pilot: Partial<PilotEvidence> = {}): PerCompEvidence => ({
+        compid: 'compA',
+        aircraft: {gliderKey: null, greg: null, country: null, compno: null, isIcaoId: false},
+        pilots: [{tokenHashes: [], clubHash: null, faiHash: null, ...pilot}],
+        matchScore: IDENTITY_CONF_FULL_NATS, // saturates confidence to 1
+        lastSeenMs: NOW,
+        ...over
     });
 
-    test('full name overlap scores 1.0', () => {
+    test('no prior comps → zero', () => {
+        const r = xcEvidenceScore(facets({nameTokenHashes: tokens('Alice Smith')}), [], NOW);
+        expect(r.nats).toBe(0);
+        expect(r.facets).toEqual([]);
+        expect(r.compid).toBeNull();
+    });
+
+    test('full name match at full confidence contributes the name weight, facet listed', () => {
         const cand = facets({nameTokenHashes: tokens('Alice Smith')});
-        const prior: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, faiHash: null};
-        const s = xcSignals(cand, null, [prior]);
-        expect(s.xcNameOverlap).toBeCloseTo(1.0, 6);
+        const r = xcEvidenceScore(cand, [comp({}, {tokenHashes: tokens('Alice Smith')})], NOW);
+        expect(r.nats).toBeCloseTo(W.xcName, 5);
+        expect(r.facets).toContain('name');
+        expect(r.compid).toBe('compA');
     });
 
-    test('solo pilot vs an "A & B" two-seater crew scores ~0.5 (partial)', () => {
+    test('solo pilot vs an "A & B" crew is a partial (~0.5) name match', () => {
         const cand = facets({nameTokenHashes: tokens('Alice Smith')});
-        const crew: PilotEvidence = {tokenHashes: tokens('Alice Smith / Bob Jones'), clubHash: null, faiHash: null};
-        const s = xcSignals(cand, null, [crew]);
-        // candidate has 2 tokens, crew has 4, shared 2 → 2/max(2,4)=0.5
-        expect(s.xcNameOverlap).toBeCloseTo(0.5, 6);
+        const r = xcEvidenceScore(cand, [comp({}, {tokenHashes: tokens('Alice Smith / Bob Jones')})], NOW);
+        expect(r.nats).toBeCloseTo(W.xcName * 0.5, 5);
     });
 
-    test('null overlap when candidate has no name tokens', () => {
-        const cand = facets({faiHash: faiH(999)});
-        const prior: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, faiHash: faiH(999)};
-        const s = xcSignals(cand, null, [prior]);
-        expect(s.xcNameOverlap).toBeNull();
-        expect(s.xcFaiMatch).toBe(true); // fai still matches the best clue
+    test('weak historical match (low match_score) contributes proportionally less', () => {
+        const cand = facets({nameTokenHashes: tokens('Alice Smith')});
+        const weak = comp({matchScore: IDENTITY_CONF_FULL_NATS / 2}, {tokenHashes: tokens('Alice Smith')});
+        const r = xcEvidenceScore(cand, [weak], NOW);
+        expect(r.nats).toBeCloseTo(W.xcName * 0.5, 5); // conf = saturate(0.5) = 0.5
     });
 
-    test('aircraft facets compare against the single aircraft row', () => {
+    test('age decays the contribution exponentially', () => {
+        const cand = facets({nameTokenHashes: tokens('Alice Smith')});
+        const old = comp({lastSeenMs: monthsAgoMs(IDENTITY_DECAY_MONTHS)}, {tokenHashes: tokens('Alice Smith')});
+        const r = xcEvidenceScore(cand, [old], NOW);
+        expect(r.nats).toBeCloseTo(W.xcName * Math.exp(-1), 4); // one decay timescale → 1/e
+    });
+
+    test('best single: the strongest (identity × confidence) comp wins, not a sum', () => {
+        const cand = facets({nameTokenHashes: tokens('Alice Smith')});
+        const strong = comp({compid: 'strong', matchScore: IDENTITY_CONF_FULL_NATS}, {tokenHashes: tokens('Alice Smith')});
+        const weak = comp({compid: 'weak', matchScore: IDENTITY_CONF_FULL_NATS / 4}, {tokenHashes: tokens('Alice Smith')});
+        const r = xcEvidenceScore(cand, [weak, strong], NOW);
+        expect(r.compid).toBe('strong');
+        expect(r.nats).toBeCloseTo(W.xcName, 5); // not W.xcName * 1.25 — no stacking
+    });
+
+    test('aircraft facets (greg/glider/compno/country) accumulate within the chosen comp', () => {
         const cand = facets({greg: 'GABCD', gliderKey: 'VENTUS3', compno: 'A1', country: 'GB'});
-        const s = xcSignals(cand, {greg: 'GABCD', gliderKey: 'VENTUS3', compno: 'A1', country: 'GB', isIcaoId: true}, []);
-        expect(s.xcGregMatch).toBe(true);
-        expect(s.xcGliderMatch).toBe(true);
-        expect(s.xcCompnoMatch).toBe(true);
-        expect(s.xcCountryMatch).toBe(true);
+        const ev = comp({aircraft: {greg: 'GABCD', gliderKey: 'VENTUS3', compno: 'A1', country: 'GB', isIcaoId: false}});
+        const r = xcEvidenceScore(cand, [ev], NOW);
+        expect(r.nats).toBeCloseTo(W.xcGreg + W.xcGlider + W.xcCompno + W.xcCountry, 5);
+        expect(r.facets.sort()).toEqual(['compno', 'country', 'glider', 'greg']);
     });
 
-    test('glider match is forgiving of descriptor suffixes (winglets, span, etc.)', () => {
+    test('glider match is forgiving of descriptor suffixes', () => {
         const cand = facets({gliderKey: gliderKeyOf('Standard Cirrus')!});
-        const a = {gliderKey: gliderKeyOf('Standard Cirrus Winglets')!, greg: null, country: null, compno: null, isIcaoId: false};
-        expect(xcSignals(cand, a, []).xcGliderMatch).toBe(true);
-        // genuinely different models do not match
-        const b = {gliderKey: gliderKeyOf('Ventus 2')!, greg: null, country: null, compno: null, isIcaoId: false};
-        expect(xcSignals(facets({gliderKey: gliderKeyOf('Ventus 3')!}), b, []).xcGliderMatch).toBe(false);
+        const ev = comp({aircraft: {gliderKey: gliderKeyOf('Standard Cirrus Winglets')!, greg: null, country: null, compno: null, isIcaoId: false}}, {});
+        expect(xcEvidenceScore(cand, [ev], NOW).facets).toContain('glider');
     });
 
-    test('best clue supplies the booleans — fai dominates clue selection', () => {
-        const cand = facets({nameTokenHashes: tokens('Alice Smith'), faiHash: faiH(555), clubHash: hashClub('Lasham Gliding', SECRET)});
-        const wrongName: PilotEvidence = {tokenHashes: tokens('Zoe Other'), clubHash: hashClub('Lasham Gliding', SECRET), faiHash: faiH(555)};
-        const rightName: PilotEvidence = {tokenHashes: tokens('Alice Smith'), clubHash: null, faiHash: null};
-        const s = xcSignals(cand, null, [wrongName, rightName]);
-        // fai match (weight 2 in selection) wins → booleans from wrongName clue
-        expect(s.xcFaiMatch).toBe(true);
-        expect(s.xcClubMatch).toBe(true);
+    test('a comp the candidate does not match at all contributes nothing', () => {
+        const cand = facets({nameTokenHashes: tokens('Alice Smith')});
+        const other = comp({}, {tokenHashes: tokens('Zoe Other')});
+        const r = xcEvidenceScore(cand, [other], NOW);
+        expect(r.nats).toBe(0);
+        expect(r.compid).toBeNull();
+    });
+
+    test('fai match fires even when names do not tokenise; chosen comp supplies the facets', () => {
+        const cand = facets({faiHash: faiH(999)});
+        const ev = comp({}, {tokenHashes: tokens('Alice Smith'), faiHash: faiH(999)});
+        const r = xcEvidenceScore(cand, [ev], NOW);
+        expect(r.facets).toContain('fai');
+        expect(r.facets).not.toContain('name'); // candidate had no tokens
+        expect(r.nats).toBeCloseTo(W.xcFai, 5);
     });
 });
