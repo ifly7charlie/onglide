@@ -87,7 +87,7 @@ export const HOME_OGN_COVERAGE = 0.5;
 // Cushion (seconds) before the scoring in-order generator emits a packet as
 // "live". Lower means scoring sees data sooner; reorders within this window
 // are absorbed without triggering a rescore.
-export const inorderAdditionalDelay = 2;
+export const inorderAdditionalDelay = 7;
 
 // Cushion (seconds) for the display-path emit in aprs.ts processMessageQueue:
 // packets with t < realNow - aprsAdditionalDelay are eligible for emission to
