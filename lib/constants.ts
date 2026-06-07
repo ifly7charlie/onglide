@@ -148,21 +148,26 @@ export const DEFAULT_INBBOX_FULL_COUNT = 200;
 // traffic that drifted into our bbox briefly.
 export const DEFAULT_INBBOX_MIN_RATIO = 0.3;
 
-// Decay timescale (days) for prior-day pair_score contributions when
-// summing within-comp history.
+// Decay timescale (days) for prior-day crossing contributions when summing
+// within-comp history.
 export const DEFAULT_PRIOR_DECAY_DAYS = 4;
+
+// The prior carries ONLY start/finish line-crossing evidence (nothing
+// derivable from ddb / the flarm_* identity tables, which are recomputed live).
+// Each task day contributes at most this many nats, so a single shaky day can
+// never dominate but repeated confirmations accumulate across days.
+export const MAX_PRIOR_PER_DAY_NATS = 1.0;
+// A flarmid is treated as "confidently held" by a glider once that glider's
+// total score clears this. A weaker contender for the same flarmid then has its
+// (prior + current) score negated, so a poor match can't displace a likely-good
+// one. See `contentionPenalty` in lib/scoring/shared/trackerScore.ts.
+export const PRIOR_PROTECT_NATS = 3.0;
 
 // Auto-apply gates (nats — natural log-LR units).
 export const DEFAULT_AUTO_MARGIN_NATS = 2.0; // min two-sided margin for auto-apply
 export const DEFAULT_SWAP_MARGIN_NATS = 3.0; // min net-gain for an auto-applied swap
 export const DEFAULT_SCORE_MIN_NATS = 0.8; // absolute floor below which we never auto-apply
 export const DEFAULT_LEDGER_MIN_NATS = 0.5; // S_min for writing an evidence row to trackerhistory
-// Weight assigned to a prior trackerhistory row that doesn't carry its own
-// pair_score (typically a legacy 'ognddb' / 'pilot' / 'startline' row from
-// before the score columns existed). Treated as a fixed positive prior so
-// past operator/system confirmations still influence today's score; lower
-// than a typical scored day to reflect the missing context.
-export const LEGACY_PRIOR_NATS = 1.0;
 
 // Per-signal nat weights. Sum of available signals × saturating function
 // produces pair_score; auto-apply compares pair_scores via the margin gates
@@ -178,7 +183,7 @@ export const TRACKER_SCORE_WEIGHTS = {
     ddbGlider: 0.3, // weak — many pilots in a comp share a glider type, so this just rules out wildly mismatched gliders
     baseline: 1.0, // flarmid in current tracker.trackerid for (class, compno)
 
-    prior: 1.0, // already in nats; sum of decayed prior-day two-sided margins (signed — may be negative)
+    prior: 1.0, // already in nats; sum of decayed per-day start/finish crossing scores (≥0, capped at MAX_PRIOR_PER_DAY_NATS/day)
     // ---- Cross-competition identity evidence (lib/scoring/shared/identity.ts) ----
     // Identity evidence from OTHER competitions (the current comp is excluded —
     // within-comp continuity is `prior`). `xcEvidenceScore` blends the per-facet
