@@ -473,14 +473,9 @@ function airfieldForCompid(compid: string): Airfield | undefined {
 // positives the aprsc filter let through (wide union slop) and routes a
 // shared FLARM ID into only the comp(s) whose bbox contain the position
 // (both pass when bboxes overlap).
-//
-// No-match fallback: if every aircraft fails the filter (e.g. the worker
-// is briefly stale between a task republish and the next rebuildAprsFilter
-// push), broadcast to all rather than silently drop. Exported for testing.
 export function selectAircraftForPosition(aircraftList: Aircraft[], lat: number, lng: number): Aircraft[] {
     if (aircraftList.length === 0) return aircraftList;
-    const matched = aircraftList.filter((ac) => !ac.airfield.bbox || pointInBbox(ac.airfield.bbox, lat, lng));
-    return matched.length > 0 ? matched : aircraftList;
+    return aircraftList.filter((ac) => !ac.airfield.bbox || pointInBbox(ac.airfield.bbox, lat, lng));
 }
 
 // Mapping by class/compno to aircraft record
