@@ -35,7 +35,7 @@ import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
-import {taskBbox, unionBboxes, expandBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
+import {taskBbox, unionBboxes, expandBbox, accumulateCompBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
 import {fromDateCode, toDateCode, competitionStartTs} from '../lib/datecode';
@@ -1647,10 +1647,17 @@ function rebuildAprsFilter() {
     // preprocessSector from the published task geometry), so the worker
     // only needs a refresh when a task is republished — which already
     // routes through here.
+    //
+    // A comp can run several classes (one channel each), all sharing one
+    // compid and one Airfield record in the worker. Union every class's
+    // task bbox into the comp's box so a class flying a larger task isn't
+    // clipped to a smaller class's area — the prefilter is per-comp, so it
+    // must cover every class's turnpoints.
     const perCompExpanded = new Map<string, Bbox>();
     for (const c of withTasks) {
         const b = taskBbox(c.task!);
-        if (b) perCompExpanded.set(c.compid, expandBbox(b, 10));
+        if (!b) continue;
+        accumulateCompBbox(perCompExpanded, c.compid, expandBbox(b, 10));
     }
 
     const boxes = Array.from(perCompExpanded.values());

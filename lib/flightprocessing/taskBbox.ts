@@ -97,6 +97,19 @@ export function unionBboxes(boxes: Bbox[]): Bbox | null {
 }
 
 //
+// Merge one comp's bbox into a per-compid accumulator. A competition runs
+// several classes — each its own task — that share a single compid and one
+// prefilter box in the APRS worker. Each class's bbox must be unioned in, not
+// overwritten, or a class flying a larger task gets clipped to a smaller
+// class's area. Mutates and returns the map.
+//
+export function accumulateCompBbox(map: Map<string, Bbox>, compid: string, bbox: Bbox): Map<string, Bbox> {
+    const existing = map.get(compid);
+    map.set(compid, existing ? unionBboxes([existing, bbox])! : bbox);
+    return map;
+}
+
+//
 // Expand a bbox by km in all directions. Uses the midpoint latitude
 // for the cos() factor, which is good enough at competition scales.
 //
