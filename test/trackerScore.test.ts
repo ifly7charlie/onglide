@@ -1,6 +1,6 @@
 import {describe, test, expect} from 'vitest';
-import {scoreSignals, computeMargins, decayPrior, summarisePrior, inBboxRatio, passesCandidateFilter, physicalMatchScore, type Signals} from '../lib/scoring/shared/trackerScore';
-import {DEFAULT_TOLERANCE_SEC, DEFAULT_DIST_TOLERANCE_KM, DEFAULT_INBBOX_FULL_COUNT, LEGACY_PRIOR_NATS, DEFAULT_PRIOR_DECAY_DAYS, TRACKER_SCORE_WEIGHTS} from '../lib/constants';
+import {scoreSignals, computeMargins, decayPrior, summarisePrior, crossingScore, contentionPenalty, inBboxRatio, passesCandidateFilter, physicalMatchScore, type Signals} from '../lib/scoring/shared/trackerScore';
+import {DEFAULT_TOLERANCE_SEC, DEFAULT_DIST_TOLERANCE_KM, DEFAULT_INBBOX_FULL_COUNT, DEFAULT_PRIOR_DECAY_DAYS, MAX_PRIOR_PER_DAY_NATS, PRIOR_PROTECT_NATS, TRACKER_SCORE_WEIGHTS} from '../lib/constants';
 
 const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     deltaStart: null,
@@ -49,6 +49,20 @@ describe('scoreSignals', () => {
         const both = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1}));
         expect(noGap.distAtStart).toBe(0);
         expect(both.distAtStart).toBeGreaterThan(0);
+    });
+
+    test('a within-tolerance start crossing zeroes distAtStart (the crossing already carries it)', () => {
+        // Same tight distance + gap, but now a clean start crossing exists.
+        const noCross = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1}));
+        const withCross = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1, deltaStart: 0}));
+        expect(noCross.distAtStart).toBeGreaterThan(0);
+        expect(withCross.distAtStart).toBe(0);
+        // A start crossing OUTSIDE tolerance does not suppress the distance signal.
+        const outOfTol = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1, deltaStart: DEFAULT_TOLERANCE_SEC + 5}));
+        expect(outOfTol.distAtStart).toBeGreaterThan(0);
+        // Finish distance is unaffected by a start crossing.
+        const withFinishDist = scoreSignals(baseSignals({distAtFinishKm: 0.05, gapAroundFinishSec: 1, deltaStart: 0}));
+        expect(withFinishDist.distAtFinish).toBeGreaterThan(0);
     });
 
     test('large bracketing gap suppresses the distance contribution', () => {
@@ -229,67 +243,140 @@ describe('inBboxRatio / passesCandidateFilter', () => {
     });
 });
 
-describe('summarisePrior', () => {
-    test('zero rows → zero prior', () => {
-        expect(summarisePrior([], LEGACY_PRIOR_NATS)).toBe(0);
+describe('crossingScore', () => {
+    test('no crossings (both null) → 0', () => {
+        expect(crossingScore(null, null)).toBe(0);
     });
 
-    test('single row at age 0 contributes its full score', () => {
-        expect(summarisePrior([{scoreNats: 2.5, taskDaysAgo: 0}], LEGACY_PRIOR_NATS)).toBeCloseTo(2.5, 6);
+    test('both crossings spot-on → capped at MAX_PRIOR_PER_DAY_NATS', () => {
+        // sStart = sFinish = 1, weighted sum = 2, capped to 1.
+        expect(crossingScore(0, 0)).toBeCloseTo(MAX_PRIOR_PER_DAY_NATS, 6);
+    });
+
+    test('one-sided start crossing → just that side, ≤ cap', () => {
+        // sStart=1 (weight 1), finish absent → 1.0; still ≤ cap.
+        expect(crossingScore(0, null)).toBeCloseTo(Math.min(MAX_PRIOR_PER_DAY_NATS, TRACKER_SCORE_WEIGHTS.deltaStart), 6);
+    });
+
+    test('crossing at the tolerance knee contributes 0', () => {
+        expect(crossingScore(DEFAULT_TOLERANCE_SEC, null)).toBeCloseTo(0, 6);
+    });
+
+    test('partial crossings below the cap sum linearly', () => {
+        // |Δ| = half the knee → support 0.5 on each side; 0.5+0.5 = 1.0 (= cap).
+        const half = DEFAULT_TOLERANCE_SEC / 2;
+        expect(crossingScore(half, half)).toBeCloseTo(MAX_PRIOR_PER_DAY_NATS, 6);
+        // A single half-knee crossing stays well under the cap.
+        expect(crossingScore(half, null)).toBeCloseTo(0.5 * TRACKER_SCORE_WEIGHTS.deltaStart, 6);
+    });
+});
+
+describe('summarisePrior', () => {
+    test('zero rows → zero prior', () => {
+        expect(summarisePrior([])).toBe(0);
+    });
+
+    test('single row at age 0 contributes its full per-day score', () => {
+        expect(summarisePrior([{scoreNats: 0.8, taskDaysAgo: 0}])).toBeCloseTo(0.8, 6);
     });
 
     test('decay is exp(-ageDays / τ) with default τ', () => {
-        const decayed = summarisePrior([{scoreNats: 2.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}], LEGACY_PRIOR_NATS);
-        expect(decayed).toBeCloseTo(2.0 / Math.E, 4);
+        const decayed = summarisePrior([{scoreNats: 1.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}]);
+        expect(decayed).toBeCloseTo(1.0 / Math.E, 4);
     });
 
-    test('multiple rows for same pair sum (each independently decayed)', () => {
-        const total = summarisePrior(
-            [
-                {scoreNats: 2.0, taskDaysAgo: 0},
-                {scoreNats: 2.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS},
-                {scoreNats: 2.0, taskDaysAgo: 2 * DEFAULT_PRIOR_DECAY_DAYS}
-            ],
-            LEGACY_PRIOR_NATS
-        );
-        expect(total).toBeCloseTo(2.0 + 2.0 / Math.E + 2.0 / (Math.E * Math.E), 4);
+    test('repeated confirmations across days accumulate (each independently decayed)', () => {
+        const total = summarisePrior([
+            {scoreNats: 1.0, taskDaysAgo: 0},
+            {scoreNats: 1.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS},
+            {scoreNats: 1.0, taskDaysAgo: 2 * DEFAULT_PRIOR_DECAY_DAYS}
+        ]);
+        expect(total).toBeCloseTo(1.0 + 1.0 / Math.E + 1.0 / (Math.E * Math.E), 4);
     });
 
-    test('NULL pair_score → uses LEGACY_PRIOR_NATS, then decays normally', () => {
-        const decayed = summarisePrior([{scoreNats: null, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}], LEGACY_PRIOR_NATS);
-        expect(decayed).toBeCloseTo(LEGACY_PRIOR_NATS / Math.E, 4);
-    });
-
-    test('legacy + scored rows mixed', () => {
-        const total = summarisePrior(
-            [
-                {scoreNats: 2.0, taskDaysAgo: 0},
-                {scoreNats: null, taskDaysAgo: 4} // legacy → 1.0 decayed by 1/e
-            ],
-            LEGACY_PRIOR_NATS
-        );
-        expect(total).toBeCloseTo(2.0 + LEGACY_PRIOR_NATS / Math.E, 4);
-    });
-
-    test('negative ages (future rows, shouldn\'t happen) are ignored', () => {
-        const total = summarisePrior(
-            [
-                {scoreNats: 2.0, taskDaysAgo: -1},
-                {scoreNats: 1.5, taskDaysAgo: 0}
-            ],
-            LEGACY_PRIOR_NATS
-        );
-        expect(total).toBeCloseTo(1.5, 4);
+    test("negative ages (future rows, shouldn't happen) are ignored", () => {
+        const total = summarisePrior([
+            {scoreNats: 1.0, taskDaysAgo: -1},
+            {scoreNats: 0.7, taskDaysAgo: 0}
+        ]);
+        expect(total).toBeCloseTo(0.7, 4);
     });
 
     test('task-day decay ignores calendar gaps — a 4-task-day prior decays as 4 days regardless of intervening weather days', () => {
         // The caller computes taskDaysAgo from task-day rank deltas, so by
-        // construction summarisePrior never sees the calendar gap. Verify
-        // that consuming the same taskDaysAgo regardless of context
-        // produces the expected value.
-        const a = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}], LEGACY_PRIOR_NATS);
-        const b = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}], LEGACY_PRIOR_NATS);
-        expect(a).toBeCloseTo(b, 6);
+        // construction summarisePrior never sees the calendar gap.
+        const a = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}]);
         expect(a).toBeCloseTo(1.0 / Math.E, 4);
+    });
+});
+
+describe('contentionPenalty', () => {
+    const key = (c: string, f: string) => `${c}|${f}`;
+
+    test('no competitor → nobody penalised', () => {
+        const out = contentionPenalty([{compno: 'AA', flarmid: 'F1', total: 5, baseline: true}], key);
+        expect(out.size).toBe(0);
+    });
+
+    test('confident baseline holder protects flarmid; weaker contender penalised', () => {
+        const out = contentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: 2, baseline: false}
+            ],
+            key
+        );
+        expect(out.has('BB|F1')).toBe(true);
+        expect(out.has('AA|F1')).toBe(false);
+    });
+
+    test('baseline below threshold does not protect — best-this-run holder used instead', () => {
+        // AA is baseline but weak (≤ threshold); BB is the strong run winner.
+        const out = contentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: false}
+            ],
+            key
+        );
+        expect(out.has('AA|F1')).toBe(true); // weak baseline contender is penalised
+        expect(out.has('BB|F1')).toBe(false); // strong run winner holds it
+    });
+
+    test('baseline precedence: protected even when a contender scores higher', () => {
+        const out = contentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 5, baseline: false}
+            ],
+            key
+        );
+        expect(out.has('BB|F1')).toBe(true); // higher-scoring contender still loses to baseline
+        expect(out.has('AA|F1')).toBe(false);
+    });
+
+    test('no holder clears the threshold → nobody penalised', () => {
+        const out = contentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: 2, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: 2.5, baseline: false}
+            ],
+            key
+        );
+        expect(out.size).toBe(0);
+    });
+
+    test('independent flarmids do not cross-penalise', () => {
+        const out = contentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: 2, baseline: false},
+                {compno: 'CC', flarmid: 'F2', total: 5, baseline: true}
+            ],
+            key
+        );
+        expect(out.has('BB|F1')).toBe(true);
+        expect(out.has('CC|F2')).toBe(false);
+        expect(out.size).toBe(1);
     });
 });

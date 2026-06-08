@@ -5,8 +5,9 @@
 // Units: nats. Score = Σ wᵢ · sᵢ where sᵢ ∈ [0,1] is a saturating support
 // function and wᵢ is the per-signal weight. Missing signals contribute 0,
 // never negative — contradictions emerge by competing pairs scoring more.
-// The sole exception is `prior`, which carries a signed margin from earlier
-// task days and may be negative (a past loss to a competitor stays negative).
+// `prior` carries only start/finish line-crossing evidence from earlier task
+// days (≥0, capped per day); a whole pair's total is driven negative separately
+// by `contentionPenalty` when a different glider confidently holds the flarmid.
 
 import {
     DEFAULT_TOLERANCE_SEC,
@@ -15,6 +16,8 @@ import {
     DEFAULT_INBBOX_FULL_COUNT,
     DEFAULT_INBBOX_MIN_RATIO,
     DEFAULT_PRIOR_DECAY_DAYS,
+    MAX_PRIOR_PER_DAY_NATS,
+    PRIOR_PROTECT_NATS,
     TRACKER_SCORE_WEIGHTS
 } from '../../constants';
 
@@ -70,7 +73,7 @@ export interface Signals {
     ddbGliderMatch: boolean;
     /** This flarmid is currently in the operator-set tracker.trackerid for the pilot. */
     baselineMatch: boolean;
-    /** Sum of decayed prior-day two-sided margins for this (compno, flarmid) within the same comp. Already in nats; signed — negative when a prior day's match lost to a competing candidate. */
+    /** Sum of decayed per-day start/finish crossing scores for this (compno, flarmid) within the same comp. Already in nats; ≥0 (each day capped at MAX_PRIOR_PER_DAY_NATS). Carries no ddb/identity-derived evidence. */
     priorNats: number;
 
     /**
@@ -133,7 +136,11 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
 
     // Distance-at-official-time, gap-modulated. Full credit only when the
     // bracketing gap is small and the bracketing-segment distance is tight.
-    const sDistStart = s.distAtStartKm === null || s.gapAroundStartSec === null //
+    // When a start crossing was actually found AND it's within tolerance, the
+    // Δstart signal already carries that evidence — the distance would just be
+    // ≈0 km (the segment crosses the line) and double-count, so score it 0.
+    const startCrossingWithinTol = s.deltaStart !== null && Math.abs(s.deltaStart) <= T_tol;
+    const sDistStart = startCrossingWithinTol || s.distAtStartKm === null || s.gapAroundStartSec === null //
         ? 0
         : distSupport(s.distAtStartKm, D_tol) * gapMod(s.gapAroundStartSec, T_gap);
     const sDistFinish = s.distAtFinishKm === null || s.gapAroundFinishSec === null //
@@ -197,26 +204,83 @@ export function physicalMatchScore(b: ScoreBreakdown): number {
     return b.deltaStart + b.deltaFinish + b.distAtStart + b.distAtFinish + b.inBbox + b.preLaunch;
 }
 
-/** Decay a single prior pair_score by its age in days. */
+/**
+ * Per-day prior contribution from a single task day's start/finish crossings,
+ * in nats. This is the ONLY thing the within-comp prior is built from — purely
+ * line-crossing evidence, nothing derivable from ddb / the flarm_* identity
+ * tables (those are recomputed live each run, never persisted into the prior).
+ *
+ * Each crossing earns its weighted saturating support (same knee as the live
+ * Δstart/Δfinish signals); the day's total is capped at MAX_PRIOR_PER_DAY_NATS
+ * so one strong day can't outweigh several days of confirmation. Both deltas
+ * null (no crossing that day) → 0, i.e. "no match".
+ */
+export function crossingScore(deltaStart: number | null, deltaFinish: number | null, weights: ScoreWeights = DEFAULT_WEIGHTS, knees: ScoreKnees = DEFAULT_KNEES): number {
+    const sStart = deltaStart === null ? 0 : linKnee(Math.abs(deltaStart), knees.timeToleranceSec);
+    const sFinish = deltaFinish === null ? 0 : linKnee(Math.abs(deltaFinish), knees.timeToleranceSec);
+    return Math.min(MAX_PRIOR_PER_DAY_NATS, weights.deltaStart * sStart + weights.deltaFinish * sFinish);
+}
+
+/** Decay a single prior crossing score by its age in task days. */
 export function decayPrior(scoreNats: number, ageDays: number, knees: ScoreKnees = DEFAULT_KNEES): number {
     if (ageDays <= 0) return scoreNats;
     return scoreNats * Math.exp(-ageDays / knees.priorDecayDays);
 }
 
-/** Sum of decayed prior contributions for one (compno, flarmid) pair. Each
- *  row carries a signed margin (use `null` to signal a legacy row that gets
- *  the caller-supplied legacy weight) and an age expressed in task-days
- *  (calendar days are *not* used — comp rest days shouldn't decay priors).
- *  A negative margin decays toward 0 from below, preserving its sign.
+/** Sum of decayed per-day crossing scores for one (compno, flarmid) pair. Each
+ *  row carries that day's `crossingScore` (≥0, already capped) and an age in
+ *  task-days (calendar days are *not* used — comp rest days shouldn't decay
+ *  priors). Repeated confirmations accumulate; a no-crossing day contributes 0.
  */
-export function summarisePrior(rows: {scoreNats: number | null; taskDaysAgo: number}[], legacyNats: number, knees: ScoreKnees = DEFAULT_KNEES): number {
+export function summarisePrior(rows: {scoreNats: number; taskDaysAgo: number}[], knees: ScoreKnees = DEFAULT_KNEES): number {
     let total = 0;
     for (const r of rows) {
         if (r.taskDaysAgo < 0) continue;
-        const base = r.scoreNats ?? legacyNats;
-        total += decayPrior(base, r.taskDaysAgo, knees);
+        total += decayPrior(r.scoreNats, r.taskDaysAgo, knees);
     }
     return total;
+}
+
+/**
+ * Contention guard: stop a poor match from displacing a likely-good one.
+ *
+ * For each flarmid, the glider that "confidently holds" it is the operator
+ * baseline assignment if that pair's total clears `protectThreshold`, otherwise
+ * the highest-scoring pair this run if *it* clears the threshold (the "Either"
+ * rule — baseline takes precedence so an existing good assignment is protected).
+ * Every OTHER glider competing for the same flarmid is a contender whose
+ * (prior + current) total should be negated, so it can never win the
+ * assignment away from the confident holder.
+ *
+ * Pure: takes the per-pair totals + baseline flags, returns the set of pair
+ * keys whose total the caller must negate. `key(compno, flarmid)` lets the
+ * caller use whatever pair-key convention it already has.
+ */
+export function contentionPenalty<P extends {compno: string; flarmid: string; total: number; baseline: boolean}>(
+    pairs: P[],
+    key: (compno: string, flarmid: string) => string,
+    protectThreshold: number = PRIOR_PROTECT_NATS
+): Set<string> {
+    const byFlarmid = new Map<string, P[]>();
+    for (const p of pairs) {
+        const arr = byFlarmid.get(p.flarmid) ?? [];
+        arr.push(p);
+        byFlarmid.set(p.flarmid, arr);
+    }
+    const penalise = new Set<string>();
+    for (const group of byFlarmid.values()) {
+        if (group.length < 2) continue; // no contention without a competitor
+        const best = (cands: P[]): P | null => cands.reduce<P | null>((m, p) => (m === null || p.total > m.total ? p : m), null);
+        const baselineHolder = best(group.filter((p) => p.baseline));
+        const bestHolder = best(group);
+        const holder = baselineHolder && baselineHolder.total > protectThreshold ? baselineHolder : bestHolder && bestHolder.total > protectThreshold ? bestHolder : null;
+        if (!holder) continue;
+        for (const p of group) {
+            if (p.compno === holder.compno) continue;
+            penalise.add(key(p.compno, p.flarmid));
+        }
+    }
+    return penalise;
 }
 
 /** Two-sided margins for a chosen pair (p*, f*) given its score and the score of every alternative on each side. Pure data — no assignment search. */
