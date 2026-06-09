@@ -2378,12 +2378,16 @@ async function primeAndBroadcast(channel: Channel, label: string): Promise<void>
             // otherwise pick http for loopback hosts (where the daemon's
             // own HTTP listener answers) and https everywhere else (where
             // an upstream proxy is terminating TLS).
+            // Match the client's oldTracksUrl cache key exactly (baseTime +
+            // scoreId) so this prime warms the entry the client will fetch —
+            // without the scoreId segment we'd warm the wrong key on a rescore.
+            const scoreId = channel.liveScoreId || 0;
             let url: string;
             if (/^https?:\/\//i.test(host)) {
-                url = `${host.replace(/\/$/, '')}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
+                url = `${host.replace(/\/$/, '')}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}/${scoreId}.bin`;
             } else {
                 const proto = /^(localhost|127\.|\[::1\])/i.test(host) ? 'http' : 'https';
-                url = `${proto}://${host}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
+                url = `${proto}://${host}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}/${scoreId}.bin`;
             }
             const ctl = new AbortController();
             const timer = setTimeout(() => ctl.abort(), 1000);
