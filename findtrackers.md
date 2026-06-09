@@ -23,6 +23,10 @@ and pair-flying pilots. The current system is probabilistic: each
 candidate pairing gets a score in nats (log-likelihood-ratio units),
 margins quantify how unambiguous the pair is against alternatives, and
 multi-day evidence accumulates so a clean prior protects a noisy day.
+The multi-day prior is built **only** from start/finish line crossings
+(nothing derivable from the DDB or the cross-comp identity tables), and
+a contention guard stops a weak contender from displacing a flarmid that
+another glider already confidently holds.
 
 ## File layout
 
@@ -33,7 +37,8 @@ multi-day evidence accumulates so a clean prior protects a noisy day.
   point log, runs `hasCrossed` on consecutive packets, produces
   `TrackerMatch[]` with `TrackerDiag` for each candidate pair.
 - `lib/scoring/shared/trackerScore.ts` — pure scoring kernel:
-  `scoreSignals`, `computeMargins`, `decayPrior`, `summarisePrior`.
+  `scoreSignals`, `computeMargins`, `decayPrior`, `crossingScore`,
+  `summarisePrior`, `contentionPenalty`, `physicalMatchScore`.
   No I/O. Unit-tested in `test/trackerScore.test.ts`.
 - `lib/constants.ts` — all tunables and weights:
   `TRACKER_SCORE_WEIGHTS`, `DEFAULT_DIST_TOLERANCE_KM`, etc.
@@ -48,7 +53,10 @@ Migrations:
   columns for persisted evidence.
 - `conf/sql/migrations/20260510_trackerhistory_method_score.sql` —
   adds `'evidence'` and `'startmatch-swap'` to the method enum.
-- `conf/sql/onglide_schema.sql` — canonical schema includes both.
+- `conf/sql/migrations/20260607_trackerhistory_drop_derivable.sql` —
+  drops `pair_score`, `margin`, `ddb_link`: the prior is now crossing-only
+  and those values are recomputed live, so storing them only went stale.
+- `conf/sql/onglide_schema.sql` — canonical schema includes all three.
 
 ## Pipeline
 
@@ -69,20 +77,21 @@ findTrackerMatches  →  TrackerMatch[]      (per (pilot, candidate-flarmid):
         ▼
 loadPriorEvidence   →  PriorMap            (per (compno, flarmid):
                                             decayed sum of prior days'
-                                            pair_scores)
+                                            start/finish crossing scores,
+                                            ≤1/day)
         │
         ▼
 computeScoreMap     →  ScoreMap            (per pair: ScoreBreakdown,
                                             two-sided margins, contested
-                                            flags, deltas)
+                                            flags, deltas, demoted flag;
+                                            applies the contention guard)
         │
         ▼
 printMatches        — operator-facing report (always runs)
         │
         ▼
 computeProposals    →  Proposal[]          (adds, removes, reason,
-                                            pair_score, margin, deltas,
-                                            ddb_link)
+                                            crossing deltas)
         │
         ▼
 reviewProposals (interactive) | --yes      operator selection
@@ -167,13 +176,25 @@ Pure functions in `lib/scoring/shared/trackerScore.ts`. Units: nats
 ```
 pairScore(p, f, today) = Σ wᵢ · sᵢ(p, f, today) + prior(p, f, today)
 
-prior(p, f, today)     = Σ_{d ∈ past task-days} pair_score(p, f, d)
+prior(p, f, today)     = Σ_{d ∈ past task-days} crossingScore(p, f, d)
                                                 · exp(−taskDaysAgo / τ)
+
+crossingScore(p, f, d) = min(1, w_Δstart·s_Δstart + w_Δfinish·s_Δfinish)
 ```
 
 All signals contribute non-negative weight when present, exactly 0
-when absent. Contradictions emerge through *other* candidates scoring
-higher, not via negative weights on this one.
+when absent, and the prior itself is ≥0. Contradictions normally emerge
+through *other* candidates scoring higher, not via negative weights — the
+**one** exception is the contention guard (below), which negates a whole
+pair's total when a different glider confidently holds the flarmid.
+
+The prior is deliberately narrow: it carries **only** that pair's own
+start/finish line crossings, capped at `MAX_PRIOR_PER_DAY_NATS = 1.0`
+per task day. A day with no crossing contributes 0, so repeated clean
+days accumulate while a single shaky day can't dominate. It never folds
+in DDB facets, the operator baseline, or cross-comp identity — those are
+recomputed live every run, so persisting them into the prior would
+double-count and go stale.
 
 ### Signal table
 
@@ -188,7 +209,7 @@ higher, not via negative weights on this one.
 | DDB CN match | `ddb.cn == pilot.compno` (case-insensitive) | indicator | 1.5 |
 | DDB glider match | `gliderEquivalent(ddb.aircraft_model, pilot.glidertype)` | indicator | 0.3 (weak) |
 | operator baseline | flarmid in current `tracker.trackerid` | indicator | 1.0 |
-| prior | persisted prior days' pair_scores, decayed | `Σ score · exp(−daysAgo/τ)` | 1.0 (already in nats) |
+| prior | persisted prior days' start/finish crossings, capped ≤1/day, decayed | `Σ crossingScore · exp(−daysAgo/τ)` | 1.0 (already in nats) |
 
 Defaults (lib/constants.ts):
 - `T_tol = 5 s` (`DEFAULT_TOLERANCE_SEC`)
@@ -216,6 +237,20 @@ anywhere in the gap). The signal is multiplied by
 So a 60 s gap with a 50 m bracketing distance scores like ~25 m at
 zero gap — i.e., the bound is trusted less.
 
+### Grandprix common-start exclusion
+
+When a class is grandprix-scored (`classes.grandprixstart = 'Y'`) **and**
+every pilot in the day's results shares one common start time, the
+start-line crossing is the same for everyone and so can't tell pilots
+apart. `processGroup` detects this (`grandprixstart && one distinct
+startUtc`) and sets `excludeStart`, which nulls `deltaStart` /
+`distAtStart` in `signalsFromMatch` and drops the start term from the
+prior's `crossingScore` — both contribute 0, leaving the finish crossing
+(plus presence, DDB, prior, xc) to do the discriminating. The report
+prints `grandprix start with a single common start time — excluding
+start-line crossing from scoring`. Both conditions are required: if the
+start times actually differ they remain informative and are kept.
+
 ### Margins
 
 `computeMargins({chosenScore, bestOtherFlarmidForPilot,
@@ -235,20 +270,44 @@ margins equal to the chosen score — wide-looking but meaningless.
 The CLI renders these as `S=1.02  uncontested (no competing
 candidate seen)` to avoid mistaking it for confidence.
 
+### Contention guard
+
+`contentionPenalty(pairs, key, protectThreshold)` runs inside
+`computeScoreMap` **before** margins, so the negation flows through to
+the two-sided margins. Its job is to stop a poor match from displacing a
+likely-good one. For each flarmid with more than one candidate:
+
+1. The **holder** is the operator-baseline pair if its total clears
+   `PRIOR_PROTECT_NATS = 3.0`, otherwise this run's highest-scoring pair
+   if *that* clears the threshold (baseline takes precedence, so an
+   existing good assignment is protected even when a contender scores
+   higher). If neither clears the threshold there is no holder and
+   nobody is penalised.
+2. Every **other** glider competing for that flarmid is a contender; its
+   whole (prior + current) total is negated — `total → −total` — so it
+   can never win the assignment away from the confident holder.
+
+The negated pair is flagged `demoted` in the `ScoreMap` and rendered as
+`S=−4.05 (demoted: flarmid confidently held elsewhere)`. Because the
+total is now negative it also falls below the ledger/auto-apply floors,
+so a demoted contender is neither written as evidence nor auto-applied.
+
 ### Prior loading
 
 `loadPriorEvidence(datecode, className)` in bin/findtrackers.ts:
 
-1. Query the ordered task-day datecodes for this class from `tasks`.
-2. Query `trackerhistory` rows for this class with non-null datecode,
-   excluding today and excluding `*-blocked` / `none` methods.
-3. For each row, compute `taskDaysAgo = currentRank − rowRank` from
-   the task-day index. Skip rows whose datecode isn't in the
-   task-day list (not part of this class's task sequence).
-4. Group by `(compno, flarmid)`, sum `Σ scoreFromRow · exp(−daysAgo / τ)`
-   via `summarisePrior`. Rows with `pair_score = NULL` (legacy
-   `'ognddb'` / `'pilot'` rows) get `LEGACY_PRIOR_NATS = 1.0` as a
-   fixed positive prior.
+1. Query `trackerhistory` rows for this class with non-null datecode,
+   excluding today and excluding `*-blocked` / `none` methods. Only the
+   `delta_start` / `delta_finish` crossing columns are read.
+2. Rank the evidence-bearing datecodes (today included) in string order
+   to get the task-day index, then for each row compute
+   `taskDaysAgo = currentRank − rowRank`. Skip rows whose datecode isn't
+   in that set (not part of this class's task sequence).
+3. Convert each row's deltas to that day's `crossingScore` (≤1), group
+   by `(compno, flarmid)`, and sum `Σ crossingScore · exp(−daysAgo / τ)`
+   via `summarisePrior`. A row with no crossing (both deltas NULL) scores
+   0; legacy rows that predate the delta columns therefore contribute
+   nothing — they carry no crossing evidence, which is all the prior is.
 
 **Task-day decay** is critical: a 7-day weather gap shouldn't erode
 a prior. Decay runs on the count of intervening *task days*, not
@@ -276,12 +335,16 @@ CREATE TABLE trackerhistory (
     datecode     char(3),                 -- which competition day
     delta_start  smallint,                -- signed seconds, scan-crossing − official; NULL when no crossing
     delta_finish smallint,                -- same
-    pair_score   float,                   -- total nats for this (compno, flarmid) on this day
-    margin       float,                   -- min(pilotMargin, flarmidMargin) at decision time
-    ddb_link     enum('none','cn','glider','both')  -- which DDB facets matched
     -- KEY idx_class_datecode_method (class, datecode, method)
 );
 ```
+
+`20260510_trackerhistory_evidence.sql` also added `pair_score`, `margin`
+and `ddb_link`, but `20260607_trackerhistory_drop_derivable.sql` removes
+them again: the prior is crossing-only and those three are recomputed
+live each run (from the DDB feed and live scoring), so persisting them
+only stored state that goes stale. The crossing deltas are the only
+per-day evidence not derivable from another source, so they stay.
 
 **Method values:**
 - `'startmatch'` — applied by findtrackers's apply path (operator
@@ -292,25 +355,28 @@ CREATE TABLE trackerhistory (
 - `'startmatch-swap'` — reserved for Stage 4 swap detection.
 - `'ognddb'`, `'pilot'`, `'igcfile'`, `'tltimes'`, `'soaringspot'`,
   `'grandprix'`, `'robocontrol'`, `'startline'` — other writers in
-  the codebase. Counted as positive priors when `pair_score=NULL` →
-  `LEGACY_PRIOR_NATS`.
+  the codebase. They carry no crossing deltas, so they contribute 0 to
+  the prior (the prior is crossing-only).
 - `'ogn-blocked'`, `'flarmnet-blocked'`, `'ddb-blocked'`, `'none'` —
-  excluded from prior contributions.
+  excluded from the prior query outright.
 
 ### Write paths in findtrackers
 
 - **`applyProposals(className, datecode, proposals)`** — for each
   proposal: INSERT IGNORE seed `tracker` row, UPDATE `tracker.trackerid`
   with the comma-joined new value, then **one trackerhistory row per
-  added flarmid** with method='startmatch' and the full score
-  context (pair_score, margin, delta_start, delta_finish, ddb_link).
+  added flarmid** with method='startmatch' and only the crossing deltas
+  (`delta_start`, `delta_finish`) — the lone bit of per-day evidence the
+  next day's prior loader needs.
 - **`writeEvidence(className, datecode, scoreMap, applied)`** — DELETE
   existing `method='evidence'` rows for this (class, datecode), then
-  bulk INSERT one row per (compno, flarmid) pair whose
-  `pair_score ≥ DEFAULT_LEDGER_MIN_NATS` (0.5) that wasn't already
-  covered by a startmatch row in this run. Written every run, not
-  just on proposal-driven changes — every clean pilot's daily score
-  becomes tomorrow's prior fuel.
+  bulk INSERT one row per (compno, flarmid) pair whose live
+  `score.total ≥ DEFAULT_LEDGER_MIN_NATS` (0.5) that wasn't already
+  covered by a startmatch row in this run. The gate uses the full live
+  total, but the row stores only the crossing deltas. Written every run,
+  not just on proposal-driven changes — every clean pilot's crossings
+  become tomorrow's prior fuel. (A `demoted` contender has a negative
+  total, so it falls below the floor and is not written.)
 
 Both run inside the same `mysql.transaction()`. `--dry-run` skips
 both.
@@ -363,7 +429,7 @@ Per (compid, datecode) group, per class:
   finish scan: ...               → ... with finish crossings
 
 --- ${className} / ${datecode} — results ---       (only if multi-class)
-  loaded N prior pair-scores from earlier task days
+  loaded N prior crossing-scores from earlier task days
 
   1P   Pilot Name                                 ⚠ ...flags...
        start time within ±5s of: 2B (+3s)
@@ -374,6 +440,10 @@ Per (compid, datecode) group, per class:
 
   Summary: 14 pilots, 12 matched, 1 ambiguous
 ```
+
+A pair the contention guard demoted shows a negated total and a reason,
+e.g. `S=−4.05 (demoted: flarmid confidently held elsewhere)` — the
+flarmid is confidently assigned to another glider this run.
 
 ### Row tags (legacy + Phase 1.5 additions)
 
@@ -416,8 +486,8 @@ map. Per pilot:
      task area).
    - `inBboxRatio ≤ 0.1` (overwhelmingly elsewhere).
 5. **Reason string** describes the trigger.
-6. **Score context** (pair_score, margin, deltas, ddb_link) recorded
-   on the proposal for the persistence layer.
+6. **Crossing deltas** for the chosen flarmid recorded on the proposal —
+   the only score context the persistence layer keeps.
 
 Important nuance: the current logic *replaces* an existing flarmid
 when a better candidate arrives (because `addId` puts everything in
@@ -436,7 +506,7 @@ Typical week:
 2. **Day 2+**: re-run. Prior evidence from Day 1 now contributes to
    each pair's score. Borderline cases (poor coverage, landout) get
    uplift from yesterday's clean evidence. The report shows
-   `loaded N prior pair-scores`. Auto-stable.
+   `loaded N prior crossing-scores`. Auto-stable.
 3. **Wrong tracker drifts in**: cross-class hits, low inBboxRatio,
    bboxOnly fire and propose removal.
 4. **Multi-flarmid pilots**: handled but pair-flying triggers
@@ -463,8 +533,13 @@ Coverage:
 - Missing signal contributes 0.
 - DDB CN vs glider weights (glider < CN).
 - Margins.
-- Decay (single-day, multi-day, NULL pair_score → legacy nats).
-- `summarisePrior` with mixed scored + legacy rows.
+- `crossingScore` (no crossing → 0, both spot-on → capped at 1/day,
+  one-sided, knee boundary, linear partials).
+- Decay and `summarisePrior` (single-day, multi-day accumulation,
+  negative ages ignored, task-day decay).
+- `contentionPenalty` (baseline-holder protection, baseline precedence
+  over a higher-scoring contender, sub-threshold holder → no penalty,
+  independent flarmids don't cross-penalise).
 
 No DB-bound integration tests yet — `loadPriorEvidence`,
 `applyProposals`, `writeEvidence` are exercised in the manual
@@ -494,16 +569,18 @@ end-to-end run.
 
 ## Key file:line references
 
-- `bin/findtrackers.ts:185` — `processGroup` main loop.
-- `bin/findtrackers.ts:425` — `loadPriorEvidence`.
-- `bin/findtrackers.ts:508` — `computeScoreMap`.
-- `bin/findtrackers.ts:855` — `computeProposals`.
-- `bin/findtrackers.ts:1058` — `applyProposals`.
-- `bin/findtrackers.ts:1107` — `writeEvidence`.
-- `lib/scoring/shared/findtrackers.ts:707` — `matchCrossings` (the
+- `bin/findtrackers.ts:223` — `processGroup` main loop.
+- `bin/findtrackers.ts:578` — `loadPriorEvidence`.
+- `bin/findtrackers.ts:1117` — `computeScoreMap` (applies the contention guard).
+- `bin/findtrackers.ts:1441` — `computeProposals`.
+- `bin/findtrackers.ts:1699` — `applyProposals`.
+- `bin/findtrackers.ts:1753` — `writeEvidence`.
+- `lib/scoring/shared/findtrackers.ts:745` — `matchCrossings` (the
   three phases).
-- `lib/scoring/shared/findtrackers.ts:455` — post-scan pass that
+- `lib/scoring/shared/findtrackers.ts:505` — post-scan pass that
   harvests line-aware `distanceKm` from `hasCrossed`.
-- `lib/scoring/shared/trackerScore.ts:113` — `scoreSignals`.
-- `lib/scoring/shared/trackerScore.ts:181` — `summarisePrior`.
-- `lib/constants.ts:67` — tracker-match scoring constants.
+- `lib/scoring/shared/trackerScore.ts:128` — `scoreSignals`.
+- `lib/scoring/shared/trackerScore.ts:218` — `crossingScore`.
+- `lib/scoring/shared/trackerScore.ts:235` — `summarisePrior`.
+- `lib/scoring/shared/trackerScore.ts:259` — `contentionPenalty`.
+- `lib/constants.ts:127` — tracker-match scoring constants.

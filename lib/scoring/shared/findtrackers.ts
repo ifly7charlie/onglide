@@ -50,6 +50,7 @@ export interface OfficialResult {
     country: string; // pilots.country (2-letter), '' when unset
     fai: number; // pilots.fai (0/synthetic when unresolved)
     greg: string; // pilots.greg (ICAO registration), '' when unset
+    grandprixstart: boolean; // classes.grandprixstart='Y' — class-level constant, identical on every row
 }
 
 export interface TrackerMatch {

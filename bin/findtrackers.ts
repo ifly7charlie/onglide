@@ -273,12 +273,21 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
             debugFlarmids: debugFlarmids.size ? debugFlarmids : undefined
         });
 
+        // Grand-prix / regatta start: when the class is grandprix-scored AND
+        // every pilot shares one common start time, the start-line crossing is
+        // identical for everyone and so carries no information for telling
+        // pilots apart. Exclude the start signal (live and in the prior) from
+        // scoring; the finish crossing still discriminates.
+        const sameStartForAll = new Set(results.map((r) => r.startUtc)).size === 1;
+        const excludeStart = results[0].grandprixstart && sameStartForAll;
+        if (excludeStart) console.log(`  grandprix start with a single common start time — excluding start-line crossing from scoring`);
+
         // Score map (including multi-day prior evidence) is built here in
         // pass 1 so pass 2 can copy the breakdown for each cross-class hit
         // onto the CrossClassHit record — the "also matches K in class X"
         // line needs to show K's score in class X, not D01607's in this class.
-        const priorMap = await loadPriorEvidence(datecode, className);
-        if (priorMap.size) console.log(`  loaded ${priorMap.size} prior pair-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
+        const priorMap = await loadPriorEvidence(datecode, className, excludeStart);
+        if (priorMap.size) console.log(`  loaded ${priorMap.size} prior crossing-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
 
         // Cross-comp identity: build each pilot's privacy-preserving
         // fingerprint and load what we've previously associated with the
@@ -290,7 +299,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         );
         if (priorAircraft.size) console.log(`  loaded cross-comp identity for ${priorAircraft.size} flarmid${priorAircraft.size === 1 ? '' : 's'}`);
 
-        const scoreMap = computeScoreMap(matches, results, ddb, priorMap, candidateFacets, priorAircraft);
+        const scoreMap = computeScoreMap(matches, results, ddb, priorMap, candidateFacets, priorAircraft, excludeStart);
 
         classMatches.push({job, results, matches, scoreMap, candidateFacets});
     }
@@ -509,6 +518,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
             country: string;
             fai: number;
             greg: string;
+            grandprixstart: 'Y' | 'N';
         }[]
     >(escape`
         SELECT pr.compno                                                    AS compno,
@@ -523,7 +533,8 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
                COALESCE(p.homeclub, '')                                     AS homeclub,
                COALESCE(p.country, '')                                      AS country,
                COALESCE(p.fai, 0)                                           AS fai,
-               COALESCE(p.greg, '')                                         AS greg
+               COALESCE(p.greg, '')                                         AS greg,
+               COALESCE(cl.grandprixstart, 'N')                             AS grandprixstart
           FROM pilotresult pr
           JOIN pilots      p  ON p.class   = pr.class AND p.compno = pr.compno
           JOIN classes     cl ON cl.class  = pr.class
@@ -544,7 +555,8 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
         homeclub: r.homeclub,
         country: r.country,
         fai: Number(r.fai) || 0,
-        greg: r.greg
+        greg: r.greg,
+        grandprixstart: r.grandprixstart === 'Y'
     }));
 }
 
@@ -575,7 +587,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
 // and tracks the same physical glider.
 type PriorMap = Map<string, number>;
 let priorEvidenceUnavailable = false; // latched after first schema failure so we don't spam the log
-async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName): Promise<PriorMap> {
+async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName, excludeStart = false): Promise<PriorMap> {
     if (priorEvidenceUnavailable) return new Map();
     let priorRows: {compno: Compno; flarmid: string; datecode: string; delta_start: number | null; delta_finish: number | null; method: string}[] = [];
     try {
@@ -626,7 +638,10 @@ async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName
         const key = `${String(r.compno)}|${r.flarmid}`;
         const arr = grouped.get(key) ?? [];
         // Prior is crossing-only: that day's Δstart/Δfinish, capped per day.
-        arr.push({scoreNats: crossingScore(r.delta_start === null ? null : Number(r.delta_start), r.delta_finish === null ? null : Number(r.delta_finish)), taskDaysAgo});
+        // For a grandprix common-start class the start crossing is excluded
+        // (identical for everyone), so the prior is finish-only.
+        const ds = excludeStart || r.delta_start === null ? null : Number(r.delta_start);
+        arr.push({scoreNats: crossingScore(ds, r.delta_finish === null ? null : Number(r.delta_finish)), taskDaysAgo});
         grouped.set(key, arr);
     }
 
@@ -1120,7 +1135,8 @@ function computeScoreMap(
     ddb: Record<string, DDBEntry> | null,
     priorMap: PriorMap,
     candidateFacets: Map<Compno, IdentityFacets> = new Map(),
-    priorAircraft: PriorAircraftMap = new Map()
+    priorAircraft: PriorAircraftMap = new Map(),
+    excludeStart = false
 ): ScoreMap {
     if (!matches.length) return new Map();
     const earliestPilotStartUtc = results.reduce((m, r) => Math.min(m, r.startUtc), Number.POSITIVE_INFINITY);
@@ -1141,7 +1157,7 @@ function computeScoreMap(
         const link = ddbLinkFor(ddbEntry, m.compno, r?.glidertype ?? '');
         const priorNats = priorMap.get(scoreKey(m.compno, m.flarmid)) ?? 0;
         const xc = computeXcBlock(m, candidateFacets, priorAircraft, nowMs);
-        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc);
+        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart);
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
         xcFacetsByKey.set(scoreKey(m.compno, m.flarmid), xc.facets);
@@ -1234,13 +1250,16 @@ function ddbLinkFor(ddb: DDBEntry | undefined, compno: Compno, glidertype: strin
     return {cn, glider, tag: cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none'};
 }
 
-function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence): Signals {
+function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false): Signals {
     const d = m.diag;
+    // Grandprix common-start: the start crossing is identical for every pilot,
+    // so drop it (and its distance) to null — scoreSignals then contributes 0
+    // for both, leaving the finish crossing to do the discriminating.
     return {
-        deltaStart: m.deltaStart,
+        deltaStart: excludeStart ? null : m.deltaStart,
         deltaFinish: m.deltaFinish,
-        distAtStartKm: d?.distAtStartKm ?? null,
-        gapAroundStartSec: d?.gapAroundStartSec ?? null,
+        distAtStartKm: excludeStart ? null : d?.distAtStartKm ?? null,
+        gapAroundStartSec: excludeStart ? null : d?.gapAroundStartSec ?? null,
         distAtFinishKm: d?.distAtFinishKm ?? null,
         gapAroundFinishSec: d?.gapAroundFinishSec ?? null,
         inBboxPackets: d?.inBboxPackets ?? 0,
