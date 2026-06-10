@@ -1,3 +1,13 @@
+// Websocket string control sentinels — sent as bare strings on the same socket
+// (no protobuf). The server emits; the client matches on the exact value.
+export const WS_RELOAD = 'reload'; // force a full page reload (unknown channel)
+export const WS_MOVE = 'move'; // graceful handover: reconnect (client picks its own delay)
+// Graceful-shutdown drain: on `move`, each client reconnects after a random
+// delay in [0, CLIENT_MOVE_WINDOW_MS) ms, staggering the herd onto the new daemon.
+// The departing daemon waits this long before tearing down, so it covers the
+// worst-case client delay.
+export const CLIENT_MOVE_WINDOW_MS = 10_000;
+
 // How much time between packets is considered to be a display-side gap
 // in the track (seconds) — at or beyond this the TripsLayer breaks the
 // segment and the gap renders as a visible discontinuity. Strictly

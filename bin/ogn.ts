@@ -85,7 +85,7 @@ function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
 import {AprsController, AirfieldSpec, type AprsWorkerEvent, type TrackerSnapshotEntry} from '../lib/webworkers/aprs';
 import {fidHexOf, fidLabel, protoOf} from '../lib/webworkers/pointlog';
 
-import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE, WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -290,6 +290,11 @@ let competitionsListeners: OgnWebSocket[] = [];
 // staring at an empty "can't find competition" overlay.
 let shuttingDown = false;
 
+// Every listening server (HTTP + any SSL). handleExit closes these first so the
+// freshly-started daemon (sharing the port via SO_REUSEPORT) becomes the sole
+// listener before we hand the live client sockets over.
+const httpServers: (http.Server | https.Server)[] = [];
+
 // Maintained set of current per-comp CompetitionSummary objects, keyed by
 // compid. broadcastCompetitionsDelta rebuilds an entry whenever a comp
 // changes; the /all snapshot sent to a joining client is built straight from
@@ -393,6 +398,11 @@ function channelNow(channel: Channel): Epoch {
 // other listen error (EACCES, etc.) is fatal — those are config problems,
 // not deploy races. Resolves once `listening` fires.
 async function listenWithRetry(server: http.Server | https.Server, port: number, label: string) {
+    // SO_REUSEPORT lets an incoming daemon bind the port alongside the still-
+    // listening outgoing one during a rolling deploy — the port is served the
+    // whole time, and handleExit drops the old listener to hand connections over
+    // cleanly. Degrades to a plain bind on kernels/platforms without it.
+    let reusePort = true;
     while (true) {
         try {
             await new Promise<void>((resolve, reject) => {
@@ -406,10 +416,16 @@ async function listenWithRetry(server: http.Server | https.Server, port: number,
                 };
                 server.once('error', onError);
                 server.once('listening', onListening);
-                server.listen(port);
+                server.listen(reusePort ? {port, reusePort: true} : {port});
             });
             return;
         } catch (e: any) {
+            // SO_REUSEPORT unsupported here — retry once without it.
+            if (reusePort && (e?.code === 'ENOTSUP' || e?.code === 'EINVAL')) {
+                console.log(`${label}: SO_REUSEPORT unsupported (${e.code}), binding without it`);
+                reusePort = false;
+                continue;
+            }
             if (e?.code !== 'EADDRINUSE') throw e;
             console.log(`${label}: port ${port} in use, waiting for previous process to release it…`);
             await setTimeoutPromise(5000);
@@ -595,6 +611,7 @@ async function main() {
                 const sslPort = parseInt(process.env.WEBSOCKET_PORT!) + 1000;
                 const server = https.createServer(options, setupOgnWebServer);
                 await listenWithRetry(server, sslPort, `SSL ${host}`);
+                httpServers.push(server);
                 setupWebSocketServer(server);
                 console.log(`listening on [SSL] ${sslPort} ssh key for ${host}`);
                 return true;
@@ -613,6 +630,7 @@ async function main() {
         console.log('****> clientError', ex);
     });
     await listenWithRetry(server, port, 'HTTP');
+    httpServers.push(server);
     setupWebSocketServer(server);
     console.log(`Onglide startup ${gitVersion()} listening on ${port}`);
 
@@ -841,6 +859,29 @@ process.on('SIGHUP', handleExit);
 process.on('SIGQUIT', handleExit);
 process.on('SIGTERM', handleExit);
 
+// Tell every connected client to reconnect — they land on the incoming daemon
+// (the sole listener once handleExit has closed our servers). The signal is the
+// bare WS_MOVE sentinel; each client picks its own random delay < CLIENT_MOVE_
+// WINDOW_MS, so the herd is staggered without the daemon tracking per-client
+// timers. Returns how many clients were signalled.
+function signalClientsToMove(): number {
+    let signalled = 0;
+    const send = (ws: OgnWebSocket) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        try {
+            ws.send(WS_MOVE);
+            signalled++;
+        } catch (e) {
+            // Socket already going away — nothing to do.
+        }
+    };
+    for (const channelName in channels) {
+        for (const client of channels[channelName as ChannelName].clients) send(client);
+    }
+    for (const client of competitionsListeners) send(client);
+    return signalled;
+}
+
 //
 // Tidily exit if the user requests it
 // we need to stop receiving,
@@ -849,6 +890,25 @@ process.on('SIGTERM', handleExit);
 async function handleExit(signal: string) {
     console.log(`received signal: ${signal}`);
     shuttingDown = true;
+
+    // Stop listening first so the freshly-started daemon (sharing the port via
+    // SO_REUSEPORT) becomes the sole listener — every new/reconnecting client
+    // now routes to it. Existing client sockets stay open; we hand them over
+    // deliberately below rather than dropping them.
+    for (const server of httpServers) {
+        try {
+            server.close();
+        } catch (e) {
+            console.error('server.close during exit:', e);
+        }
+    }
+
+    // Ask every live client to migrate, then give them the full move window to
+    // do so before we tear anything down — so they keep getting live data from
+    // us until each individually reconnects to the new daemon.
+    const moved = signalClientsToMove();
+    console.log(`signalled ${moved} client(s) to move to the incoming daemon`);
+    if (moved) await setTimeoutPromise(CLIENT_MOVE_WINDOW_MS);
 
     // Fan out over every active context so each one gets its full
     // destroy path — reload clients, close broadcast channels, wait
@@ -3580,7 +3640,7 @@ function setupWebSocketServer(server) {
         }
 
         if (!(channelName in channels)) {
-            ws.send('reload');
+            ws.send(WS_RELOAD);
             ws.isAlive = false;
             ws.isValid = false;
             return;

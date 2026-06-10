@@ -54,6 +54,8 @@ function useIsMobile() {
 
 import {proposedUrl} from './fixupUrls';
 
+import {WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../constants';
+
 import {useWebsocketDecoder} from './useWebsocketDecoder';
 import {triggerVersionCheck} from './autoUpdate';
 
@@ -145,7 +147,7 @@ export const OgnFeed = memo(
         const socketUrl = useMemo(() => proposedUrl(vc, datecode), [vc, datecode]);
 
         // We are using a webSocket to update our data here
-        const {sendMessage} = useWebSocket(socketUrl, {
+        const {sendMessage, getWebSocket} = useWebSocket(socketUrl, {
             reconnectAttempts: 40,
             reconnectInterval: (lastAttemptNumber: number) => {
                 mergeWsStatus({retry: lastAttemptNumber + 1});
@@ -161,7 +163,7 @@ export const OgnFeed = memo(
             },
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
-                if (lastMessage.data === 'reload') {
+                if (lastMessage.data === WS_RELOAD) {
                     // Force a page reload
                     const currentReloadCount = parseInt((router.query?.reloaded as string) ?? '0');
                     if (currentReloadCount == 0) {
@@ -170,6 +172,12 @@ export const OgnFeed = memo(
                         };
                         setTimeout(() => router.replace(newParams), 30000 * Math.random());
                     }
+                } else if (lastMessage.data === WS_MOVE) {
+                    // Daemon is shutting down gracefully — reconnect after a random
+                    // delay so the field re-spreads across the incoming daemon
+                    // instead of stampeding. Closing the socket triggers this
+                    // hook's shouldReconnect path back to the same URL.
+                    setTimeout(() => getWebSocket()?.close(), Math.random() * CLIENT_MOVE_WINDOW_MS);
                 } else {
                     decoder(lastMessage.data);
                 }
