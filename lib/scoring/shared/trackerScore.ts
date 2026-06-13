@@ -16,6 +16,7 @@ import {
     DEFAULT_INBBOX_FULL_COUNT,
     DEFAULT_INBBOX_MIN_RATIO,
     DEFAULT_PRIOR_DECAY_DAYS,
+    AMBIGUOUS_DELTA_FACTOR,
     MAX_PRIOR_PER_DAY_NATS,
     PRIOR_PROTECT_NATS,
     TRACKER_SCORE_WEIGHTS
@@ -84,6 +85,21 @@ export interface Signals {
      * prior evidence. The per-facet detail is carried separately for display.
      */
     xcNats: number;
+
+    /**
+     * Same-pilot-in-twin-class support s ∈ [0,1], from `twinPilotSupport`: the
+     * same compno+name in another class of THIS comp links the flarmid (their
+     * assigned id and/or a crossing match there). 0 / absent when no twin.
+     */
+    twinSupport?: number;
+
+    /**
+     * Match was flagged ambiguous by the scan (multiple within-tolerance
+     * candidates or a concurrent-times group). Downgrades only the Δstart /
+     * Δfinish supports by AMBIGUOUS_DELTA_FACTOR — a matching time is weaker
+     * evidence when it matches several pilots.
+     */
+    ambiguous?: boolean;
 }
 
 export interface ScoreBreakdown {
@@ -98,6 +114,7 @@ export interface ScoreBreakdown {
     baseline: number;
     prior: number;
     xc: number; // weights.xc × xcNats — cross-comp identity, single value
+    twin: number; // weights.twin × twinSupport — same pilot in a twin class this comp
     total: number;
 }
 
@@ -130,29 +147,35 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
     const D_tol = knees.distToleranceKm;
     const T_gap = knees.gapModulationSec;
 
-    // Δstart / Δfinish — full credit at Δ=0, zero at |Δ|≥T_tol.
-    const sStart = s.deltaStart === null ? 0 : linKnee(Math.abs(s.deltaStart), T_tol);
-    const sFinish = s.deltaFinish === null ? 0 : linKnee(Math.abs(s.deltaFinish), T_tol);
+    // Δstart / Δfinish — full credit at Δ=0, zero at |Δ|≥T_tol. Ambiguous rows
+    // (time matches several pilots) carry less discrimination per match.
+    const ambig = s.ambiguous ? AMBIGUOUS_DELTA_FACTOR : 1;
+    const sStart = (s.deltaStart === null ? 0 : linKnee(Math.abs(s.deltaStart), T_tol)) * ambig;
+    const sFinish = (s.deltaFinish === null ? 0 : linKnee(Math.abs(s.deltaFinish), T_tol)) * ambig;
 
     // Distance-at-official-time, gap-modulated. Full credit only when the
     // bracketing gap is small and the bracketing-segment distance is tight.
-    // When a start crossing was actually found AND it's within tolerance, the
-    // Δstart signal already carries that evidence — the distance would just be
+    // When a crossing was actually found AND it's within tolerance, the Δ
+    // signal already carries that evidence — the distance would just be
     // ≈0 km (the segment crosses the line) and double-count, so score it 0.
     const startCrossingWithinTol = s.deltaStart !== null && Math.abs(s.deltaStart) <= T_tol;
-    const sDistStart = startCrossingWithinTol || s.distAtStartKm === null || s.gapAroundStartSec === null //
-        ? 0
-        : distSupport(s.distAtStartKm, D_tol) * gapMod(s.gapAroundStartSec, T_gap);
-    const sDistFinish = s.distAtFinishKm === null || s.gapAroundFinishSec === null //
-        ? 0
-        : distSupport(s.distAtFinishKm, D_tol) * gapMod(s.gapAroundFinishSec, T_gap);
+    const sDistStart =
+        startCrossingWithinTol || s.distAtStartKm === null || s.gapAroundStartSec === null //
+            ? 0
+            : distSupport(s.distAtStartKm, D_tol) * gapMod(s.gapAroundStartSec, T_gap);
+    const finishCrossingWithinTol = s.deltaFinish !== null && Math.abs(s.deltaFinish) <= T_tol;
+    const sDistFinish =
+        finishCrossingWithinTol || s.distAtFinishKm === null || s.gapAroundFinishSec === null //
+            ? 0
+            : distSupport(s.distAtFinishKm, D_tol) * gapMod(s.gapAroundFinishSec, T_gap);
 
     // Presence: count saturates at N_full and is multiplied by the in/out
     // ratio so a flarmid that mostly flew elsewhere doesn't get credit.
     const ratio = inBboxRatio(s);
-    const sInBbox = ratio < knees.inBboxMinRatio //
-        ? 0
-        : sat(s.inBboxPackets / knees.inBboxFullCount) * ratio;
+    const sInBbox =
+        ratio < knees.inBboxMinRatio //
+            ? 0
+            : sat(s.inBboxPackets / knees.inBboxFullCount) * ratio;
 
     // Pre-launch sighting: glider was in the area ≥30 min before the
     // earliest pilot start. Typical for a real competition glider.
@@ -176,6 +199,7 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         // Cross-comp identity already collapsed to a single nats value by
         // xcEvidenceScore (confidence-scaled, age-decayed, best prior comp).
         xc: weights.xc * s.xcNats,
+        twin: weights.twin * (s.twinSupport ?? 0),
         total: 0
     };
     breakdown.total =
@@ -189,7 +213,8 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         breakdown.ddbGlider +
         breakdown.baseline +
         breakdown.prior +
-        breakdown.xc;
+        breakdown.xc +
+        breakdown.twin;
     return breakdown;
 }
 
@@ -219,6 +244,35 @@ export function crossingScore(deltaStart: number | null, deltaFinish: number | n
     const sStart = deltaStart === null ? 0 : linKnee(Math.abs(deltaStart), knees.timeToleranceSec);
     const sFinish = deltaFinish === null ? 0 : linKnee(Math.abs(deltaFinish), knees.timeToleranceSec);
     return Math.min(MAX_PRIOR_PER_DAY_NATS, weights.deltaStart * sStart + weights.deltaFinish * sFinish);
+}
+
+/**
+ * Evidence that the same pilot (compno + name) in another class of THIS comp
+ * links a flarmid: the operator assigned it to them there, and/or it produced
+ * crossing matches against their official times there. Built from raw scan
+ * output and the trackerid column only — never from the other class's scored
+ * total, so the twin signal can't feed back on itself across classes.
+ */
+export interface TwinClassEvidence {
+    /** flarmid ∈ the same-compno+name pilot's trackerid in the other class */
+    assigned: boolean;
+    /** Raw crossing deltas from the other class's scan (null = no crossing). */
+    deltaStart: number | null;
+    deltaFinish: number | null;
+}
+
+/**
+ * Same-pilot twin-class support s ∈ [0,1]: max over twin classes of
+ * sat(0.5·assigned + crossingScore(ds, df) / MAX_PRIOR_PER_DAY_NATS).
+ * Assignment alone gives 0.5; a clean both-sided crossing there saturates.
+ */
+export function twinPilotSupport(evidence: TwinClassEvidence[], weights: ScoreWeights = DEFAULT_WEIGHTS, knees: ScoreKnees = DEFAULT_KNEES): number {
+    let best = 0;
+    for (const e of evidence) {
+        const s = sat((e.assigned ? 0.5 : 0) + crossingScore(e.deltaStart, e.deltaFinish, weights, knees) / MAX_PRIOR_PER_DAY_NATS);
+        if (s > best) best = s;
+    }
+    return best;
 }
 
 /** Decay a single prior crossing score by its age in task days. */
@@ -281,6 +335,60 @@ export function contentionPenalty<P extends {compno: string; flarmid: string; to
         }
     }
     return penalise;
+}
+
+/**
+ * Pilot-side analog of `contentionPenalty`: once a pilot confidently holds one
+ * flarmid (the baseline pair if it clears `protectThreshold`, else this run's
+ * best pair if *it* clears), the pilot's claims on OTHER flarmids are negated —
+ * so a flarmid that happens to match their times doesn't block its rightful
+ * claimant's margin. Baseline rows are never penalised: a multi-unit pilot's
+ * second assigned flarmid is the operator's statement, not a competing claim.
+ */
+export function pilotContentionPenalty<P extends {compno: string; flarmid: string; total: number; baseline: boolean}>(
+    pairs: P[],
+    key: (compno: string, flarmid: string) => string,
+    protectThreshold: number = PRIOR_PROTECT_NATS
+): Set<string> {
+    const byCompno = new Map<string, P[]>();
+    for (const p of pairs) {
+        const arr = byCompno.get(p.compno) ?? [];
+        arr.push(p);
+        byCompno.set(p.compno, arr);
+    }
+    const penalise = new Set<string>();
+    for (const group of byCompno.values()) {
+        if (group.length < 2) continue; // no contention without a second claim
+        const best = (cands: P[]): P | null => cands.reduce<P | null>((m, p) => (m === null || p.total > m.total ? p : m), null);
+        const baselineHolder = best(group.filter((p) => p.baseline));
+        const bestHolder = best(group);
+        const holder = baselineHolder && baselineHolder.total > protectThreshold ? baselineHolder : bestHolder && bestHolder.total > protectThreshold ? bestHolder : null;
+        if (!holder) continue;
+        for (const p of group) {
+            if (p.flarmid === holder.flarmid || p.baseline) continue;
+            penalise.add(key(p.compno, p.flarmid));
+        }
+    }
+    return penalise;
+}
+
+/**
+ * Both contention penalties evaluated from the SAME pre-penalty totals, then
+ * unioned — the caller negates each key once, so the result is independent of
+ * application order and cannot oscillate. `reason` distinguishes which side(s)
+ * demoted a pair for display.
+ */
+export function applyContentionPenalties<P extends {compno: string; flarmid: string; total: number; baseline: boolean}>(
+    pairs: P[],
+    key: (compno: string, flarmid: string) => string,
+    protectThreshold: number = PRIOR_PROTECT_NATS
+): {penalised: Set<string>; reason: Map<string, 'flarm' | 'pilot' | 'both'>} {
+    const flarmSide = contentionPenalty(pairs, key, protectThreshold);
+    const pilotSide = pilotContentionPenalty(pairs, key, protectThreshold);
+    const penalised = new Set<string>([...flarmSide, ...pilotSide]);
+    const reason = new Map<string, 'flarm' | 'pilot' | 'both'>();
+    for (const k of penalised) reason.set(k, flarmSide.has(k) ? (pilotSide.has(k) ? 'both' : 'flarm') : 'pilot');
+    return {penalised, reason};
 }
 
 /** Two-sided margins for a chosen pair (p*, f*) given its score and the score of every alternative on each side. Pure data — no assignment search. */

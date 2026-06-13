@@ -179,19 +179,35 @@ export const DEFAULT_SWAP_MARGIN_NATS = 3.0; // min net-gain for an auto-applied
 export const DEFAULT_SCORE_MIN_NATS = 0.8; // absolute floor below which we never auto-apply
 export const DEFAULT_LEDGER_MIN_NATS = 0.5; // S_min for writing an evidence row to trackerhistory
 
+// Proposal gate: a candidate pair is proposed only when its post-demotion total
+// clears this floor AND, when either side is contested, its two-sided margin
+// clears DEFAULT_AUTO_MARGIN_NATS. Same gate for interactive and --yes.
+// Calibration: a clean both-sided match (Δs=−1s, Δf=0s, saturated presence,
+// pre-launch sighting) totals ≈0.80+1.00+0.48+0.30 = 2.58 without DDB — proposes.
+// A start-only landout with zero corroboration (≈1.58) stays manual until ddbCN
+// (+1.5) or a day of prior (+~1.0) lifts it. ddbCN+presence with no crossing at
+// all (≈1.98) stays just below the floor: identity alone can't propose.
+export const SCORE_PROPOSE_NATS = 2.0;
+
+// Multiplier applied to the Δstart/Δfinish supports on rows the scan flagged
+// `ambiguous` (multiple within-tolerance candidates, or a concurrent-times
+// group): a matching time is weaker evidence when it matches several pilots.
+export const AMBIGUOUS_DELTA_FACTOR = 0.8;
+
 // Per-signal nat weights. Sum of available signals × saturating function
 // produces pair_score; auto-apply compares pair_scores via the margin gates
 // above. Tuneable as a single object so flag overrides hit one place.
 export const TRACKER_SCORE_WEIGHTS = {
     deltaStart: 1.0,
     deltaFinish: 1.0,
-    distAtStart: 1.0, // modulated by gap@start
-    distAtFinish: 1.0, // modulated by gap@finish
+    distAtStart: 0.5, // modulated by gap@start; zeroed when a within-tolerance start crossing already carries the evidence
+    distAtFinish: 0.5, // modulated by gap@finish; zeroed when a within-tolerance finish crossing already carries the evidence
     inBbox: 0.5, // multiplied by inBboxRatio
     preLaunch: 0.3, // firstSeen ≥ 30 min before earliest pilot start
     ddbCn: 1.5,
     ddbGlider: 0.3, // weak — many pilots in a comp share a glider type, so this just rules out wildly mismatched gliders
     baseline: 1.0, // flarmid in current tracker.trackerid for (class, compno)
+    twin: 1.0, // same compno+name in another class of the same comp links this flarmid (assigned there and/or crossing-matched there)
 
     prior: 1.0, // already in nats; sum of decayed per-day start/finish crossing scores (≥0, capped at MAX_PRIOR_PER_DAY_NATS/day)
     // ---- Cross-competition identity evidence (lib/scoring/shared/identity.ts) ----

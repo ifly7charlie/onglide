@@ -79,6 +79,17 @@ export function tokeniseName(name: string | null | undefined): string[] {
     return out;
 }
 
+// Same pilot iff both names tokenise to the same non-empty distinct token set.
+// Names that reduce to nothing (placeholders, "Team A") never match — absence
+// of identifying tokens is not evidence of identity.
+export function samePilotName(a: string | null | undefined, b: string | null | undefined): boolean {
+    const setA = new Set(tokeniseName(a));
+    const setB = new Set(tokeniseName(b));
+    if (setA.size === 0 || setA.size !== setB.size) return false;
+    for (const t of setA) if (!setB.has(t)) return false;
+    return true;
+}
+
 export function hashNameToken(token: string, secret: string = identitySecret()): string {
     return hmac(`name:${token}`, secret);
 }

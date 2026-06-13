@@ -31,15 +31,20 @@ another glider already confidently holds.
 ## File layout
 
 - `bin/findtrackers.ts` — CLI: argument parsing, DB I/O, operator
-  prompts, proposal generation, write paths. Database-bound code lives
-  here.
+  prompts, write paths. Database-bound code lives here.
 - `lib/scoring/shared/findtrackers.ts` — scan + match: reads APRS
   point log, runs `hasCrossed` on consecutive packets, produces
   `TrackerMatch[]` with `TrackerDiag` for each candidate pair.
 - `lib/scoring/shared/trackerScore.ts` — pure scoring kernel:
   `scoreSignals`, `computeMargins`, `decayPrior`, `crossingScore`,
-  `summarisePrior`, `contentionPenalty`, `physicalMatchScore`.
+  `summarisePrior`, `contentionPenalty`, `pilotContentionPenalty`,
+  `applyContentionPenalties`, `twinPilotSupport`, `physicalMatchScore`.
   No I/O. Unit-tested in `test/trackerScore.test.ts`.
+- `lib/scoring/shared/proposals.ts` — pure proposal generation:
+  `computeProposals` (score/margin-gated), `Proposal`, `ScoreMap` /
+  `ScoredPair`, `CrossClassHit` / `CrossClassMap`, cross-class conflict
+  helpers, `parseCurrentIds`, `scoreKey`. No I/O. Unit-tested in
+  `test/computeProposals.test.ts`.
 - `lib/constants.ts` — all tunables and weights:
   `TRACKER_SCORE_WEIGHTS`, `DEFAULT_DIST_TOLERANCE_KM`, etc.
 - `lib/ddb/index.ts` — FLARM device database loader (OGN + FlarmNet
@@ -81,10 +86,17 @@ loadPriorEvidence   →  PriorMap            (per (compno, flarmid):
                                             ≤1/day)
         │
         ▼
+twin-pilot evidence →  TwinClassEvidence   (group-level: same compno+name
+                                            in another class of this comp
+                                            — their assignment + raw
+                                            crossing deltas there)
+        │
+        ▼
 computeScoreMap     →  ScoreMap            (per pair: ScoreBreakdown,
                                             two-sided margins, contested
-                                            flags, deltas, demoted flag;
-                                            applies the contention guard)
+                                            flags, deltas, demoted flag +
+                                            reason; applies both
+                                            contention guards)
         │
         ▼
 printMatches        — operator-facing report (always runs)
@@ -102,6 +114,19 @@ applyProposals      — tracker + trackerhistory writes
         ▼
 writeEvidence       — trackerhistory evidence rows (multi-day fuel)
 ```
+
+`processGroup` runs the group in passes: **1a** scan + load per class
+(results, matches, prior, identity — no scoring yet); **1b** group-level
+maps — task twins (`loadTaskTwins`), twin-pilot evidence (same
+compno+name in another class: their `trackerid` assignment plus that
+class's raw crossing deltas), and the differing-task warning set;
+**1c** `computeScoreMap` per class with the twin evidence in place;
+**2** the cross-class map (built from scored pairs, display/conflict
+only); **3** per-class report, proposals, writes. Twin evidence is
+deliberately built from *raw* scan output and the trackerid column in
+1b, never from another class's scored total — `CrossClassHit.score`
+contains the twin contribution, but it only feeds display and removal
+conflicts, so the signal can't feed back on itself.
 
 ## Scan / match: the three phases
 
@@ -200,16 +225,31 @@ double-count and go stale.
 
 | Signal | Source | Saturating function `s ∈ [0,1]` | Weight `w` |
 |---|---|---|---|
-| Δstart | `TrackerMatch.deltaStart` | `max(0, 1 − \|Δ\|/T_tol)` | 1.0 |
+| Δstart | `TrackerMatch.deltaStart` | `max(0, 1 − \|Δ\|/T_tol)` × 0.8 when the row is `ambiguous` | 1.0 |
 | Δfinish | `TrackerMatch.deltaFinish` | same | 1.0 |
-| distAtStart | `TrackerDiag.distAtStartKm` (line/sector-aware), modulated by `gapAroundStartSec` | `max(0, 1 − distKm/D_tol) · 1/(1 + gap/T_gap)` | 1.0 |
-| distAtFinish | same | analogous | 1.0 |
+| distAtStart | `TrackerDiag.distAtStartKm` (line/sector-aware), modulated by `gapAroundStartSec` | `max(0, 1 − distKm/D_tol) · 1/(1 + gap/T_gap)`; **zeroed when a within-tolerance start crossing exists** (the Δ signal already carries it) | 0.5 |
+| distAtFinish | same | analogous, with the same within-tolerance-crossing gate on the finish side | 0.5 |
 | in-area presence | `inBboxPackets` AND `bboxRejectedPackets` | `min(1, inBbox/N_full) · inBboxRatio` | 0.5 |
 | pre-launch sighting | `firstSeenT` vs earliest pilot start | `1` if firstSeen ≤ earliestStart − 30 min | 0.3 |
 | DDB CN match | `ddb.cn == pilot.compno` (case-insensitive) | indicator | 1.5 |
 | DDB glider match | `gliderEquivalent(ddb.aircraft_model, pilot.glidertype)` | indicator | 0.3 (weak) |
 | operator baseline | flarmid in current `tracker.trackerid` | indicator | 1.0 |
+| twin pilot | same compno + same pilot name (`samePilotName` token-set match) in another class of this comp | `twinPilotSupport`: max over classes of `min(1, 0.5·assignedThere + crossingScore(rawΔs, rawΔf))` | 1.0 |
 | prior | persisted prior days' start/finish crossings, capped ≤1/day, decayed | `Σ crossingScore · exp(−daysAgo/τ)` | 1.0 (already in nats) |
+
+The dist signals' job is the coverage-gap case — the glider was seen
+near the line but no clean crossing was detected. When a
+within-tolerance crossing *was* found on that side, the distance would
+just restate it (the segment crosses the line, dist ≈ 0 km), so it is
+zeroed to avoid double-counting. The `ambiguous` ×0.8 factor
+(`AMBIGUOUS_DELTA_FACTOR`) reflects that a matching time discriminates
+less when it matches several pilots; the structural ambiguity itself is
+resolved by margins and the contention guards, not by this factor.
+
+The twin-pilot signal is excluded from `physicalMatchScore` (it is
+identity-derived, and physical confidence is what gets stored as
+cross-comp evidence) and from the within-comp prior (`crossingScore` is
+crossing-only).
 
 Defaults (lib/constants.ts):
 - `T_tol = 5 s` (`DEFAULT_TOLERANCE_SEC`)
@@ -220,6 +260,8 @@ Defaults (lib/constants.ts):
 - `inBboxRatio < 0.3` excludes a flarmid from the candidate set
   (`DEFAULT_INBBOX_MIN_RATIO`) — mostly-elsewhere traffic that drifted
   briefly into our bbox.
+- `SCORE_PROPOSE_NATS = 2.0` — absolute proposal floor.
+- `AMBIGUOUS_DELTA_FACTOR = 0.8` — Δ downgrade on ambiguous rows.
 
 ### Gap-modulated distance
 
@@ -244,9 +286,10 @@ every pilot in the day's results shares one common start time, the
 start-line crossing is the same for everyone and so can't tell pilots
 apart. `processGroup` detects this (`grandprixstart && one distinct
 startUtc`) and sets `excludeStart`, which nulls `deltaStart` /
-`distAtStart` in `signalsFromMatch` and drops the start term from the
-prior's `crossingScore` — both contribute 0, leaving the finish crossing
-(plus presence, DDB, prior, xc) to do the discriminating. The report
+`distAtStart` in `signalsFromMatch`, drops the start term from the
+prior's `crossingScore`, and nulls the start delta in any twin-pilot
+evidence sourced from that class — all contribute 0, leaving the finish
+crossing (plus presence, DDB, prior, xc) to do the discriminating. The report
 prints `grandprix start with a single common start time — excluding
 start-line crossing from scoring`. Both conditions are required: if the
 start times actually differ they remain informative and are kept.
@@ -270,27 +313,37 @@ margins equal to the chosen score — wide-looking but meaningless.
 The CLI renders these as `S=1.02  uncontested (no competing
 candidate seen)` to avoid mistaking it for confidence.
 
-### Contention guard
+### Contention guards (two-sided)
 
-`contentionPenalty(pairs, key, protectThreshold)` runs inside
-`computeScoreMap` **before** margins, so the negation flows through to
-the two-sided margins. Its job is to stop a poor match from displacing a
-likely-good one. For each flarmid with more than one candidate:
+Two mirrored penalties run inside `computeScoreMap` **before** margins,
+so the negation flows through to the two-sided margins. Their job is to
+stop a poor match from displacing a likely-good one:
 
-1. The **holder** is the operator-baseline pair if its total clears
-   `PRIOR_PROTECT_NATS = 3.0`, otherwise this run's highest-scoring pair
-   if *that* clears the threshold (baseline takes precedence, so an
-   existing good assignment is protected even when a contender scores
-   higher). If neither clears the threshold there is no holder and
-   nobody is penalised.
-2. Every **other** glider competing for that flarmid is a contender; its
-   whole (prior + current) total is negated — `total → −total` — so it
-   can never win the assignment away from the confident holder.
+- **Flarm side** — `contentionPenalty`: for each flarmid with more than
+  one candidate, the **holder** is the operator-baseline pair if its
+  total clears `PRIOR_PROTECT_NATS = 3.0`, otherwise this run's
+  highest-scoring pair if *that* clears the threshold (baseline takes
+  precedence, so an existing good assignment is protected even when a
+  contender scores higher). If neither clears, nobody is penalised.
+  Every **other** glider competing for that flarmid has its whole
+  (prior + current) total negated — `total → −total`.
+- **Pilot side** — `pilotContentionPenalty`: the mirror image. Once a
+  pilot confidently holds one flarmid (same baseline-then-best holder
+  rule), the pilot's claims on *other* flarmids are negated — so a
+  flarmid that happens to match their times doesn't block its rightful
+  claimant's margin. Baseline rows are never penalised: a multi-unit
+  pilot's second assigned id is the operator's statement, not a
+  competing claim.
 
-The negated pair is flagged `demoted` in the `ScoreMap` and rendered as
-`S=−4.05 (demoted: flarmid confidently held elsewhere)`. Because the
-total is now negative it also falls below the ledger/auto-apply floors,
-so a demoted contender is neither written as evidence nor auto-applied.
+`applyContentionPenalties` computes both sets from the **same
+pre-penalty totals**, unions them, and negates each pair once — the
+result is independent of application order and cannot oscillate. The
+pair is flagged `demoted` with a `demotedReason` (`flarm` / `pilot` /
+`both`) and rendered as e.g. `S=−4.05 (demoted: flarmid confidently
+held elsewhere)` or `(demoted: pilot confidently holds another
+flarmid)`. Because the total is now negative it falls below the ledger
+floor and the proposal gate, so a demoted contender is neither written
+as evidence nor ever proposed.
 
 ### Prior loading
 
@@ -441,9 +494,13 @@ Per (compid, datecode) group, per class:
   Summary: 14 pilots, 12 matched, 1 ambiguous
 ```
 
-A pair the contention guard demoted shows a negated total and a reason,
-e.g. `S=−4.05 (demoted: flarmid confidently held elsewhere)` — the
-flarmid is confidently assigned to another glider this run.
+A pair a contention guard demoted shows a negated total and the side
+that demoted it, e.g. `S=−4.05 (demoted: flarmid confidently held
+elsewhere)` or `(demoted: pilot confidently holds another flarmid)`.
+Twin-pilot contributions render as `twin=1.00` in the contribs list.
+When a same-compno+name pilot appears in another class whose task
+differs, the class block opens with a one-line `⚠ … also appears in
+class X with a different task` warning.
 
 ### Row tags (legacy + Phase 1.5 additions)
 
@@ -461,37 +518,53 @@ flarmid is confidently assigned to another glider this run.
 - `[match]` — unassigned, within tolerance both sides.
 - `[start-only match]` / `[finish-only match]` — Phase 1.5 unassigned.
 
-Stage 3 will replace these with score-based categories
-(`[confirmed]`, `[held-from-prior]`, `[conflict]`, etc.).
+The tags describe what the scan saw; the proposal decision itself is
+purely score/margin-driven (below).
 
 ## Proposal logic
 
-`computeProposals` builds the list of `Proposal[]` from matches + score
-map. Per pilot:
+`computeProposals` (lib/scoring/shared/proposals.ts) builds the
+`Proposal[]` from matches + score map. The gate is **purely numeric** —
+every condition the old categorical gates encoded (within-tolerance,
+one-sidedness, competing claims, ambiguity) is already reflected in the
+post-demotion totals and margins. The same gate feeds interactive
+review and `--yes`. Per pilot:
 
-1. **Skip if structurally ambiguous** — concurrent-times group or
-   any `m.ambiguous`. Manual review required.
-2. **Skip if already-good** — any `m.assigned && m.withinTolerance`.
-3. **Pick an add candidate** (in order):
-   - `altMatches`: unassigned + within tolerance + non-ambiguous,
-     exactly one.
-   - `altSingleSided`: Phase 1.5 unassigned, where the flarmid has
-     no competing claim from any other pilot (Phase 1 or Phase 1.5).
-4. **Build remove set** from `assignedBad` (assigned but not
-   within-tolerance) when ANY of:
-   - `addId` is present (we have a replacement) — replace.
-   - cross-class hit (the flarmid cleanly matches a pilot in another
-     class today).
-   - `bboxOnly` (flarmid was active but every packet was outside the
-     task area).
-   - `inBboxRatio ≤ 0.1` (overwhelmingly elsewhere).
-5. **Reason string** describes the trigger.
-6. **Crossing deltas** for the chosen flarmid recorded on the proposal —
+1. **Assigned-good skip** — any assigned, non-demoted pair with
+   `total ≥ SCORE_PROPOSE_NATS` means the operator's choice stands;
+   the pilot is left alone even if a higher-scoring alternative exists.
+2. **Add candidate** — argmax post-demotion total over the pilot's
+   unassigned, non-demoted pairs. Proposed only when
+   `total ≥ SCORE_PROPOSE_NATS = 2.0` AND, if either side is contested,
+   `margin ≥ DEFAULT_AUTO_MARGIN_NATS = 2.0`. A demoted pair (negative
+   total) can never be proposed; a tie is contested with margin ≤ 0, so
+   it can never sneak through. Ambiguous rows are NOT skipped — the
+   ×0.8 Δ downgrade plus margins do the work.
+3. **Remove set** — removal needs *positive* evidence the assigned id
+   is wrong (low score alone can be poor coverage, a DNF, or a
+   no-finish landout). Triggers: a replacement candidate (`addId`), a
+   conflicting cross-class hit, `bboxOnly`, or `inBboxRatio ≤ 0.1`.
+   Each trigger is score-guarded: never remove an assigned pair whose
+   total ≥ the replacement's total (or ≥ the floor when there's no
+   replacement). Same-compno hits to a task-twin class, and
+   same-compno+`samePilotName` hits to ANY class of the comp, are
+   corroboration (twin-pilot entries), not conflicts.
+4. **Reason string** states the scores (`associate: S=3.42
+   margin=2.61`, `replace: S=3.42 uncontested > S(F1)=0.61`), annotated
+   with cross-class lines for removed ids.
+5. **Crossing deltas** for the chosen flarmid recorded on the proposal —
    the only score context the persistence layer keeps.
 
-Important nuance: the current logic *replaces* an existing flarmid
-when a better candidate arrives (because `addId` puts everything in
-`removeIds`). It does NOT propose adding alongside. To get the
+SCORE_PROPOSE_NATS calibration: a clean both-sided match (Δs=−1s,
+Δf=0s, saturated presence, pre-launch) totals ≈2.58 without DDB —
+proposes. A start-only landout with zero corroboration (≈1.58) stays
+manual until ddbCN (+1.5), a day of prior (+~1.0), or a twin-pilot link
+lifts it. ddbCN + presence with no crossing at all (≈1.98) stays just
+below the floor — identity alone can't propose.
+
+Important nuance: the logic *replaces* an existing flarmid when a
+better candidate arrives (because `addId` triggers removal of weaker
+assigned ids). It does NOT propose adding alongside. To get the
 "tentatively add, confirm-bad-then-remove" workflow, this would need
 to be changed — see open work below.
 
@@ -509,8 +582,11 @@ Typical week:
    `loaded N prior crossing-scores`. Auto-stable.
 3. **Wrong tracker drifts in**: cross-class hits, low inBboxRatio,
    bboxOnly fire and propose removal.
-4. **Multi-flarmid pilots**: handled but pair-flying triggers
-   `[ambiguous]` — manual decision.
+4. **Multi-flarmid pilots / pair-flying**: ambiguous rows score with
+   the ×0.8 Δ downgrade and compete normally; thin margins simply
+   produce no proposal, while a claimant whose competitor is already
+   confidently held elsewhere recovers its margin via the pilot-side
+   contention guard.
 
 Re-running on the same day is safe:
 - `writeEvidence` is DELETE+INSERT idempotent.
@@ -519,16 +595,18 @@ Re-running on the same day is safe:
 
 ## Tests
 
-`test/trackerScore.test.ts` — pure-function unit tests for the
-scoring kernel. Run via:
+`test/trackerScore.test.ts` (scoring kernel) and
+`test/computeProposals.test.ts` (proposal gate) — pure-function unit
+tests. Run via:
 
 ```
-npx vitest run test/trackerScore.test.ts
+npx vitest run test/trackerScore.test.ts test/computeProposals.test.ts
 ```
 
-Coverage:
+Kernel coverage:
 - Saturating signal functions (Δstart at knee, distance at 2·knee).
-- Gap modulation.
+- Gap modulation; within-tolerance-crossing gates on BOTH dist signals.
+- Ambiguity ×0.8 on Δ only (default-off identical to unflagged).
 - In-bbox ratio filter.
 - Missing signal contributes 0.
 - DDB CN vs glider weights (glider < CN).
@@ -540,6 +618,22 @@ Coverage:
 - `contentionPenalty` (baseline-holder protection, baseline precedence
   over a higher-scoring contender, sub-threshold holder → no penalty,
   independent flarmids don't cross-penalise).
+- `pilotContentionPenalty` (mirror cases, plus: a multi-unit pilot's
+  second baseline id is never penalised).
+- `applyContentionPenalties` (union with per-key reasons, computed from
+  pre-penalty totals, deterministic).
+- `twinPilotSupport` (assigned-only 0.5, crossing saturates, capped,
+  best-of-classes not sum).
+- `physicalMatchScore` excludes prior/baseline/ddb/xc/twin.
+
+Proposal coverage:
+- Demoted candidate never proposed (the landout-pilot regression that
+  motivated the score-driven rewrite).
+- Absolute floor and contested-margin gates.
+- Ambiguous rows propose when score + margin clear.
+- Assigned-good skip; replacement; strong-negative removal triggers
+  with the score guard; multi-id removal preserves the other id.
+- Same-compno+name cross-class hit is corroboration, not a conflict.
 
 No DB-bound integration tests yet — `loadPriorEvidence`,
 `applyProposals`, `writeEvidence` are exercised in the manual
@@ -555,10 +649,13 @@ end-to-end run.
   alongside an existing assignment. Pair with a stale-prior remove
   gate (assigned flarmid with no signal AND no prior > S_min for N
   task-days → propose remove) so dead ids don't accumulate.
-- **Stage 3 — auto-apply category gate**: replace the
-  `withinTolerance && !ambiguous` proposal logic with margin- and
-  score-based categories. Tunables already in `lib/constants.ts`
-  (`DEFAULT_AUTO_MARGIN_NATS`, `DEFAULT_SCORE_MIN_NATS`).
+- **Threshold watch after the dist re-weighting**: totals dropped by up
+  to ~1.0 for pairs that previously double-counted a within-tolerance
+  finish (distF). The evidence-ledger floor (0.5) now drops distF-only
+  weak pairs (good), `isGoodMatch`'s identity gate is effectively
+  slightly stricter, and a clean assigned match without ddbCN
+  (≈3.58) still clears `PRIOR_PROTECT_NATS = 3.0` but sparse-presence
+  cases may not — watch before retuning.
 - **Stage 4 — swap detection**: Hungarian assignment over (pilots ×
   candidate flarmids) with `'startmatch-swap'` writes for both legs
   of a swap. Threshold relaxes after ≥3 prior days agree.
@@ -569,18 +666,21 @@ end-to-end run.
 
 ## Key file:line references
 
-- `bin/findtrackers.ts:223` — `processGroup` main loop.
-- `bin/findtrackers.ts:578` — `loadPriorEvidence`.
-- `bin/findtrackers.ts:1117` — `computeScoreMap` (applies the contention guard).
-- `bin/findtrackers.ts:1441` — `computeProposals`.
-- `bin/findtrackers.ts:1699` — `applyProposals`.
-- `bin/findtrackers.ts:1753` — `writeEvidence`.
-- `lib/scoring/shared/findtrackers.ts:745` — `matchCrossings` (the
+- `bin/findtrackers.ts:221` — `processGroup` main loop (passes 1a/1b/1c/2/3).
+- `bin/findtrackers.ts:635` — `loadPriorEvidence`.
+- `bin/findtrackers.ts:1152` — `computeScoreMap` (applies both contention guards).
+- `bin/findtrackers.ts:1540` — `applyProposals`.
+- `bin/findtrackers.ts:1594` — `writeEvidence`.
+- `lib/scoring/shared/proposals.ts:133` — `computeProposals` (score/margin gate).
+- `lib/scoring/shared/findtrackers.ts:746` — `matchCrossings` (the
   three phases).
 - `lib/scoring/shared/findtrackers.ts:505` — post-scan pass that
   harvests line-aware `distanceKm` from `hasCrossed`.
-- `lib/scoring/shared/trackerScore.ts:128` — `scoreSignals`.
-- `lib/scoring/shared/trackerScore.ts:218` — `crossingScore`.
-- `lib/scoring/shared/trackerScore.ts:235` — `summarisePrior`.
-- `lib/scoring/shared/trackerScore.ts:259` — `contentionPenalty`.
-- `lib/constants.ts:127` — tracker-match scoring constants.
+- `lib/scoring/shared/trackerScore.ts:145` — `scoreSignals`.
+- `lib/scoring/shared/trackerScore.ts:243` — `crossingScore`.
+- `lib/scoring/shared/trackerScore.ts:269` — `twinPilotSupport`.
+- `lib/scoring/shared/trackerScore.ts:289` — `summarisePrior`.
+- `lib/scoring/shared/trackerScore.ts:313` — `contentionPenalty`.
+- `lib/scoring/shared/trackerScore.ts:348` — `pilotContentionPenalty`.
+- `lib/scoring/shared/trackerScore.ts:381` — `applyContentionPenalties`.
+- `lib/constants.ts:137` — tracker-match scoring constants.

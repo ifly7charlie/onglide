@@ -15,7 +15,20 @@ import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/typ
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
-import {scoreSignals, computeMargins, summarisePrior, crossingScore, contentionPenalty, physicalMatchScore, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
+import {
+    scoreSignals,
+    computeMargins,
+    summarisePrior,
+    crossingScore,
+    applyContentionPenalties,
+    twinPilotSupport,
+    physicalMatchScore,
+    type Signals,
+    type ScoreBreakdown,
+    type Margins,
+    type TwinClassEvidence
+} from '../lib/scoring/shared/trackerScore';
+import {computeProposals, scoreKey, parseCurrentIds, crossClassHitsFor, type Proposal, type ScoreMap, type CrossClassMap} from '../lib/scoring/shared/proposals';
 import {loadMergedDDB, gliderEquivalent, isBlocked, type DDBEntry} from '../lib/ddb';
 import {
     fingerprintFromPilot,
@@ -24,6 +37,7 @@ import {
     flarmidIsIcao,
     resolveCountries,
     resolvePilotCountry,
+    samePilotName,
     xcEvidenceScore,
     type IdentityFacets,
     type PilotEvidence,
@@ -102,35 +116,19 @@ interface ClassMatches {
     job: Job;
     results: OfficialResult[];
     matches: TrackerMatch[];
-    scoreMap: ScoreMap;
+    excludeStart: boolean;
+    priorMap: PriorMap;
+    priorAircraft: PriorAircraftMap;
     // Per-pilot cross-comp identity fingerprint (empty when identity disabled).
-    // Built in pass 1 and reused for collection in pass 3.
+    // Built in pass 1a and reused for collection in pass 3.
     candidateFacets: Map<Compno, IdentityFacets>;
+    // Filled in pass 1c — scoring needs the group-level twin-pilot evidence
+    // from pass 1b, so it can't happen during the per-class scan.
+    scoreMap: ScoreMap;
+    // Same-compno+name pilots whose other class flies a DIFFERENT task —
+    // printed once at the top of this class's results block.
+    twinWarnings: string[];
 }
-
-// A flarmid → pilots that produced a clean (within-tolerance, non-ambiguous)
-// phase-1 match in any class of the same (compid, datecode). Used to surface
-// "this assigned tracker actually matches a pilot in another class" — the
-// case where a flarm unit was moved between gliders during a comp.
-interface CrossClassHit {
-    className: ClassName;
-    classDisplay: string;
-    compno: Compno;
-    name: string;
-    deltaStart: number | null;
-    deltaFinish: number | null;
-    /** This flarmid is currently in the other-class pilot's trackerid list. */
-    assigned: boolean;
-    /** Score breakdown for this (compno, flarmid) in the other class, including prior evidence. */
-    score: ScoreBreakdown;
-    margins: Margins;
-    pilotContested: boolean;
-    flarmidContested: boolean;
-    xcFacets: string[];
-    /** Total was negated by the contention guard (flarmid confidently held by another glider in that class). */
-    demoted: boolean;
-}
-type CrossClassMap = Map<FlarmID, CrossClassHit[]>;
 
 interface GroupSummary {
     pilots: number;
@@ -282,10 +280,9 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         const excludeStart = results[0].grandprixstart && sameStartForAll;
         if (excludeStart) console.log(`  grandprix start with a single common start time — excluding start-line crossing from scoring`);
 
-        // Score map (including multi-day prior evidence) is built here in
-        // pass 1 so pass 2 can copy the breakdown for each cross-class hit
-        // onto the CrossClassHit record — the "also matches K in class X"
-        // line needs to show K's score in class X, not D01607's in this class.
+        // Prior evidence and cross-comp identity load here in pass 1a;
+        // scoring waits for pass 1c so it can include the group-level
+        // twin-pilot evidence built in pass 1b.
         const priorMap = await loadPriorEvidence(datecode, className, excludeStart);
         if (priorMap.size) console.log(`  loaded ${priorMap.size} prior crossing-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
 
@@ -299,9 +296,66 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         );
         if (priorAircraft.size) console.log(`  loaded cross-comp identity for ${priorAircraft.size} flarmid${priorAircraft.size === 1 ? '' : 's'}`);
 
-        const scoreMap = computeScoreMap(matches, results, ddb, priorMap, candidateFacets, priorAircraft, excludeStart);
+        classMatches.push({job, results, matches, excludeStart, priorMap, priorAircraft, candidateFacets, scoreMap: new Map(), twinWarnings: []});
+    }
 
-        classMatches.push({job, results, matches, scoreMap, candidateFacets});
+    // Pass 1b — group-level maps that scoring depends on.
+    //
+    // Task-twin classes (same comp/day, identical turnpoint sequence): a
+    // cross-class hit between them for the same compno is the same glider,
+    // not a "moved glider" conflict. Computed once for the whole group.
+    const twinMap =
+        classMatches.length > 1
+            ? await loadTaskTwins(
+                  classMatches.map((cm) => cm.job.className),
+                  classMatches[0].job.datecode
+              )
+            : new Map<ClassName, Set<ClassName>>();
+
+    // Twin-pilot evidence: the same compno+name entered in another class of
+    // this comp links a flarmid to that pilot — their assigned id there,
+    // and/or that class's raw crossing matches against their official times.
+    // Built from scan output and the trackerid column only (never the other
+    // class's scored total), so the twin signal can't feed back on itself.
+    const twinEvidence = new Map<ClassName, Map<string, TwinClassEvidence[]>>();
+    for (const cm of classMatches) {
+        const evidence = new Map<string, TwinClassEvidence[]>();
+        twinEvidence.set(cm.job.className, evidence);
+        if (classMatches.length < 2) continue;
+        const twins = twinMap.get(cm.job.className) ?? new Set<ClassName>();
+        for (const other of classMatches) {
+            if (other === cm) continue;
+            const otherByCompno = new Map(other.results.map((r) => [r.compno, r]));
+            const otherMatchByKey = new Map(other.matches.map((m) => [scoreKey(m.compno, m.flarmid), m]));
+            for (const mine of cm.results) {
+                const theirs = otherByCompno.get(mine.compno);
+                if (!theirs || !samePilotName(mine.name, theirs.name)) continue;
+                if (!twins.has(other.job.className)) {
+                    const otherLabel = other.job.classDisplay ? `${other.job.classDisplay} [${other.job.className}]` : String(other.job.className);
+                    cm.twinWarnings.push(`⚠ ${String(mine.compno).trim()} (${mine.name}) also appears in class ${otherLabel} with a different task — twin-pilot signal applied, but crossings are not comparable`);
+                }
+                const theirIds = parseCurrentIds(theirs.trackerid);
+                for (const m of cm.matches) {
+                    if (m.compno !== mine.compno) continue;
+                    const assigned = theirIds.includes(m.flarmid);
+                    const otherMatch = otherMatchByKey.get(scoreKey(m.compno, m.flarmid));
+                    if (!assigned && !otherMatch) continue;
+                    const arr = evidence.get(scoreKey(m.compno, m.flarmid)) ?? [];
+                    arr.push({
+                        assigned,
+                        // A GP common-start crossing carries no discrimination there.
+                        deltaStart: other.excludeStart ? null : (otherMatch?.deltaStart ?? null),
+                        deltaFinish: otherMatch?.deltaFinish ?? null
+                    });
+                    evidence.set(scoreKey(m.compno, m.flarmid), arr);
+                }
+            }
+        }
+    }
+
+    // Pass 1c — score each class with the twin evidence in place.
+    for (const cm of classMatches) {
+        cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeStart, twinEvidence.get(cm.job.className));
     }
 
     // Pass 2 — flarmid → unambiguous within-tolerance hits across the group.
@@ -327,22 +381,12 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
                 pilotContested: scored.pilotContested,
                 flarmidContested: scored.flarmidContested,
                 xcFacets: scored.xcFacets,
-                demoted: scored.demoted
+                demoted: scored.demoted,
+                demotedReason: scored.demotedReason
             });
             crossClass.set(m.flarmid, arr);
         }
     }
-
-    // Task-twin classes (same comp/day, identical turnpoint sequence): a
-    // cross-class hit between them for the same compno is the same glider,
-    // not a "moved glider" conflict. Computed once for the whole group.
-    const twinMap =
-        classMatches.length > 1
-            ? await loadTaskTwins(
-                  classMatches.map((cm) => cm.job.className),
-                  classMatches[0].job.datecode
-              )
-            : new Map<ClassName, Set<ClassName>>();
 
     // Pass 3 — per-class results and proposals.
     const summary: GroupSummary = {pilots: 0, matched: 0, ambiguous: 0, proposed: 0, applied: 0};
@@ -355,6 +399,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
             const classLabel = job.classDisplay ? `${job.classDisplay} [${className}]` : className;
             console.log(`\n--- ${classLabel} / ${datecode} — results ---`);
         }
+        for (const w of cm.twinWarnings) console.log(`  ${w}`);
 
         // Always print the full report. The score breakdown is useful even
         // for clean pilots (operator can see what's holding the assignment
@@ -721,7 +766,9 @@ async function loadPriorAircraft(flarmids: FlarmID[], currentCompid: string): Pr
     if (!identityEnabled || identityTablesUnavailable || !flarmids.length) return out;
     const ids = Array.from(new Set(flarmids.map((f) => String(f).toUpperCase())));
     try {
-        const aircraftRows = await mysql.query<{flarmid: string; compid: string; glider_key: string | null; greg: string | null; country: string | null; compno: string | null; is_icao_id: string | null; match_score: number | null; last_seen_ms: number}[]>(
+        const aircraftRows = await mysql.query<
+            {flarmid: string; compid: string; glider_key: string | null; greg: string | null; country: string | null; compno: string | null; is_icao_id: string | null; match_score: number | null; last_seen_ms: number}[]
+        >(
             escape`SELECT flarmid, compid, glider_key, greg, country, compno, is_icao_id, match_score,
                           UNIX_TIMESTAMP(last_seen) * 1000 AS last_seen_ms
                      FROM flarm_aircraft
@@ -798,7 +845,10 @@ async function purgeExpiredIdentity(): Promise<void> {
         const pilots = Number(res?.[0]?.affectedRows ?? 0);
         const aircraft = Number(res?.[1]?.affectedRows ?? 0);
         const tokens = Number(res?.[2]?.affectedRows ?? 0);
-        if (aircraft || pilots || tokens) console.log(`identity-evidence: expired ${aircraft} aircraft / ${pilots} pilot clue${pilots === 1 ? '' : 's'} / ${tokens} orphaned token${tokens === 1 ? '' : 's'} (not reconfirmed in ${IDENTITY_EXPIRY_MONTHS} months)`);
+        if (aircraft || pilots || tokens)
+            console.log(
+                `identity-evidence: expired ${aircraft} aircraft / ${pilots} pilot clue${pilots === 1 ? '' : 's'} / ${tokens} orphaned token${tokens === 1 ? '' : 's'} (not reconfirmed in ${IDENTITY_EXPIRY_MONTHS} months)`
+            );
     } catch (e) {
         if (isMissingTable(e)) {
             identityTablesUnavailable = true;
@@ -1059,33 +1109,6 @@ function pilotHeaderTag(rows: TrackerMatch[]): string {
     return flags.length ? `   ⚠ ${flags.join('; ')}` : '';
 }
 
-function crossClassHitsFor(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined): CrossClassHit[] {
-    if (!crossClass) return [];
-    const all = crossClass.get(flarmid);
-    if (!all) return [];
-    return all.filter((h) => h.className !== thisClass);
-}
-
-// Cross-class hits that represent a genuine "moved glider" conflict — i.e.
-// excluding hits to a task-twin class for the *same* compno, which are just
-// the same glider scored in two classes (see loadTaskTwins). A hit to a twin
-// class under a *different* compno is still a real conflict and kept.
-function conflictingCrossClassHits(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined, twinClasses: Set<ClassName>, compno: Compno): CrossClassHit[] {
-    return crossClassHitsFor(flarmid, thisClass, crossClass).filter((h) => !(twinClasses.has(h.className) && h.compno === compno));
-}
-
-/**
- * Short one-liner per cross-class hit. Used in proposal `reason` strings
- * (which get joined into a single-line CSV-friendly log entry).
- */
-function describeCrossClass(flarmid: FlarmID, thisClass: ClassName, crossClass: CrossClassMap | undefined): string[] {
-    return crossClassHitsFor(flarmid, thisClass, crossClass).map((h) => {
-        const classLabel = h.classDisplay ? `${h.classDisplay} [${h.className}]` : h.className;
-        const tag = h.assigned ? ' [their assigned ID]' : '';
-        return `also matches ${String(h.compno).trim()} in class ${classLabel}${tag}`;
-    });
-}
-
 /**
  * Multi-line printout per cross-class hit: header + Δstart/Δfinish + the
  * other class's score breakdown (S, margins, contribs including any prior
@@ -1097,7 +1120,7 @@ function describeCrossClassDetailed(flarmid: FlarmID, thisClass: ClassName, cros
         const tag = h.assigned ? ' [their assigned ID]' : '';
         const compno = String(h.compno).trim();
         const deltas = `Δstart ${fmtDelta(h.deltaStart)}, Δfinish ${fmtDelta(h.deltaFinish)}`;
-        return [`also matches ${compno} in class ${classLabel}${tag}: ${deltas}`, `  ${fmtScore(h.score, h.margins, h.pilotContested, h.flarmidContested, h.xcFacets, h.demoted)}`];
+        return [`also matches ${compno} in class ${classLabel}${tag}: ${deltas}`, `  ${fmtScore(h.score, h.margins, h.pilotContested, h.flarmidContested, h.xcFacets, h.demoted, h.demotedReason)}`];
     });
 }
 
@@ -1117,13 +1140,10 @@ function describeSameClassDetailed(m: TrackerMatch, byFlarmid: Map<FlarmID, Trac
         const deltas = `Δstart ${fmtDelta(p.deltaStart)}, Δfinish ${fmtDelta(p.deltaFinish)}`;
         const lines = [`also matches ${compno} in this class${tag}: ${deltas}`];
         const scored = scoreMap?.get(scoreKey(p.compno, p.flarmid));
-        if (scored) lines.push(`  ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested, scored.xcFacets, scored.demoted)}`);
+        if (scored) lines.push(`  ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested, scored.xcFacets, scored.demoted, scored.demotedReason)}`);
         return lines;
     });
 }
-
-type ScoreMap = Map<string, {score: ScoreBreakdown; margins: Margins; pilotContested: boolean; flarmidContested: boolean; deltaStart: number | null; deltaFinish: number | null; xcFacets: string[]; demoted: boolean}>;
-const scoreKey = (compno: Compno, flarmid: FlarmID) => `${compno}|${flarmid}`;
 
 // Build per-pair scores and two-sided margins from the matches we already
 // have. Since the candidate set is bounded by what `findTrackerMatches`
@@ -1136,7 +1156,8 @@ function computeScoreMap(
     priorMap: PriorMap,
     candidateFacets: Map<Compno, IdentityFacets> = new Map(),
     priorAircraft: PriorAircraftMap = new Map(),
-    excludeStart = false
+    excludeStart = false,
+    twinEvidence?: Map<string, TwinClassEvidence[]>
 ): ScoreMap {
     if (!matches.length) return new Map();
     const earliestPilotStartUtc = results.reduce((m, r) => Math.min(m, r.startUtc), Number.POSITIVE_INFINITY);
@@ -1157,18 +1178,21 @@ function computeScoreMap(
         const link = ddbLinkFor(ddbEntry, m.compno, r?.glidertype ?? '');
         const priorNats = priorMap.get(scoreKey(m.compno, m.flarmid)) ?? 0;
         const xc = computeXcBlock(m, candidateFacets, priorAircraft, nowMs);
-        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart);
+        const twinSupport = twinPilotSupport(twinEvidence?.get(scoreKey(m.compno, m.flarmid)) ?? []);
+        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart, twinSupport);
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
         xcFacetsByKey.set(scoreKey(m.compno, m.flarmid), xc.facets);
         pairs.push({compno: m.compno, flarmid: m.flarmid, total: breakdown.total, baseline: m.assigned});
     }
 
-    // Contention guard: once a flarmid is confidently held by one glider,
-    // negate every weaker contender's (prior + current) total so a poor match
-    // can't displace a likely-good one. Apply BEFORE margins/peer arrays so the
-    // negated totals flow through to the two-sided margins.
-    const penalised = contentionPenalty(
+    // Contention guards: once a flarmid is confidently held by one glider
+    // (flarm side), or a pilot confidently holds one flarmid (pilot side),
+    // negate every weaker competing claim so a poor match can't displace a
+    // likely-good one. Both sets are computed from the same pre-penalty
+    // totals, then each pair is negated once. Apply BEFORE margins/peer
+    // arrays so the negated totals flow through to the two-sided margins.
+    const {penalised, reason: demotedReasonByKey} = applyContentionPenalties(
         pairs.map((p) => ({compno: String(p.compno), flarmid: String(p.flarmid), total: p.total, baseline: p.baseline})),
         (compno, flarmid) => `${compno}|${flarmid}`
     );
@@ -1212,7 +1236,8 @@ function computeScoreMap(
             deltaStart: m.deltaStart,
             deltaFinish: m.deltaFinish,
             xcFacets: xcFacetsByKey.get(scoreKey(m.compno, m.flarmid)) ?? [],
-            demoted: penalised.has(scoreKey(m.compno, m.flarmid))
+            demoted: penalised.has(scoreKey(m.compno, m.flarmid)),
+            demotedReason: demotedReasonByKey.get(scoreKey(m.compno, m.flarmid))
         });
     }
     return out;
@@ -1250,7 +1275,7 @@ function ddbLinkFor(ddb: DDBEntry | undefined, compno: Compno, glidertype: strin
     return {cn, glider, tag: cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none'};
 }
 
-function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false): Signals {
+function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false, twinSupport = 0): Signals {
     const d = m.diag;
     // Grandprix common-start: the start crossing is identical for every pilot,
     // so drop it (and its distance) to null — scoreSignals then contributes 0
@@ -1258,8 +1283,8 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: 
     return {
         deltaStart: excludeStart ? null : m.deltaStart,
         deltaFinish: m.deltaFinish,
-        distAtStartKm: excludeStart ? null : d?.distAtStartKm ?? null,
-        gapAroundStartSec: excludeStart ? null : d?.gapAroundStartSec ?? null,
+        distAtStartKm: excludeStart ? null : (d?.distAtStartKm ?? null),
+        gapAroundStartSec: excludeStart ? null : (d?.gapAroundStartSec ?? null),
         distAtFinishKm: d?.distAtFinishKm ?? null,
         gapAroundFinishSec: d?.gapAroundFinishSec ?? null,
         inBboxPackets: d?.inBboxPackets ?? 0,
@@ -1270,7 +1295,9 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: 
         ddbGliderMatch: link.glider,
         baselineMatch: m.assigned,
         priorNats,
-        xcNats: xc.nats
+        xcNats: xc.nats,
+        twinSupport,
+        ambiguous: m.ambiguous
     };
 }
 
@@ -1363,7 +1390,7 @@ function printPilotMatches(
         console.log(`       flarmid: ${m.flarmid}   Δstart: ${fmtDelta(m.deltaStart)}   Δfinish: ${fmtDelta(m.deltaFinish)}   confidence: ${fmtConfidence(m.confidence)}${tagPart}`);
         if (m.diag) console.log(`         · ${fmtDiag(m.diag)}`);
         const scored = scoreMap?.get(scoreKey(m.compno, m.flarmid));
-        if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested, scored.xcFacets, scored.demoted)}`);
+        if (scored) console.log(`         · ${fmtScore(scored.score, scored.margins, scored.pilotContested, scored.flarmidContested, scored.xcFacets, scored.demoted, scored.demotedReason)}`);
         if (byFlarmid) {
             for (const lines of describeSameClassDetailed(m, byFlarmid, scoreMap)) {
                 for (const [i, line] of lines.entries()) {
@@ -1381,9 +1408,15 @@ function printPilotMatches(
     }
 }
 
-function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boolean, flarmidContested: boolean, xcFacets: string[] = [], demoted = false): string {
+const DEMOTED_TEXT: Record<'flarm' | 'pilot' | 'both', string> = {
+    flarm: 'flarmid confidently held elsewhere',
+    pilot: 'pilot confidently holds another flarmid',
+    both: 'flarmid confidently held elsewhere AND pilot confidently holds another flarmid'
+};
+
+function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boolean, flarmidContested: boolean, xcFacets: string[] = [], demoted = false, demotedReason?: 'flarm' | 'pilot' | 'both'): string {
     const parts: string[] = [];
-    parts.push(`S=${score.total.toFixed(2)}${demoted ? ' (demoted: flarmid confidently held elsewhere)' : ''}`);
+    parts.push(`S=${score.total.toFixed(2)}${demoted ? ` (demoted: ${DEMOTED_TEXT[demotedReason ?? 'flarm']})` : ''}`);
     if (!pilotContested && !flarmidContested) {
         parts.push(`uncontested (no competing candidate seen)`);
     } else {
@@ -1401,6 +1434,7 @@ function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boole
     if (score.ddbCn > 0) contribs.push(`ddbCN=${score.ddbCn.toFixed(2)}`);
     if (score.ddbGlider > 0) contribs.push(`ddbGlider=${score.ddbGlider.toFixed(2)}`);
     if (score.baseline > 0) contribs.push(`base=${score.baseline.toFixed(2)}`);
+    if (score.twin > 0) contribs.push(`twin=${score.twin.toFixed(2)}`);
     if (score.prior !== 0) contribs.push(`prior=${score.prior.toFixed(2)}`);
     // Single cross-comp identity contribution, with the facets that fired in the
     // chosen prior comp (xcEvidenceScore already excluded the current comp).
@@ -1425,218 +1459,6 @@ function bestConfidence(rows: TrackerMatch[]): number {
     let best = Infinity;
     for (const m of rows) if (m.confidence !== null && m.confidence < best) best = m.confidence;
     return best;
-}
-
-interface Proposal {
-    compno: Compno;
-    name: string;
-    currentTrackerid: string;
-    newTrackerid: string;
-    addedIds: FlarmID[];
-    removedIds: FlarmID[];
-    reason: string;
-    // Start/finish crossing deltas for the chosen flarmid (the addedId, or the
-    // assigned flarmid being removed when there's no addedId). These are the
-    // ONLY score context persisted on the applied trackerhistory row — the next
-    // day's prior loader rebuilds its crossing score from them. Everything else
-    // (composite score, margin, ddb link) is derivable live and is not stored.
-    deltaStart: number | null;
-    deltaFinish: number | null;
-}
-
-function parseCurrentIds(raw: string): FlarmID[] {
-    const out: FlarmID[] = [];
-    if (!raw) return out;
-    for (const part of raw.split(',')) {
-        const t = part.trim();
-        if (!t) continue;
-        const lc = t.toLowerCase();
-        if (lc === 'unknown' || lc === 'blocked') continue;
-        out.push(t as FlarmID);
-    }
-    return out;
-}
-
-function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName, twinClasses: Set<ClassName>): Proposal[] {
-    const byPilot = new Map<Compno, TrackerMatch[]>();
-    const byFlarm = new Map<FlarmID, TrackerMatch[]>();
-    for (const m of matches) {
-        const arrP = byPilot.get(m.compno) ?? [];
-        arrP.push(m);
-        byPilot.set(m.compno, arrP);
-        const arrF = byFlarm.get(m.flarmid) ?? [];
-        arrF.push(m);
-        byFlarm.set(m.flarmid, arrF);
-    }
-
-    const out: Proposal[] = [];
-    for (const [compno, rows] of byPilot) {
-        // Already-good assignment: leave alone even if alternatives exist.
-        if (rows.some((m) => m.assigned && m.withinTolerance)) continue;
-
-        // Pilot is structurally ambiguous (concurrent-times group, multi
-        // candidate, or multi pilot per flarmid) — every diagnosis is
-        // unsafe, including "remove the assigned tracker". Skip entirely.
-        if (rows.some((m) => m.ambiguous)) continue;
-
-        const altMatches = rows.filter((m) => !m.assigned && m.withinTolerance && !m.ambiguous);
-        // Phase 1.5 single-sided alts — landout pilots and any pilot whose
-        // tracker only crossed one of start/finish. Safe to propose only
-        // when the flarmid isn't claimed elsewhere and there's no
-        // competing single-sided candidate for the same flarmid or pilot.
-        const isOneSided = (m: TrackerMatch) => m.confidence !== null && (m.deltaStart === null) !== (m.deltaFinish === null);
-        const altSingleSided = rows.filter((m) => {
-            if (m.assigned) return false;
-            if (!isOneSided(m)) return false;
-            const peers = byFlarm.get(m.flarmid) ?? [];
-            // Phase 1 (both-sided) match for the same flarmid wins, regardless of pilot.
-            if (peers.some((p) => p.withinTolerance)) return false;
-            // Another pilot has a single-sided claim on this flarmid — but
-            // only counts as competing if that peer actually prefers this
-            // flarmid. A peer that strongly prefers a different candidate
-            // of their own (pilotMargin ≤ -DEFAULT_AUTO_MARGIN_NATS on this
-            // flarmid) isn't really in contention — their score is decisively
-            // higher elsewhere. Ignore them and let the rightful claimant
-            // take this flarmid. We require *strong* preference (not just
-            // any negative margin) so thin score differences don't override
-            // a peer's legitimate claim.
-            const competingPeer = peers.some((p) => {
-                if (p.compno === m.compno) return false;
-                if (!isOneSided(p)) return false;
-                const peerPilotMargin = scoreMap.get(scoreKey(p.compno, p.flarmid))?.margins.pilotMargin ?? 0;
-                return peerPilotMargin > -DEFAULT_AUTO_MARGIN_NATS;
-            });
-            if (competingPeer) return false;
-            return true;
-        });
-
-        const assignedBad = rows.filter((m) => m.assigned && !m.withinTolerance);
-        if (!altMatches.length && !altSingleSided.length && !assignedBad.length) continue;
-
-        // When multiple unassigned candidates compete for the same pilot,
-        // pick the highest-scoring one — provided it strictly outscores the
-        // runner-up. A tie is genuinely ambiguous, but a clear score
-        // separation (e.g. one candidate with a DDB CN match, the other
-        // without) shouldn't get treated the same way. Phase 1 (both-sided)
-        // candidates win over Phase 1.5 (single-sided) for the same pilot;
-        // within a phase, score breaks the tie.
-        const pickBestByScore = (cands: TrackerMatch[]): TrackerMatch | null => {
-            if (cands.length === 0) return null;
-            if (cands.length === 1) return cands[0];
-            const scored = cands.map((m) => ({m, s: scoreMap.get(scoreKey(compno, m.flarmid))?.score.total ?? 0}));
-            scored.sort((a, b) => b.s - a.s);
-            if (scored[0].s <= scored[1].s) return null; // genuine tie
-            return scored[0].m;
-        };
-        const bestAlt = pickBestByScore(altMatches);
-        const bestSingle = pickBestByScore(altSingleSided);
-        // If altMatches was non-empty but tied on score, fall through to
-        // single-sided rather than declaring the pilot ambiguous outright.
-        if (altMatches.length > 1 && !bestAlt && altSingleSided.length === 0 && !assignedBad.length) continue;
-        if (altMatches.length === 0 && altSingleSided.length > 1 && !bestSingle && !assignedBad.length) continue;
-
-        const first = rows[0];
-        const currentIds = parseCurrentIds(first.currentTrackerid);
-        // Prefer Phase 1 (both-sided) over Phase 1.5 (single-sided) when
-        // both exist for the same pilot.
-        let addRow: TrackerMatch | null = bestAlt ?? bestSingle ?? null;
-        let addId: FlarmID | null = addRow?.flarmid ?? null;
-
-        // Score gate: only replace an assigned tracker when the proposed
-        // alternative actually outscores it. Phase 1/1.5 categorisation is
-        // a blunt instrument — on landout / one-sided days the assigned
-        // tracker often ends up in `assignedBad` purely because Phase 1.5
-        // carries withinTolerance=false, even when its score (Δstart, in-
-        // area presence, DDB CN, base) clearly beats any contender. Drop
-        // the add candidate in that case so the existing assignment stands.
-        if (addId && assignedBad.length) {
-            const addScore = scoreMap.get(scoreKey(compno, addId))?.score.total ?? 0;
-            let bestAssignedScore = -Infinity;
-            for (const m of assignedBad) {
-                const s = scoreMap.get(scoreKey(compno, m.flarmid))?.score.total ?? 0;
-                if (s > bestAssignedScore) bestAssignedScore = s;
-            }
-            if (addScore <= bestAssignedScore) {
-                addRow = null;
-                addId = null;
-            }
-        }
-
-        // Only propose removing an assigned tracker if we have *positive*
-        // evidence it's wrong. "Outside tolerance" alone can be poor FLARM
-        // coverage, a DNF, or a no-finish landout — dropping the operator's
-        // existing assignment in those cases loses information.
-        //
-        // Strong-negative signals that warrant removal:
-        //   • a within-tolerance alternative exists for this pilot (`addId`)
-        //     — we'd be replacing, not just clearing.
-        //   • the assigned flarmid cleanly matches a pilot in another class
-        //     today (cross-class hit) — "moved glider" signal.
-        //   • `bboxOnly`: flarmid was active in the scan window but every
-        //     packet was outside the task area.
-        //   • `inBboxRatio` very low (≤0.1, some traffic): flarmid was
-        //     overwhelmingly elsewhere — almost certainly a different
-        //     comp's glider that briefly drifted into our bbox.
-        const STRONG_NEGATIVE_RATIO = 0.1;
-        const removeIds = new Set<FlarmID>();
-        for (const m of assignedBad) {
-            const crossClassHit = conflictingCrossClassHits(m.flarmid, thisClass, crossClass, twinClasses, compno).length > 0;
-            const total = (m.diag?.inBboxPackets ?? 0) + (m.diag?.bboxRejectedPackets ?? 0);
-            const ratio = total > 0 ? (m.diag?.inBboxPackets ?? 0) / total : 0;
-            const lowRatio = total > 0 && ratio <= STRONG_NEGATIVE_RATIO;
-            if (addId || crossClassHit || m.bboxOnly || lowRatio) removeIds.add(m.flarmid);
-        }
-        // Nothing to do if we'd be neither adding nor removing.
-        if (!addId && removeIds.size === 0) continue;
-
-        const newIds: FlarmID[] = [];
-        for (const id of currentIds) if (!removeIds.has(id)) newIds.push(id);
-        if (addId && !newIds.includes(addId)) newIds.push(addId);
-
-        const newTrackerid = newIds.length ? newIds.join(',') : 'unknown';
-        if (newTrackerid === first.currentTrackerid) continue;
-
-        const oneSidedAdd = addRow ? isOneSided(addRow) : false;
-        const baseReason = addId //
-            ? removeIds.size
-                ? oneSidedAdd
-                    ? 'switch to single-sided match (start- or finish-only)'
-                    : 'switch to within-tolerance alternative'
-                : oneSidedAdd
-                  ? `associate single-sided match (${addRow!.deltaStart !== null ? 'start' : 'finish'}-only)`
-                  : 'associate within-tolerance match'
-            : 'assigned tracker has strong negative signal (out-of-area or other-class match)';
-
-        // Annotate the reason with any cross-class hits for the flarmids
-        // we're removing — strong evidence the tracker is now flying with
-        // a pilot in another class.
-        const crossInfo: string[] = [];
-        for (const id of removeIds) {
-            for (const line of describeCrossClass(id, thisClass, crossClass)) {
-                crossInfo.push(`${id} ${line}`);
-            }
-        }
-        const reason = crossInfo.length ? `${baseReason}; ${crossInfo.join('; ')}` : baseReason;
-
-        // Pull the crossing deltas for the flarmid we're acting on. Prefer the
-        // addedId (the new chosen flarmid), else the assigned flarmid being
-        // removed. Null when that flarmid never produced a tracked crossing.
-        const focusFlarmid = addId ?? Array.from(removeIds)[0];
-        const focusMatch = focusFlarmid ? rows.find((m) => m.flarmid === focusFlarmid) : undefined;
-        out.push({
-            compno,
-            name: first.name,
-            currentTrackerid: first.currentTrackerid,
-            newTrackerid,
-            addedIds: addId ? [addId] : [],
-            removedIds: Array.from(removeIds),
-            reason,
-            deltaStart: focusMatch?.deltaStart ?? null,
-            deltaFinish: focusMatch?.deltaFinish ?? null
-        });
-    }
-    out.sort((a, b) => a.compno.localeCompare(b.compno));
-    return out;
 }
 
 function summariseProposal(p: Proposal): string {
