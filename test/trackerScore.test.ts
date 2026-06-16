@@ -8,7 +8,6 @@ import {
     contentionPenalty,
     pilotContentionPenalty,
     applyContentionPenalties,
-    twinPilotSupport,
     inBboxRatio,
     passesCandidateFilter,
     physicalMatchScore,
@@ -237,45 +236,13 @@ describe('physicalMatchScore', () => {
                 ddbCnMatch: true, // excluded from physical score
                 baselineMatch: true, // excluded
                 priorNats: 5, // excluded
-                xcNats: 5, // excluded
-                twinSupport: 1 // excluded — identity-derived, must not self-feed cross-comp evidence
+                xcNats: 5 // excluded
             })
         );
         const physical = b.deltaStart + b.deltaFinish + b.distAtStart + b.distAtFinish + b.inBbox + b.preLaunch;
-        expect(b.twin).toBeGreaterThan(0);
         expect(physicalMatchScore(b)).toBeCloseTo(physical, 6);
-        // strictly less than the inflated total (which includes ddb/baseline/prior/xc/twin)
+        // strictly less than the inflated total (which includes ddb/baseline/prior/xc)
         expect(physicalMatchScore(b)).toBeLessThan(b.total);
-    });
-});
-
-describe('twinPilotSupport', () => {
-    test('no evidence → 0', () => {
-        expect(twinPilotSupport([])).toBe(0);
-    });
-
-    test('assigned-only (no crossings there) → 0.5', () => {
-        expect(twinPilotSupport([{assigned: true, deltaStart: null, deltaFinish: null}])).toBeCloseTo(0.5, 6);
-    });
-
-    test('clean both-sided crossing there saturates at 1', () => {
-        expect(twinPilotSupport([{assigned: false, deltaStart: 0, deltaFinish: 0}])).toBeCloseTo(1.0, 6);
-    });
-
-    test('assigned + crossing is capped at 1', () => {
-        expect(twinPilotSupport([{assigned: true, deltaStart: 0, deltaFinish: 0}])).toBeCloseTo(1.0, 6);
-    });
-
-    test('out-of-tolerance deltas contribute nothing beyond the assigned half', () => {
-        expect(twinPilotSupport([{assigned: true, deltaStart: DEFAULT_TOLERANCE_SEC + 5, deltaFinish: DEFAULT_TOLERANCE_SEC + 5}])).toBeCloseTo(0.5, 6);
-    });
-
-    test('multiple twin classes take the best, not the sum', () => {
-        const s = twinPilotSupport([
-            {assigned: true, deltaStart: null, deltaFinish: null},
-            {assigned: false, deltaStart: 0, deltaFinish: null}
-        ]);
-        expect(s).toBeCloseTo(1.0, 6); // one clean start crossing = 1.0/cap, beats assigned-only 0.5
     });
 });
 

@@ -15,19 +15,7 @@ import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/typ
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
-import {
-    scoreSignals,
-    computeMargins,
-    summarisePrior,
-    crossingScore,
-    applyContentionPenalties,
-    twinPilotSupport,
-    physicalMatchScore,
-    type Signals,
-    type ScoreBreakdown,
-    type Margins,
-    type TwinClassEvidence
-} from '../lib/scoring/shared/trackerScore';
+import {scoreSignals, computeMargins, summarisePrior, crossingScore, applyContentionPenalties, physicalMatchScore, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
 import {computeProposals, scoreKey, parseCurrentIds, crossClassHitsFor, type Proposal, type ScoreMap, type CrossClassMap} from '../lib/scoring/shared/proposals';
 import {loadMergedDDB, gliderEquivalent, isBlocked, type DDBEntry} from '../lib/ddb';
 import {
@@ -136,6 +124,15 @@ interface GroupSummary {
     ambiguous: number;
     proposed: number;
     applied: number;
+}
+
+// A set of entries (one per class) that all refer to the same physical pilot
+// (same compno AND samePilotName). The identification decision made in any
+// one class is propagated to the others in the twin-pilot sync pass.
+interface TwinPilotGroup {
+    compno: Compno;
+    name: string;
+    entries: Array<{cm: ClassMatches; result: OfficialResult}>;
 }
 
 function groupJobs(jobs: Job[]): JobGroup[] {
@@ -299,7 +296,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         classMatches.push({job, results, matches, excludeStart, priorMap, priorAircraft, candidateFacets, scoreMap: new Map(), twinWarnings: []});
     }
 
-    // Pass 1b — group-level maps that scoring depends on.
+    // Pass 1b — group-level maps.
     //
     // Task-twin classes (same comp/day, identical turnpoint sequence): a
     // cross-class hit between them for the same compno is the same glider,
@@ -312,50 +309,58 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
               )
             : new Map<ClassName, Set<ClassName>>();
 
-    // Twin-pilot evidence: the same compno+name entered in another class of
-    // this comp links a flarmid to that pilot — their assigned id there,
-    // and/or that class's raw crossing matches against their official times.
-    // Built from scan output and the trackerid column only (never the other
-    // class's scored total), so the twin signal can't feed back on itself.
-    const twinEvidence = new Map<ClassName, Map<string, TwinClassEvidence[]>>();
-    for (const cm of classMatches) {
-        const evidence = new Map<string, TwinClassEvidence[]>();
-        twinEvidence.set(cm.job.className, evidence);
-        if (classMatches.length < 2) continue;
-        const twins = twinMap.get(cm.job.className) ?? new Set<ClassName>();
-        for (const other of classMatches) {
-            if (other === cm) continue;
-            const otherByCompno = new Map(other.results.map((r) => [r.compno, r]));
-            const otherMatchByKey = new Map(other.matches.map((m) => [scoreKey(m.compno, m.flarmid), m]));
-            for (const mine of cm.results) {
-                const theirs = otherByCompno.get(mine.compno);
-                if (!theirs || !samePilotName(mine.name, theirs.name)) continue;
-                if (!twins.has(other.job.className)) {
-                    const otherLabel = other.job.classDisplay ? `${other.job.classDisplay} [${other.job.className}]` : String(other.job.className);
-                    cm.twinWarnings.push(`⚠ ${String(mine.compno).trim()} (${mine.name}) also appears in class ${otherLabel} with a different task — twin-pilot signal applied, but crossings are not comparable`);
+    // Twin-pilot groups: pilots (same compno+name) in 2+ classes of this
+    // (compid, datecode). Used in pass 3 to propagate the identification
+    // decision across classes — one physical aircraft, one decision.
+    const twinPilotGroups: TwinPilotGroup[] = [];
+    if (classMatches.length > 1) {
+        const byCompno = new Map<Compno, Array<{cm: ClassMatches; result: OfficialResult}>>();
+        for (const cm of classMatches) {
+            for (const r of cm.results) {
+                const arr = byCompno.get(r.compno) ?? [];
+                arr.push({cm, result: r});
+                byCompno.set(r.compno, arr);
+            }
+        }
+        for (const [compno, entries] of byCompno) {
+            if (entries.length < 2) continue;
+            // Group by name using samePilotName (accent/case-normalised token-set compare).
+            const nameGroups: Array<Array<{cm: ClassMatches; result: OfficialResult}>> = [];
+            for (const entry of entries) {
+                let placed = false;
+                for (const ng of nameGroups) {
+                    if (samePilotName(entry.result.name, ng[0].result.name)) {
+                        ng.push(entry);
+                        placed = true;
+                        break;
+                    }
                 }
-                const theirIds = parseCurrentIds(theirs.trackerid);
-                for (const m of cm.matches) {
-                    if (m.compno !== mine.compno) continue;
-                    const assigned = theirIds.includes(m.flarmid);
-                    const otherMatch = otherMatchByKey.get(scoreKey(m.compno, m.flarmid));
-                    if (!assigned && !otherMatch) continue;
-                    const arr = evidence.get(scoreKey(m.compno, m.flarmid)) ?? [];
-                    arr.push({
-                        assigned,
-                        // A GP common-start crossing carries no discrimination there.
-                        deltaStart: other.excludeStart ? null : (otherMatch?.deltaStart ?? null),
-                        deltaFinish: otherMatch?.deltaFinish ?? null
-                    });
-                    evidence.set(scoreKey(m.compno, m.flarmid), arr);
+                if (!placed) nameGroups.push([entry]);
+            }
+            for (const ng of nameGroups) {
+                if (ng.length < 2) continue;
+                twinPilotGroups.push({compno, name: ng[0].result.name, entries: ng});
+            }
+        }
+        // Warn once per (pilot, class) pair when the twin classes fly different tasks.
+        for (const tpg of twinPilotGroups) {
+            for (const {cm, result} of tpg.entries) {
+                const thisClassTwins = twinMap.get(cm.job.className) ?? new Set<ClassName>();
+                for (const {cm: otherCm} of tpg.entries) {
+                    if (otherCm === cm) continue;
+                    if (!thisClassTwins.has(otherCm.job.className)) {
+                        const otherLabel = otherCm.job.classDisplay ? `${otherCm.job.classDisplay} [${otherCm.job.className}]` : String(otherCm.job.className);
+                        cm.twinWarnings.push(`⚠ ${String(result.compno).trim()} (${result.name}) also appears in class ${otherLabel} with a different task — identification will be synced`);
+                    }
                 }
             }
         }
     }
 
-    // Pass 1c — score each class with the twin evidence in place.
+    // Pass 1c — score each class independently (no twin signal — the
+    // identification decision is shared in pass 3, not pre-empted here).
     for (const cm of classMatches) {
-        cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeStart, twinEvidence.get(cm.job.className));
+        cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeStart);
     }
 
     // Pass 2 — flarmid → unambiguous within-tolerance hits across the group.
@@ -391,6 +396,20 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     // Pass 3 — per-class results and proposals.
     const summary: GroupSummary = {pilots: 0, matched: 0, ambiguous: 0, proposed: 0, applied: 0};
     const multi = classMatches.length > 1;
+
+    // Pass 3a — compute all proposals before reviewing any, so the
+    // twin-pilot sync (3b) can see the full picture before any are applied.
+    const proposalsByClass = new Map<ClassName, Proposal[]>();
+    if (!argv['dry-run']) {
+        for (const cm of classMatches) {
+            proposalsByClass.set(cm.job.className, computeProposals(cm.matches, cm.scoreMap, crossClass, cm.job.className, twinMap.get(cm.job.className) ?? new Set<ClassName>()));
+        }
+        // Pass 3b — twin-pilot sync: propagate the strongest identification
+        // decision for a twin pilot to all other classes they appear in.
+        if (twinPilotGroups.length > 0) syncTwinPilotProposals(proposalsByClass, twinPilotGroups);
+    }
+
+    // Pass 3c — print, review, apply per class.
     for (const cm of classMatches) {
         const {job, results, matches, scoreMap} = cm;
         const {className, datecode} = job;
@@ -424,7 +443,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
             continue;
         }
 
-        const proposals = computeProposals(matches, scoreMap, crossClass, className, twinMap.get(className) ?? new Set<ClassName>());
+        const proposals = proposalsByClass.get(className) ?? [];
         summary.proposed += proposals.length;
 
         const accepted = proposals.length //
@@ -1156,8 +1175,7 @@ function computeScoreMap(
     priorMap: PriorMap,
     candidateFacets: Map<Compno, IdentityFacets> = new Map(),
     priorAircraft: PriorAircraftMap = new Map(),
-    excludeStart = false,
-    twinEvidence?: Map<string, TwinClassEvidence[]>
+    excludeStart = false
 ): ScoreMap {
     if (!matches.length) return new Map();
     const earliestPilotStartUtc = results.reduce((m, r) => Math.min(m, r.startUtc), Number.POSITIVE_INFINITY);
@@ -1178,8 +1196,7 @@ function computeScoreMap(
         const link = ddbLinkFor(ddbEntry, m.compno, r?.glidertype ?? '');
         const priorNats = priorMap.get(scoreKey(m.compno, m.flarmid)) ?? 0;
         const xc = computeXcBlock(m, candidateFacets, priorAircraft, nowMs);
-        const twinSupport = twinPilotSupport(twinEvidence?.get(scoreKey(m.compno, m.flarmid)) ?? []);
-        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart, twinSupport);
+        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart);
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
         xcFacetsByKey.set(scoreKey(m.compno, m.flarmid), xc.facets);
@@ -1275,7 +1292,7 @@ function ddbLinkFor(ddb: DDBEntry | undefined, compno: Compno, glidertype: strin
     return {cn, glider, tag: cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none'};
 }
 
-function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false, twinSupport = 0): Signals {
+function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false): Signals {
     const d = m.diag;
     // Grandprix common-start: the start crossing is identical for every pilot,
     // so drop it (and its distance) to null — scoreSignals then contributes 0
@@ -1296,7 +1313,6 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: 
         baselineMatch: m.assigned,
         priorNats,
         xcNats: xc.nats,
-        twinSupport,
         ambiguous: m.ambiguous
     };
 }
@@ -1434,7 +1450,6 @@ function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boole
     if (score.ddbCn > 0) contribs.push(`ddbCN=${score.ddbCn.toFixed(2)}`);
     if (score.ddbGlider > 0) contribs.push(`ddbGlider=${score.ddbGlider.toFixed(2)}`);
     if (score.baseline > 0) contribs.push(`base=${score.baseline.toFixed(2)}`);
-    if (score.twin > 0) contribs.push(`twin=${score.twin.toFixed(2)}`);
     if (score.prior !== 0) contribs.push(`prior=${score.prior.toFixed(2)}`);
     // Single cross-comp identity contribution, with the facets that fired in the
     // chosen prior comp (xcEvidenceScore already excluded the current comp).
@@ -1535,6 +1550,70 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
         }
     }
     return accepted;
+}
+
+// Propagate the strongest identification decision for a twin pilot to all other
+// classes they appear in. If class A's per-class scoring confidently identifies
+// flarmid X for pilot P, and class B (same pilot, same comp day) has no such
+// proposal, add a matching proposal to class B using class B's own scan data
+// for crossing deltas (so the trackerhistory prior is anchored correctly).
+// Conflicts (different flarmids proposed in two classes) are logged and left
+// for the operator — we don't guess which is right.
+function syncTwinPilotProposals(proposalsByClass: Map<ClassName, Proposal[]>, twinPilotGroups: TwinPilotGroup[]): void {
+    for (const tpg of twinPilotGroups) {
+        // Find the highest-scoring "add" proposal across all classes.
+        let bestFlarmid: FlarmID | null = null;
+        let bestScore = -Infinity;
+        let bestClassLabel = '';
+        for (const {cm} of tpg.entries) {
+            const proposals = proposalsByClass.get(cm.job.className) ?? [];
+            const pilotProposal = proposals.find((p) => p.compno === tpg.compno && p.addedIds.length > 0);
+            if (!pilotProposal) continue;
+            const flarmid = pilotProposal.addedIds[0] as FlarmID;
+            const total = cm.scoreMap.get(scoreKey(tpg.compno, flarmid))?.score.total ?? 0;
+            if (total > bestScore) {
+                bestScore = total;
+                bestFlarmid = flarmid;
+                bestClassLabel = cm.job.classDisplay || String(cm.job.className);
+            }
+        }
+        if (!bestFlarmid) continue;
+
+        for (const {cm, result} of tpg.entries) {
+            const proposals = proposalsByClass.get(cm.job.className) ?? [];
+            // Already has an add-proposal for this flarmid — nothing to add.
+            if (proposals.some((p) => p.compno === tpg.compno && p.addedIds.includes(bestFlarmid!))) continue;
+            // Conflict: a different flarmid was proposed in this class — warn
+            // and skip rather than overwrite, so the operator can review.
+            const conflicting = proposals.find((p) => p.compno === tpg.compno && p.addedIds.length > 0);
+            if (conflicting) {
+                console.log(
+                    `  ⚠ twin-pilot conflict: ${String(tpg.compno).trim()} (${tpg.name}) — class ${cm.job.classDisplay || String(cm.job.className)} proposes ${conflicting.addedIds[0]} but twin class ${bestClassLabel} proposes ${bestFlarmid}`
+                );
+                continue;
+            }
+            // Already in current trackerid — nothing to do.
+            const currentIds = parseCurrentIds(result.trackerid);
+            if (currentIds.includes(bestFlarmid!)) continue;
+            // Use this class's own match data for the crossing deltas so the
+            // trackerhistory prior row is anchored to this class's task times.
+            const ownMatch = cm.matches.find((m) => m.compno === tpg.compno && m.flarmid === bestFlarmid);
+            const newIds = [...currentIds.filter((id) => id !== bestFlarmid), bestFlarmid!];
+            const newTrackerid = newIds.join(',') || 'unknown';
+            proposals.push({
+                compno: tpg.compno,
+                name: tpg.name,
+                currentTrackerid: result.trackerid,
+                newTrackerid,
+                addedIds: [bestFlarmid!],
+                removedIds: [],
+                reason: `twin-pilot: identified as ${bestFlarmid} in class ${bestClassLabel}`,
+                deltaStart: ownMatch?.deltaStart ?? null,
+                deltaFinish: ownMatch?.deltaFinish ?? null
+            });
+            proposalsByClass.set(cm.job.className, proposals);
+        }
+    }
 }
 
 async function applyProposals(className: ClassName, datecode: Datecode, proposals: Proposal[]): Promise<number> {

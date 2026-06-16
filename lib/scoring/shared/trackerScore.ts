@@ -87,13 +87,6 @@ export interface Signals {
     xcNats: number;
 
     /**
-     * Same-pilot-in-twin-class support s ∈ [0,1], from `twinPilotSupport`: the
-     * same compno+name in another class of THIS comp links the flarmid (their
-     * assigned id and/or a crossing match there). 0 / absent when no twin.
-     */
-    twinSupport?: number;
-
-    /**
      * Match was flagged ambiguous by the scan (multiple within-tolerance
      * candidates or a concurrent-times group). Downgrades only the Δstart /
      * Δfinish supports by AMBIGUOUS_DELTA_FACTOR — a matching time is weaker
@@ -114,7 +107,6 @@ export interface ScoreBreakdown {
     baseline: number;
     prior: number;
     xc: number; // weights.xc × xcNats — cross-comp identity, single value
-    twin: number; // weights.twin × twinSupport — same pilot in a twin class this comp
     total: number;
 }
 
@@ -199,7 +191,6 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         // Cross-comp identity already collapsed to a single nats value by
         // xcEvidenceScore (confidence-scaled, age-decayed, best prior comp).
         xc: weights.xc * s.xcNats,
-        twin: weights.twin * (s.twinSupport ?? 0),
         total: 0
     };
     breakdown.total =
@@ -213,8 +204,7 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         breakdown.ddbGlider +
         breakdown.baseline +
         breakdown.prior +
-        breakdown.xc +
-        breakdown.twin;
+        breakdown.xc;
     return breakdown;
 }
 
@@ -244,35 +234,6 @@ export function crossingScore(deltaStart: number | null, deltaFinish: number | n
     const sStart = deltaStart === null ? 0 : linKnee(Math.abs(deltaStart), knees.timeToleranceSec);
     const sFinish = deltaFinish === null ? 0 : linKnee(Math.abs(deltaFinish), knees.timeToleranceSec);
     return Math.min(MAX_PRIOR_PER_DAY_NATS, weights.deltaStart * sStart + weights.deltaFinish * sFinish);
-}
-
-/**
- * Evidence that the same pilot (compno + name) in another class of THIS comp
- * links a flarmid: the operator assigned it to them there, and/or it produced
- * crossing matches against their official times there. Built from raw scan
- * output and the trackerid column only — never from the other class's scored
- * total, so the twin signal can't feed back on itself across classes.
- */
-export interface TwinClassEvidence {
-    /** flarmid ∈ the same-compno+name pilot's trackerid in the other class */
-    assigned: boolean;
-    /** Raw crossing deltas from the other class's scan (null = no crossing). */
-    deltaStart: number | null;
-    deltaFinish: number | null;
-}
-
-/**
- * Same-pilot twin-class support s ∈ [0,1]: max over twin classes of
- * sat(0.5·assigned + crossingScore(ds, df) / MAX_PRIOR_PER_DAY_NATS).
- * Assignment alone gives 0.5; a clean both-sided crossing there saturates.
- */
-export function twinPilotSupport(evidence: TwinClassEvidence[], weights: ScoreWeights = DEFAULT_WEIGHTS, knees: ScoreKnees = DEFAULT_KNEES): number {
-    let best = 0;
-    for (const e of evidence) {
-        const s = sat((e.assigned ? 0.5 : 0) + crossingScore(e.deltaStart, e.deltaFinish, weights, knees) / MAX_PRIOR_PER_DAY_NATS);
-        if (s > best) best = s;
-    }
-    return best;
 }
 
 /** Decay a single prior crossing score by its age in task days. */

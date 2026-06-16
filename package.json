@@ -64,7 +64,7 @@
         "suncalc": "^1.8.0",
         "tabletojson": "^4.0.0",
         "web-push": "^3.6.7",
-        "ws": ">=7.3"
+        "ws": "8.21.0"
     },
     "devDependencies": {
         "@babel/core": "^7.24.7",

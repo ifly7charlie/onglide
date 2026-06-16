@@ -207,7 +207,6 @@ export const TRACKER_SCORE_WEIGHTS = {
     ddbCn: 1.5,
     ddbGlider: 0.3, // weak — many pilots in a comp share a glider type, so this just rules out wildly mismatched gliders
     baseline: 1.0, // flarmid in current tracker.trackerid for (class, compno)
-    twin: 1.0, // same compno+name in another class of the same comp links this flarmid (assigned there and/or crossing-matched there)
 
     prior: 1.0, // already in nats; sum of decayed per-day start/finish crossing scores (≥0, capped at MAX_PRIOR_PER_DAY_NATS/day)
     // ---- Cross-competition identity evidence (lib/scoring/shared/identity.ts) ----

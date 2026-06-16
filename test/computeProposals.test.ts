@@ -9,7 +9,7 @@ const OTHER_CLASS = 'std' as ClassName;
 const NO_TWINS = new Set<ClassName>();
 const GATES = {proposeNats: 2.0, marginNats: 2.0};
 
-const breakdown = (total: number): ScoreBreakdown => ({deltaStart: 0, deltaFinish: 0, distAtStart: 0, distAtFinish: 0, inBbox: 0, preLaunch: 0, ddbCn: 0, ddbGlider: 0, baseline: 0, prior: 0, xc: 0, twin: 0, total});
+const breakdown = (total: number): ScoreBreakdown => ({deltaStart: 0, deltaFinish: 0, distAtStart: 0, distAtFinish: 0, inBbox: 0, preLaunch: 0, ddbCn: 0, ddbGlider: 0, baseline: 0, prior: 0, xc: 0, total});
 
 const match = (over: Omit<Partial<TrackerMatch>, 'compno' | 'flarmid'> & {compno: string; flarmid: string}): TrackerMatch => ({
     name: 'A Pilot',
