@@ -25,7 +25,7 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
                 console.log('unable to decode websocket message');
             }
 
-            if (decoded.identifiers) {
+            if (decoded.identifiers && decoded.identifiers.className === className) {
                 console.log('identifiers', decoded.identifiers, decoded.t);
                 dispatch(updateClassAction({...decoded.identifiers, t: decoded.t as Epoch}));
             }
