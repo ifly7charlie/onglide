@@ -91,12 +91,21 @@ export type HoverFlash = {compno: Compno; phase: 'grow' | 'shrink'} | null;
 const BASE_ICON_SIZE = 35;
 const FLASH_PEAK_SIZE = 65;
 
+let isAndroid: boolean | undefined;
+
 export function pilotsLayer(selectedCompno: Compno, hoveredCompno: Compno | null, hoverFlash: HoverFlash, setSelectedCompno: (compno: Compno) => void, now: Epoch) {
     const data = useSelector((state) => selectAllPositions(state, now));
 
     // Stable key for the pilot list so we only rebuild the atlas when pilots
     // actually join/leave — not on every position tick.
-    const compnoKey = useMemo(() => data.map((d) => d.compno).sort().join(','), [data]);
+    const compnoKey = useMemo(
+        () =>
+            data
+                .map((d) => d.compno)
+                .sort()
+                .join(','),
+        [data]
+    );
 
     const [atlas, setAtlas] = useState<AtlasState | null>(null);
 
@@ -115,6 +124,11 @@ export function pilotsLayer(selectedCompno: Compno, hoveredCompno: Compno | null
         return null;
     }
 
+    if (isAndroid === undefined) {
+        const ua = navigator.userAgent;
+        isAndroid = /Android/.test(ua);
+    }
+
     return new IconLayer<(typeof data)[0], {beforeId: string}>({
         id: 'labels',
         data: data,
@@ -131,9 +145,11 @@ export function pilotsLayer(selectedCompno: Compno, hoveredCompno: Compno | null
             getSize: [hoverFlash?.compno, hoverFlash?.phase],
             getPosition: [now]
         },
-        transitions: {
-            getSize: {duration: 220, easing: (t: number) => 1 - (1 - t) * (1 - t)}
-        },
+        transitions: !isAndroid
+            ? {
+                  getSize: {duration: 220, easing: (t: number) => 1 - (1 - t) * (1 - t)}
+              }
+            : undefined,
         pickable: true
     });
 }
