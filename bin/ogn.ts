@@ -161,6 +161,7 @@ interface CompetitionContext {
     ownedChannels: Set<ChannelName>;
     unknownChannel?: BroadcastChannel;
     lastDatecode?: Datecode;
+    unknownTrackers: Record<FlarmID, UnknownTracker>;
     state: 'starting' | 'running' | 'stopping' | 'stopped';
     // 'Y' if the comp has obtained explicit livetracking consent from
     // pilots; bypasses the DDB Permit-Livetracking block.
@@ -359,7 +360,6 @@ interface UnknownTracker {
     matched?: any;
 }
 
-let unknownTrackers: Record<FlarmID, UnknownTracker> = {}; // All the ones we have seen in launch area but matched or not matched
 
 // DDB entry shape — see lib/ddb for the merged (OGN + FlarmNet) loader.
 type DDBEntry = SharedDDBEntry;
@@ -1148,6 +1148,7 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
         location,
         getNow: makeGetNow(location.officialDelay),
         ownedChannels: new Set(),
+        unknownTrackers: {},
         state: 'starting',
         trackingconsent: row.trackingconsent || 'N',
         summary: {
@@ -1286,6 +1287,13 @@ async function tickCompetition(competition: CompetitionContext) {
 async function tickCompetitionClasses(competition: CompetitionContext): Promise<Datecode | null> {
     if (competition.state === 'stopping' || competition.state === 'stopped') return null;
     const datecode = await getDCode(competition);
+    if (competition.lastDatecode !== datecode) {
+        if (competition.lastDatecode !== undefined) {
+            console.log(`${compShort(competition.compid)}: datecode ${competition.lastDatecode} -> ${datecode}, resetting unknownTrackers`);
+        }
+        competition.unknownTrackers = {};
+        competition.lastDatecode = datecode;
+    }
     getSunset(competition, datecode);
     getProposedScoreId(competition);
     await updateClasses(competition, datecode);
@@ -3419,12 +3427,13 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     // Check if it's a possible launch
     capturePossibleLaunchLanding(flarmId, datecode, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm', competition.compid);
 
-    const firstSighting = !unknownTrackers[flarmId];
+    const ut = competition.unknownTrackers;
+    const firstSighting = !ut[flarmId];
 
     // Store in the unknown list for status display
-    unknownTrackers[flarmId] = {
+    ut[flarmId] = {
         firstTime: data.t,
-        ...unknownTrackers[flarmId],
+        ...ut[flarmId],
         lastTime: data.t,
         flarmid: flarmId
     };
@@ -3439,7 +3448,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     const ddbf = ddb[flarmId];
 
     // If we have matched before then don't do it again
-    if (unknownTrackers[flarmId].message) {
+    if (ut[flarmId].message) {
         return;
     }
 
@@ -3464,8 +3473,8 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         }
 
         if (!Object.keys(matches).length) {
-            unknownTrackers[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
-            console.log(unknownTrackers[flarmId].message);
+            ut[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
+            console.log(ut[flarmId].message);
             return;
         }
 
@@ -3483,9 +3492,9 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
             // check on next load and restores the in-memory block state.
             for (const match of matches) {
                 match.dbTrackerId = 'blocked';
-                unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
-                unknownTrackers[flarmId].message = `${flarmId}: matched to ${match.compno} (${match.className}) from DDB but blocked — declined livetracking (sources: ${sources}, method: ${method})`;
-                console.log(unknownTrackers[flarmId].message);
+                ut[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
+                ut[flarmId].message = `${flarmId}: matched to ${match.compno} (${match.className}) from DDB but blocked — declined livetracking (sources: ${sources}, method: ${method})`;
+                console.log(ut[flarmId].message);
                 if (!readOnly) {
                     db.transaction()
                         .query(
@@ -3524,23 +3533,23 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
 
         if (matches.length > 1) {
             console.log(flarmId + ': warning more than one candidate matched from ddb (' + matches.toString() + ')');
-            unknownTrackers[flarmId].message = 'Multiple DDB matches ' + matches.toString();
+            ut[flarmId].message = 'Multiple DDB matches ' + matches.toString();
         }
 
         // And we will use the first one
         const match = matches[0];
 
-        unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
+        ut[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
 
         // If it's another match for somebody we have matched then ignore it
         if (match.dbTrackerId != flarmId && match.dbTrackerId != 'unknown' && match.dbTrackerId != 'blocked') {
-            unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
-            console.log(unknownTrackers[flarmId].message);
+            ut[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
+            console.log(ut[flarmId].message);
             return;
         }
 
-        unknownTrackers[flarmId].message = `${flarmId}:  found in ddb, matched to ${match.compno} (${match.className})`;
-        console.log(unknownTrackers[flarmId].message);
+        ut[flarmId].message = `${flarmId}:  found in ddb, matched to ${match.compno} (${match.className})`;
+        console.log(ut[flarmId].message);
 
         // Link the two together (same as the db update)
         match.dbTrackerId = flarmId;
@@ -3785,6 +3794,7 @@ function setupOgnWebServer(req, res) {
             return value;
         };
 
+        const unknownTrackers = Object.values(contexts).reduce((acc, c) => Object.assign(acc, c.unknownTrackers), {} as Record<string, UnknownTracker>);
         res.end(JSON.stringify({channels: channels, gliders, unknownTrackers}, replacer));
         return;
     }

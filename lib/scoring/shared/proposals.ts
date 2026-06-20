@@ -10,7 +10,7 @@
 // purely numeric; a demoted pair (negative total) can never be proposed.
 
 import type {Compno, ClassName, FlarmID} from '../../types';
-import type {TrackerMatch} from './findtrackers';
+import type {TrackerMatch, OfficialResult} from './findtrackers';
 import type {ScoreBreakdown, Margins} from './trackerScore';
 import {samePilotName} from './identity';
 import {SCORE_PROPOSE_NATS, DEFAULT_AUTO_MARGIN_NATS} from '../../constants';
@@ -62,6 +62,8 @@ export interface Proposal {
     newTrackerid: string;
     addedIds: FlarmID[];
     removedIds: FlarmID[];
+    /** Subset of removedIds displaced because another pilot was confidently assigned this flarmid. Gets a 'displaced' trackerhistory row. */
+    displacedIds?: FlarmID[];
     reason: string;
     // Start/finish crossing deltas for the chosen flarmid (the addedId, or the
     // assigned flarmid being removed when there's no addedId). These are the
@@ -130,7 +132,7 @@ export interface ProposalGates {
     marginNats?: number;
 }
 
-export function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName, twinClasses: Set<ClassName>, gates: ProposalGates = {}): Proposal[] {
+export function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName, twinClasses: Set<ClassName>, allResults: OfficialResult[], gates: ProposalGates = {}): Proposal[] {
     const proposeNats = gates.proposeNats ?? SCORE_PROPOSE_NATS;
     const marginNats = gates.marginNats ?? DEFAULT_AUTO_MARGIN_NATS;
 
@@ -262,6 +264,62 @@ export function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, cr
             deltaFinish: focusMatch?.deltaFinish ?? null
         });
     }
+    // Displacement pass: for each proposal that adds a flarmid, find the
+    // current holder of that flarmid in this class and generate a removal
+    // for them. Cross-class propagation (same compno in twin classes) is
+    // handled by syncDisplacementProposals in the caller after all per-class
+    // proposals are computed.
+    const currentHolderByFlarmid = new Map<FlarmID, {compno: Compno; name: string; trackerid: string}>();
+    for (const r of allResults) {
+        for (const id of parseCurrentIds(r.trackerid)) {
+            currentHolderByFlarmid.set(id, {compno: r.compno, name: r.name, trackerid: r.trackerid});
+        }
+    }
+    const addedByFlarmid = new Map<FlarmID, Proposal>();
+    for (const p of out) {
+        for (const id of p.addedIds) addedByFlarmid.set(id, p);
+    }
+    const displacementsByCompno = new Map<Compno, {name: string; trackerid: string; ids: FlarmID[]; reasons: string[]}>();
+    for (const [id, adder] of addedByFlarmid) {
+        const holder = currentHolderByFlarmid.get(id);
+        if (!holder || holder.compno === adder.compno) continue;
+        const entry = displacementsByCompno.get(holder.compno) ?? {name: holder.name, trackerid: holder.trackerid, ids: [], reasons: []};
+        entry.ids.push(id);
+        entry.reasons.push(`${id} taken by ${String(adder.compno)}`);
+        displacementsByCompno.set(holder.compno, entry);
+    }
+    for (const [displacedCompno, {name, trackerid, ids, reasons}] of displacementsByCompno) {
+        const reasonSuffix = `displaced: ${reasons.join(', ')}`;
+        const existing = out.find((p) => p.compno === displacedCompno);
+        if (existing) {
+            // Already has a proposal — augment it to also remove the displaced IDs.
+            for (const id of ids) {
+                if (!existing.removedIds.includes(id)) {
+                    existing.removedIds.push(id);
+                    const stripped = parseCurrentIds(existing.newTrackerid).filter((t) => t !== id);
+                    existing.newTrackerid = stripped.length ? stripped.join(',') : 'unknown';
+                }
+                if (!existing.displacedIds) existing.displacedIds = [];
+                if (!existing.displacedIds.includes(id)) existing.displacedIds.push(id);
+            }
+            existing.reason += `; ${reasonSuffix}`;
+        } else {
+            const keptIds = parseCurrentIds(trackerid).filter((id) => !ids.includes(id as FlarmID));
+            out.push({
+                compno: displacedCompno,
+                name,
+                currentTrackerid: trackerid,
+                newTrackerid: keptIds.length ? keptIds.join(',') : 'unknown',
+                addedIds: [],
+                removedIds: [...ids],
+                displacedIds: [...ids],
+                reason: reasonSuffix,
+                deltaStart: null,
+                deltaFinish: null
+            });
+        }
+    }
+
     out.sort((a, b) => a.compno.localeCompare(b.compno));
     return out;
 }
