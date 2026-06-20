@@ -135,9 +135,15 @@ export const DEFAULT_REORDER_WINDOW_SEC = 20; // per-flarmid sliding reorder buf
 export const DEFAULT_TOLERANCE_SEC = 5;
 
 // ---- Tracker-match scoring (findtrackers ambiguity model) ---------------
-// Saturating-knee parameters for per-day signal extraction. Each signal
-// produces s ∈ [0,1] then is multiplied by its nat weight; missing signals
-// contribute 0 (never negative). See plans/the-outside-tolerance-is-recursive-barto.md.
+// Saturating-knee parameters for per-day signal extraction. Positive signals
+// produce s ∈ [0,1] then are multiplied by their nat weight; the two negative
+// signals (negStart, negFinish) produce s ∈ [-1,0] and are modulated by gap
+// coverage quality. See plans/the-outside-tolerance-is-recursive-barto.md.
+//
+// Scale factor for the wrong-time-crossing strand of negStart/negFinish.
+// The signal saturates (reaches -1) at |Δ| = (1 + WRONG_CROSS_SCALE) × T_tol.
+// At scale=5: fully negative at |Δ|=30s; larger deltas stay at -1.
+export const WRONG_CROSS_SCALE = 5;
 
 // Distance from the bracketing segment to the actual line/sector at which
 // the distAtStart/distAtFinish signal still gives full credit; credit decays
@@ -158,15 +164,15 @@ export const DEFAULT_INBBOX_FULL_COUNT = 200;
 // traffic that drifted into our bbox briefly.
 export const DEFAULT_INBBOX_MIN_RATIO = 0.3;
 
-// Decay timescale (days) for prior-day crossing contributions when summing
-// within-comp history.
-export const DEFAULT_PRIOR_DECAY_DAYS = 4;
-
 // The prior carries ONLY start/finish line-crossing evidence (nothing
 // derivable from ddb / the flarm_* identity tables, which are recomputed live).
-// Each task day contributes at most this many nats, so a single shaky day can
-// never dominate but repeated confirmations accumulate across days.
+// Each task day contributes at most this many nats so a single shaky day can
+// never dominate, and the running total is capped at ±MAX_TOTAL_PRIOR_NATS so
+// many confirmed days don't drown out the current day's live signals.
+// No decay: tracker-to-glider mapping doesn't degrade over time, so old
+// confirmed evidence is as valid as recent.
 export const MAX_PRIOR_PER_DAY_NATS = 1.0;
+export const MAX_TOTAL_PRIOR_NATS = 3.0;
 // A flarmid is treated as "confidently held" by a glider once that glider's
 // total score clears this. A weaker contender for the same flarmid then has its
 // (prior + current) score negated, so a poor match can't displace a likely-good
@@ -206,9 +212,14 @@ export const TRACKER_SCORE_WEIGHTS = {
     preLaunch: 0.3, // firstSeen ≥ 30 min before earliest pilot start
     ddbCn: 1.5,
     ddbGlider: 0.3, // weak — many pilots in a comp share a glider type, so this just rules out wildly mismatched gliders
-    baseline: 1.0, // flarmid in current tracker.trackerid for (class, compno)
+    baseline: 1.0, // flarmid in current tracker.trackerid for (class, compno); suppressed when the assignment was auto-sourced from ognddb (double-counts ddbCn)
 
-    prior: 1.0, // already in nats; sum of decayed per-day start/finish crossing scores (≥0, capped at MAX_PRIOR_PER_DAY_NATS/day)
+    // Negative evidence: wrong-time crossing (tracker seen crossing at the wrong pilot's time)
+    // or confirmed positional absence (tracker far from line with good coverage). Both strands
+    // are unified into one signal per side; the stronger strand wins (Math.max) to avoid double-count.
+    negCross: 0.5, // weight applied to negStart and negFinish
+
+    prior: 1.0, // already in nats; sum of decayed per-day crossing scores (may be negative with the new schema); capped at ±MAX_PRIOR_PER_DAY_NATS/day
     // ---- Cross-competition identity evidence (lib/scoring/shared/identity.ts) ----
     // Identity evidence from OTHER competitions (the current comp is excluded —
     // within-comp continuity is `prior`). `xcEvidenceScore` blends the per-facet

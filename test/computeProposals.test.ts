@@ -9,7 +9,7 @@ const OTHER_CLASS = 'std' as ClassName;
 const NO_TWINS = new Set<ClassName>();
 const GATES = {proposeNats: 2.0, marginNats: 2.0};
 
-const breakdown = (total: number): ScoreBreakdown => ({deltaStart: 0, deltaFinish: 0, distAtStart: 0, distAtFinish: 0, inBbox: 0, preLaunch: 0, ddbCn: 0, ddbGlider: 0, baseline: 0, prior: 0, xc: 0, total});
+const breakdown = (total: number): ScoreBreakdown => ({deltaStart: 0, deltaFinish: 0, distAtStart: 0, distAtFinish: 0, negStart: 0, negFinish: 0, inBbox: 0, preLaunch: 0, ddbCn: 0, ddbGlider: 0, baseline: 0, prior: 0, xc: 0, total});
 
 const match = (over: Omit<Partial<TrackerMatch>, 'compno' | 'flarmid'> & {compno: string; flarmid: string}): TrackerMatch => ({
     name: 'A Pilot',
@@ -172,6 +172,51 @@ describe('computeProposals (score-driven)', () => {
         const crossClass: CrossClassMap = new Map([['F1' as FlarmID, [crossHit({compno: 'AA', name: 'jose garcia'})]]]);
         const sm = scoreMapOf([[assigned, scored(0.4)]]);
         expect(computeProposals([assigned], sm, crossClass, THIS_CLASS, NO_TWINS, GATES)).toEqual([]);
+    });
+
+    test('confidence=null does not block replacement: Phase-2 assigned row clears score floor from identity only, replacement still proposed', () => {
+        // Replicates the I|DF1855 pattern: ognddb-assigned, confidence=null,
+        // score driven solely by presence+ddbCN+baseline (no crossing evidence).
+        // A better-evidenced unassigned candidate (DDDC83) should still be proposed.
+        const assigned = match({
+            compno: 'I',
+            flarmid: 'DF1855' as FlarmID,
+            currentTrackerid: 'DF1855',
+            assigned: true,
+            withinTolerance: false,
+            confidence: null,
+            deltaStart: null,
+            deltaFinish: null
+        });
+        const better = match({compno: 'I', flarmid: 'DDDC83' as FlarmID});
+        const sm = scoreMapOf([
+            [assigned, scored(3.0)], // high score, but confidence=null — identity only
+            [better, scored(5.16, {pilotContested: true, margins: {pilotMargin: 2.16, flarmidMargin: 5.16, margin: 2.16}})]
+        ]);
+        const p = computeProposals([assigned, better], sm, new Map(), THIS_CLASS, NO_TWINS, GATES);
+        expect(p).toHaveLength(1);
+        expect(p[0].addedIds).toEqual(['DDDC83']);
+        expect(p[0].removedIds).toEqual(['DF1855']);
+    });
+
+    test('confidence≠null AND score above floor still blocks replacement (the happy path)', () => {
+        // Same setup but confidence is non-null — the already-good gate should fire.
+        const assigned = match({
+            compno: 'I',
+            flarmid: 'DF1855' as FlarmID,
+            currentTrackerid: 'DF1855',
+            assigned: true,
+            withinTolerance: true,
+            confidence: 1,
+            deltaStart: -1,
+            deltaFinish: 0
+        });
+        const better = match({compno: 'I', flarmid: 'DDDC83' as FlarmID});
+        const sm = scoreMapOf([
+            [assigned, scored(3.0)],
+            [better, scored(5.16, {pilotContested: true, margins: {pilotMargin: 2.16, flarmidMargin: 5.16, margin: 2.16}})]
+        ]);
+        expect(computeProposals([assigned, better], sm, new Map(), THIS_CLASS, NO_TWINS, GATES)).toEqual([]);
     });
 
     test('best unassigned candidate wins by score; the proposal carries its crossing deltas', () => {

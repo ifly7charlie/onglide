@@ -2,9 +2,9 @@ import {describe, test, expect} from 'vitest';
 import {
     scoreSignals,
     computeMargins,
-    decayPrior,
     summarisePrior,
     crossingScore,
+    negCrossScore,
     contentionPenalty,
     pilotContentionPenalty,
     applyContentionPenalties,
@@ -16,12 +16,14 @@ import {
 import {
     DEFAULT_TOLERANCE_SEC,
     DEFAULT_DIST_TOLERANCE_KM,
+    DEFAULT_GAP_MODULATION_SEC,
     DEFAULT_INBBOX_FULL_COUNT,
-    DEFAULT_PRIOR_DECAY_DAYS,
     AMBIGUOUS_DELTA_FACTOR,
     MAX_PRIOR_PER_DAY_NATS,
+    MAX_TOTAL_PRIOR_NATS,
     PRIOR_PROTECT_NATS,
-    TRACKER_SCORE_WEIGHTS
+    TRACKER_SCORE_WEIGHTS,
+    WRONG_CROSS_SCALE
 } from '../lib/constants';
 
 const baseSignals = (over: Partial<Signals> = {}): Signals => ({
@@ -222,6 +224,133 @@ describe('scoreSignals', () => {
     });
 });
 
+describe('negStart / negFinish in scoreSignals', () => {
+    test('no crossing, no dist data → both zero', () => {
+        const b = scoreSignals(baseSignals());
+        expect(b.negStart).toBe(0);
+        expect(b.negFinish).toBe(0);
+    });
+
+    test('within-tolerance crossing → negStart stays 0 (positive evidence wins)', () => {
+        const b = scoreSignals(baseSignals({deltaStart: 0, distAtStartKm: 1.0, gapAroundStartSec: 10}));
+        expect(b.negStart).toBe(0);
+        expect(b.deltaStart).toBeGreaterThan(0);
+    });
+
+    test('wrong-time crossing (|Δ| > T_tol) with tight gap → negative negStart', () => {
+        // Δ = T_tol + WRONG_CROSS_SCALE×T_tol/2 → wrongTimeFactor = 0.5
+        const delta = DEFAULT_TOLERANCE_SEC + (WRONG_CROSS_SCALE * DEFAULT_TOLERANCE_SEC) / 2;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0}));
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross * 0.5, 4);
+    });
+
+    test('wrong-time crossing saturates at |Δ| = (1+WRONG_CROSS_SCALE)×T_tol', () => {
+        // At full saturation, wrongTimeFactor = 1; gapMod(0) = 1 → negStart = -negCross weight
+        const saturated = (1 + WRONG_CROSS_SCALE) * DEFAULT_TOLERANCE_SEC;
+        const b = scoreSignals(baseSignals({deltaStart: saturated, gapAroundStartSec: 0}));
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+
+        // Beyond saturation the value is clamped
+        const beyond = saturated * 5;
+        const b2 = scoreSignals(baseSignals({deltaStart: beyond, gapAroundStartSec: 0}));
+        expect(b2.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('confirmed absent (dist > 2×D_tol, no crossing) → negStart = -weight × gapMod', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM; // 1km > 2×0.3
+        const gap = DEFAULT_GAP_MODULATION_SEC; // gapMod = 0.5
+        const b = scoreSignals(baseSignals({distAtStartKm: farKm, gapAroundStartSec: gap}));
+        // notHereFactor = 1, gapMod(30,30) = 0.5 → raw = -0.5 → weighted by negCross
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross * 0.5, 4);
+    });
+
+    test('Math.max: both strands fire, stronger one wins', () => {
+        // wrongTimeFactor = 0.5 (Δ = midpoint), notHereFactor = 1 → max is 1
+        const delta = DEFAULT_TOLERANCE_SEC + (WRONG_CROSS_SCALE * DEFAULT_TOLERANCE_SEC) / 2;
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        const b = scoreSignals(baseSignals({deltaStart: delta, distAtStartKm: farKm, gapAroundStartSec: 0}));
+        // notHere wins; gapMod(0) = 1 → raw = -1 → weighted
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('large gap attenuates the negative signal toward zero', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        const tight = scoreSignals(baseSignals({distAtStartKm: farKm, gapAroundStartSec: 1}));
+        const wide = scoreSignals(baseSignals({distAtStartKm: farKm, gapAroundStartSec: 3000}));
+        expect(tight.negStart).toBeLessThan(-0.1);
+        expect(wide.negStart).toBeGreaterThan(-0.01); // large gap → gapMod near 0
+    });
+
+    test('null gapAroundStartSec → negStart ≈ 0 (no coverage info, gapMod(Infinity)→0)', () => {
+        // Even with a wrong-time crossing, if gap is null the modulator collapses to 0.
+        // gapMod(Infinity) = 1/(1+Infinity) = 0; result may be -0 vs 0 in IEEE 754.
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: null}));
+        expect(Math.abs(b.negStart)).toBeCloseTo(0, 6);
+    });
+
+    test('negStart and negFinish are independent (symmetric behaviour)', () => {
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const bStart = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0}));
+        const bFinish = scoreSignals(baseSignals({deltaFinish: delta, gapAroundFinishSec: 0}));
+        expect(bStart.negStart).toBeLessThan(0);
+        expect(bStart.negFinish).toBe(0);
+        expect(bFinish.negFinish).toBeLessThan(0);
+        expect(bFinish.negStart).toBe(0);
+        // symmetric
+        expect(bStart.negStart).toBeCloseTo(bFinish.negFinish, 6);
+    });
+
+    test('negStart / negFinish are excluded from physicalMatchScore', () => {
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0, deltaFinish: delta, gapAroundFinishSec: 0}));
+        expect(b.negStart).toBeLessThan(0);
+        expect(b.negFinish).toBeLessThan(0);
+        expect(physicalMatchScore(b)).toBe(0); // no positive physical components
+    });
+
+    test('negative signals reduce the total (can drive it below zero)', () => {
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0, deltaFinish: delta, gapAroundFinishSec: 0}));
+        expect(b.total).toBeLessThan(0);
+    });
+});
+
+describe('negCrossScore', () => {
+    test('all null → 0', () => {
+        expect(negCrossScore(null, null, null, null, null, null)).toBe(0);
+    });
+
+    test('wrong-time start crossing at saturation → -(negCross weight)', () => {
+        const saturated = (1 + WRONG_CROSS_SCALE) * DEFAULT_TOLERANCE_SEC;
+        const score = negCrossScore(saturated, 0, null, null, null, null);
+        expect(score).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('confirmed absent on both sides adds both contributions', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        const score = negCrossScore(null, 0, farKm, null, 0, farKm);
+        // Each side: notHereFactor=1, gapMod(0)=1 → raw=-1 → weight × -1 per side
+        expect(score).toBeCloseTo(-2 * TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('within-tolerance crossing on start side → start contribution = 0', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        // deltaStart within tolerance: even though dist is far, crossing took priority
+        const score = negCrossScore(0, 0, farKm, null, 0, farKm);
+        // start is clear (within tol), finish is absent → only finish contributes
+        expect(score).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('gap modulation applies: large gap attenuates negative contribution', () => {
+        const saturated = (1 + WRONG_CROSS_SCALE) * DEFAULT_TOLERANCE_SEC;
+        const tightGap = negCrossScore(saturated, 0, null, null, null, null);
+        const wideGap = negCrossScore(saturated, 3000, null, null, null, null);
+        expect(tightGap).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+        expect(wideGap).toBeGreaterThan(-0.01); // almost zero
+    });
+});
+
 describe('physicalMatchScore', () => {
     test('sums only the physical-track components, excluding prior/baseline/ddb/xc', () => {
         const b = scoreSignals(
@@ -266,20 +395,6 @@ describe('computeMargins', () => {
     });
 });
 
-describe('decayPrior', () => {
-    test('zero age preserves the score', () => {
-        expect(decayPrior(2.0, 0)).toBe(2.0);
-    });
-
-    test('ages decay by the configured τ (default 4 days)', () => {
-        const decayed = decayPrior(2.0, 4);
-        expect(decayed).toBeCloseTo(2.0 / Math.E, 4);
-    });
-
-    test('large ages decay toward zero', () => {
-        expect(decayPrior(2.0, 100)).toBeLessThan(0.001);
-    });
-});
 
 describe('inBboxRatio / passesCandidateFilter', () => {
     test('zero packets → ratio 0, fails filter', () => {
@@ -332,22 +447,18 @@ describe('summarisePrior', () => {
         expect(summarisePrior([])).toBe(0);
     });
 
-    test('single row at age 0 contributes its full per-day score', () => {
+    test('single row contributes its full score regardless of age', () => {
         expect(summarisePrior([{scoreNats: 0.8, taskDaysAgo: 0}])).toBeCloseTo(0.8, 6);
+        expect(summarisePrior([{scoreNats: 0.8, taskDaysAgo: 10}])).toBeCloseTo(0.8, 6);
     });
 
-    test('decay is exp(-ageDays / τ) with default τ', () => {
-        const decayed = summarisePrior([{scoreNats: 1.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}]);
-        expect(decayed).toBeCloseTo(1.0 / Math.E, 4);
-    });
-
-    test('repeated confirmations across days accumulate (each independently decayed)', () => {
+    test('repeated confirmations sum directly without decay', () => {
         const total = summarisePrior([
-            {scoreNats: 1.0, taskDaysAgo: 0},
-            {scoreNats: 1.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS},
-            {scoreNats: 1.0, taskDaysAgo: 2 * DEFAULT_PRIOR_DECAY_DAYS}
+            {scoreNats: 0.6, taskDaysAgo: 1},
+            {scoreNats: 0.8, taskDaysAgo: 2},
+            {scoreNats: 1.0, taskDaysAgo: 3}
         ]);
-        expect(total).toBeCloseTo(1.0 + 1.0 / Math.E + 1.0 / (Math.E * Math.E), 4);
+        expect(total).toBeCloseTo(2.4, 6);
     });
 
     test("negative ages (future rows, shouldn't happen) are ignored", () => {
@@ -355,14 +466,27 @@ describe('summarisePrior', () => {
             {scoreNats: 1.0, taskDaysAgo: -1},
             {scoreNats: 0.7, taskDaysAgo: 0}
         ]);
-        expect(total).toBeCloseTo(0.7, 4);
+        expect(total).toBeCloseTo(0.7, 6);
     });
 
-    test('task-day decay ignores calendar gaps — a 4-task-day prior decays as 4 days regardless of intervening weather days', () => {
-        // The caller computes taskDaysAgo from task-day rank deltas, so by
-        // construction summarisePrior never sees the calendar gap.
-        const a = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}]);
-        expect(a).toBeCloseTo(1.0 / Math.E, 4);
+    test('positive total is capped at MAX_TOTAL_PRIOR_NATS', () => {
+        const rows = Array.from({length: 10}, (_, i) => ({scoreNats: MAX_PRIOR_PER_DAY_NATS, taskDaysAgo: i + 1}));
+        expect(summarisePrior(rows)).toBeCloseTo(MAX_TOTAL_PRIOR_NATS, 6);
+    });
+
+    test('negative total is capped at -MAX_TOTAL_PRIOR_NATS', () => {
+        const rows = Array.from({length: 10}, (_, i) => ({scoreNats: -MAX_PRIOR_PER_DAY_NATS, taskDaysAgo: i + 1}));
+        expect(summarisePrior(rows)).toBeCloseTo(-MAX_TOTAL_PRIOR_NATS, 6);
+    });
+
+    test('mixed positive and negative rows combine before cap', () => {
+        // 2 good days then 1 bad day: net = 2*1.0 + 1*(-0.5) = 1.5 (under cap)
+        const total = summarisePrior([
+            {scoreNats: 1.0, taskDaysAgo: 3},
+            {scoreNats: 1.0, taskDaysAgo: 2},
+            {scoreNats: -0.5, taskDaysAgo: 1}
+        ]);
+        expect(total).toBeCloseTo(1.5, 6);
     });
 });
 

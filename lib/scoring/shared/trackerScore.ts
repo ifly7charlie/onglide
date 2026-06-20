@@ -2,12 +2,12 @@
 // signal extraction, score combination, two-sided margin computation. No DB,
 // no I/O. Persistence and assignment optimisation live elsewhere.
 //
-// Units: nats. Score = Σ wᵢ · sᵢ where sᵢ ∈ [0,1] is a saturating support
-// function and wᵢ is the per-signal weight. Missing signals contribute 0,
-// never negative — contradictions emerge by competing pairs scoring more.
-// `prior` carries only start/finish line-crossing evidence from earlier task
-// days (≥0, capped per day); a whole pair's total is driven negative separately
-// by `contentionPenalty` when a different glider confidently holds the flarmid.
+// Units: nats. Score = Σ wᵢ · sᵢ where positive signals sᵢ ∈ [0,1] use
+// saturating support functions. Two unified negative signals (negStart, negFinish)
+// take sᵢ ∈ [-1,0] — fired when the tracker is confirmed to NOT match this pilot's
+// line crossing (wrong-time crossing or positionally absent with good coverage).
+// `prior` carries start/finish evidence from earlier task days, capped per day
+// and in total; whole-pair totals may also be driven negative by `contentionPenalty`.
 
 import {
     DEFAULT_TOLERANCE_SEC,
@@ -15,9 +15,10 @@ import {
     DEFAULT_GAP_MODULATION_SEC,
     DEFAULT_INBBOX_FULL_COUNT,
     DEFAULT_INBBOX_MIN_RATIO,
-    DEFAULT_PRIOR_DECAY_DAYS,
+    WRONG_CROSS_SCALE,
     AMBIGUOUS_DELTA_FACTOR,
     MAX_PRIOR_PER_DAY_NATS,
+    MAX_TOTAL_PRIOR_NATS,
     PRIOR_PROTECT_NATS,
     TRACKER_SCORE_WEIGHTS
 } from '../../constants';
@@ -33,8 +34,6 @@ export interface ScoreKnees {
     inBboxFullCount: number;
     /** Minimum inBboxPackets / (inBboxPackets + bboxRejectedPackets) for a flarmid to be a candidate. Below this, presence weight is forced to 0. */
     inBboxMinRatio: number;
-    /** Decay timescale (days) for prior-day pair_scores. */
-    priorDecayDays: number;
 }
 
 export const DEFAULT_KNEES: ScoreKnees = {
@@ -42,8 +41,7 @@ export const DEFAULT_KNEES: ScoreKnees = {
     distToleranceKm: DEFAULT_DIST_TOLERANCE_KM,
     gapModulationSec: DEFAULT_GAP_MODULATION_SEC,
     inBboxFullCount: DEFAULT_INBBOX_FULL_COUNT,
-    inBboxMinRatio: DEFAULT_INBBOX_MIN_RATIO,
-    priorDecayDays: DEFAULT_PRIOR_DECAY_DAYS
+    inBboxMinRatio: DEFAULT_INBBOX_MIN_RATIO
 };
 
 export type ScoreWeights = typeof TRACKER_SCORE_WEIGHTS;
@@ -74,7 +72,7 @@ export interface Signals {
     ddbGliderMatch: boolean;
     /** This flarmid is currently in the operator-set tracker.trackerid for the pilot. */
     baselineMatch: boolean;
-    /** Sum of decayed per-day start/finish crossing scores for this (compno, flarmid) within the same comp. Already in nats; ≥0 (each day capped at MAX_PRIOR_PER_DAY_NATS). Carries no ddb/identity-derived evidence. */
+    /** Sum of per-day start/finish crossing scores for this (compno, flarmid) within the same comp, capped at ±MAX_TOTAL_PRIOR_NATS. Each day capped at ±MAX_PRIOR_PER_DAY_NATS; no decay applied. Carries no ddb/identity-derived evidence. */
     priorNats: number;
 
     /**
@@ -100,6 +98,10 @@ export interface ScoreBreakdown {
     deltaFinish: number;
     distAtStart: number;
     distAtFinish: number;
+    /** ≤0: unified negative evidence for start — wrong-time crossing OR confirmed positional absence, whichever is stronger, modulated by coverage quality. */
+    negStart: number;
+    /** ≤0: same for finish. */
+    negFinish: number;
     inBbox: number;
     preLaunch: number;
     ddbCn: number;
@@ -161,6 +163,30 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
             ? 0
             : distSupport(s.distAtFinishKm, D_tol) * gapMod(s.gapAroundFinishSec, T_gap);
 
+    // Negative evidence: wrong-time crossing (tracker crossed at a different pilot's time)
+    // and confirmed positional absence (tracker was far from the line at the official time
+    // with good coverage). Both strands are computed as [0,1] factors; we take the stronger
+    // (Math.max) to avoid double-counting when both fire for the same physical fact, then
+    // negate and scale by gap-coverage quality.
+    //
+    // wrongTimeFactor: saturates to 1 at |Δ| = (1+WRONG_CROSS_SCALE)×T_tol (=30s default).
+    const wrongTimeStartFactor = s.deltaStart !== null && Math.abs(s.deltaStart) > T_tol
+        ? sat((Math.abs(s.deltaStart) - T_tol) / (WRONG_CROSS_SCALE * T_tol))
+        : 0;
+    // notHereFactor: 1 when confirmed far (> 2×D_tol) and no within-tolerance crossing.
+    const notHereStartFactor = !startCrossingWithinTol && s.distAtStartKm !== null && s.gapAroundStartSec !== null && s.distAtStartKm > 2 * D_tol ? 1.0 : 0;
+    const sNegStart = (wrongTimeStartFactor > 0 || notHereStartFactor > 0)
+        ? -Math.max(wrongTimeStartFactor, notHereStartFactor) * gapMod(s.gapAroundStartSec ?? Infinity, T_gap)
+        : 0;
+
+    const wrongTimeFinishFactor = s.deltaFinish !== null && Math.abs(s.deltaFinish) > T_tol
+        ? sat((Math.abs(s.deltaFinish) - T_tol) / (WRONG_CROSS_SCALE * T_tol))
+        : 0;
+    const notHereFinishFactor = !finishCrossingWithinTol && s.distAtFinishKm !== null && s.gapAroundFinishSec !== null && s.distAtFinishKm > 2 * D_tol ? 1.0 : 0;
+    const sNegFinish = (wrongTimeFinishFactor > 0 || notHereFinishFactor > 0)
+        ? -Math.max(wrongTimeFinishFactor, notHereFinishFactor) * gapMod(s.gapAroundFinishSec ?? Infinity, T_gap)
+        : 0;
+
     // Presence: count saturates at N_full and is multiplied by the in/out
     // ratio so a flarmid that mostly flew elsewhere doesn't get credit.
     const ratio = inBboxRatio(s);
@@ -182,6 +208,8 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         deltaFinish: weights.deltaFinish * sFinish,
         distAtStart: weights.distAtStart * sDistStart,
         distAtFinish: weights.distAtFinish * sDistFinish,
+        negStart: weights.negCross * sNegStart,
+        negFinish: weights.negCross * sNegFinish,
         inBbox: weights.inBbox * sInBbox,
         preLaunch: weights.preLaunch * sPreLaunch,
         ddbCn: weights.ddbCn * sDdbCn,
@@ -198,6 +226,8 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         breakdown.deltaFinish +
         breakdown.distAtStart +
         breakdown.distAtFinish +
+        breakdown.negStart +
+        breakdown.negFinish +
         breakdown.inBbox +
         breakdown.preLaunch +
         breakdown.ddbCn +
@@ -236,24 +266,62 @@ export function crossingScore(deltaStart: number | null, deltaFinish: number | n
     return Math.min(MAX_PRIOR_PER_DAY_NATS, weights.deltaStart * sStart + weights.deltaFinish * sFinish);
 }
 
-/** Decay a single prior crossing score by its age in task days. */
-export function decayPrior(scoreNats: number, ageDays: number, knees: ScoreKnees = DEFAULT_KNEES): number {
-    if (ageDays <= 0) return scoreNats;
-    return scoreNats * Math.exp(-ageDays / knees.priorDecayDays);
+/**
+ * Negative contribution to the per-day prior from stored dist/gap data in
+ * trackerhistory. Mirrors the sNegStart/sNegFinish logic in `scoreSignals`
+ * but works from persisted values (dist_at_start, gap_around_start, etc.)
+ * rather than live Signals. Returns a value in [-2×weights.negCross, 0].
+ * Called by `loadPriorEvidence` for rows where the new columns are present.
+ */
+export function negCrossScore(
+    deltaStart: number | null,
+    gapAroundStartSec: number | null,
+    distAtStartKm: number | null,
+    deltaFinish: number | null,
+    gapAroundFinishSec: number | null,
+    distAtFinishKm: number | null,
+    weights: ScoreWeights = DEFAULT_WEIGHTS,
+    knees: ScoreKnees = DEFAULT_KNEES
+): number {
+    const T_tol = knees.timeToleranceSec;
+    const D_tol = knees.distToleranceKm;
+    const T_gap = knees.gapModulationSec;
+
+    const startCrossingWithinTol = deltaStart !== null && Math.abs(deltaStart) <= T_tol;
+    const wrongTimeStartFactor = deltaStart !== null && Math.abs(deltaStart) > T_tol
+        ? sat((Math.abs(deltaStart) - T_tol) / (WRONG_CROSS_SCALE * T_tol))
+        : 0;
+    const notHereStartFactor = !startCrossingWithinTol && distAtStartKm !== null && gapAroundStartSec !== null && distAtStartKm > 2 * D_tol ? 1.0 : 0;
+    const sNegStart = (wrongTimeStartFactor > 0 || notHereStartFactor > 0)
+        ? -Math.max(wrongTimeStartFactor, notHereStartFactor) * gapMod(gapAroundStartSec ?? Infinity, T_gap)
+        : 0;
+
+    const finishCrossingWithinTol = deltaFinish !== null && Math.abs(deltaFinish) <= T_tol;
+    const wrongTimeFinishFactor = deltaFinish !== null && Math.abs(deltaFinish) > T_tol
+        ? sat((Math.abs(deltaFinish) - T_tol) / (WRONG_CROSS_SCALE * T_tol))
+        : 0;
+    const notHereFinishFactor = !finishCrossingWithinTol && distAtFinishKm !== null && gapAroundFinishSec !== null && distAtFinishKm > 2 * D_tol ? 1.0 : 0;
+    const sNegFinish = (wrongTimeFinishFactor > 0 || notHereFinishFactor > 0)
+        ? -Math.max(wrongTimeFinishFactor, notHereFinishFactor) * gapMod(gapAroundFinishSec ?? Infinity, T_gap)
+        : 0;
+
+    return weights.negCross * (sNegStart + sNegFinish);
 }
 
-/** Sum of decayed per-day crossing scores for one (compno, flarmid) pair. Each
- *  row carries that day's `crossingScore` (≥0, already capped) and an age in
- *  task-days (calendar days are *not* used — comp rest days shouldn't decay
- *  priors). Repeated confirmations accumulate; a no-crossing day contributes 0.
+/** Sum of per-day crossing scores for one (compno, flarmid) pair, capped at
+ *  ±MAX_TOTAL_PRIOR_NATS. Each row carries that day's `crossingScore + negCrossScore`
+ *  (already capped at ±MAX_PRIOR_PER_DAY_NATS). No decay: tracker-to-glider
+ *  mapping doesn't degrade with age, so old confirmed evidence is as valid as recent.
+ *  The total cap prevents accumulated days from dominating current-day live signals.
+ *  taskDaysAgo is retained to guard against impossible future rows (taskDaysAgo < 0).
  */
-export function summarisePrior(rows: {scoreNats: number; taskDaysAgo: number}[], knees: ScoreKnees = DEFAULT_KNEES): number {
+export function summarisePrior(rows: {scoreNats: number; taskDaysAgo: number}[]): number {
     let total = 0;
     for (const r of rows) {
         if (r.taskDaysAgo < 0) continue;
-        total += decayPrior(r.scoreNats, r.taskDaysAgo, knees);
+        total += r.scoreNats;
     }
-    return total;
+    return Math.max(-MAX_TOTAL_PRIOR_NATS, Math.min(MAX_TOTAL_PRIOR_NATS, total));
 }
 
 /**

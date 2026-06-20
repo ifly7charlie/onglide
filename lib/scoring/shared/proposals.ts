@@ -146,10 +146,26 @@ export function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, cr
     for (const [compno, rows] of byPilot) {
         const scored = (m: TrackerMatch): ScoredPair | undefined => scoreMap.get(scoreKey(compno, m.flarmid));
 
-        // Already-good assignment: any assigned, non-demoted pair clearing the
-        // proposal floor means the operator's choice stands — leave the pilot
-        // alone even if a higher-scoring alternative exists.
-        if (rows.some((m) => m.assigned && scored(m) && !scored(m)!.demoted && scored(m)!.score.total >= proposeNats)) continue;
+        // Already-good assignment: any assigned, non-demoted pair WITH usable
+        // crossing evidence (confidence !== null) clearing the proposal floor
+        // means the operator's choice stands. Phase-2 rows (confidence=null —
+        // no crossings, or only one side within tolerance) are excluded from
+        // this check: an assigned tracker that has never been seen crossing the
+        // line should not block a better-evidenced replacement even if its
+        // identity signals (ddbCN, baseline) push its total above the floor.
+        const alreadyGood = rows.some((m) => m.assigned && m.confidence !== null && scored(m) && !scored(m)!.demoted && scored(m)!.score.total >= proposeNats);
+        if (alreadyGood) {
+            // Even when left alone, report any assigned tracker that has net-negative
+            // evidence — likely a mismatched second tracker on a multi-tracker pilot.
+            for (const m of rows) {
+                if (!m.assigned) continue;
+                const s = scored(m);
+                if (s && s.score.total < 0) {
+                    console.log(`  WARN: ${String(compno)} has assigned ${m.flarmid} with S=${s.score.total.toFixed(2)} (possible mismatched second tracker)`);
+                }
+            }
+            continue;
+        }
 
         // Add candidate: highest post-demotion total among unassigned pairs.
         // Demoted pairs are never proposed — a contention guard concluded the

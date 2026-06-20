@@ -389,6 +389,10 @@ CREATE TABLE `trackerhistory` (
   `datecode` char(3) DEFAULT NULL,
   `delta_start` smallint DEFAULT NULL,
   `delta_finish` smallint DEFAULT NULL,
+  `dist_at_start` float DEFAULT NULL,
+  `gap_around_start` float DEFAULT NULL,
+  `dist_at_finish` float DEFAULT NULL,
+  `gap_around_finish` float DEFAULT NULL,
   KEY `idx_class_datecode_method` (`class`, `datecode`, `method`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 

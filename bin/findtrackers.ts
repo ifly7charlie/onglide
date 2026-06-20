@@ -15,7 +15,7 @@ import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/typ
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
-import {scoreSignals, computeMargins, summarisePrior, crossingScore, applyContentionPenalties, physicalMatchScore, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
+import {scoreSignals, computeMargins, summarisePrior, crossingScore, negCrossScore, applyContentionPenalties, physicalMatchScore, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
 import {computeProposals, scoreKey, parseCurrentIds, crossClassHitsFor, type Proposal, type ScoreMap, type CrossClassMap} from '../lib/scoring/shared/proposals';
 import {loadMergedDDB, gliderEquivalent, isBlocked, type DDBEntry} from '../lib/ddb';
 import {
@@ -32,7 +32,7 @@ import {
     type PerCompEvidence,
     type XcEvidence
 } from '../lib/scoring/shared/identity';
-import {DEFAULT_LEDGER_MIN_NATS, DEFAULT_AUTO_MARGIN_NATS, DEFAULT_SCORE_MIN_NATS, IDENTITY_EXPIRY_MONTHS} from '../lib/constants';
+import {DEFAULT_LEDGER_MIN_NATS, DEFAULT_AUTO_MARGIN_NATS, DEFAULT_SCORE_MIN_NATS, IDENTITY_EXPIRY_MONTHS, MAX_PRIOR_PER_DAY_NATS} from '../lib/constants';
 
 import prompts from 'prompts';
 import escape from 'sql-template-strings';
@@ -110,6 +110,10 @@ interface ClassMatches {
     // Per-pilot cross-comp identity fingerprint (empty when identity disabled).
     // Built in pass 1a and reused for collection in pass 3.
     candidateFacets: Map<Compno, IdentityFacets>;
+    // Most recent authoritative trackerhistory method per `${compno}|${flarmid}`.
+    // Used to suppress the baseline signal when the assignment was auto-sourced
+    // from ognddb (which already contributes via ddbCn, making baseline a double-count).
+    assignmentMethodMap: Map<string, string>;
     // Filled in pass 1c — scoring needs the group-level twin-pilot evidence
     // from pass 1b, so it can't happen during the per-class scan.
     scoreMap: ScoreMap;
@@ -283,6 +287,8 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         const priorMap = await loadPriorEvidence(datecode, className, excludeStart);
         if (priorMap.size) console.log(`  loaded ${priorMap.size} prior crossing-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
 
+        const assignmentMethodMap = await loadAssignmentMethods(className);
+
         // Cross-comp identity: build each pilot's privacy-preserving
         // fingerprint and load what we've previously associated with the
         // candidate flarmids in OTHER comps. Disabled (empty) without a secret.
@@ -293,7 +299,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         );
         if (priorAircraft.size) console.log(`  loaded cross-comp identity for ${priorAircraft.size} flarmid${priorAircraft.size === 1 ? '' : 's'}`);
 
-        classMatches.push({job, results, matches, excludeStart, priorMap, priorAircraft, candidateFacets, scoreMap: new Map(), twinWarnings: []});
+        classMatches.push({job, results, matches, excludeStart, priorMap, priorAircraft, candidateFacets, assignmentMethodMap, scoreMap: new Map(), twinWarnings: []});
     }
 
     // Pass 1b — group-level maps.
@@ -360,7 +366,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     // Pass 1c — score each class independently (no twin signal — the
     // identification decision is shared in pass 3, not pre-empted here).
     for (const cm of classMatches) {
-        cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeStart);
+        cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeStart, cm.assignmentMethodMap);
     }
 
     // Pass 2 — flarmid → unambiguous within-tolerance hits across the group.
@@ -458,7 +464,8 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         // ledger floor that wasn't covered by an applied startmatch row.
         // This is the multi-day fuel — written every run, not just on
         // proposal-driven changes.
-        await writeEvidence(className, datecode, scoreMap, accepted);
+        const diagMap = new Map(matches.map((m) => [scoreKey(m.compno, m.flarmid), m.diag]));
+        await writeEvidence(className, datecode, scoreMap, accepted, diagMap);
         // Cross-comp identity: collect aircraft/pilot evidence from confident
         // matches only (never DDB-blocked devices). Persists across comps.
         await writeAircraftEvidence(job, matches, scoreMap, accepted, cm.candidateFacets, ddb);
@@ -651,39 +658,66 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
 // and tracks the same physical glider.
 type PriorMap = Map<string, number>;
 let priorEvidenceUnavailable = false; // latched after first schema failure so we don't spam the log
+// Latched after the first missing-column error for the new dist/gap columns
+// (conf/sql/migrations/*_trackerhistory_neg_signals.sql not yet applied).
+// When true, prior evidence still uses the existing delta_start/delta_finish.
+let negEvidenceUnavailable = false;
+
 async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName, excludeStart = false): Promise<PriorMap> {
     if (priorEvidenceUnavailable) return new Map();
-    let priorRows: {compno: Compno; flarmid: string; datecode: string; delta_start: number | null; delta_finish: number | null; method: string}[] = [];
-    try {
-        priorRows = await mysql.query<
-            {
-                compno: Compno;
-                flarmid: string;
-                datecode: string;
-                delta_start: number | null;
-                delta_finish: number | null;
-                method: string;
-            }[]
-        >(escape`
-            SELECT compno, flarmid, datecode, delta_start, delta_finish, method
-            FROM trackerhistory
-            WHERE class = ${className}
-              AND datecode IS NOT NULL
-              AND datecode <> ${String(currentDatecode)}
-              AND method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
-        `);
-    } catch (e: any) {
-        // If the migration hasn't been applied yet, the `class` /
-        // `datecode` / `delta_*` columns on trackerhistory don't exist
-        // — give up on priors for this run and keep going so the scan
-        // still produces a useful report.
-        const msg = String(e?.code ?? e?.message ?? e);
-        if (/Unknown column|BAD_FIELD_ERROR|ER_BAD_FIELD/i.test(msg)) {
-            console.warn(`  (prior-evidence schema not applied yet — skipping multi-day priors this run. Apply conf/sql/migrations/20260510_*.sql to enable.)`);
-            priorEvidenceUnavailable = true;
-            return new Map();
+    type FullRow = {compno: Compno; flarmid: string; datecode: string; delta_start: number | null; delta_finish: number | null; method: string; dist_at_start: number | null; gap_around_start: number | null; dist_at_finish: number | null; gap_around_finish: number | null};
+    let priorRows: FullRow[] = [];
+    let fetchedRows = false;
+
+    if (!negEvidenceUnavailable) {
+        try {
+            priorRows = await mysql.query<FullRow[]>(escape`
+                SELECT compno, flarmid, datecode, delta_start, delta_finish, method,
+                       dist_at_start, gap_around_start, dist_at_finish, gap_around_finish
+                FROM trackerhistory
+                WHERE class = ${className}
+                  AND datecode IS NOT NULL
+                  AND datecode <> ${String(currentDatecode)}
+                  AND method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
+            `);
+            fetchedRows = true;
+        } catch (e: any) {
+            const msg = String(e?.code ?? e?.message ?? e);
+            if (/Unknown column|BAD_FIELD_ERROR|ER_BAD_FIELD/i.test(msg)) {
+                negEvidenceUnavailable = true;
+                console.warn(`  (negative-evidence schema not applied yet — prior will use crossing deltas only. Apply conf/sql/migrations/*_trackerhistory_neg_signals.sql to enable.)`);
+            } else {
+                throw e;
+            }
         }
-        throw e;
+    }
+
+    if (!fetchedRows) {
+        // Migration for dist/gap columns not yet applied — fall back to crossing deltas only.
+        type BaseRow = {compno: Compno; flarmid: string; datecode: string; delta_start: number | null; delta_finish: number | null; method: string};
+        try {
+            const base = await mysql.query<BaseRow[]>(escape`
+                SELECT compno, flarmid, datecode, delta_start, delta_finish, method
+                FROM trackerhistory
+                WHERE class = ${className}
+                  AND datecode IS NOT NULL
+                  AND datecode <> ${String(currentDatecode)}
+                  AND method NOT IN ('ogn-blocked','flarmnet-blocked','ddb-blocked','none')
+            `);
+            priorRows = base.map((r) => ({...r, dist_at_start: null, gap_around_start: null, dist_at_finish: null, gap_around_finish: null}));
+        } catch (e: any) {
+            // If the migration hasn't been applied yet, the `class` /
+            // `datecode` / `delta_*` columns on trackerhistory don't exist
+            // — give up on priors for this run and keep going so the scan
+            // still produces a useful report.
+            const msg = String(e?.code ?? e?.message ?? e);
+            if (/Unknown column|BAD_FIELD_ERROR|ER_BAD_FIELD/i.test(msg)) {
+                console.warn(`  (prior-evidence schema not applied yet — skipping multi-day priors this run. Apply conf/sql/migrations/20260510_*.sql to enable.)`);
+                priorEvidenceUnavailable = true;
+                return new Map();
+            }
+            throw e;
+        }
     }
     // Rank the evidence-bearing datecodes (current day included) by string
     // order so taskDaysAgo counts task days, not calendar days.
@@ -705,13 +739,50 @@ async function loadPriorEvidence(currentDatecode: Datecode, className: ClassName
         // For a grandprix common-start class the start crossing is excluded
         // (identical for everyone), so the prior is finish-only.
         const ds = excludeStart || r.delta_start === null ? null : Number(r.delta_start);
-        arr.push({scoreNats: crossingScore(ds, r.delta_finish === null ? null : Number(r.delta_finish)), taskDaysAgo});
+        const df = r.delta_finish === null ? null : Number(r.delta_finish);
+        const pos = crossingScore(ds, df);
+        const neg = negEvidenceUnavailable
+            ? 0
+            : negCrossScore(
+                  ds,
+                  r.gap_around_start === null ? null : Number(r.gap_around_start),
+                  r.dist_at_start === null ? null : Number(r.dist_at_start),
+                  df,
+                  r.gap_around_finish === null ? null : Number(r.gap_around_finish),
+                  r.dist_at_finish === null ? null : Number(r.dist_at_finish)
+              );
+        // Cap the combined per-day contribution symmetrically at ±MAX_PRIOR_PER_DAY_NATS
+        // so a single bad day can't dominate the prior in either direction.
+        const scoreNats = Math.max(-MAX_PRIOR_PER_DAY_NATS, Math.min(MAX_PRIOR_PER_DAY_NATS, pos + neg));
+        arr.push({scoreNats, taskDaysAgo});
         grouped.set(key, arr);
     }
 
     const out: PriorMap = new Map();
     for (const [key, rows] of grouped) {
         out.set(key, summarisePrior(rows));
+    }
+    return out;
+}
+
+// Most recent authoritative trackerhistory method per `${compno}|${flarmid}`.
+// Used to suppress the `baseline` signal when assignment came from ognddb, which
+// already contributes via ddbCn=1.5 (double-counting the same DDB source).
+// Returns empty map when the class column is unavailable (priorEvidenceUnavailable).
+async function loadAssignmentMethods(className: ClassName): Promise<Map<string, string>> {
+    if (priorEvidenceUnavailable) return new Map(); // class column not in schema
+    const rows = await mysql.query<{compno: string; flarmid: string; method: string}[]>(escape`
+        SELECT compno, flarmid, method
+        FROM trackerhistory
+        WHERE class = ${className}
+          AND method NOT IN ('evidence', 'ogn-blocked', 'flarmnet-blocked', 'ddb-blocked', 'none')
+        ORDER BY changed DESC
+    `);
+    // Most-recent-first due to ORDER BY; take first seen per (compno, flarmid).
+    const out = new Map<string, string>();
+    for (const r of rows) {
+        const k = `${String(r.compno)}|${r.flarmid}`;
+        if (!out.has(k)) out.set(k, r.method);
     }
     return out;
 }
@@ -1175,7 +1246,8 @@ function computeScoreMap(
     priorMap: PriorMap,
     candidateFacets: Map<Compno, IdentityFacets> = new Map(),
     priorAircraft: PriorAircraftMap = new Map(),
-    excludeStart = false
+    excludeStart = false,
+    assignmentMethodMap: Map<string, string> = new Map()
 ): ScoreMap {
     if (!matches.length) return new Map();
     const earliestPilotStartUtc = results.reduce((m, r) => Math.min(m, r.startUtc), Number.POSITIVE_INFINITY);
@@ -1196,7 +1268,12 @@ function computeScoreMap(
         const link = ddbLinkFor(ddbEntry, m.compno, r?.glidertype ?? '');
         const priorNats = priorMap.get(scoreKey(m.compno, m.flarmid)) ?? 0;
         const xc = computeXcBlock(m, candidateFacets, priorAircraft, nowMs);
-        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart);
+        // Suppress baseline when the assignment came from ognddb — that method already
+        // contributes via ddbCn=1.5, so baseline=1.0 would double-count the same source.
+        // For external assignments (robocontrol, soaringspotscrape, sgp, startmatch),
+        // baseline is independent evidence and is kept.
+        const baselineMatch = m.assigned && assignmentMethodMap.get(scoreKey(m.compno, m.flarmid)) !== 'ognddb';
+        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart, baselineMatch);
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
         xcFacetsByKey.set(scoreKey(m.compno, m.flarmid), xc.facets);
@@ -1292,11 +1369,14 @@ function ddbLinkFor(ddb: DDBEntry | undefined, compno: Compno, glidertype: strin
     return {cn, glider, tag: cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none'};
 }
 
-function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false): Signals {
+function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false, baselineMatch = m.assigned): Signals {
     const d = m.diag;
     // Grandprix common-start: the start crossing is identical for every pilot,
     // so drop it (and its distance) to null — scoreSignals then contributes 0
     // for both, leaving the finish crossing to do the discriminating.
+    // Note: gapAroundStartSec and distAtStartKm are also nulled so the
+    // negStart signal (confirmed-positional-absence) does not fire either —
+    // there's no useful per-pilot start-line evidence in this mode.
     return {
         deltaStart: excludeStart ? null : m.deltaStart,
         deltaFinish: m.deltaFinish,
@@ -1310,7 +1390,7 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: 
         earliestPilotStartUtc,
         ddbCnMatch: link.cn,
         ddbGliderMatch: link.glider,
-        baselineMatch: m.assigned,
+        baselineMatch,
         priorNats,
         xcNats: xc.nats,
         ambiguous: m.ambiguous
@@ -1445,6 +1525,8 @@ function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boole
     if (score.deltaFinish > 0) contribs.push(`Δf=${score.deltaFinish.toFixed(2)}`);
     if (score.distAtStart > 0) contribs.push(`distS=${score.distAtStart.toFixed(2)}`);
     if (score.distAtFinish > 0) contribs.push(`distF=${score.distAtFinish.toFixed(2)}`);
+    if (score.negStart < 0) contribs.push(`negS=${score.negStart.toFixed(2)}`);
+    if (score.negFinish < 0) contribs.push(`negF=${score.negFinish.toFixed(2)}`);
     if (score.inBbox > 0) contribs.push(`presence=${score.inBbox.toFixed(2)}`);
     if (score.preLaunch > 0) contribs.push(`pre=${score.preLaunch.toFixed(2)}`);
     if (score.ddbCn > 0) contribs.push(`ddbCN=${score.ddbCn.toFixed(2)}`);
@@ -1626,7 +1708,7 @@ async function applyProposals(className: ClassName, datecode: Datecode, proposal
         `);
         t.query(escape`
             UPDATE tracker
-               SET trackerid = ${p.newTrackerid}
+               SET trackerid = ${p.newTrackerid}, feedid = 'findtracker'
              WHERE class = ${className} AND compno = ${p.compno}
         `);
         // One trackerhistory row per ADDED flarmid (not per proposal). Multi-
@@ -1670,7 +1752,7 @@ function countEvidenceRows(scoreMap: ScoreMap): number {
 // Idempotent per-day: deletes the previous day's evidence rows for this
 // (class, datecode) before inserting fresh ones, so re-runs don't
 // accumulate.
-async function writeEvidence(className: ClassName, datecode: Datecode, scoreMap: ScoreMap, applied: Proposal[]): Promise<number> {
+async function writeEvidence(className: ClassName, datecode: Datecode, scoreMap: ScoreMap, applied: Proposal[], diagMap: Map<string, TrackerDiag | undefined> = new Map()): Promise<number> {
     // Covers every flarmid an apply just wrote a startmatch row for — so a
     // multi-add proposal doesn't get a duplicate evidence row for the same
     // pair on the same day.
@@ -1678,13 +1760,31 @@ async function writeEvidence(className: ClassName, datecode: Datecode, scoreMap:
     for (const p of applied) {
         for (const id of p.addedIds) appliedKeys.add(`${String(p.compno)}|${String(id)}`);
     }
-    const writes: {compno: Compno; flarmid: FlarmID; deltaStart: number | null; deltaFinish: number | null}[] = [];
+    const writes: {
+        compno: Compno;
+        flarmid: FlarmID;
+        deltaStart: number | null;
+        deltaFinish: number | null;
+        distAtStart: number | null;
+        gapAroundStart: number | null;
+        distAtFinish: number | null;
+        gapAroundFinish: number | null;
+    }[] = [];
     for (const [key, v] of scoreMap) {
         if (v.score.total < DEFAULT_LEDGER_MIN_NATS) continue;
         if (appliedKeys.has(key)) continue;
         const [compno, flarmid] = key.split('|') as [Compno, FlarmID];
-        // Persist only the crossing deltas — the prior is rebuilt from these.
-        writes.push({compno, flarmid, deltaStart: v.deltaStart, deltaFinish: v.deltaFinish});
+        const diag = diagMap.get(key);
+        writes.push({
+            compno,
+            flarmid,
+            deltaStart: v.deltaStart,
+            deltaFinish: v.deltaFinish,
+            distAtStart: diag?.distAtStartKm ?? null,
+            gapAroundStart: diag?.gapAroundStartSec ?? null,
+            distAtFinish: diag?.distAtFinishKm ?? null,
+            gapAroundFinish: diag?.gapAroundFinishSec ?? null
+        });
     }
 
     const t = mysql.transaction();
@@ -1696,10 +1796,12 @@ async function writeEvidence(className: ClassName, datecode: Datecode, scoreMap:
         t.query(escape`
             INSERT INTO trackerhistory
                 (compno, changed, flarmid, method, class, datecode,
-                 delta_start, delta_finish)
+                 delta_start, delta_finish,
+                 dist_at_start, gap_around_start, dist_at_finish, gap_around_finish)
             VALUES
                 (${w.compno}, now(), ${w.flarmid}, 'evidence', ${className}, ${String(datecode)},
-                 ${w.deltaStart}, ${w.deltaFinish})
+                 ${w.deltaStart}, ${w.deltaFinish},
+                 ${w.distAtStart}, ${w.gapAroundStart}, ${w.distAtFinish}, ${w.gapAroundFinish})
         `);
     }
     await t.commit();
