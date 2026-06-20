@@ -43,8 +43,22 @@ another glider already confidently holds.
 - `lib/scoring/shared/proposals.ts` — pure proposal generation:
   `computeProposals` (score/margin-gated), `Proposal`, `ScoreMap` /
   `ScoredPair`, `CrossClassHit` / `CrossClassMap`, cross-class conflict
-  helpers, `parseCurrentIds`, `scoreKey`. No I/O. Unit-tested in
+  helpers, `parseCurrentIds`, `scoreKey`. Also the same-flight join
+  post-processing (`liftSameFlightDemotions`,
+  `applyPathSimilarityToProposals`). No I/O. Unit-tested in
   `test/computeProposals.test.ts`.
+- `lib/scoring/shared/pathSimilarity.ts` — same-flight detection: a
+  two-phase track-shape comparison (`runPathComparison`) that decides
+  whether two flarmids on one pilot are the same physical flight, the
+  prior-evidence veto policy (`resolveSameFlight`), the canonical pair
+  key (`pathPriorKey`), and the report formatter (`formatPathSimilarity`,
+  returns lines — no I/O). Leaf module: no dependency on `proposals.ts`.
+  Unit-tested in `test/pathSimilarity.test.ts`.
+- `lib/flightprocessing/trackshape.ts` — the shape primitive
+  `pathSimilarity.ts` builds on: `loadStream` (reads the binary APRS
+  point log via `loadPointsForIds` — same source as the crossing scan)
+  and `compareShapes` (altitude cross-correlation lag estimate +
+  piecewise-linear position comparison → a classified `ShapeReport`).
 - `lib/constants.ts` — all tunables and weights:
   `TRACKER_SCORE_WEIGHTS`, `DEFAULT_DIST_TOLERANCE_KM`, etc.
 - `lib/ddb/index.ts` — FLARM device database loader (OGN + FlarmNet
@@ -61,7 +75,11 @@ Migrations:
 - `conf/sql/migrations/20260607_trackerhistory_drop_derivable.sql` —
   drops `pair_score`, `margin`, `ddb_link`: the prior is now crossing-only
   and those values are recomputed live, so storing them only went stale.
-- `conf/sql/onglide_schema.sql` — canonical schema includes all three.
+- `conf/sql/migrations/20260620_trackerhistory_paths.sql` — new
+  `trackerhistory_paths` table holding per-(compno, pair) same-flight
+  evidence (see Database below).
+- `conf/sql/onglide_schema.sql` — canonical schema includes all of the
+  above, including `trackerhistory_paths`.
 
 ## Pipeline
 
@@ -121,6 +139,10 @@ maps — task twins (`loadTaskTwins`), twin-pilot evidence (same
 compno+name in another class: their `trackerid` assignment plus that
 class's raw crossing deltas), and the differing-task warning set;
 **1c** `computeScoreMap` per class with the twin evidence in place;
+**1d** path similarity — for any pilot with ≥2 within-tolerance
+ambiguous candidates, compare the track shapes and (subject to the
+prior-evidence veto) lift the pilot-side demotion so the pair can be
+*joined* rather than one demoted (see Same-flight detection below);
 **2** the cross-class map (built from scored pairs, display/conflict
 only); **3** per-class report, proposals, writes. Twin evidence is
 deliberately built from *raw* scan output and the trackerid column in
@@ -163,8 +185,14 @@ are evaluated as candidates. Operations:
 
 - **Phase 1**: each flarmid that crosses cleanly produces an
   `assigned=true && withinTolerance=true` row.
-- **Pair-flying with two units**: both rows → both `ambiguous` → pilot
-  skipped (no auto-decision; manual review).
+- **Two units, same flight (one aircraft, two trackers)**: both rows →
+  both `ambiguous`. Pass 1d compares the track shapes; a `same_flight`
+  verdict (not vetoed by prior history) *joins* both ids into the
+  assignment instead of demoting the weaker one. See Same-flight
+  detection below.
+- **Two units, genuinely different flights** (or the comparison can't
+  decide): the pilot-side contention guard demotes the weaker claim as
+  normal — no join.
 - **Removing one of two**: handled — `parseCurrentIds` splits, the
   apply path filters and rejoins. Result preserves the multi-id
   shape minus the removed one.
@@ -371,6 +399,90 @@ columns don't exist, the query fails, and we latch
 `priorEvidenceUnavailable = true` with a one-time warning. The rest
 of the scan still produces a useful report.
 
+## Same-flight detection (path similarity)
+
+Crossing times can't tell two units in *one* aircraft apart from two
+units in *two* aircraft that happened to start/finish together — both
+produce two ambiguous Phase-1 rows for the same compno. The contention
+guard's default is to demote the weaker claim. That's wrong when the two
+trackers are the same flight: the right answer is to **join** both ids
+into the assignment (`trackerid = "A,B"`), not discard one.
+
+Pass 1d resolves this by comparing the two tracks' *shapes*, not just
+their line-crossing times.
+
+### Selection
+
+Per class, collect compnos with **≥2 within-tolerance ambiguous**
+candidates. The ≥2 filter matters: the `ambiguous` flag also fires for
+"one flarmid, multiple pilots", but there each pilot has only a single
+candidate, so they drop out here. For ≥3 candidates only the top two by
+score are compared (a `⚠` is logged); a 3-tracker join is out of scope.
+
+### Two-phase comparison
+
+`runPathComparison(a, b, since, until, quickUntil)` in
+`lib/scoring/shared/pathSimilarity.ts`:
+
+1. Load both full tracks via `loadStream` over `[minStart − 2h,
+   maxFinish + 1h]` — the binary APRS log, the same source the crossing
+   scan reads, so if the scan found crossings the data is present.
+2. **Quick phase** — if the pilot has ≥120 s of pre-start track on both
+   ids, compare only the pre-start slice (`quickUntil = startUtc`). A
+   solid `different_flight` here **aborts early** (`abortedAfterQuick`)
+   without comparing the rest of the day.
+3. **Full phase** — otherwise compare the whole window.
+
+`compareShapes` (in `trackshape.ts`) estimates the lag between the two
+streams by altitude cross-correlation (±120 s — covers clock skew and
+any anti-cheat delay), aligns on it, then classifies the
+piecewise-linear position/altitude deltas. Its `ShapeClassificationKind`
+maps to a `SameFlightKind` via `classifyKind`:
+
+- `matching`, `consistent_offset` → **`same_flight`**
+- `very_different`, `diverged_abrupt`, `diverged_slow`,
+  `alignment_failed` → **`different_flight`**
+- `insufficient_overlap` → **`insufficient_data`**
+
+### Prior-evidence veto
+
+`resolveSameFlight(sim, prior)` combines today's verdict with prior days'
+history from `trackerhistory_paths`. A same-day `same_flight` auto-joins
+**unless** prior history strongly disagrees — `≥2` prior days
+`different_flight` **and** `0` days `same_flight` — in which case it is
+downgraded to a **flag** (`⚑`): the demotion stands, nothing is
+auto-joined, and the report asks for manual review. A single prior
+`same_flight` day defeats the veto. The threshold is the one constant
+`PRIOR_VETO_MIN_DIFFERENT_DAYS = 2`. `resolveSameFlight` is the single
+source of the join/flag/none decision — the demotion-lift, the proposal
+join, and the display all call it, so they can't disagree.
+
+### Effect on scoring and proposals
+
+- `liftSameFlightDemotions` (proposals.ts) — for a `join` verdict,
+  restores the negated total (`Math.abs`, valid because the pre-penalty
+  total is ≥0 and contention negates it exactly once) and clears
+  `demoted` — but **only** for `demotedReason === 'pilot'`. A `flarm` /
+  `both` demotion means a *different pilot* confidently holds that
+  flarmid; path similarity between one pilot's two trackers can't speak
+  to that, so it's left intact.
+- `applyPathSimilarityToProposals` (proposals.ts, runs after
+  `computeProposals`) — widens or creates the join proposal so both ids
+  are in `addedIds` / `newTrackerid`. If a proposal already exists it
+  drops the joined ids from `removedIds` (so the proposal stays
+  consistent with `newTrackerid`); if either id is being **displaced** to
+  another pilot it leaves the proposal alone (a real conflict path
+  similarity can't resolve).
+
+**Tracker order / primary.** The first id in `trackerid` is the primary
+stream downstream (`aprs.ts` `pickStickyPrimary`; secondaries only
+gap-fill). A freshly-created join lists the higher-scored id first. When
+*widening* an existing proposal the incumbent assigned id stays first and
+the joined id is appended — consistent with `computeProposals`' own
+"kept ids first, additions last" convention, and deliberately so:
+re-ordering would change the authoritative device for an already-live
+pilot.
+
 ## Database
 
 ### `trackerhistory` schema
@@ -433,6 +545,33 @@ per-day evidence not derivable from another source, so they stay.
 
 Both run inside the same `mysql.transaction()`. `--dry-run` skips
 both.
+
+### `trackerhistory_paths` schema (same-flight evidence)
+
+Full DDL in `conf/sql/migrations/20260620_trackerhistory_paths.sql` (and
+the canonical `onglide_schema.sql`). Separate from `trackerhistory`
+because path similarity is a record about a **pair** of flarmids, not a
+single one — `(compno, class, datecode, flarmid_a, flarmid_b)` plus the
+`ShapeReport` summary (`kind`, classification, p95 position, alt bias,
+lag, overlap, `aborted_after_quick`).
+
+The pair is stored in **canonical order** (`flarmid_a < flarmid_b` by
+ASCII, via `pathPriorKey`) so `(A,B)` and `(B,A)` map to one row; the
+`uq_path` UNIQUE KEY lets `writePathSimilarityEvidence` upsert (INSERT …
+ON DUPLICATE KEY UPDATE) on every re-run without accumulating duplicates.
+
+- **`writePathSimilarityEvidence`** — one upserted row per compared pair
+  (all kinds, including `insufficient_data`). Runs after `writeEvidence`,
+  in its own transaction; `--dry-run` skips it.
+- **`loadPriorPathSimilarity(datecode, className)`** — reads prior days'
+  rows for this class (`datecode <> today`), counting `same_flight` vs
+  `different_flight` days per `(compno, pair)` for the veto. Only those
+  two kinds count; `insufficient_data` is ignored.
+
+**Schema-resilient** like the prior loader: a missing table latches
+`pathEvidenceUnavailable` with a one-time warning and the feature
+no-ops — the rest of the scan still runs. Apply
+`20260620_trackerhistory_paths.sql` to enable.
 
 ### Other trackerhistory writers (legacy, don't carry class/datecode)
 
@@ -564,9 +703,11 @@ below the floor — identity alone can't propose.
 
 Important nuance: the logic *replaces* an existing flarmid when a
 better candidate arrives (because `addId` triggers removal of weaker
-assigned ids). It does NOT propose adding alongside. To get the
-"tentatively add, confirm-bad-then-remove" workflow, this would need
-to be changed — see open work below.
+assigned ids). It does NOT propose adding alongside — **except** for the
+same-flight join (Pass 1d / `applyPathSimilarityToProposals`), which is
+the one path that keeps both ids. For the general "tentatively add,
+confirm-bad-then-remove" workflow on *different*-flight candidates, this
+would still need changing — see open work below.
 
 ## Operator workflow
 
@@ -595,12 +736,13 @@ Re-running on the same day is safe:
 
 ## Tests
 
-`test/trackerScore.test.ts` (scoring kernel) and
-`test/computeProposals.test.ts` (proposal gate) — pure-function unit
-tests. Run via:
+`test/trackerScore.test.ts` (scoring kernel),
+`test/computeProposals.test.ts` (proposal gate), and
+`test/pathSimilarity.test.ts` (same-flight helpers) — pure-function
+unit tests. Run via:
 
 ```
-npx vitest run test/trackerScore.test.ts test/computeProposals.test.ts
+npx vitest run test/trackerScore.test.ts test/computeProposals.test.ts test/pathSimilarity.test.ts
 ```
 
 Kernel coverage:
@@ -635,9 +777,19 @@ Proposal coverage:
   with the score guard; multi-id removal preserves the other id.
 - Same-compno+name cross-class hit is corroboration, not a conflict.
 
+Path-similarity coverage (`test/pathSimilarity.test.ts`):
+- `sliceStream` time-range filter (inclusive bounds, empty/full spans).
+- `classifyKind` maps every `ShapeClassificationKind` to the right
+  `SameFlightKind`.
+- `resolveSameFlight` veto policy: no prior → join; `≥2` different /
+  `0` same → flag; one prior same day defeats the veto; a single
+  different day is below threshold; `different_flight` /
+  `insufficient_data` → none regardless of prior.
+
 No DB-bound integration tests yet — `loadPriorEvidence`,
-`applyProposals`, `writeEvidence` are exercised in the manual
-end-to-end run.
+`loadPriorPathSimilarity`, `applyProposals`, `writeEvidence`,
+`writePathSimilarityEvidence`, and `compareShapes` over real tracks are
+exercised in the manual end-to-end run.
 
 ## Open work
 
@@ -656,6 +808,10 @@ end-to-end run.
   slightly stricter, and a clean assigned match without ddbCN
   (≈3.58) still clears `PRIOR_PROTECT_NATS = 3.0` but sparse-presence
   cases may not — watch before retuning.
+- **≥3-tracker joins**: Pass 1d only compares the top two candidates by
+  score; a pilot flying three units that are all one flight won't fully
+  join. Would need all-pairs comparison + union-find over `same_flight`
+  edges, one join per connected component.
 - **Stage 4 — swap detection**: Hungarian assignment over (pilots ×
   candidate flarmids) with `'startmatch-swap'` writes for both legs
   of a swap. Threshold relaxes after ≥3 prior days agree.
@@ -669,9 +825,20 @@ end-to-end run.
 - `bin/findtrackers.ts:221` — `processGroup` main loop (passes 1a/1b/1c/2/3).
 - `bin/findtrackers.ts:635` — `loadPriorEvidence`.
 - `bin/findtrackers.ts:1152` — `computeScoreMap` (applies both contention guards).
+- `bin/findtrackers.ts:377` — Pass 1d: path-similarity orchestration
+  (selection, window, `runPathComparison` fan-out, `liftSameFlightDemotions`).
 - `bin/findtrackers.ts:1540` — `applyProposals`.
 - `bin/findtrackers.ts:1594` — `writeEvidence`.
+- `bin/findtrackers.ts:1987` — `loadPriorPathSimilarity`.
+- `bin/findtrackers.ts:2017` — `writePathSimilarityEvidence`.
 - `lib/scoring/shared/proposals.ts:133` — `computeProposals` (score/margin gate).
+- `lib/scoring/shared/proposals.ts:338` — `liftSameFlightDemotions`.
+- `lib/scoring/shared/proposals.ts:358` — `applyPathSimilarityToProposals`.
+- `lib/scoring/shared/pathSimilarity.ts:67` — `runPathComparison` (two-phase).
+- `lib/scoring/shared/pathSimilarity.ts:134` — `resolveSameFlight` (prior veto).
+- `lib/scoring/shared/pathSimilarity.ts:154` — `formatPathSimilarity` (report lines).
+- `lib/flightprocessing/trackshape.ts:123` — `loadStream`.
+- `lib/flightprocessing/trackshape.ts:492` — `compareShapes`.
 - `lib/scoring/shared/findtrackers.ts:746` — `matchCrossings` (the
   three phases).
 - `lib/scoring/shared/findtrackers.ts:505` — post-scan pass that

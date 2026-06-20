@@ -16,7 +16,8 @@ import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
 import {scoreSignals, computeMargins, summarisePrior, crossingScore, negCrossScore, applyContentionPenalties, physicalMatchScore, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
-import {computeProposals, scoreKey, parseCurrentIds, crossClassHitsFor, type Proposal, type ScoreMap, type CrossClassMap} from '../lib/scoring/shared/proposals';
+import {computeProposals, applyPathSimilarityToProposals, liftSameFlightDemotions, scoreKey, parseCurrentIds, crossClassHitsFor, type Proposal, type ScoreMap, type CrossClassMap} from '../lib/scoring/shared/proposals';
+import {runPathComparison, resolveSameFlight, formatPathSimilarity, pathPriorKey, type PathSimilarityResult, type PathPriorMap} from '../lib/scoring/shared/pathSimilarity';
 import {loadMergedDDB, gliderEquivalent, isBlocked, type DDBEntry} from '../lib/ddb';
 import {
     fingerprintFromPilot,
@@ -117,6 +118,10 @@ interface ClassMatches {
     // Filled in pass 1c — scoring needs the group-level twin-pilot evidence
     // from pass 1b, so it can't happen during the per-class scan.
     scoreMap: ScoreMap;
+    // Filled in pass 1d — path similarity results for ambiguous same-pilot pairs.
+    sameFlightMap: Map<Compno, PathSimilarityResult>;
+    // Prior path-similarity evidence from earlier task days for this class.
+    pathPriorMap: PathPriorMap;
     // Same-compno+name pilots whose other class flies a DIFFERENT task —
     // printed once at the top of this class's results block.
     twinWarnings: string[];
@@ -299,7 +304,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         );
         if (priorAircraft.size) console.log(`  loaded cross-comp identity for ${priorAircraft.size} flarmid${priorAircraft.size === 1 ? '' : 's'}`);
 
-        classMatches.push({job, results, matches, excludeStart, priorMap, priorAircraft, candidateFacets, assignmentMethodMap, scoreMap: new Map(), twinWarnings: []});
+        classMatches.push({job, results, matches, excludeStart, priorMap, priorAircraft, candidateFacets, assignmentMethodMap, scoreMap: new Map(), sameFlightMap: new Map(), pathPriorMap: new Map(), twinWarnings: []});
     }
 
     // Pass 1b — group-level maps.
@@ -369,6 +374,68 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeStart, cm.assignmentMethodMap);
     }
 
+    // Pass 1d — path similarity for ambiguous same-pilot pairs.
+    // Runs after scoring so pilot-side demotions can be lifted before proposals.
+    for (const cm of classMatches) {
+        const {results, matches, scoreMap, job} = cm;
+
+        // Collect compnos where 2+ within-tolerance candidates exist for the same pilot.
+        // Filter to ≥2 per compno: the ambiguous flag also fires for "same flarmid,
+        // multiple pilots" — in that case each pilot ends up with only 1 candidate here.
+        const ambiguousByPilot = new Map<Compno, TrackerMatch[]>();
+        for (const m of matches) {
+            if (!m.ambiguous || !m.withinTolerance) continue;
+            const arr = ambiguousByPilot.get(m.compno) ?? [];
+            arr.push(m);
+            ambiguousByPilot.set(m.compno, arr);
+        }
+        for (const [compno, arr] of ambiguousByPilot) {
+            if (arr.length < 2) ambiguousByPilot.delete(compno);
+        }
+
+        if (!ambiguousByPilot.size) continue;
+
+        // Compute the scan window for loadStream: 2h before earliest start to
+        // 1h after latest finish (same data the findTrackerMatches scan used).
+        const allStarts = results.map((r) => r.startUtc);
+        const allFinishes = results.flatMap((r) => (r.finishUtc !== null ? [r.finishUtc] : []));
+        const minStart = Math.min(...allStarts);
+        const maxFinish = allFinishes.length ? Math.max(...allFinishes) : Math.max(...allStarts) + 4 * 3600;
+        const pathSince = minStart - 2 * 3600;
+        const pathUntil = maxFinish + 3600;
+
+        cm.pathPriorMap = await loadPriorPathSimilarity(job.datecode, job.className);
+        if (cm.pathPriorMap.size) console.log(`  loaded path-similarity history for ${cm.pathPriorMap.size} pair${cm.pathPriorMap.size === 1 ? '' : 's'}`);
+
+        const comparisonJobs: Promise<void>[] = [];
+        for (const [compno, candidates] of ambiguousByPilot) {
+            const pilot = results.find((r) => r.compno === compno);
+            if (!pilot) continue;
+            if (candidates.length > 2) console.log(`  ⚠ ${String(compno)} has ${candidates.length} ambiguous candidates — comparing top 2 by score`);
+            const sorted = [...candidates].sort((a, b) => {
+                const sa = scoreMap.get(scoreKey(a.compno, a.flarmid))?.score.total ?? -Infinity;
+                const sb = scoreMap.get(scoreKey(b.compno, b.flarmid))?.score.total ?? -Infinity;
+                return sb - sa;
+            });
+            const [mA, mB] = sorted;
+            comparisonJobs.push(
+                runPathComparison(mA.flarmid, mB.flarmid, pathSince, pathUntil, pilot.startUtc)
+                    .then((r) => {
+                        cm.sameFlightMap.set(compno, r);
+                    })
+                    .catch((e) => console.error(`  path comparison ${mA.flarmid}/${mB.flarmid} for ${String(compno)} failed:`, e))
+            );
+        }
+        if (comparisonJobs.length) {
+            console.log(`  running path similarity for ${comparisonJobs.length} ambiguous pilot${comparisonJobs.length === 1 ? '' : 's'}…`);
+            await Promise.all(comparisonJobs);
+        }
+
+        // Lift pilot-side demotion for confirmed same-flight pairs (subject to
+        // prior-evidence veto) so computeProposals can generate a join.
+        liftSameFlightDemotions(scoreMap, cm.sameFlightMap, cm.pathPriorMap);
+    }
+
     // Pass 2 — flarmid → unambiguous within-tolerance hits across the group.
     // Stash the breakdown/margins for the (compno, flarmid) pair from the
     // hit's own class so we can render quality info on the cross-class line.
@@ -408,7 +475,9 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     const proposalsByClass = new Map<ClassName, Proposal[]>();
     if (!argv['dry-run']) {
         for (const cm of classMatches) {
-            proposalsByClass.set(cm.job.className, computeProposals(cm.matches, cm.scoreMap, crossClass, cm.job.className, twinMap.get(cm.job.className) ?? new Set<ClassName>(), cm.results));
+            const proposals = computeProposals(cm.matches, cm.scoreMap, crossClass, cm.job.className, twinMap.get(cm.job.className) ?? new Set<ClassName>(), cm.results);
+            applyPathSimilarityToProposals(proposals, cm.sameFlightMap, cm.pathPriorMap, cm.matches, cm.results);
+            proposalsByClass.set(cm.job.className, proposals);
         }
         // Pass 3b — twin-pilot sync: propagate the strongest identification
         // decision for a twin pilot to all other classes they appear in.
@@ -433,7 +502,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         // for clean pilots (operator can see what's holding the assignment
         // up). Per-proposal printPilotMatches in reviewProposals is the
         // focused review view atop this.
-        printMatches(results, matches, tolerance, scoreMap, crossClass, className);
+        printMatches(results, matches, tolerance, scoreMap, crossClass, className, cm.sameFlightMap, cm.pathPriorMap);
 
         const matchedCompnos = new Set(matches.filter((m) => m.withinTolerance && !m.ambiguous).map((m) => m.compno));
         const ambiguousCompnos = new Set(matches.filter((m) => m.ambiguous).map((m) => m.compno));
@@ -469,6 +538,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         // proposal-driven changes.
         const diagMap = new Map(matches.map((m) => [scoreKey(m.compno, m.flarmid), m.diag]));
         await writeEvidence(className, datecode, scoreMap, accepted, diagMap);
+        await writePathSimilarityEvidence(className, datecode, cm.sameFlightMap);
         // Cross-comp identity: collect aircraft/pilot evidence from confident
         // matches only (never DDB-blocked devices). Persists across comps.
         await writeAircraftEvidence(job, matches, scoreMap, accepted, cm.candidateFacets, ddb);
@@ -1403,7 +1473,16 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: 
     };
 }
 
-function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolerance: number, scoreMap: ScoreMap, crossClass?: CrossClassMap, thisClass?: ClassName): void {
+function printMatches(
+    results: OfficialResult[],
+    matches: TrackerMatch[],
+    tolerance: number,
+    scoreMap: ScoreMap,
+    crossClass?: CrossClassMap,
+    thisClass?: ClassName,
+    sameFlightMap?: Map<Compno, PathSimilarityResult>,
+    pathPriorMap?: PathPriorMap
+): void {
     if (!matches.length) {
         console.log(`  (no matches, no assigned-tracker reports)`);
         return;
@@ -1434,7 +1513,7 @@ function printMatches(results: OfficialResult[], matches: TrackerMatch[], tolera
     });
 
     for (const compno of compnos) {
-        printPilotMatches(compno, byPilot.get(compno)!, results, tolerance, scoreMap, crossClass, thisClass, byFlarmid);
+        printPilotMatches(compno, byPilot.get(compno)!, results, tolerance, scoreMap, crossClass, thisClass, byFlarmid, sameFlightMap, pathPriorMap);
     }
 }
 
@@ -1475,7 +1554,9 @@ function printPilotMatches(
     scoreMap?: ScoreMap,
     crossClass?: CrossClassMap,
     thisClass?: ClassName,
-    byFlarmid?: Map<FlarmID, TrackerMatch[]>
+    byFlarmid?: Map<FlarmID, TrackerMatch[]>,
+    sameFlightMap?: Map<Compno, PathSimilarityResult>,
+    pathPriorMap?: PathPriorMap
 ): void {
     if (!arr.length) return;
     const r = results.find((x) => x.compno === compno);
@@ -1507,6 +1588,11 @@ function printPilotMatches(
                 }
             }
         }
+    }
+    const simResult = sameFlightMap?.get(compno);
+    if (simResult) {
+        const decision = resolveSameFlight(simResult, pathPriorMap?.get(pathPriorKey(compno, simResult.flarmidA, simResult.flarmidB)));
+        for (const line of formatPathSimilarity(simResult, decision)) console.log(line);
     }
 }
 
@@ -1890,4 +1976,82 @@ async function writeEvidence(className: ClassName, datecode: Datecode, scoreMap:
     await t.commit();
     if (writes.length) console.log(`  Wrote ${writes.length} evidence row${writes.length === 1 ? '' : 's'}.`);
     return writes.length;
+}
+
+// ---- Path similarity: DB persistence (decision/display logic lives in
+// lib/scoring/shared/pathSimilarity.ts; proposal joins in proposals.ts) ----
+
+// Latched after the first "table doesn't exist" error on trackerhistory_paths.
+let pathEvidenceUnavailable = false;
+
+async function loadPriorPathSimilarity(currentDatecode: Datecode, className: ClassName): Promise<PathPriorMap> {
+    if (pathEvidenceUnavailable) return new Map();
+    type Row = {compno: Compno; flarmid_a: string; flarmid_b: string; kind: string};
+    let rows: Row[] = [];
+    try {
+        rows = await mysql.query<Row[]>(escape`
+            SELECT compno, flarmid_a, flarmid_b, kind
+            FROM trackerhistory_paths
+            WHERE class = ${className}
+              AND datecode <> ${String(currentDatecode)}
+        `);
+    } catch (e: any) {
+        if (isMissingTable(e)) {
+            pathEvidenceUnavailable = true;
+            console.warn(`  (trackerhistory_paths table missing — apply conf/sql/migrations/20260620_trackerhistory_paths.sql to enable path-similarity history)`);
+            return new Map();
+        }
+        throw e;
+    }
+    const out: PathPriorMap = new Map();
+    for (const r of rows) {
+        const key = pathPriorKey(r.compno as Compno, r.flarmid_a as FlarmID, r.flarmid_b as FlarmID);
+        const entry = out.get(key) ?? {sameFlightDays: 0, differentFlightDays: 0};
+        if (r.kind === 'same_flight') entry.sameFlightDays++;
+        else if (r.kind === 'different_flight') entry.differentFlightDays++;
+        out.set(key, entry);
+    }
+    return out;
+}
+
+async function writePathSimilarityEvidence(
+    className: ClassName,
+    datecode: Datecode,
+    sameFlightMap: Map<Compno, PathSimilarityResult>
+): Promise<void> {
+    if (pathEvidenceUnavailable || !sameFlightMap.size) return;
+    const t = mysql.transaction();
+    let written = 0;
+    for (const [compno, sim] of sameFlightMap) {
+        const [fa, fb] = [String(sim.flarmidA), String(sim.flarmidB)].sort();
+        const report = sim.fullReport ?? sim.quickReport;
+        try {
+            t.query(escape`
+                INSERT INTO trackerhistory_paths
+                    (compno, class, datecode, flarmid_a, flarmid_b,
+                     kind, classification, p95_pos_km, alt_bias_m, lag_sec, overlap_sec, aborted_after_quick, changed)
+                VALUES
+                    (${String(compno)}, ${className}, ${String(datecode)}, ${fa}, ${fb},
+                     ${sim.kind}, ${report?.classification.kind ?? null},
+                     ${report?.deltaPosP95Km ?? null}, ${report?.altBiasM ?? null},
+                     ${report?.lag.lag ?? null}, ${report?.overlapSec ?? null},
+                     ${sim.abortedAfterQuick ? 1 : 0}, NOW())
+                ON DUPLICATE KEY UPDATE
+                    kind = VALUES(kind), classification = VALUES(classification),
+                    p95_pos_km = VALUES(p95_pos_km), alt_bias_m = VALUES(alt_bias_m),
+                    lag_sec = VALUES(lag_sec), overlap_sec = VALUES(overlap_sec),
+                    aborted_after_quick = VALUES(aborted_after_quick), changed = NOW()
+            `);
+            written++;
+        } catch (e: any) {
+            if (isMissingTable(e)) {
+                pathEvidenceUnavailable = true;
+                console.warn(`  (trackerhistory_paths missing mid-run — path evidence not written)`);
+                return;
+            }
+            throw e;
+        }
+    }
+    await t.commit();
+    if (written) console.log(`  Wrote ${written} path-similarity row${written === 1 ? '' : 's'}.`);
 }

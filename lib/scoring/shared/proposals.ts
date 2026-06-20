@@ -13,6 +13,7 @@ import type {Compno, ClassName, FlarmID} from '../../types';
 import type {TrackerMatch, OfficialResult} from './findtrackers';
 import type {ScoreBreakdown, Margins} from './trackerScore';
 import {samePilotName} from './identity';
+import {resolveSameFlight, pathPriorKey, type PathSimilarityResult, type PathPriorMap} from './pathSimilarity';
 import {SCORE_PROPOSE_NATS, DEFAULT_AUTO_MARGIN_NATS} from '../../constants';
 
 // A flarmid → pilots that produced a clean (within-tolerance, non-ambiguous)
@@ -322,4 +323,77 @@ export function computeProposals(matches: TrackerMatch[], scoreMap: ScoreMap, cr
 
     out.sort((a, b) => a.compno.localeCompare(b.compno));
     return out;
+}
+
+// Lift the pilot-side contention demotion for pairs that path similarity (and
+// prior history) confirm are the same physical flight, so computeProposals
+// sees positive totals for both IDs and can generate a join. Only the 'pilot'
+// demotion is lifted — 'flarm'/'both' mean a *different pilot* holds the
+// flarmid, which path similarity between this pilot's two trackers can't
+// resolve. A prior-vetoed (flagged) result is NOT lifted: the demotion stands
+// and the CLI surfaces the flag for manual review.
+//
+// Demotion negates an otherwise ≥0 total exactly once (see computeScoreMap in
+// bin/findtrackers.ts), so Math.abs restores the original positive value.
+export function liftSameFlightDemotions(scoreMap: ScoreMap, sameFlightMap: Map<Compno, PathSimilarityResult>, priorMap?: PathPriorMap): void {
+    for (const [compno, sim] of sameFlightMap) {
+        const decision = resolveSameFlight(sim, priorMap?.get(pathPriorKey(compno, sim.flarmidA, sim.flarmidB)));
+        if (decision.action !== 'join') continue;
+        for (const flarmid of [sim.flarmidA, sim.flarmidB]) {
+            const entry = scoreMap.get(scoreKey(compno, flarmid));
+            if (entry?.demoted && entry.demotedReason === 'pilot') {
+                entry.score.total = Math.abs(entry.score.total);
+                entry.demoted = false;
+            }
+        }
+    }
+}
+
+// Post-process proposals so a confirmed same-flight pair is JOINED (both IDs
+// kept) rather than the lower-scoring one demoted. Mutates `proposals` in place.
+// Only acts on pairs resolved to 'join' (prior-vetoed 'flag' results are left
+// for the operator). When a proposal already exists for the pilot it's widened
+// to include both IDs; otherwise a fresh join proposal is created when both
+// IDs are within tolerance.
+export function applyPathSimilarityToProposals(proposals: Proposal[], sameFlightMap: Map<Compno, PathSimilarityResult>, priorMap: PathPriorMap | undefined, matches: TrackerMatch[], results: OfficialResult[]): void {
+    for (const [compno, sim] of sameFlightMap) {
+        const decision = resolveSameFlight(sim, priorMap?.get(pathPriorKey(compno, sim.flarmidA, sim.flarmidB)));
+        if (decision.action !== 'join') continue;
+        const {flarmidA, flarmidB, fullReport, quickReport} = sim;
+        const report = fullReport ?? quickReport!;
+
+        const existing = proposals.find((p) => p.compno === compno);
+        if (existing) {
+            // If either ID is being displaced to another pilot, this is a real
+            // conflict path similarity can't resolve — leave the proposal alone.
+            if ((existing.displacedIds ?? []).some((id) => id === flarmidA || id === flarmidB)) continue;
+            const bothIds = [...new Set([...existing.addedIds, flarmidA, flarmidB])];
+            existing.addedIds = bothIds;
+            // We're keeping both IDs now — drop them from removedIds so the
+            // proposal stays internally consistent with newTrackerid.
+            existing.removedIds = existing.removedIds.filter((id) => id !== flarmidA && id !== flarmidB);
+            const kept = parseCurrentIds(existing.currentTrackerid).filter((id) => !existing.removedIds.includes(id));
+            existing.newTrackerid = [...new Set([...kept, ...bothIds])].join(',');
+            existing.reason += `; path-similarity ${report.classification.summary}`;
+        } else {
+            // Neither candidate crossed the proposal threshold individually, but
+            // path similarity confirms same flight — generate a join proposal.
+            const mA = matches.find((m) => m.compno === compno && m.flarmid === flarmidA);
+            const mB = matches.find((m) => m.compno === compno && m.flarmid === flarmidB);
+            if (!mA?.withinTolerance || !mB?.withinTolerance) continue;
+            const pilot = results.find((r) => r.compno === compno);
+            if (!pilot) continue;
+            proposals.push({
+                compno,
+                name: pilot.name,
+                currentTrackerid: pilot.trackerid,
+                newTrackerid: [flarmidA, flarmidB].join(','),
+                addedIds: [flarmidA, flarmidB],
+                removedIds: [],
+                reason: `path similarity: ${report.classification.summary}`,
+                deltaStart: mA.deltaStart ?? mB.deltaStart,
+                deltaFinish: mA.deltaFinish ?? mB.deltaFinish
+            });
+        }
+    }
 }
