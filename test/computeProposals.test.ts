@@ -193,7 +193,7 @@ describe('computeProposals (score-driven)', () => {
             [assigned, scored(3.0)], // high score, but confidence=null — identity only
             [better, scored(5.16, {pilotContested: true, margins: {pilotMargin: 2.16, flarmidMargin: 5.16, margin: 2.16}})]
         ]);
-        const p = computeProposals([assigned, better], sm, new Map(), THIS_CLASS, NO_TWINS, GATES);
+        const p = computeProposals([assigned, better], sm, new Map(), THIS_CLASS, NO_TWINS, [], GATES);
         expect(p).toHaveLength(1);
         expect(p[0].addedIds).toEqual(['DDDC83']);
         expect(p[0].removedIds).toEqual(['DF1855']);
@@ -216,7 +216,7 @@ describe('computeProposals (score-driven)', () => {
             [assigned, scored(3.0)],
             [better, scored(5.16, {pilotContested: true, margins: {pilotMargin: 2.16, flarmidMargin: 5.16, margin: 2.16}})]
         ]);
-        expect(computeProposals([assigned, better], sm, new Map(), THIS_CLASS, NO_TWINS, GATES)).toEqual([]);
+        expect(computeProposals([assigned, better], sm, new Map(), THIS_CLASS, NO_TWINS, [], GATES)).toEqual([]);
     });
 
     test('best unassigned candidate wins by score; the proposal carries its crossing deltas', () => {

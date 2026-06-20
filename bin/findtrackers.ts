@@ -1280,7 +1280,10 @@ function computeScoreMap(
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
         xcFacetsByKey.set(scoreKey(m.compno, m.flarmid), xc.facets);
-        pairs.push({compno: m.compno, flarmid: m.flarmid, total: breakdown.total, baseline: m.assigned});
+        // Consistent with baselineMatch above: ognddb assignments don't count as
+        // baseline holders in the contention penalty (same DDB source as ddbCn,
+        // so they shouldn't block better-evidenced replacements from competing).
+        pairs.push({compno: m.compno, flarmid: m.flarmid, total: breakdown.total, baseline: m.assigned && assignmentMethodMap.get(scoreKey(m.compno, m.flarmid)) !== 'ognddb'});
     }
 
     // Contention guards: once a flarmid is confidently held by one glider
