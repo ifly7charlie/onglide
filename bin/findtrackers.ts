@@ -402,11 +402,14 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     const proposalsByClass = new Map<ClassName, Proposal[]>();
     if (!argv['dry-run']) {
         for (const cm of classMatches) {
-            proposalsByClass.set(cm.job.className, computeProposals(cm.matches, cm.scoreMap, crossClass, cm.job.className, twinMap.get(cm.job.className) ?? new Set<ClassName>()));
+            proposalsByClass.set(cm.job.className, computeProposals(cm.matches, cm.scoreMap, crossClass, cm.job.className, twinMap.get(cm.job.className) ?? new Set<ClassName>(), cm.results));
         }
         // Pass 3b — twin-pilot sync: propagate the strongest identification
         // decision for a twin pilot to all other classes they appear in.
-        if (twinPilotGroups.length > 0) syncTwinPilotProposals(proposalsByClass, twinPilotGroups);
+        if (twinPilotGroups.length > 0) {
+            syncTwinPilotProposals(proposalsByClass, twinPilotGroups);
+            syncDisplacementProposals(proposalsByClass, twinPilotGroups);
+        }
     }
 
     // Pass 3c — print, review, apply per class.
@@ -1616,6 +1619,69 @@ function syncTwinPilotProposals(proposalsByClass: Map<ClassName, Proposal[]>, tw
     }
 }
 
+// Propagate displacement proposals to twin classes. If pilot P loses flarmid F
+// in Class A, any other class where P currently holds F must also drop it —
+// the physical tracker belongs to someone else in all contexts.
+function syncDisplacementProposals(proposalsByClass: Map<ClassName, Proposal[]>, twinPilotGroups: TwinPilotGroup[]): void {
+    for (const tpg of twinPilotGroups) {
+        // Collect all flarmids being displaced for this pilot across any class.
+        const displacedInClass = new Map<FlarmID, string>(); // flarmid → originating class label
+        for (const {cm} of tpg.entries) {
+            const proposals = proposalsByClass.get(cm.job.className) ?? [];
+            const label = cm.job.classDisplay || String(cm.job.className);
+            for (const p of proposals) {
+                if (p.compno !== tpg.compno) continue;
+                for (const id of p.displacedIds ?? []) {
+                    if (!displacedInClass.has(id)) displacedInClass.set(id, label);
+                }
+            }
+        }
+        if (displacedInClass.size === 0) continue;
+
+        // Propagate to every other class where this pilot still holds the flarmid.
+        for (const {cm, result} of tpg.entries) {
+            const proposals = proposalsByClass.get(cm.job.className) ?? [];
+            const currentIds = parseCurrentIds(result.trackerid);
+            const toDisplace = [...displacedInClass.keys()].filter((id) => currentIds.includes(id));
+            if (toDisplace.length === 0) continue;
+            // Skip classes that already have a displacement proposal covering all these IDs.
+            const alreadyDisplaced = proposals.find((p) => p.compno === tpg.compno)?.displacedIds ?? [];
+            const stillNeeded = toDisplace.filter((id) => !alreadyDisplaced.includes(id));
+            if (stillNeeded.length === 0) continue;
+
+            const reasonSuffix = stillNeeded.map((id) => `${id} displaced in class ${displacedInClass.get(id)}`).join(', ');
+            const existing = proposals.find((p) => p.compno === tpg.compno);
+            if (existing) {
+                for (const id of stillNeeded) {
+                    if (!existing.removedIds.includes(id)) {
+                        existing.removedIds.push(id);
+                        const stripped = parseCurrentIds(existing.newTrackerid).filter((t) => t !== id);
+                        existing.newTrackerid = stripped.length ? stripped.join(',') : 'unknown';
+                    }
+                    if (!existing.displacedIds) existing.displacedIds = [];
+                    existing.displacedIds.push(id);
+                }
+                existing.reason += `; ${reasonSuffix}`;
+            } else {
+                const keptIds = currentIds.filter((id) => !stillNeeded.includes(id as FlarmID));
+                proposals.push({
+                    compno: tpg.compno,
+                    name: tpg.name,
+                    currentTrackerid: result.trackerid,
+                    newTrackerid: keptIds.length ? keptIds.join(',') : 'unknown',
+                    addedIds: [],
+                    removedIds: [...stillNeeded],
+                    displacedIds: [...stillNeeded],
+                    reason: reasonSuffix,
+                    deltaStart: null,
+                    deltaFinish: null
+                });
+                proposalsByClass.set(cm.job.className, proposals);
+            }
+        }
+    }
+}
+
 async function applyProposals(className: ClassName, datecode: Datecode, proposals: Proposal[]): Promise<number> {
     if (!proposals.length) return 0;
     const t = mysql.transaction();
@@ -1645,6 +1711,20 @@ async function applyProposals(className: ClassName, datecode: Datecode, proposal
                 VALUES
                     (${p.compno}, now(), ${String(flarmid)}, 'startmatch', ${className}, ${String(datecode)},
                      ${p.deltaStart}, ${p.deltaFinish})
+            `);
+        }
+        // Displacement records: a separate trackerhistory row for each flarmid
+        // actively taken by another pilot so future runs know this association
+        // was explicitly broken. Deltas are null — the prior contribution is 0,
+        // so this is an audit record only, not positive scoring evidence.
+        for (const flarmid of p.displacedIds ?? []) {
+            t.query(escape`
+                INSERT INTO trackerhistory
+                    (compno, changed, flarmid, method, class, datecode,
+                     delta_start, delta_finish)
+                VALUES
+                    (${p.compno}, now(), ${String(flarmid)}, 'displaced', ${className}, ${String(datecode)},
+                     NULL, NULL)
             `);
         }
         // Pure-removal proposals (e.g. bboxOnly forces a clear) leave no
