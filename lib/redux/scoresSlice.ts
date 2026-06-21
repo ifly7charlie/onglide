@@ -17,7 +17,7 @@ import {unscaleClassScoreHistoryFromWire} from '../protobuf/wireScaling';
 //const updateScoresAction = createAction<PilotScores>('updateScores');
 import {assembleLabeledLine} from '../react/distanceLine';
 
-import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey, OptimalGridEntry} from '../types';
+import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey, OptimalGridEntry, PilotStatsEntry} from '../types';
 
 import {sortedIndexBy} from '../util/binarySearch';
 
@@ -31,6 +31,7 @@ interface ScoresSliceState {
     scores: ScoreData;
     historical: HistoricalScoreData;
     optimalGrids: Record<Compno, OptimalGridEntry[]>;
+    pilotStats: Record<Compno, PilotStatsEntry[]>;
     loading: Record<Epoch, string>; // request id for requests to load - we only remove on error (so it retries) otherwise
     scoreId: string; //  copy of track version set when loading something
     // leave the ID in the structure so we don't keep trying to get missing scores
@@ -43,6 +44,7 @@ const initialState: ScoresSliceState = {
     scores: {},
     historical: {},
     optimalGrids: {},
+    pilotStats: {},
     loading: {},
     scoreId: '',
     scoresScoreId: ''
@@ -68,6 +70,7 @@ export const scoresSlice = createSlice({
                     scores: {},
                     historical: {},
                     optimalGrids: {},
+                    pilotStats: {},
                     loading: {},
                     scoreId,
                     // scores is empty for the new class, so mark it reconciled at this
@@ -81,6 +84,7 @@ export const scoresSlice = createSlice({
                 state.loading = {};
                 state.scoreId = scoreId;
                 state.historical = {};
+                state.pilotStats = {};
             }
         });
 
@@ -231,6 +235,28 @@ export const scoresSlice = createSlice({
                     resultEqualityCheck: (a, b) => a?.t === b?.t
                 }
             }
+        ),
+        // Returns the segments array for a pilot at a given replay time, or the
+        // latest snapshot for live mode (t undefined). Binary-searches the
+        // time-indexed pilotStats store for the most recent snapshot at or
+        // before t — same semantics as selectOptimalGrid.
+        selectPilotStats: createSelector(
+            [
+                (_state: ScoresSliceState, _compno: Compno | undefined, t: Epoch | undefined) => t,
+                (_state: ScoresSliceState, compno: Compno | undefined) => compno,
+                (state: ScoresSliceState, compno: Compno | undefined) => (compno ? state.pilotStats[compno] : undefined)
+            ],
+            (t: Epoch | undefined, compno: Compno | undefined, entries: PilotStatsEntry[] | undefined) => {
+                if (!compno || !entries?.length) return undefined;
+                if (!t) return entries.at(-1)?.segments;
+                const index = sortedIndexBy(entries, {t} as PilotStatsEntry, (x) => x.t) - 1;
+                return index >= 0 ? entries[index].segments : undefined;
+            },
+            {
+                memoizeOptions: {
+                    resultEqualityCheck: (a, b) => a === b
+                }
+            }
         )
     }
 });
@@ -309,7 +335,7 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
 
 export default scoresSlice.reducer;
 export const {updateScores} = scoresSlice.actions;
-export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus, selectOptimalGrid} = scoresSlice.selectors;
+export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus, selectOptimalGrid, selectPilotStats} = scoresSlice.selectors;
 
 //////////////////////////////////////////
 // Logic for updates
@@ -345,7 +371,7 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     for (const compno in action.payload.pilots) {
         const score: PilotScore = action.payload.pilots[compno];
         // Extract optimal grid into separate storage (emitted once per sector entry)
-        const {optimalGrid, ...scoreWithoutGrid} = score;
+        const {optimalGrid, stats, ...scoreWithoutExtras} = score;
         if (optimalGrid?.length) {
             const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: optimalGrid};
             const gh = (state.optimalGrids[compno as Compno] ??= []);
@@ -353,11 +379,21 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
             gh.splice(gIdx, Infinity, entry);
         }
 
+        // Extract stats into a separate time-indexed store (emitted only when
+        // segment count changes or the interim interval elapses). Splice-Infinity
+        // mirrors the live rewind semantics used for optimalGrid above.
+        if (stats?.segments.length) {
+            const entry: PilotStatsEntry = {t: score.t as Epoch, segments: stats.segments};
+            const ps = (state.pilotStats[compno as Compno] ??= []);
+            const pIdx = sortedIndexBy(ps, entry, (x) => x.t);
+            ps.splice(pIdx, Infinity, entry);
+        }
+
         // Read the prior display score via original() so we get the plain
         // pre-draft value — passing an Immer draft as prev risks smuggling
         // draft references into the new object.
         const prev = result[compno] ? (original(result[compno]) as PilotScoreDisplay | undefined) : undefined;
-        result[compno] = mapScoresToDisplayScores(prev, scoreWithoutGrid as PilotScore);
+        result[compno] = mapScoresToDisplayScores(prev, scoreWithoutExtras as PilotScore);
 
         // If the scoreId is the current one then we will use that
         const sh = (state.historical[compno] ??= []);
@@ -422,20 +458,29 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
             continue;
         }
 
-        // Pull any optimalGrid carried in this chunk into the dedicated store. The /scorehistory
-        // endpoint backfills the active grid onto the first record per pilot (plus mid-chunk leg
-        // transitions still carry their own), so this is at most a handful of entries. Use a
-        // sorted insert/replace rather than the splice-Infinity rewind used by _updateScores —
-        // older chunks must not drop later-loaded grids from the tail.
+        // Pull any optimalGrid / stats carried in this chunk into their dedicated
+        // stores. Use sorted insert/replace rather than splice-Infinity — older
+        // chunks must not drop later-loaded entries from the tail.
         for (const ns of newScores) {
-            if (!ns.optimalGrid?.length) continue;
-            const entry: OptimalGridEntry = {t: ns.t as Epoch, currentLeg: ns.currentLeg, grid: ns.optimalGrid};
-            const gh = (state.optimalGrids[compno as Compno] ??= []);
-            const gIdx = sortedIndexBy(gh, entry, (x) => x.t);
-            if (gh[gIdx]?.t === entry.t) {
-                gh[gIdx] = entry;
-            } else {
-                gh.splice(gIdx, 0, entry);
+            if (ns.optimalGrid?.length) {
+                const entry: OptimalGridEntry = {t: ns.t as Epoch, currentLeg: ns.currentLeg, grid: ns.optimalGrid};
+                const gh = (state.optimalGrids[compno as Compno] ??= []);
+                const gIdx = sortedIndexBy(gh, entry, (x) => x.t);
+                if (gh[gIdx]?.t === entry.t) {
+                    gh[gIdx] = entry;
+                } else {
+                    gh.splice(gIdx, 0, entry);
+                }
+            }
+            if (ns.stats?.segments.length) {
+                const entry: PilotStatsEntry = {t: ns.t as Epoch, segments: ns.stats.segments};
+                const ps = (state.pilotStats[compno as Compno] ??= []);
+                const pIdx = sortedIndexBy(ps, entry, (x) => x.t);
+                if (ps[pIdx]?.t === entry.t) {
+                    ps[pIdx] = entry;
+                } else {
+                    ps.splice(pIdx, 0, entry);
+                }
             }
         }
 

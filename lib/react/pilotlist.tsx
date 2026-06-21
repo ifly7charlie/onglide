@@ -411,7 +411,7 @@ export const Details = ({
             <ActualGRComponent actualGrRemaining={score.actual.grRemaining} homeGr={score.home?.grRemaining} />
         )
     ) : null;
-    const wind = score?.stats ? <WindComponent wind={score.wind} /> : null;
+    const wind = score?.wind ? <WindComponent wind={score.wind} /> : null;
 
     let times = null;
     if (score?.utcStart) {

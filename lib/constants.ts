@@ -76,6 +76,11 @@ export const webPathBaseTimeDuration = 5 * 60;
 // How many minutes of scores are we batching together
 export const scoreChunkSize = 30 * 60;
 
+// How often (seconds) to emit an interim stats update for the current open
+// segment, even when no new segment has been finalised. Keeps the tooltip
+// fresh during long thermals without sending stats on every tick.
+export const STATS_INTERIM_INTERVAL = 30;
+
 // ETA threshold (minutes) for promoting a class compstatus to 'F' (finishing):
 // when any tracked pilot's distanceRemaining / taskSpeed implies arrival within
 // this many minutes, the class is treated as imminently finishing.

@@ -8,7 +8,7 @@ import {MessagePort} from 'node:worker_threads';
 
 import {setTimeout} from 'timers/promises';
 
-import {scoreChanged} from '../flightprocessing/scoreChanged';
+import {scoreChanged, statsChanged} from '../flightprocessing/scoreChanged';
 
 import {d} from '../now';
 
@@ -89,7 +89,9 @@ export function scoreCollector(port: MessagePort, className: ClassName, getNow: 
     function updateScore(compno: Compno, score: PilotScore, scoreId: string) {
         const c = getScoreIdDetails(scoreId);
         const oldScore = c.allScores[compno];
-        const changed = scoreChanged(oldScore, score, true);
+        // A finalised flight-statistics segment is its own reason to emit (see
+        // statsChanged) — without it a pre-start soaring glider would post nothing.
+        const changed = scoreChanged(oldScore, score, true) || statsChanged(oldScore, score);
         if (changed) {
             if (oldScore && oldScore.flightStatus != score.flightStatus) {
                 console.log(`${className}:${score.compno}: ${PositionStatusText[oldScore.flightStatus ?? PositionStatus.Unknown]} => ${PositionStatusText[score.flightStatus ?? PositionStatus.Unknown]} @ ${d(score.t)}`);

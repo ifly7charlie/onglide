@@ -85,7 +85,7 @@ function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
 import {AprsController, AirfieldSpec, type AprsWorkerEvent, type TrackerSnapshotEntry} from '../lib/webworkers/aprs';
 import {fidHexOf, fidLabel, protoOf} from '../lib/webworkers/pointlog';
 
-import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE, WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE, WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS, STATS_INTERIM_INTERVAL} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -245,6 +245,14 @@ interface Channel {
     latestScore: Epoch;
 
     allScores: Record<Compno, PilotScore>;
+
+    // Track the last-emitted stats state per pilot so we can suppress redundant
+    // stats payloads and only send when segments change or the interim interval
+    // elapses. Keyed by scoreId (like scoreHistory) so a concurrent rescore
+    // stream and the live stream slim independently and don't clobber each
+    // other's counter. Lifecycle mirrors scoreHistory: cleared on task-clear,
+    // the old liveScoreId dropped on the _live transition.
+    statsTracking: Map<string, Map<Compno, {count: number; sentAt: Epoch}>>;
 
     scoreId: string;
     proposedScoreId: string;
@@ -1466,6 +1474,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 tracksBroadcastRequired: false,
                 scoreHistory: new Map(),
                 allScores: {},
+                statsTracking: new Map(),
                 scoreId,
                 proposedScoreId: scoreId,
                 liveScoreId: '',
@@ -1659,6 +1668,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
                 console.log(`${channel.className}: ** clear task`);
                 channel.scoring?.clearTask();
                 channel.scoreHistory.clear();
+                channel.statsTracking.clear();
                 channel.allScores = {};
                 channel.task = undefined;
                 channel.geoTask = undefined;
@@ -2549,6 +2559,7 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         console.log(`${channel.className}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
         if (channel.liveScoreId != scoreId) {
             channel.scoreHistory.delete(channel.liveScoreId);
+            channel.statsTracking.delete(channel.liveScoreId);
         }
         channel.liveScoreId = scoreId;
         channel.webPathBaseTime = 0 as Epoch; // we rescored so probably all the tracks have changed
@@ -2589,6 +2600,26 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             shidTo.set(compno, shCompno ?? []);
         }
 
+        // Stats sparse-emit: only include stats when the segment count changes
+        // or the interim interval has elapsed (so the open/current segment gets
+        // periodic updates). Tracking is keyed per scoreId so a concurrent
+        // rescore stream and the live stream don't clobber each other's counter.
+        // channel.allScores always stores the full score so new-client snapshots
+        // via sendAllScores carry complete stats.
+        let statsForId = channel.statsTracking.get(scoreId);
+        if (!statsForId) {
+            channel.statsTracking.set(scoreId, (statsForId = new Map()));
+        }
+        const priorStats = statsForId.get(compno);
+        const currentCount = score.stats?.segments.length ?? 0;
+        const countChanged = currentCount !== (priorStats?.count ?? 0);
+        const statsStale = score.stats != null && (score.t as Epoch) - (priorStats?.sentAt ?? (0 as Epoch)) > STATS_INTERIM_INTERVAL;
+        const includeStats = countChanged || statsStale;
+        if (includeStats) {
+            statsForId.set(compno, {count: currentCount, sentAt: score.t as Epoch});
+        }
+        const scoreToSend = includeStats ? score : {...score, stats: undefined};
+
         // Historical scores
         if (t) {
             let shid = channel.scoreHistory.get(scoreId);
@@ -2608,22 +2639,25 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 // scoreFrequency of the last survivor. State transitions
                 // (leg / sector / flight status / start / finish) always
                 // land a row via scoreChanged so we never silently swallow
-                // a meaningful event.
-                if (!prev || t - prev.t >= scoreFrequency || scoreChanged(prev, score, false)) {
-                    sh.push(score);
+                // a meaningful event. includeStats forces a row whenever we're
+                // shipping stats (segment change / interim) so a pre-start
+                // segment is persisted, not just broadcast live — the history
+                // gate's scoreChanged is stats-blind by design.
+                if (!prev || t - prev.t >= scoreFrequency || scoreChanged(prev, score, false) || includeStats) {
+                    sh.push(scoreToSend);
                 }
             } else {
                 // Out-of-order arrival: the chain rewound (e.g. dogleg
                 // backtrack in taskpositiongenerator) and is now re-emitting
                 // from t. Drop the stale tail and insert.
                 console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[i].t)} sh:[${i}/${sh.length}]`);
-                sh.splice(i, Infinity, score);
+                sh.splice(i, Infinity, scoreToSend);
             }
         }
 
         // Score from Live packets (either end of rescore or end of current score)
         if (score.live) {
-            const msg = safeEncode(OnglideWebSocketMessage, {scores: {scoreId, pilots: {[compno]: score}}}, `live score ${channel.className}/${compno}`);
+            const msg = safeEncode(OnglideWebSocketMessage, {scores: {scoreId, pilots: {[compno]: scoreToSend}}}, `live score ${channel.className}/${compno}`);
             if (msg) {
                 channel.statistics.bytesSent += channel.clients.length * msg.byteLength;
                 trackMetric(channel.className + '.scoring.bytesSent', msg.byteLength * channel.clients.length);

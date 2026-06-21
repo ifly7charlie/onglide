@@ -294,6 +294,14 @@ export interface OptimalGridEntry {
     grid: number[];
 }
 
+// Flight statistics snapshot (closed segments + open segment), stored
+// independently of scores so only segment-count changes and periodic interim
+// updates hit the wire, not every scoring tick.
+export interface PilotStatsEntry {
+    t: Epoch; // score timestamp when this snapshot was captured
+    segments: import('./protobuf/onglide').StatSegment[];
+}
+
 // points re-ordered if necessary
 export type SoftenGenerator<Type extends TimeStampType> = AsyncGenerator<Type, Type | void, void>;
 

@@ -1,5 +1,5 @@
 import {displayHeight, displayClimb} from './displayunits';
-import {TZ, ScoreData} from '../types';
+import {TZ, PilotStatsEntry} from '../types';
 
 type TFn = (key: string, opts?: Record<string, any>) => string;
 
@@ -9,7 +9,7 @@ export function deckTooltip({
     layer,
     coordinate,
     map,
-    pilotScores,
+    pilotStats,
     lang,
     tz,
     units,
@@ -22,7 +22,7 @@ export function deckTooltip({
     layer: any;
     coordinate?: number[];
     map: any;
-    pilotScores: ScoreData;
+    pilotStats?: Record<string, PilotStatsEntry[]>;
     lang: string;
     tz: TZ;
     units: number | boolean;
@@ -54,11 +54,14 @@ export function deckTooltip({
         }
 
         if (time) {
-            if (compno && pilotScores?.[compno]?.stats?.segments) {
-                const segment = pilotScores[compno].stats.segments.find((c) => c.start <= time && time <= c.end);
-                if (segment) {
-                    object.stats = segment;
-                }
+            if (compno && pilotStats?.[compno]?.length) {
+                // Find the latest stats snapshot at or before this track point's time,
+                // then look up which segment contains the point.
+                const entries = pilotStats[compno];
+                let ei = entries.length - 1;
+                while (ei > 0 && entries[ei].t > time) ei--;
+                const segment = entries[ei]?.segments.find((c) => c.start <= time && time <= c.end);
+                if (segment) object.stats = segment;
             }
             // Figure out what the local language is for international date strings
             const dt = new Date(time * 1000);

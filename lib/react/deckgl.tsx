@@ -27,7 +27,8 @@ import {TaskUp} from '../types';
 import {distanceLineLabelStyle} from './distanceLine';
 
 import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
-import {selectPilotScore, selectAllScores, selectOptimalGrid, selectAllTimes} from '../redux/scoresSlice';
+import {selectPilotScore, selectOptimalGrid, selectAllTimes} from '../redux/scoresSlice';
+import type {PilotStatsEntry} from '../types';
 import {selectPilotPosition, selectLatestUpdate, selectAllPositions} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {useStore} from 'react-redux';
@@ -135,7 +136,7 @@ export default function MApp(props: {
     // Score details for selected pilot
     const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
     const optimalGrid = useSelector((state) => selectOptimalGrid(state, selectedCompno, props.replayTime));
-    const pilotScores = useSelector((state) => selectAllScores(state, props.replayTime));
+    const allPilotStats = useSelector((state: RootState) => state.scores.pilotStats as Record<string, PilotStatsEntry[]>);
     const latestUpdate = useSelector(selectLatestUpdate);
     const selectedPosition = useSelector((state) => (selectedCompno ? selectPilotPosition(state, selectedCompno, props.replayTime) : undefined));
 
@@ -661,8 +662,8 @@ export default function MApp(props: {
 
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, pilotScores, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, t}), //
-        [vc, props.options.units, props.tz, mapRef?.current, pilotScores, t, lang]
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotStats: allPilotStats, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, t}), //
+        [vc, props.options.units, props.tz, mapRef?.current, allPilotStats, t, lang]
     );
 
     const attribution = useMemo(() => <AttributionInfo customParts={[radarOverlay.attribution, props.status]} />, [radarOverlay.key, radarOverlay.attribution, props.status]);

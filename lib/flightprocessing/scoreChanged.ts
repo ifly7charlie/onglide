@@ -87,3 +87,17 @@ export function scoreChanged(oldScore: PilotScore | undefined, newScore: PilotSc
 
     return false;
 }
+
+//
+// True when the flight-statistics segment set changed between two scores — a new
+// thermal/straight/gap segment was finalised (or a rescore reset them). A segment
+// boundary is a meaningful flight event in its own right, so the scoreCollector
+// treats it as a reason to emit even when no core score field moved. This matters
+// most pre-start: scoreChanged short-circuits to false before utcStart, so a glider
+// soaring through the pre-start window would otherwise post no scores and its
+// thermal/wind segments would never reach the front end. Both scores must be
+// full-stats (the flightStatistics attacher decorates every tick) for the length
+// comparison to be a valid segment count.
+export function statsChanged(oldScore: PilotScore | undefined, newScore: PilotScore | undefined): boolean {
+    return (oldScore?.stats?.segments?.length ?? 0) !== (newScore?.stats?.segments?.length ?? 0);
+}
