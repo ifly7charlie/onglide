@@ -384,6 +384,10 @@ interface OgnWebSocket extends WebSocket {
     isInteracting: boolean;
     isVisible: boolean;
     connectedAt: Epoch;
+    // performance.now() stamped at the top of the wss 'connection' handler —
+    // the earliest JS hook for this socket. Used to log connect→first-send
+    // latency for the /all snapshot (TIMING instrumentation).
+    connectPerf?: number;
     sendBinary: (data: Uint8Array) => void;
 }
 
@@ -2361,6 +2365,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
         console.log(`${channel.className}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
+        const reduceStart = performance.now();
         const toStream = Object.entries(gliders).reduce<Record<string, any>>((result, [compno, glider]) => {
             if (glider.className == channel.className) {
                 const p = glider.deck;
@@ -2388,8 +2393,15 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
             }
             return result;
         }, {});
+        const reduceMs = performance.now() - reduceStart;
         // Send the client the current version of the tracks
+        const encodeStart = performance.now();
         const webPath = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: 0}}, `webPath ${channel.className}`);
+        const encodeMs = performance.now() - encodeStart;
+        // TIMING: confirm whether the freeze is the multi-second main-thread
+        // block. Logs pilot count, encoded size, and a split of reduce (cheap
+        // array views) vs safeEncode (the suspected synchronous CPU cost).
+        console.log(`TIMING freeze ${channel.className}: pilots=${Object.keys(toStream).length} bytes=${webPath?.byteLength ?? 0} reduce=${reduceMs.toFixed(1)}ms encode=${encodeMs.toFixed(1)}ms`);
         // Don't advertise a baseTime for a snapshot with no pilots — viewers
         // would fetch the empty .bin and the proxy/browser would cache it.
         if (webPath && Object.keys(toStream).length > 0) {
@@ -2401,9 +2413,12 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
 
 // Send the abbreviated track for all gliders, used when a new client connects
 async function generateRecentPilotTracks(channel: Channel) {
+    const fnStart = performance.now();
     // Make sure they are up to date (does nothing if they are)
     await generateHistoricalTracks(channel);
+    const freezeMs = performance.now() - fnStart;
 
+    const reduceStart = performance.now();
     const toStream = Object.values(gliders).reduce<Record<string, any>>((result, glider) => {
         if (glider.className == channel.className) {
             const p = glider.deck;
@@ -2436,8 +2451,16 @@ async function generateRecentPilotTracks(channel: Channel) {
         }
         return result;
     }, {});
+    const reduceMs = performance.now() - reduceStart;
     // Send the client the current version of the tracks
-    return safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.className}`) ?? new Uint8Array(0);
+    const encodeStart = performance.now();
+    const msg = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.className}`) ?? new Uint8Array(0);
+    const encodeMs = performance.now() - encodeStart;
+    // TIMING: residual (post-snapshot delta) cost on a connect. `freeze` is the
+    // time spent inside generateHistoricalTracks above — non-zero only when this
+    // call triggered a 5-min freeze (and so paid the full-class encode).
+    console.log(`TIMING recent ${channel.className}: pilots=${Object.keys(toStream).length} bytes=${msg.byteLength} freeze=${freezeMs.toFixed(1)}ms reduce=${reduceMs.toFixed(1)}ms encode=${encodeMs.toFixed(1)}ms`);
+    return msg;
 }
 
 // Build the tracks message and broadcast it to all clients of the channel.
@@ -3047,15 +3070,31 @@ function encodeCompetitionsSnapshot(group: string | null): Uint8Array | null {
 // and broadcastCompetitionsDelta keeps the cache rebuilt — so a connect never
 // re-walks or re-encodes the list.
 function sendCompetitionsSnapshot(client: OgnWebSocket) {
+    const fnStart = performance.now();
     const groupKey = client.ognGroup ?? '';
     let msg = competitionsSnapshotCache.get(groupKey);
+    const cacheHit = msg !== undefined;
+    let encodeMs = 0;
     if (msg === undefined) {
+        const encodeStart = performance.now();
         msg = encodeCompetitionsSnapshot(client.ognGroup);
+        encodeMs = performance.now() - encodeStart;
         competitionsSnapshotCache.set(groupKey, msg);
     }
     if (msg && client.readyState === WebSocket.OPEN) {
+        const sendStart = performance.now();
         client.send(msg, {binary: true});
-        console.log('sendCompetitionsSnapshot', client.ognPeer, groupKey || 'all');
+        const sendMs = performance.now() - sendStart;
+        // TIMING: the /all snapshot. `connectToSend` is the wall-clock from the
+        // wss 'connection' handler firing for this socket to the first send
+        // completing — the latency the joining client actually experiences.
+        // cacheHit=true with a large connectToSend means the loop was blocked
+        // before this function ran (correlate with the `TIMING freeze` lines and
+        // the `EVENT-LOOP BLOCKED` monitor), not that the snapshot itself is slow.
+        const connectToSend = client.connectPerf !== undefined ? performance.now() - client.connectPerf : -1;
+        console.log(
+            `sendCompetitionsSnapshot ${client.ognPeer} ${groupKey || 'all'} TIMING cacheHit=${cacheHit} bytes=${msg.byteLength} encode=${encodeMs.toFixed(1)}ms send=${sendMs.toFixed(1)}ms total=${(performance.now() - fnStart).toFixed(1)}ms connectToSend=${connectToSend.toFixed(1)}ms`
+        );
     }
 }
 
@@ -3637,6 +3676,7 @@ function setupWebSocketServer(server) {
 
     // What to do when a client connects
     wss.on('connection', (ws: OgnWebSocket, req: IncomingMessage) => {
+        ws.connectPerf = performance.now();
         if (!req.url?.length) {
             ws.isAlive = false;
             ws.isValid = false;
