@@ -16,6 +16,7 @@ import {faClockRotateLeft, faHourglassStart, faTrophy} from '@fortawesome/free-s
 import type {TaskDetails, ClassWinner} from '../protobuf/onglide';
 import type {Epoch} from '../types';
 import {OptionalDurationMM} from './optional';
+import {useElementSize} from './useElementSize';
 import {STATUS_COLOURS, STATUS_LABEL_KEYS, StatusIcon, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
 import {useStatusSummary, type StatusSummary} from './statusSummary';
 import {LanguageSwitcher} from './language-switcher';
@@ -162,20 +163,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
     // re-render — toggling the in-view filter pre-interaction would otherwise
     // do nothing because width/height were still 0). Used together with the
     // live viewState to construct a Viewport for the in-view projection test.
-    const canvasRef = useRef<HTMLDivElement | null>(null);
-    const [canvasSize, setCanvasSize] = useState<{width: number; height: number}>({width: 0, height: 0});
-    useEffect(() => {
-        const el = canvasRef.current;
-        if (!el) return;
-        const update = () => {
-            const r = el.getBoundingClientRect();
-            setCanvasSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : {width: r.width, height: r.height}));
-        };
-        update();
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
+    const [canvasRef, canvasSize] = useElementSize<HTMLDivElement>();
 
     // Refs to each list entry, keyed by compid, so hovering/clicking a marker
     // on the globe can scroll the corresponding row into view in the side panel.

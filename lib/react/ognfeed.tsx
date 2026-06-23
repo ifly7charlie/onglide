@@ -35,6 +35,7 @@ import Sponsors from './sponsors';
 import {groupForHost} from './domainGroups';
 
 import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {useElementSize} from './useElementSize';
 import {SubscribeBellMenuItem} from './subscribeBell';
 import {LanguageSwitcher} from './language-switcher';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
@@ -275,6 +276,14 @@ export const OgnFeed = memo(
         const isMobile = useIsMobile();
         const [drawerOpen, setDrawerOpen] = useState(false);
 
+        // The mobile drawer hangs directly below the fixed top strip. The strip's
+        // height varies with its contents (the startline-open notice and the
+        // taller two-line "Tap for Official Scores" banner both grow it past its
+        // min-height), so we measure it rather than pinning the drawer to a
+        // hardcoded offset — otherwise the overflowed strip covers the drawer's
+        // first item (the class selector).
+        const [stripRef, stripSize] = useElementSize<HTMLDivElement>();
+
         const sortOrder = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
         const setSort = useCallback(
             (key: any) => {
@@ -338,7 +347,7 @@ export const OgnFeed = memo(
             return (
                 <>
                     {map}
-                    <div className="mobile-top-strip">
+                    <div className="mobile-top-strip" ref={stripRef}>
                         <div className="mobile-strip-header">
                             <Link href={groupForHost(window.location.host) ? '/' : 'https://www.onglide.com/'} className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                                 <FontAwesomeIcon icon={faGlobe} />
@@ -371,7 +380,7 @@ export const OgnFeed = memo(
                         )}
                     </div>
                     {drawerOpen ? (
-                        <div className="mobile-drawer">
+                        <div className="mobile-drawer" style={{top: stripSize.height || 128}}>
                             {(comp?.classes?.length ?? 0) > 1 ? (
                                 <div className="drawer-group">
                                     <div className="drawer-label">{t('drawer.class')}</div>

@@ -1029,6 +1029,10 @@ button {
 
     .mobile-drawer {
         position: fixed;
+        // Fallback only — ognfeed.tsx measures the top strip's real height with a
+        // ResizeObserver and sets `top` inline so the drawer always clears it,
+        // even when the strip grows past its 128px min-height (startline notice /
+        // official-scores banner). Keep this in sync with the strip min-height.
         top: 128px;
         left: 0;
         right: 0;
