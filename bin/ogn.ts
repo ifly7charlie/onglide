@@ -233,6 +233,16 @@ interface Channel {
     // Sticky once true — sunset only happens once per channel lifetime (new datecode = new channel)
     afterSunset: boolean;
 
+    // Sticky once true — set when this channel's compstatus ever reaches a
+    // FLEW_STATES code (L/S/F/H), i.e. the day actually launched/flew. A
+    // channel is per (class, contest-day) and the contest day flips at 10:00
+    // local, so this channel keeps representing the just-flown day until the
+    // next morning's rollover. Survives the compStatus mirror being bumped to
+    // the next day's briefed task ('B'/'G') in the pre-10:00 window — that
+    // overwrite is why buildCompetitionSummary can't recover "flew" from
+    // compStatus and relies on this flag for the 'replay yesterday' pill.
+    flew: boolean;
+
     // True while we are actively listening to APRS for at least one glider on
     // this channel (not after sunset, day still being scored). Recomputed each
     // updateTrackers tick and shipped to the frontend via getIdentifiers.
@@ -1470,6 +1480,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 },
                 heightStatistics: new Stats(),
                 afterSunset: false,
+                flew: false,
                 live: false,
                 // Info on what has been sent via https
                 webPathBaseTime: 0 as Epoch,
@@ -1504,6 +1515,16 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
         channel.statusDatecode = (c.datecode as Datecode | null) ?? null;
         channel.classHandicapped = c.handicapped || '';
         channel.classname = c.classname;
+        // Latch "this day flew" while the compstatus row still reflects this
+        // channel's day. Once the next day's task is briefed the mirror above
+        // is overwritten with 'B'/'G', so this latch preserves the fact and is
+        // what buildCompetitionSummary reads for the 'replay yesterday' pill. A
+        // later cancel (status 'Z') for the same day clears it — a scrubbed day
+        // is not a replayable flown day, matching the 'yesterday' badge gate.
+        if (channel.statusDatecode === channel.datecode) {
+            if (FLEW_STATES.has(channel.compStatus)) channel.flew = true;
+            else if (channel.compStatus === CompStatus.Scrubbed) channel.flew = false;
+        }
 
         // Sticky once true — once the day has crossed sunset stay there even if replay rewinds time
         channel.afterSunset = channel.afterSunset || getNow() > location.sunset;
@@ -2281,6 +2302,10 @@ function updateCompStatus(channel: Channel) {
                 // /all feed reflects the change without a tick.
                 channel.compStatus = result.status;
                 channel.statusDatecode = channel.datecode;
+                // Keep the sticky flew latch in step with the live status (see
+                // the matching block in updateClasses).
+                if (FLEW_STATES.has(result.status)) channel.flew = true;
+                else if (result.status === CompStatus.Scrubbed) channel.flew = false;
                 broadcastCompetitionsDelta([channel.compid], []);
             }
         })
@@ -2917,6 +2942,16 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         } else {
             displayStatus = classDisplayStatus(ch.compStatus, inWindow);
         }
+        // Pre-10:00-local "replay yesterday + new task" dual state: the comp
+        // day flips at 10:00, so before then the channel still represents the
+        // just-flown day (ch.datecode), while a briefed task for today has
+        // advanced the compstatus datecode past it (sdc > ch.datecode). When
+        // that day actually flew (ch.flew, sticky), the globe shows both the
+        // 'replay yesterday' pill and today's task pill (displayStatus above,
+        // e.g. 'task_set'). After 10:00 the channel rolls to today and sdc ==
+        // ch.datecode, so this is naturally false.
+        const channelDatecode = ch.datecode ? String(ch.datecode).toUpperCase() : null;
+        const replayYesterday = !!(ch.flew && sdc && channelDatecode && sdc > channelDatecode);
         // Prefer the live TaskRules from the briefed task. Pre-task, fall back
         // to a stub carrying just the class's configured handicapped/dh flags
         // so the per-comp page can still tell whether to surface handicapped
@@ -2960,7 +2995,8 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
             taskRules,
             datecode: ch.datecode,
             taskDetails: ch.task?.details,
-            winner
+            winner,
+            replayYesterday: replayYesterday || undefined
         });
     }
     classes.sort((a, b) => a.classname.localeCompare(b.classname));

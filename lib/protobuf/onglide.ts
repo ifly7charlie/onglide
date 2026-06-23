@@ -67,7 +67,11 @@ export interface CompetitionClassStatus {
     | TaskDetails
     | undefined;
   /** home/yesterday with at least one score */
-  winner?: ClassWinner | undefined;
+  winner?:
+    | ClassWinner
+    | undefined;
+  /** pre-10am-local: yesterday flew (replay available) AND a task is briefed for today, so the globe shows both the 'replay yesterday' and the task pill */
+  replayYesterday?: boolean | undefined;
 }
 
 export interface CompetitionSummary {
@@ -778,6 +782,7 @@ function createBaseCompetitionClassStatus(): CompetitionClassStatus {
     datecode: undefined,
     taskDetails: undefined,
     winner: undefined,
+    replayYesterday: undefined,
   };
 }
 
@@ -812,6 +817,9 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
     }
     if (message.winner !== undefined) {
       ClassWinner.encode(message.winner, writer.uint32(82).fork()).join();
+    }
+    if (message.replayYesterday !== undefined) {
+      writer.uint32(88).bool(message.replayYesterday);
     }
     return writer;
   },
@@ -903,6 +911,14 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
           message.winner = ClassWinner.decode(reader, reader.uint32());
           continue;
         }
+        case 11: {
+          if (tag !== 88) {
+            break;
+          }
+
+          message.replayYesterday = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -924,6 +940,7 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
       datecode: isSet(object.datecode) ? globalThis.String(object.datecode) : undefined,
       taskDetails: isSet(object.taskDetails) ? TaskDetails.fromJSON(object.taskDetails) : undefined,
       winner: isSet(object.winner) ? ClassWinner.fromJSON(object.winner) : undefined,
+      replayYesterday: isSet(object.replayYesterday) ? globalThis.Boolean(object.replayYesterday) : undefined,
     };
   },
 
@@ -959,6 +976,9 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
     if (message.winner !== undefined) {
       obj.winner = ClassWinner.toJSON(message.winner);
     }
+    if (message.replayYesterday !== undefined) {
+      obj.replayYesterday = message.replayYesterday;
+    }
     return obj;
   },
 
@@ -983,6 +1003,7 @@ export const CompetitionClassStatus: MessageFns<CompetitionClassStatus> = {
     message.winner = (object.winner !== undefined && object.winner !== null)
       ? ClassWinner.fromPartial(object.winner)
       : undefined;
+    message.replayYesterday = object.replayYesterday ?? undefined;
     return message;
   },
 };

@@ -47,6 +47,10 @@ export interface CompetitionClass {
     taskDetails?: TaskDetails;
     winner?: ClassWinner;
     nostartutc?: number;
+    // Pre-10:00-local: yesterday flew (replay available) AND a task is briefed
+    // for today. The row then shows a 'replay yesterday' pill alongside the
+    // main task pill (displayStatus). Set server-side in buildCompetitionSummary.
+    replayYesterday?: boolean;
 }
 
 export interface Competition {
@@ -743,6 +747,12 @@ function CompetitionListEntry({
                                   Router.push('/' + comp.compid + '?className=' + cls.class);
                               }}
                           >
+                              {cls.replayYesterday ? (
+                                  <span className="status-pill" style={{background: statusCss('yesterday')}}>
+                                      <StatusIcon status="yesterday" />
+                                      {t(STATUS_LABEL_KEYS.yesterday)}
+                                  </span>
+                              ) : null}
                               <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
                                   <StatusIcon status={cls.displayStatus} />
                                   {t(STATUS_LABEL_KEYS[cls.displayStatus])}

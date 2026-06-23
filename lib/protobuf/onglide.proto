@@ -35,6 +35,7 @@ message CompetitionClassStatus {
 	optional string datecode = 8;      // per-class WS-channel datecode (10am-local cutoff)
 	optional TaskDetails taskDetails = 9;  // current day's task; FE picks distance (speed task) or duration (AAT)
 	optional ClassWinner winner = 10;      // home/yesterday with at least one score
+	optional bool replayYesterday = 11;    // pre-10am-local: yesterday flew (replay available) AND a task is briefed for today, so the globe shows both the 'replay yesterday' and the task pill
 }
 
 message CompetitionSummary {
