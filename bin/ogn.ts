@@ -2919,21 +2919,24 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         }
         // Leader from this channel's scored pilots — the same data that backs
         // the winner trophy, and our signal for "is there a flown day worth
-        // replaying". Prefer handicapped speed (a pilot who completed task),
-        // then handicapped distance, then raw actual distance as a fallback so
-        // non-handicapped classes still register. Computed unconditionally so
-        // it can gate replayYesterday below; only attached to the row in the
-        // home/yesterday/replay cases.
+        // replaying". Rank by handicapped score when the class is handicapped,
+        // otherwise by actual: most classes are non-handicapped and carry no
+        // `handicapped` block at all, so we must always fall back to `actual`
+        // or they'd never produce a winner. Prefer speed (a pilot who completed
+        // the task), then distance. Computed unconditionally so it can gate
+        // replayYesterday below; only attached to the row in the home/yesterday/
+        // replay cases.
         const scores = Object.values(ch.allScores);
+        const rankScore = (s: PilotScore) => s.handicapped ?? s.actual;
         let winnerCandidate: ClassWinner | undefined;
-        const bySpeed = scores.filter((s) => (s.handicapped?.taskSpeed ?? 0) > 0).sort((a, b) => b.handicapped!.taskSpeed! - a.handicapped!.taskSpeed!)[0];
+        const bySpeed = scores.filter((s) => (rankScore(s)?.taskSpeed ?? 0) > 0).sort((a, b) => rankScore(b)!.taskSpeed! - rankScore(a)!.taskSpeed!)[0];
         if (bySpeed) {
-            winnerCandidate = {compno: bySpeed.compno, taskSpeed: bySpeed.handicapped!.taskSpeed};
+            winnerCandidate = {compno: bySpeed.compno, taskSpeed: rankScore(bySpeed)!.taskSpeed};
         } else {
-            const byDistance = scores.filter((s) => (s.handicapped?.taskDistance ?? 0) > 0).sort((a, b) => b.handicapped!.taskDistance - a.handicapped!.taskDistance)[0];
-            if (byDistance) winnerCandidate = {compno: byDistance.compno, taskDistance: byDistance.handicapped!.taskDistance};
+            const byDistance = scores.filter((s) => (rankScore(s)?.taskDistance ?? 0) > 0).sort((a, b) => (rankScore(b)!.taskDistance ?? 0) - (rankScore(a)!.taskDistance ?? 0))[0];
+            if (byDistance) winnerCandidate = {compno: byDistance.compno, taskDistance: rankScore(byDistance)!.taskDistance};
         }
-        const hasFlownScores = !!winnerCandidate || scores.some((s) => (s.actual?.taskDistance ?? 0) > 0);
+        const hasFlownScores = !!winnerCandidate;
 
         // Pre-10:00-local "replay yesterday + new task" dual state: the comp
         // day flips at 10:00, so before then the channel still represents the
