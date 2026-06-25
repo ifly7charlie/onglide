@@ -651,7 +651,10 @@ function CompetitionListEntry({
     // (AAT). Returns null when there's nothing meaningful to show — pre-task
     // and upcoming classes render with just the status pill and class name.
     const renderClassMetric = (cls: CompetitionClass) => {
-        if ((cls.displayStatus === 'home' || cls.displayStatus === 'yesterday') && cls.winner) {
+        // Show yesterday's winner whenever we have one — including the dual
+        // 'replay yesterday + task today' state, where displayStatus is
+        // 'task_set' but the row still represents a flown day with a result.
+        if ((cls.displayStatus === 'home' || cls.displayStatus === 'yesterday' || cls.replayYesterday) && cls.winner) {
             const w = cls.winner;
             const value =
                 typeof w.taskSpeed === 'number' && w.taskSpeed > 0

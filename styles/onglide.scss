@@ -907,6 +907,14 @@ button {
     display: none;
 }
 
+// The globe list rows can carry two status pills (e.g. 'Replay yesterday' +
+// 'Task set') plus a winner/metric, so give this panel more room than the
+// per-competition sidepanel to stop the rows wrapping. Mobile overrides this
+// to a full-width bottom drawer below.
+.sidepanel.sidepanel-globe {
+    width: 470px;
+}
+
 @media (max-width: 991.98px) {
     .sidepanel {
         display: none;
