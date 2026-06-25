@@ -684,7 +684,7 @@ export default function MApp(props: {
     // Thermal-strength spirals for the selected/hovered glider (incl. the
     // in-progress thermal). Driven by the same time-indexed pilotStats store
     // as the tooltip, so it follows the replay cursor for free.
-    const thermals = thermalLayer(selectedCompno, props.hoveredCompno ?? null, props.replayTime ?? liveNow);
+    const thermals = thermalLayer(selectedCompno, props.hoveredCompno ?? null, props.replayTime ?? liveNow, props.replayTime);
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);

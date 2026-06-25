@@ -113,7 +113,13 @@ function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | und
 // Thermal-strength markers for the selected and/or hovered glider, including
 // the in-progress thermal (the open segment, which is always the last entry in
 // stats.segments). Returns null when neither pilot has thermals to show.
-export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: Compno | null, t: Epoch | undefined) {
+//
+// `t` is the display cursor (replay time, or the live now) used to place markers
+// and trim the future. `replayTime` is the raw replay slider value — undefined
+// in live mode — which selectPilotScore needs to pick the live vs historical
+// score store for utcStart; passing the live cursor there would read the empty
+// historical store and silently drop the start-clip.
+export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: Compno | null, t: Epoch | undefined, replayTime: Epoch | undefined) {
     // Only fetch the hovered pilot's stats when it differs from the selected one.
     const hovered = hoveredCompno && hoveredCompno !== selectedCompno ? hoveredCompno : undefined;
 
@@ -121,8 +127,8 @@ export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: 
     const hoveredSegments = useSelector((state: RootState) => selectPilotStats(state, hovered, t));
     const selectedDeck = useSelector((state: RootState) => (selectedCompno ? state.tracks.tracks[selectedCompno]?.deck : undefined));
     const hoveredDeck = useSelector((state: RootState) => (hovered ? state.tracks.tracks[hovered]?.deck : undefined));
-    const selectedStart = useSelector((state: RootState) => (selectedCompno ? (selectPilotScore(state, selectedCompno, t)?.utcStart as Epoch | undefined) : undefined));
-    const hoveredStart = useSelector((state: RootState) => (hovered ? (selectPilotScore(state, hovered, t)?.utcStart as Epoch | undefined) : undefined));
+    const selectedStart = useSelector((state: RootState) => (selectedCompno ? (selectPilotScore(state, selectedCompno, replayTime)?.utcStart as Epoch | undefined) : undefined));
+    const hoveredStart = useSelector((state: RootState) => (hovered ? (selectPilotScore(state, hovered, replayTime)?.utcStart as Epoch | undefined) : undefined));
 
     const data = useMemo(
         () => [...thermalPoints(selectedDeck, selectedSegments, selectedStart, t), ...thermalPoints(hoveredDeck, hoveredSegments, hoveredStart, t)],

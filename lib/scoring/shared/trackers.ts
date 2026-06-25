@@ -56,7 +56,6 @@ export async function updateTracker(
                     AND (
                         feedid = ${feed}
                         OR feedid IS NULL
-                        OR feedid = 'findtracker'
                     )
             `)
         ).affectedRows;
