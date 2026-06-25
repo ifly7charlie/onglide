@@ -3,6 +3,19 @@ import {TZ, PilotStatsEntry} from '../types';
 
 type TFn = (key: string, opts?: Record<string, any>) => string;
 
+// Seconds since task start → compact H:MM:SS / M:SS. Used for the "time into
+// task" readout on the thermal tooltip.
+function formatElapsed(seconds: number): string {
+    const sign = seconds < 0 ? '-' : '';
+    let s = Math.abs(Math.round(seconds));
+    const h = Math.floor(s / 3600);
+    s -= h * 3600;
+    const m = Math.floor(s / 60);
+    s -= m * 60;
+    const mm = h ? String(m).padStart(2, '0') : String(m);
+    return `${sign}${h ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`;
+}
+
 export function deckTooltip({
     object,
     picked,
@@ -50,6 +63,11 @@ export function deckTooltip({
             const seconds = s.end - s.start;
             const turn = s.direction === 1 ? ' ↺' : s.direction === 2 ? ' ↻' : '';
             let html = `<strong>${object.compno}</strong> 🌀${turn}<br/>`;
+            // When the thermal started: absolute comp-time clock plus, once the
+            // pilot has started, the time into the task.
+            const clock = new Date(s.start * 1000).toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'});
+            const rel = object.utcStart ? ` (+${formatElapsed(s.start - object.utcStart)})` : '';
+            html += `🕐 ${clock}${rel}<br/>`;
             html += t('tooltip.thermal_average', {climb: displayClimb(s.avgDelta, units)});
             html += `<br/>${t('tooltip.thermal_for_seconds', {state: s.state, seconds})}`;
             if (s.heightgain) html += `<br/>⬆️ ${displayHeight(s.heightgain, units)}`;

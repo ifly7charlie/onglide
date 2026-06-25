@@ -4,7 +4,7 @@ import {IconLayer} from '@deck.gl/layers';
 
 import {useSelector} from '../redux';
 import type {RootState} from '../redux/store';
-import {selectPilotStats} from '../redux/scoresSlice';
+import {selectPilotStats, selectPilotScore} from '../redux/scoresSlice';
 
 import {sortedIndexNumber} from '../util/binarySearch';
 
@@ -74,6 +74,7 @@ interface ThermalPoint {
     t: Epoch; // mid-thermal time (for the tooltip)
     climb: number; // m/s
     stats: StatSegment; // so the existing deckTooltip object.stats branch lights up
+    utcStart?: Epoch; // pilot's task start, for the tooltip's relative (time-into-task) readout
 }
 
 // Resolve each thermal segment to a map position by sampling the glider's track
@@ -81,7 +82,7 @@ interface ThermalPoint {
 // deck is the source of truth. `t` (cursor) bounds how far we look so a replay
 // never paints a thermal the glider hasn't reached yet — selectPilotStats
 // already trims future segments, this guards the open segment's position too.
-function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | undefined, t: Epoch | undefined): ThermalPoint[] {
+function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | undefined, utcStart: Epoch | undefined, t: Epoch | undefined): ThermalPoint[] {
     if (!deck?.posIndex || !segments?.length) return [];
     const limit = t ?? Infinity;
     const ts = deck.t.subarray(0, deck.posIndex);
@@ -89,6 +90,10 @@ function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | und
     for (const seg of segments) {
         if (seg.state !== 'thermal') continue;
         if (seg.end - seg.start < MIN_THERMAL_SECONDS) continue;
+        // Tie the markers to the scored track: drop any thermal that finished
+        // before the pilot's start. The displayed trace is clipped at the start
+        // line, so a pre-start marker would float with no trail beneath it.
+        if (utcStart && seg.end <= utcStart) continue;
         if (seg.start > limit) continue;
         const mid = Math.min((seg.start + seg.end) / 2, limit) as Epoch;
         let i = sortedIndexNumber(ts, mid);
@@ -98,7 +103,8 @@ function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | und
             compno: deck.compno,
             t: mid,
             climb: seg.avgDelta ?? 0,
-            stats: seg
+            stats: seg,
+            utcStart
         });
     }
     return out;
@@ -115,8 +121,13 @@ export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: 
     const hoveredSegments = useSelector((state: RootState) => selectPilotStats(state, hovered, t));
     const selectedDeck = useSelector((state: RootState) => (selectedCompno ? state.tracks.tracks[selectedCompno]?.deck : undefined));
     const hoveredDeck = useSelector((state: RootState) => (hovered ? state.tracks.tracks[hovered]?.deck : undefined));
+    const selectedStart = useSelector((state: RootState) => (selectedCompno ? (selectPilotScore(state, selectedCompno, t)?.utcStart as Epoch | undefined) : undefined));
+    const hoveredStart = useSelector((state: RootState) => (hovered ? (selectPilotScore(state, hovered, t)?.utcStart as Epoch | undefined) : undefined));
 
-    const data = useMemo(() => [...thermalPoints(selectedDeck, selectedSegments, t), ...thermalPoints(hoveredDeck, hoveredSegments, t)], [selectedDeck, selectedSegments, hoveredDeck, hoveredSegments, t]);
+    const data = useMemo(
+        () => [...thermalPoints(selectedDeck, selectedSegments, selectedStart, t), ...thermalPoints(hoveredDeck, hoveredSegments, hoveredStart, t)],
+        [selectedDeck, selectedSegments, selectedStart, hoveredDeck, hoveredSegments, hoveredStart, t]
+    );
 
     if (!data.length) return null;
 
