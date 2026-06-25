@@ -65,6 +65,7 @@ import buffer from '@turf/buffer';
 
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
+import {thermalLayer} from './thermalLayer';
 import {pilotsTrackLayer, computeTripsFiltering} from './pilotstracklayer';
 import {OgnTripsLayer} from './ogntripslayer';
 import {homeLocationLayer} from './homeLocationLayer';
@@ -680,6 +681,11 @@ export default function MApp(props: {
 
     const pilotLayer = pilotsLayer(selectedCompno, props.hoveredCompno ?? null, hoverFlash, props.setSelectedCompno, props.replayTime ?? liveNow);
 
+    // Thermal-strength spirals for the selected/hovered glider (incl. the
+    // in-progress thermal). Driven by the same time-indexed pilotStats store
+    // as the tooltip, so it follows the replay cursor for free.
+    const thermals = thermalLayer(selectedCompno, props.hoveredCompno ?? null, props.replayTime ?? liveNow);
+
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
 
@@ -824,7 +830,7 @@ export default function MApp(props: {
                     getTooltip={toolTip}
                     onClick={onClick}
                     onDragStart={onDragStart}
-                    layers={valid && !unmounting ? ([...pilotTrackLayer, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
+                    layers={valid && !unmounting ? ([...pilotTrackLayer, thermals, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
                     interleaved={false}
                     overlayRef={overlayRef}
                 />

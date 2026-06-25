@@ -42,6 +42,21 @@ export function deckTooltip({
             return {html: `<strong>${tp.leg} ${tp.trigraph}</strong>: ${tp.name} 📏 ${tp.r1}${t('units.km')}<br/>`};
         }
 
+        // Thermal marker (thermalLayer) — a focused readout that leads with the
+        // climb strength, then duration / height gain / wind. The marker object
+        // already carries its StatSegment, so no pilotStats lookup is needed.
+        if (layer?.id === 'thermals' && object.stats) {
+            const s = object.stats;
+            const seconds = s.end - s.start;
+            const turn = s.direction === 1 ? ' ↺' : s.direction === 2 ? ' ↻' : '';
+            let html = `<strong>${object.compno}</strong> 🌀${turn}<br/>`;
+            html += t('tooltip.thermal_average', {climb: displayClimb(s.avgDelta, units)});
+            html += `<br/>${t('tooltip.thermal_for_seconds', {state: s.state, seconds})}`;
+            if (s.heightgain) html += `<br/>⬆️ ${displayHeight(s.heightgain, units)}`;
+            if (s.wind?.direction) html += `<br/>${t('tooltip.wind', {speed: s.wind.speed?.toFixed(0), direction: s.wind.direction.toFixed(0)})}`;
+            return {html};
+        }
+
         let response = '';
         const compno = layer?.props?.compno ?? object.compno;
         const classLabel = layer?.props?.className ?? object.classname ?? object.class;
