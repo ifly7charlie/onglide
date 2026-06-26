@@ -1,5 +1,6 @@
 import {displayHeight, displayClimb} from './displayunits';
-import {TZ, PilotStatsEntry} from '../types';
+import {TZ} from '../types';
+import type {StatSegment} from '../protobuf/onglide';
 
 type TFn = (key: string, opts?: Record<string, any>) => string;
 
@@ -35,7 +36,7 @@ export function deckTooltip({
     layer: any;
     coordinate?: number[];
     map: any;
-    pilotStats?: Record<string, PilotStatsEntry[]>;
+    pilotStats?: Record<string, StatSegment[]>;
     lang: string;
     tz: TZ;
     units: number | boolean;
@@ -88,12 +89,9 @@ export function deckTooltip({
 
         if (time) {
             if (compno && pilotStats?.[compno]?.length) {
-                // Find the latest stats snapshot at or before this track point's time,
-                // then look up which segment contains the point.
-                const entries = pilotStats[compno];
-                let ei = entries.length - 1;
-                while (ei > 0 && entries[ei].t > time) ei--;
-                const segment = entries[ei]?.segments.find((c) => c.start <= time && time <= c.end);
+                // pilotStats is a single merged, start-sorted segment list, so the
+                // segment containing this track point is a direct lookup.
+                const segment = pilotStats[compno].find((c) => c.start <= time && time <= c.end);
                 if (segment) object.stats = segment;
             }
             // Figure out what the local language is for international date strings

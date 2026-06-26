@@ -80,8 +80,9 @@ interface ThermalPoint {
 // Resolve each thermal segment to a map position by sampling the glider's track
 // at the segment mid-time. StatSegment carries no position of its own, so the
 // deck is the source of truth. `t` (cursor) bounds how far we look so a replay
-// never paints a thermal the glider hasn't reached yet — selectPilotStats
-// already trims future segments, this guards the open segment's position too.
+// never paints a thermal the glider hasn't reached yet — the `seg.start > limit`
+// clip below drops future segments and the `mid` clamp guards the open segment's
+// position too (selectPilotStats returns the whole accumulator, unclipped).
 function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | undefined, utcStart: Epoch | undefined, t: Epoch | undefined): ThermalPoint[] {
     if (!deck?.posIndex || !segments?.length) return [];
     const limit = t ?? Infinity;
@@ -123,8 +124,8 @@ export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: 
     // Only fetch the hovered pilot's stats when it differs from the selected one.
     const hovered = hoveredCompno && hoveredCompno !== selectedCompno ? hoveredCompno : undefined;
 
-    const selectedSegments = useSelector((state: RootState) => selectPilotStats(state, selectedCompno, t));
-    const hoveredSegments = useSelector((state: RootState) => selectPilotStats(state, hovered, t));
+    const selectedSegments = useSelector((state: RootState) => selectPilotStats(state, selectedCompno));
+    const hoveredSegments = useSelector((state: RootState) => selectPilotStats(state, hovered));
     const selectedDeck = useSelector((state: RootState) => (selectedCompno ? state.tracks.tracks[selectedCompno]?.deck : undefined));
     const hoveredDeck = useSelector((state: RootState) => (hovered ? state.tracks.tracks[hovered]?.deck : undefined));
     const selectedStart = useSelector((state: RootState) => (selectedCompno ? (selectPilotScore(state, selectedCompno, replayTime)?.utcStart as Epoch | undefined) : undefined));

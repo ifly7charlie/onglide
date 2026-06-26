@@ -22,7 +22,7 @@ import {point} from '@turf/helpers';
 import {WebSocket, WebSocketServer} from 'ws';
 import type {IncomingMessage} from 'http';
 
-import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore, CompetitionSummary, CompetitionClassStatus, ClassWinner} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore, CompetitionSummary, CompetitionClassStatus, ClassWinner, StatSegment} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
@@ -247,12 +247,17 @@ interface Channel {
     allScores: Record<Compno, PilotScore>;
 
     // Track the last-emitted stats state per pilot so we can suppress redundant
-    // stats payloads and only send when segments change or the interim interval
-    // elapses. Keyed by scoreId (like scoreHistory) so a concurrent rescore
-    // stream and the live stream slim independently and don't clobber each
-    // other's counter. Lifecycle mirrors scoreHistory: cleared on task-clear,
-    // the old liveScoreId dropped on the _live transition.
-    statsTracking: Map<string, Map<Compno, {count: number; sentAt: Epoch}>>;
+    // stats payloads and ship only the changed tail. We emit when segments
+    // change or the interim interval elapses, and then send only the segments
+    // from confirmedClosed onward. A segment is frozen only once it has a closed
+    // successor; the last closed segment can still be coalesced into by pushOpen
+    // (growing its end/stats), so confirmedClosed trails the open by one and the
+    // resend window is always [last-closed, open]. Keyed by scoreId (like
+    // scoreHistory) so a concurrent rescore stream and the live stream slim
+    // independently and don't clobber each other's counter. Lifecycle mirrors
+    // scoreHistory: cleared on task-clear, the old liveScoreId dropped on the
+    // _live transition.
+    statsTracking: Map<string, Map<Compno, {count: number; sentAt: Epoch; confirmedClosed: number}>>;
 
     scoreId: string;
     proposedScoreId: string;
@@ -2637,11 +2642,27 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         const currentCount = score.stats?.segments.length ?? 0;
         const countChanged = currentCount !== (priorStats?.count ?? 0);
         const statsStale = score.stats != null && (score.t as Epoch) - (priorStats?.sentAt ?? (0 as Epoch)) > STATS_INTERIM_INTERVAL;
-        const includeStats = countChanged || statsStale;
-        if (includeStats) {
-            statsForId.set(compno, {count: currentCount, sentAt: score.t as Epoch});
+        const includeStats = score.stats != null && (countChanged || statsStale);
+        // Ship only the changed tail: segments from confirmedClosed onward. The
+        // last *closed* segment is still mutable — pushOpen can coalesce the next
+        // segment into it (growing its end/stats) — so the resend window is the
+        // last closed segment plus the open one (currentCount - 2). Only segments
+        // with a closed successor are truly frozen, and those we never resend. On
+        // an interim tick with no count change the slice is the last-closed + open
+        // pair. The client merges by start (max-end wins), so a partial list is
+        // sufficient. allScores keeps the full score, so a new client still gets
+        // the complete list via sendAllScores.
+        let scoreToSend = score;
+        if (score.stats != null) {
+            if (includeStats) {
+                const confirmedClosed = priorStats?.confirmedClosed ?? 0;
+                const delta = score.stats.segments.slice(confirmedClosed);
+                scoreToSend = {...score, stats: {...score.stats, segments: delta}};
+                statsForId.set(compno, {count: currentCount, sentAt: score.t as Epoch, confirmedClosed: Math.max(0, currentCount - 2)});
+            } else {
+                scoreToSend = {...score, stats: undefined};
+            }
         }
-        const scoreToSend = includeStats ? score : {...score, stats: undefined};
 
         // Historical scores
         if (t) {
@@ -2672,8 +2693,11 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             } else {
                 // Out-of-order arrival: the chain rewound (e.g. dogleg
                 // backtrack in taskpositiongenerator) and is now re-emitting
-                // from t. Drop the stale tail and insert.
+                // from t. Drop the stale tail and insert. Reset confirmedClosed
+                // so the next emit re-sends the full segment tail and the client
+                // re-establishes its merged list after the backtrack.
                 console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[i].t)} sh:[${i}/${sh.length}]`);
+                if (priorStats) statsForId.set(compno, {...priorStats, confirmedClosed: 0});
                 sh.splice(i, Infinity, scoreToSend);
             }
         }
@@ -3990,6 +4014,24 @@ function setupOgnWebServer(req, res) {
                             const carrier = scores.findLast((s) => s.t <= first.t && s.currentLeg === first.currentLeg && s.optimalGrid?.length);
                             if (carrier) {
                                 history[compno].history[0] = {...first, optimalGrid: carrier.optimalGrid};
+                            }
+                        }
+                        // Stats rows carry only deltas — rebuild the full segment list as of the chunk's
+                        // first record (merge by start, keeping the most-evolved/max-end version) and
+                        // backfill it so each chunk is self-contained; later rows in the chunk are deltas
+                        // the client merges on top.
+                        const firstWithStats = history[compno].history[0];
+                        if (firstWithStats) {
+                            const merged = new Map<number, StatSegment>();
+                            for (const s of scores) {
+                                if (s.t > firstWithStats.t) break; // scores are t-sorted
+                                for (const seg of s.stats?.segments ?? []) {
+                                    if ((merged.get(seg.start)?.end ?? -Infinity) <= seg.end) merged.set(seg.start, seg);
+                                }
+                            }
+                            if (merged.size) {
+                                const segments = [...merged.values()].sort((a, b) => a.start - b.start);
+                                history[compno].history[0] = {...firstWithStats, stats: {segments}};
                             }
                         }
                         scoreCount += history[compno].history.length;

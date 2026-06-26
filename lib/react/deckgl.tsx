@@ -28,7 +28,7 @@ import {distanceLineLabelStyle} from './distanceLine';
 
 import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
 import {selectPilotScore, selectOptimalGrid, selectAllTimes} from '../redux/scoresSlice';
-import type {PilotStatsEntry} from '../types';
+import type {StatSegment} from '../protobuf/onglide';
 import {selectPilotPosition, selectLatestUpdate, selectAllPositions} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {useStore} from 'react-redux';
@@ -137,7 +137,7 @@ export default function MApp(props: {
     // Score details for selected pilot
     const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
     const optimalGrid = useSelector((state) => selectOptimalGrid(state, selectedCompno, props.replayTime));
-    const allPilotStats = useSelector((state: RootState) => state.scores.pilotStats as Record<string, PilotStatsEntry[]>);
+    const allPilotStats = useSelector((state: RootState) => state.scores.pilotStats as Record<string, StatSegment[]>);
     const latestUpdate = useSelector(selectLatestUpdate);
     const selectedPosition = useSelector((state) => (selectedCompno ? selectPilotPosition(state, selectedCompno, props.replayTime) : undefined));
 

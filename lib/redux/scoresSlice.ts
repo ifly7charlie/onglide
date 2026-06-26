@@ -10,14 +10,14 @@ import {scoreChunkSize} from '../constants';
 
 import {updatePilotStartTimeAction, updateClassAction, updateSortKeyAction} from './actions';
 
-import {PilotScore, Scores, Scores_PilotsEntry} from '../protobuf/onglide';
+import {PilotScore, Scores, Scores_PilotsEntry, StatSegment} from '../protobuf/onglide';
 import {ClassScoreHistory, OnglideWebSocketMessage} from '../protobuf/onglide';
 import {unscaleClassScoreHistoryFromWire} from '../protobuf/wireScaling';
 
 //const updateScoresAction = createAction<PilotScores>('updateScores');
 import {assembleLabeledLine} from '../react/distanceLine';
 
-import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey, OptimalGridEntry, PilotStatsEntry} from '../types';
+import type {ScoreData, Compno, Datecode, Epoch, ClassName, PilotScoreDisplay, SortKey, OptimalGridEntry} from '../types';
 
 import {sortedIndexBy} from '../util/binarySearch';
 
@@ -31,7 +31,7 @@ interface ScoresSliceState {
     scores: ScoreData;
     historical: HistoricalScoreData;
     optimalGrids: Record<Compno, OptimalGridEntry[]>;
-    pilotStats: Record<Compno, PilotStatsEntry[]>;
+    pilotStats: Record<Compno, StatSegment[]>;
     loading: Record<Epoch, string>; // request id for requests to load - we only remove on error (so it retries) otherwise
     scoreId: string; //  copy of track version set when loading something
     // leave the ID in the structure so we don't keep trying to get missing scores
@@ -236,21 +236,15 @@ export const scoresSlice = createSlice({
                 }
             }
         ),
-        // Returns the segments array for a pilot at a given replay time, or the
-        // latest snapshot for live mode (t undefined). Binary-searches the
-        // time-indexed pilotStats store for the most recent snapshot at or
-        // before t — same semantics as selectOptimalGrid.
+        // Returns the merged, start-sorted segment list for a pilot. The store
+        // is a single accumulator (deltas merged on arrival), so there is no
+        // per-time snapshot to pick — consumers (thermalLayer, decktooltip) clip
+        // by segment start/end against the replay cursor themselves.
         selectPilotStats: createSelector(
-            [
-                (_state: ScoresSliceState, _compno: Compno | undefined, t: Epoch | undefined) => t,
-                (_state: ScoresSliceState, compno: Compno | undefined) => compno,
-                (state: ScoresSliceState, compno: Compno | undefined) => (compno ? state.pilotStats[compno] : undefined)
-            ],
-            (t: Epoch | undefined, compno: Compno | undefined, entries: PilotStatsEntry[] | undefined) => {
-                if (!compno || !entries?.length) return undefined;
-                if (!t) return entries.at(-1)?.segments;
-                const index = sortedIndexBy(entries, {t} as PilotStatsEntry, (x) => x.t) - 1;
-                return index >= 0 ? entries[index].segments : undefined;
+            [(state: ScoresSliceState, compno: Compno | undefined) => (compno ? state.pilotStats[compno] : undefined)],
+            (segments: StatSegment[] | undefined) => {
+                if (!segments?.length) return undefined;
+                return segments;
             },
             {
                 memoizeOptions: {
@@ -341,6 +335,24 @@ export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilo
 // Logic for updates
 //////////////////////////////////////////
 
+// Merge a batch of (possibly partial) flight-statistics segment deltas into the
+// pilot's single start-sorted accumulator, in place. Segments are keyed by their
+// immutable `start`; a segment only ever grows its `end` — the open segment as
+// it extends, and the last closed segment when pushOpen coalesces its successor
+// into it — so we upsert keeping the larger-`end` version. This makes the merge
+// idempotent and order-independent — a stale earlier copy arriving after the
+// grown one (e.g. /scorehistory chunks fetched out of order) can't overwrite it.
+export function mergeSegments(list: StatSegment[], incoming: StatSegment[]): void {
+    for (const seg of incoming) {
+        const idx = sortedIndexBy(list, seg, (x) => x.start);
+        if (list[idx]?.start === seg.start) {
+            if (seg.end >= list[idx].end) list[idx] = seg;
+        } else {
+            list.splice(idx, 0, seg);
+        }
+    }
+}
+
 function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     if (Object.keys(action.payload.pilots).length > 1) {
         console.log(`updateScores live: ${state.scoreId}, received: ${action.payload.scoreId}, ${Object.keys(action.payload.pilots).join(',')}`);
@@ -379,14 +391,12 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
             gh.splice(gIdx, Infinity, entry);
         }
 
-        // Extract stats into a separate time-indexed store (emitted only when
-        // segment count changes or the interim interval elapses). Splice-Infinity
-        // mirrors the live rewind semantics used for optimalGrid above.
+        // Stats arrive as deltas (the resend tail: last-closed + open). Merge
+        // them into the single start-sorted accumulator for this pilot;
+        // mergeSegments keeps the max-end version, so a stale earlier copy never
+        // clobbers a grown/finalised one.
         if (stats?.segments.length) {
-            const entry: PilotStatsEntry = {t: score.t as Epoch, segments: stats.segments};
-            const ps = (state.pilotStats[compno as Compno] ??= []);
-            const pIdx = sortedIndexBy(ps, entry, (x) => x.t);
-            ps.splice(pIdx, Infinity, entry);
+            mergeSegments((state.pilotStats[compno as Compno] ??= []), stats.segments);
         }
 
         // Read the prior display score via original() so we get the plain
@@ -473,14 +483,10 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
                 }
             }
             if (ns.stats?.segments.length) {
-                const entry: PilotStatsEntry = {t: ns.t as Epoch, segments: ns.stats.segments};
-                const ps = (state.pilotStats[compno as Compno] ??= []);
-                const pIdx = sortedIndexBy(ps, entry, (x) => x.t);
-                if (ps[pIdx]?.t === entry.t) {
-                    ps[pIdx] = entry;
-                } else {
-                    ps.splice(pIdx, 0, entry);
-                }
+                // Historical chunks carry the full list on their first record and
+                // deltas thereafter; merging is order-independent (max-end wins)
+                // so chunks loaded in any order converge to the correct list.
+                mergeSegments((state.pilotStats[compno as Compno] ??= []), ns.stats.segments);
             }
         }
 
