@@ -224,6 +224,16 @@ export function createFlightStatistics() {
         } else {
             segments.push(seg);
         }
+
+        // Cascade back along the tail. A merge can flip a segment's state — a
+        // weak thermal absorbed into a straight turns that straight thermal —
+        // which can leave it adjacent to a like-state predecessor that was never
+        // re-checked. Collapse repeatedly so adjacent same-state segments never
+        // survive (the archive's iterative coalesceStack, done incrementally).
+        while (segments.length >= 2 && shouldMerge(segments[segments.length - 2], segments[segments.length - 1])) {
+            const last = segments.pop()!;
+            mergeInto(segments[segments.length - 1], last);
+        }
     }
 
     // Wind from circling drift: across each completed rotation the slowest
@@ -383,7 +393,18 @@ export function createFlightStatistics() {
         // begins where the previous fix was so segments abut cleanly.
         if (nextMode !== mode || !open) {
             pushOpen();
-            open = makeSegment(nextMode, prevTime, prevLng, prevLat, prevAlt);
+            // If we're re-entering the state the last (now-coalesced) segment is
+            // already in — e.g. a brief straight between two thermals was just
+            // absorbed into the prior thermal — resume that segment as the open
+            // one rather than starting a fresh adjacent one. This keeps the
+            // in-progress view coalesced live, not only once the segment closes
+            // (when the pushOpen cascade would merge them anyway).
+            const last = segments[segments.length - 1];
+            if (last && last.state === nextMode) {
+                open = segments.pop()!;
+            } else {
+                open = makeSegment(nextMode, prevTime, prevLng, prevLat, prevAlt);
+            }
             mode = nextMode;
         }
 

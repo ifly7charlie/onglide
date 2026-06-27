@@ -25,11 +25,29 @@ describe('stats data plane reducer', () => {
         expect(Object.keys(s1.scores)).toHaveLength(0);
     });
 
-    test('same trackVersion merges (max-end wins), growing the open segment', () => {
+    test('same trackVersion grows the open segment in place', () => {
         let s = scoresReducer(undefined, fulfilled({residual: update(1, [seg(100, 130, {turncount: 1})])}));
         s = scoresReducer(s, fulfilled({residual: update(1, [seg(100, 180, {turncount: 3})])}));
         expect(s.pilotStats['42' as Compno]).toHaveLength(1);
         expect(s.pilotStats['42' as Compno][0].end).toBe(180);
+    });
+
+    test('coalescing that removes segments does not leave phantoms (suffix replace)', () => {
+        // Two segments, then a later update where they coalesced into one (the
+        // 200-start vanished server-side). An append/merge would keep a phantom
+        // at 200; suffix-replace from start=100 must drop it.
+        let s = scoresReducer(undefined, fulfilled({residual: update(1, [seg(100, 180), seg(200, 240)])}));
+        s = scoresReducer(s, fulfilled({residual: update(1, [seg(100, 400)])}));
+        expect(s.pilotStats['42' as Compno].map((x) => x.start)).toEqual([100]);
+        expect(s.pilotStats['42' as Compno][0].end).toBe(400);
+    });
+
+    test('residual replaces only its own suffix, leaving earlier segments intact', () => {
+        let s = scoresReducer(undefined, fulfilled({residual: update(1, [seg(100, 130), seg(200, 240)])}));
+        // A later residual covering only [200, now] must not disturb the 100 segment.
+        s = scoresReducer(s, fulfilled({residual: update(1, [seg(200, 300)])}));
+        expect(s.pilotStats['42' as Compno].map((x) => x.start)).toEqual([100, 200]);
+        expect(s.pilotStats['42' as Compno][1].end).toBe(300);
     });
 
     test('a new trackVersion rebuilds from scratch (tracker change), dropping stale segments', () => {

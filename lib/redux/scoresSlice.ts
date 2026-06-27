@@ -396,17 +396,17 @@ export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilo
 // Logic for updates
 //////////////////////////////////////////
 
-// Merge a batch of (possibly partial) flight-statistics segment deltas into the
-// pilot's single start-sorted accumulator, in place. Segments are keyed by their
-// immutable `start`; a segment only ever grows its `end` — the open segment as
-// it extends, and the last closed segment when pushOpen coalesces its successor
-// into it — so we upsert keeping the larger-`end` version. This makes the merge
-// idempotent and order-independent — a stale earlier copy arriving after the
-// grown one (e.g. /scorehistory chunks fetched out of order) can't overwrite it.
-// Apply one PilotStatsUpdate (snapshot or residual) to the accumulator. Per
-// pilot: if the trackVersion differs from what the accumulator was last built
-// at, the deck was rebuilt (tracker change / first load) so rebuild from the
-// incoming full list; otherwise merge the tail (idempotent, max-end wins).
+// Apply one PilotStatsUpdate (snapshot or residual) to the pilot's single
+// start-sorted accumulator, in place. Per pilot:
+//   - trackVersion differs from what we last built at → the deck was rebuilt
+//     (tracker change / first load): rebuild from the incoming full list.
+//   - otherwise → replace the suffix from incoming's first start. The server
+//     resends the *whole* post-snapshot window each time (every segment with
+//     end >= statsBaseTime, start-sorted), so it is authoritative for
+//     [incoming[0].start, now]. A plain append/merge can't be used: segment
+//     coalescing removes/renumbers segments (a weak thermal absorbed into a
+//     straight, then cascaded into the prior thermal), and a never-remove merge
+//     would leave those vanished starts behind as phantom segments.
 function applyStatsUpdate(state: ScoresSliceState, update: PilotStatsUpdate | undefined): void {
     if (!update) return;
     for (const compno in update.pilots) {
@@ -416,18 +416,10 @@ function applyStatsUpdate(state: ScoresSliceState, update: PilotStatsUpdate | un
             state.pilotStats[compno as Compno] = segments.slice();
             state.pilotStatsTrackVersion[compno as Compno] = trackVersion;
         } else {
-            mergeSegments((state.pilotStats[compno as Compno] ??= []), segments);
-        }
-    }
-}
-
-export function mergeSegments(list: StatSegment[], incoming: StatSegment[]): void {
-    for (const seg of incoming) {
-        const idx = sortedIndexBy(list, seg, (x) => x.start);
-        if (list[idx]?.start === seg.start) {
-            if (seg.end >= list[idx].end) list[idx] = seg;
-        } else {
-            list.splice(idx, 0, seg);
+            const list = (state.pilotStats[compno as Compno] ??= []);
+            const from = segments[0].start;
+            const cut = sortedIndexBy(list, {start: from} as StatSegment, (x) => x.start);
+            list.splice(cut, list.length - cut, ...segments);
         }
     }
 }
