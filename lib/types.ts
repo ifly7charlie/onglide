@@ -109,6 +109,11 @@ export interface PositionMessage extends BasePositionMessage {
     s?: Speed; // speed
     l?: boolean | null; // picked
     _?: boolean; // live
+    // Flight-statistics piggyback (APRS worker -> main + scoring, low cadence).
+    // Attached only when the segment set materially changes; structured-clone
+    // over the BroadcastChannel, never serialised to the wire here.
+    stats?: Stats; // full current segment list (incl. per-segment wind)
+    wind?: Wind; // most recent wind estimate (scoring welds it onto PilotScore.wind)
 }
 
 export function isTick(m: any): m is TickMessage {
@@ -417,7 +422,7 @@ export interface NearestSectorPoint {
 }
 
 export {PilotScore, PilotScoreLeg} from './protobuf/onglide';
-import {PilotScore} from './protobuf/onglide';
+import {PilotScore, Stats, Wind} from './protobuf/onglide';
 //import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 
 export type TrackData = Record<Compno, DisplayPilotTrackData>;

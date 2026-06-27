@@ -1,5 +1,5 @@
 import type {Compno, Epoch, PositionMessage, AirfieldLocation, Task, TZ, AltitudeAMSL} from '../types';
-import type {PilotScore} from '../protobuf/onglide';
+import type {PilotScore, Stats} from '../protobuf/onglide';
 
 import {point as turfPoint} from '@turf/helpers';
 
@@ -39,15 +39,20 @@ function deriveAirfield(task: Task, fixes: PositionMessage[]): AirfieldLocation 
     };
 }
 
+export interface IGCScoreResult {
+    scores: PilotScore[];
+    stats: Stats | undefined;
+}
+
 export async function scoreIGCFlight(
     task: Task,
     fixes: PositionMessage[],
     compno: Compno,
     handicap: number = 100,
     utcStart: Epoch = 0 as Epoch
-): Promise<PilotScore[]> {
+): Promise<IGCScoreResult> {
     if (!fixes.length || !task.legs.length) {
-        return [];
+        return {scores: [], stats: undefined};
     }
 
     // Ensure preparedLegs exist
@@ -64,22 +69,29 @@ export async function scoreIGCFlight(
     // Build the scoring chain (same pattern as getScoringChain in scoring.ts).
     // No per-glider log file client-side — use the no-op logger.
     const log = noopGliderLog;
-    const stats = createFlightStatistics(compno, log);
+    const stats = createFlightStatistics();
     const inorder = bindClientInOrderGenerator(compno, fixes);
     const epg = enrichedPositionGenerator(airfield, inorder(getNow), log);
-    const observed = stats.observer(epg);
-    const tpg = taskPositionGenerator(task, utcStart, observed, log);
+    const tpg = taskPositionGenerator(task, utcStart, epg, log);
     const distances = task.rules.aat //
         ? assignedAreaScoringGenerator(task, tpg, log)
         : racingScoringGenerator(task, tpg, log);
     const scores = taskScoresGenerator(task, compno, handicap, distances, log);
-    const attachedScores = stats.attacher(scores);
 
-    // Collect all scores
+    // Feed the (sorted) IGC fixes into the incremental stats unit in step with
+    // score emission, so each score carries the wind known up to its own time
+    // and the full Stats are returned alongside.
     const allScores: PilotScore[] = [];
-    for await (const score of attachedScores) {
+    let fi = 0;
+    for await (const score of scores) {
+        if (!score) continue;
+        while (fi < fixes.length && fixes[fi].t <= score.t) stats.addPosition(fixes[fi++]);
+        const wind = stats.getWind();
+        if (wind) score.wind = wind;
         allScores.push(score);
     }
+    // Drain any trailing fixes so the returned Stats cover the whole flight.
+    while (fi < fixes.length) stats.addPosition(fixes[fi++]);
 
-    return allScores;
+    return {scores: allScores, stats: stats.getStats()};
 }

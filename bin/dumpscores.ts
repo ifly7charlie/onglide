@@ -107,7 +107,6 @@ function stripBulky(s: any) {
     for (const k of ['scoredPoints', 'minDistancePoints', 'maxDistancePoints', 'optimalGrid', 'optimalGridBaselinePath', 'suggestedTrackPoints']) {
         if (Array.isArray(s[k])) s[k] = `<${s[k].length} nums>`;
     }
-    if (s.stats?.segments) s.stats.segments = `<${s.stats.segments.length} segments>`;
     if (s.legs && typeof s.legs === 'object') {
         for (const leg of Object.values(s.legs) as any[]) {
             if (Array.isArray(leg?.convexHull)) leg.convexHull = `<${leg.convexHull.length} nums>`;
@@ -153,7 +152,6 @@ function printScore(s: PilotScore) {
             .join(' ');
         console.log(`    legs: ${summary}`);
     }
-    if (s.stats?.segments?.length) console.log(`    stats: ${s.stats.segments.length} segments`);
     if (s.scoreId) console.log(`    scoreId: ${s.scoreId}`);
 }
 

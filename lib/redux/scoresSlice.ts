@@ -11,8 +11,8 @@ import {scoreChunkSize} from '../constants';
 import {updatePilotStartTimeAction, updateClassAction, updateSortKeyAction} from './actions';
 
 import {PilotScore, Scores, Scores_PilotsEntry, StatSegment} from '../protobuf/onglide';
-import {ClassScoreHistory, OnglideWebSocketMessage} from '../protobuf/onglide';
-import {unscaleClassScoreHistoryFromWire} from '../protobuf/wireScaling';
+import {ClassScoreHistory, OnglideWebSocketMessage, PilotStatsUpdate} from '../protobuf/onglide';
+import {unscaleClassScoreHistoryFromWire, unscaleFromWire} from '../protobuf/wireScaling';
 
 //const updateScoresAction = createAction<PilotScores>('updateScores');
 import {assembleLabeledLine} from '../react/distanceLine';
@@ -32,6 +32,10 @@ interface ScoresSliceState {
     historical: HistoricalScoreData;
     optimalGrids: Record<Compno, OptimalGridEntry[]>;
     pilotStats: Record<Compno, StatSegment[]>;
+    // Per-pilot trackVersion the accumulator was last (re)built at. A change means
+    // the deck was rebuilt (tracker change / new position lineage) — rebuild the
+    // segment list from the incoming full set rather than merging onto stale data.
+    pilotStatsTrackVersion: Record<Compno, number>;
     loading: Record<Epoch, string>; // request id for requests to load - we only remove on error (so it retries) otherwise
     scoreId: string; //  copy of track version set when loading something
     // leave the ID in the structure so we don't keep trying to get missing scores
@@ -45,20 +49,27 @@ const initialState: ScoresSliceState = {
     historical: {},
     optimalGrids: {},
     pilotStats: {},
+    pilotStatsTrackVersion: {},
     loading: {},
     scoreId: '',
     scoresScoreId: ''
 };
 
-// Find the old scores
-import {oldScoresUrl} from '../react/fixupUrls';
+// Find the old scores / stats
+import {oldScoresUrl, oldStatsUrl} from '../react/fixupUrls';
 
 export const scoresSlice = createSlice({
     name: 'scores',
     // `createSlice` will infer the state type from the `initialState` argument
     initialState,
     reducers: {
-        updateScores: _updateScores
+        updateScores: _updateScores,
+        // Direct stats replace for the local IGC scorer (pages/viewer.tsx), which
+        // has no websocket / snapshot plane — it rescore the whole flight and
+        // replaces the segment list outright.
+        setPilotStats(state, {payload}: PayloadAction<{compno: Compno; segments: StatSegment[]}>) {
+            state.pilotStats[payload.compno] = payload.segments;
+        }
     },
     extraReducers: (builder) => {
         //
@@ -71,6 +82,7 @@ export const scoresSlice = createSlice({
                     historical: {},
                     optimalGrids: {},
                     pilotStats: {},
+                    pilotStatsTrackVersion: {},
                     loading: {},
                     scoreId,
                     // scores is empty for the new class, so mark it reconciled at this
@@ -78,13 +90,14 @@ export const scoresSlice = createSlice({
                     scoresScoreId: scoreId
                 };
             }
-            // If the score id has changed then we need to reset everything historical
+            // If the score id has changed then we need to reset everything historical.
+            // pilotStats are keyed to trackVersion (position lineage), not scoreId, so a
+            // rescore leaves them intact — only a class change clears them.
             if (state.scoreId != scoreId) {
                 console.log(`update scoreId ${state.scoreId} => ${scoreId}`);
                 state.loading = {};
                 state.scoreId = scoreId;
                 state.historical = {};
-                state.pilotStats = {};
             }
         });
 
@@ -102,6 +115,15 @@ export const scoresSlice = createSlice({
         builder.addCase(fetchOldScores.rejected, (state, {meta}) => {
             const {t, now} = meta.arg;
             delete state.loading[getChunk(t, now).toString()];
+        });
+
+        // Flight-statistics plane: every stats message (live residual or connect
+        // snapshot) routes through fetchOldStats. The snapshot (when baseTime>0)
+        // is applied first as the baseline, then the residual tail on top.
+        builder.addCase(fetchOldStats.fulfilled, (state, {payload}) => {
+            if (!payload) return;
+            applyStatsUpdate(state, payload.snapshot);
+            applyStatsUpdate(state, payload.residual);
         });
     },
     selectors: {
@@ -327,8 +349,47 @@ export const fetchOldScores = createAsyncThunk<{data: ClassScoreHistory}, {t: Ep
     }
 );
 
+// Flight-statistics fetch. The websocket carries a PilotStatsUpdate per class:
+// baseTime>0 means "fetch the immutable /stats snapshot first" (a fresh/connect
+// bootstrap); baseTime===0 means "merge this residual inline" (the steady-state
+// 500ms tail). No scoreId — stats key to trackVersion, not scoreId.
+export const fetchOldStats = createAsyncThunk<
+    {snapshot?: PilotStatsUpdate; residual?: PilotStatsUpdate} | undefined,
+    {baseTime: Epoch; residual: PilotStatsUpdate; className: ClassName; datecode: Datecode}
+>('scores/fetchOldStats', async ({baseTime, residual, className, datecode}, {signal}) => {
+    if (!baseTime) {
+        // Inline residual — no snapshot to fetch.
+        return {residual};
+    }
+    const url = oldStatsUrl(className, datecode, baseTime.toString());
+    const MAX_RETRIES = 10;
+    for (let attempt = 0; attempt < MAX_RETRIES && !signal.aborted; attempt++) {
+        try {
+            const res = await fetch(url, {signal});
+            if (res.ok) {
+                const ab = await res.arrayBuffer();
+                const snapshot = unscaleFromWire(OnglideWebSocketMessage.decode(new Uint8Array(ab))).stats?.class[className];
+                return {snapshot, residual};
+            }
+            if (res.status !== 503) return {residual}; // give up on the snapshot, still apply the residual
+            const retryAfter = Math.max(1, parseInt(res.headers.get('Retry-After') ?? '2', 10));
+            await new Promise<void>((resolve, reject) => {
+                const timer = setTimeout(resolve, retryAfter * 1000);
+                signal.addEventListener('abort', () => {
+                    clearTimeout(timer);
+                    reject(signal.reason);
+                }, {once: true});
+            });
+        } catch (e) {
+            console.error('FOStats:', e);
+            return {residual};
+        }
+    }
+    return {residual};
+});
+
 export default scoresSlice.reducer;
-export const {updateScores} = scoresSlice.actions;
+export const {updateScores, setPilotStats} = scoresSlice.actions;
 export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus, selectOptimalGrid, selectPilotStats} = scoresSlice.selectors;
 
 //////////////////////////////////////////
@@ -342,6 +403,24 @@ export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilo
 // into it — so we upsert keeping the larger-`end` version. This makes the merge
 // idempotent and order-independent — a stale earlier copy arriving after the
 // grown one (e.g. /scorehistory chunks fetched out of order) can't overwrite it.
+// Apply one PilotStatsUpdate (snapshot or residual) to the accumulator. Per
+// pilot: if the trackVersion differs from what the accumulator was last built
+// at, the deck was rebuilt (tracker change / first load) so rebuild from the
+// incoming full list; otherwise merge the tail (idempotent, max-end wins).
+function applyStatsUpdate(state: ScoresSliceState, update: PilotStatsUpdate | undefined): void {
+    if (!update) return;
+    for (const compno in update.pilots) {
+        const {trackVersion, segments} = update.pilots[compno];
+        if (!segments?.length) continue;
+        if (state.pilotStatsTrackVersion[compno as Compno] !== trackVersion) {
+            state.pilotStats[compno as Compno] = segments.slice();
+            state.pilotStatsTrackVersion[compno as Compno] = trackVersion;
+        } else {
+            mergeSegments((state.pilotStats[compno as Compno] ??= []), segments);
+        }
+    }
+}
+
 export function mergeSegments(list: StatSegment[], incoming: StatSegment[]): void {
     for (const seg of incoming) {
         const idx = sortedIndexBy(list, seg, (x) => x.start);
@@ -382,21 +461,13 @@ function _updateScores(state: ScoresSliceState, action: PayloadAction<Scores>) {
     const result = state.scores ?? {};
     for (const compno in action.payload.pilots) {
         const score: PilotScore = action.payload.pilots[compno];
-        // Extract optimal grid into separate storage (emitted once per sector entry)
-        const {optimalGrid, stats, ...scoreWithoutExtras} = score;
+        // Extract optimal grid into separate storage (emitted once per sector entry).
+        const {optimalGrid, ...scoreWithoutExtras} = score;
         if (optimalGrid?.length) {
             const entry: OptimalGridEntry = {t: score.t as Epoch, currentLeg: score.currentLeg, grid: optimalGrid};
             const gh = (state.optimalGrids[compno as Compno] ??= []);
             const gIdx = sortedIndexBy(gh, entry, (x) => x.t);
             gh.splice(gIdx, Infinity, entry);
-        }
-
-        // Stats arrive as deltas (the resend tail: last-closed + open). Merge
-        // them into the single start-sorted accumulator for this pilot;
-        // mergeSegments keeps the max-end version, so a stale earlier copy never
-        // clobbers a grown/finalised one.
-        if (stats?.segments.length) {
-            mergeSegments((state.pilotStats[compno as Compno] ??= []), stats.segments);
         }
 
         // Read the prior display score via original() so we get the plain
@@ -481,12 +552,6 @@ function _updateOldScores(state: ScoresSliceState, action: PayloadAction<{data: 
                 } else {
                     gh.splice(gIdx, 0, entry);
                 }
-            }
-            if (ns.stats?.segments.length) {
-                // Historical chunks carry the full list on their first record and
-                // deltas thereafter; merging is order-independent (max-end wins)
-                // so chunks loaded in any order converge to the correct list.
-                mergeSegments((state.pilotStats[compno as Compno] ??= []), ns.stats.segments);
             }
         }
 

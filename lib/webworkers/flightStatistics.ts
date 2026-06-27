@@ -4,20 +4,32 @@
  * estimates wind direction/speed from the in-thermal speed-vs-bearing fan.
  *
  * Logic ported and cleaned up from archive/igcstatistics.js, restructured so
- * it can run incrementally inside the scoring async-generator chain instead of
- * batch on a finished flight.
+ * it can run incrementally as positions arrive instead of batch on a finished
+ * flight.
  *
- * Wired into the chain via createFlightStatistics(): one factory call returns
- * two passthrough generators that share the same closure state.
- *   observer  — sits between epg and tpg, advances the state machine for each
- *               EnrichedPosition it sees
- *   attacher  — sits after taskScoresGenerator, decorates each PilotScore with
- *               the current Stats / Wind from that closure
+ * createFlightStatistics() returns an incremental push unit driven by whoever
+ * owns the position stream (the APRS worker per aircraft, or the client IGC
+ * scorer). It is deliberately decoupled from scoring — it reads only raw fix
+ * geometry (t / altitude / lng / lat / bearing / speed):
+ *   addPosition(fix) — advance the state machine for one forward fix
+ *   getStats()       — the current Stats (closed segments + the open one)
+ *   getWind()        — the most recently estimated wind
+ *   reset()          — drop all state (a new track / tracker change)
  */
 
-import {Compno, EnrichedPosition, EnrichedPositionGenerator, TaskScoresGenerator, isTick, Epoch} from '../types';
-import {Stats, StatSegment} from '../protobuf/onglide';
+import {Stats, StatSegment, Wind} from '../protobuf/onglide';
 import {distHaversineRaw} from '../flightprocessing/taskhelper';
+
+// Minimal per-fix shape the state machine needs — a subset of PositionMessage /
+// EnrichedPosition, so any forward position source can drive it.
+export interface StatsFix {
+    t: number;
+    a: number; // altitude AMSL
+    lng: number;
+    lat: number;
+    b?: number; // bearing (deg)
+    s?: number; // ground speed (kph)
+}
 
 // Soaring thresholds. The original walked three widening tolerance levels in
 // a batch coalesce loop; for incremental processing we pick a single fixed
@@ -111,7 +123,7 @@ function makeSegment(state: Mode, startTime: number, startLng: number, startLat:
     };
 }
 
-export function createFlightStatistics(compno: Compno, log: Function) {
+export function createFlightStatistics() {
     // === closure state — the only place stats data lives ===
     let segments: Segment[] = [];
     let open: Segment | null = null;
@@ -283,176 +295,142 @@ export function createFlightStatistics(compno: Compno, log: Function) {
         return {segments: out};
     }
 
-    // === observer: state-machine body lives inline here, mutating closure state ===
-    async function* observer(input: EnrichedPositionGenerator): EnrichedPositionGenerator {
-        let nextArg: Epoch | void = void 0;
-        for (let cur = await input.next(); !cur.done; cur = await input.next(nextArg as Epoch | undefined)) {
-            const v = cur.value;
-            if (!v) {
-                continue;
-            }
+    // === addPosition: advance the state machine for one forward fix ===
+    // Caller must feed fixes in ascending time order (out-of-order/duplicate
+    // fixes are ignored) and call reset() when the track restarts.
+    function addPosition(point: StatsFix): void {
+        // First fix: just remember it, no segment yet
+        if (!havePrev) {
+            havePrev = true;
+            prevTime = point.t;
+            prevAlt = point.a;
+            prevLng = point.lng;
+            prevLat = point.lat;
+            prevBearing = point.b ?? 0;
+            return;
+        }
 
-            // Upstream rewind — drop everything so a rescore doesn't double count
-            if (nextArg !== undefined) {
-                reset();
-            }
+        const timedif = point.t - prevTime;
+        if (timedif <= 0) {
+            // out-of-order or duplicate timestamp
+            return;
+        }
 
-            if (isTick(v)) {
-                nextArg = yield v;
-                continue;
-            }
+        const distance = distHaversineRaw([prevLng, prevLat], [point.lng, point.lat]);
+        const bearing = ((point.b ?? bearingRaw(prevLng, prevLat, point.lng, point.lat)) + 360) % 360;
+        const speed = point.s ?? (timedif > 0 ? (3600 * distance) / timedif : 0);
 
-            const point = v as EnrichedPosition;
+        // Signed bearing change in (-180, 180] — preserves turn direction
+        // across the 0/360 boundary. The archive lost the sign here.
+        let bearingChange = bearing - prevBearing;
+        if (bearingChange > 180) bearingChange -= 360;
+        else if (bearingChange < -180) bearingChange += 360;
+        const rawBearingChange = bearingChange;
+        // per-second turn rate (so sparse samples don't trigger thermal mode)
+        bearingChange = bearingChange / timedif;
 
-            // First fix: just remember it, no segment yet
-            if (!havePrev) {
-                havePrev = true;
-                prevTime = point.t;
-                prevAlt = point.a;
-                prevLng = point.lng;
-                prevLat = point.lat;
-                prevBearing = point.b ?? 0;
-                nextArg = yield v;
-                continue;
-            }
-
-            const timedif = point.t - prevTime;
-            if (timedif <= 0) {
-                // out-of-order or duplicate timestamp
-                nextArg = yield v;
-                continue;
-            }
-
-            const distance = distHaversineRaw([prevLng, prevLat], [point.lng, point.lat]);
-            const bearing = ((point.b ?? bearingRaw(prevLng, prevLat, point.lng, point.lat)) + 360) % 360;
-            const speed = point.s ?? (timedif > 0 ? (3600 * distance) / timedif : 0);
-
-            // Signed bearing change in (-180, 180] — preserves turn direction
-            // across the 0/360 boundary. The archive lost the sign here.
-            let bearingChange = bearing - prevBearing;
-            if (bearingChange > 180) bearingChange -= 360;
-            else if (bearingChange < -180) bearingChange += 360;
-            const rawBearingChange = bearingChange;
-            // per-second turn rate (so sparse samples don't trigger thermal mode)
-            bearingChange = bearingChange / timedif;
-
-            // While in a thermal, smooth the turn rate. If extrapolation from
-            // the previous smoothed rate matches the observed bearing closely,
-            // trust the forecast — points were probably dropped.
-            if (mode === 'thermal') {
-                const forecast = (smoothedTurnRate * timedif + prevBearing) % 360;
-                let forecastErr = ((forecast - bearing + 540) % 360) - 180;
-                if (forecastErr < -180) forecastErr += 360;
-                if (timedif > 5 && timedif < 20 && Math.abs(forecastErr) < 10) {
-                    bearingChange = smoothedTurnRate;
-                } else {
-                    smoothedTurnRate = (smoothedTurnRate + bearingChange) / 2;
-                    bearingChange = smoothedTurnRate;
-                }
+        // While in a thermal, smooth the turn rate. If extrapolation from
+        // the previous smoothed rate matches the observed bearing closely,
+        // trust the forecast — points were probably dropped.
+        if (mode === 'thermal') {
+            const forecast = (smoothedTurnRate * timedif + prevBearing) % 360;
+            let forecastErr = ((forecast - bearing + 540) % 360) - 180;
+            if (forecastErr < -180) forecastErr += 360;
+            if (timedif > 5 && timedif < 20 && Math.abs(forecastErr) < 10) {
+                bearingChange = smoothedTurnRate;
             } else {
-                smoothedTurnRate = bearingChange;
+                smoothedTurnRate = (smoothedTurnRate + bearingChange) / 2;
+                bearingChange = smoothedTurnRate;
             }
+        } else {
+            smoothedTurnRate = bearingChange;
+        }
 
-            // Per-fix turn sign (for the segment direction aggregator)
-            const tdirection = bearingChange > 2 ? 1 : bearingChange < -2 ? -1 : 0;
+        // Per-fix turn sign (for the segment direction aggregator)
+        const tdirection = bearingChange > 2 ? 1 : bearingChange < -2 ? -1 : 0;
 
-            // Big tracking gap: emit a synthetic gap segment, then resume
-            // classification afresh from this point.
-            if (timedif > MAX_GAP_S) {
-                pushOpen();
-                const gapSeg = makeSegment('gap', prevTime, prevLng, prevLat, prevAlt);
-                gapSeg.endTime = point.t;
-                gapSeg.endLng = point.lng;
-                gapSeg.endLat = point.lat;
-                gapSeg.endAlt = point.a;
-                segments.push(gapSeg);
-                mode = 'start';
-                prevTime = point.t;
-                prevAlt = point.a;
-                prevLng = point.lng;
-                prevLat = point.lat;
-                prevBearing = bearing;
-                smoothedTurnRate = 0;
-                nextArg = yield v;
-                continue;
-            }
-
-            // Decide what mode this fix belongs to
-            let nextMode: Mode = mode;
-            if (mode === 'start') {
-                nextMode = Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S ? 'thermal' : 'straight';
-            } else if (mode === 'straight') {
-                if (Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S) nextMode = 'thermal';
-            } else if (mode === 'thermal') {
-                if (Math.abs(bearingChange) < EXIT_THERMAL_DEG_PER_S) nextMode = 'straight';
-            }
-
-            // Mode transition: close current segment and open a new one that
-            // begins where the previous fix was so segments abut cleanly.
-            if (nextMode !== mode || !open) {
-                pushOpen();
-                open = makeSegment(nextMode, prevTime, prevLng, prevLat, prevAlt);
-                mode = nextMode;
-            }
-
-            // Accumulate this fix into the open segment
-            open.distance += distance;
-            open.endTime = point.t;
-            open.endLng = point.lng;
-            open.endLat = point.lat;
-            open.endAlt = point.a;
-            if (point.a > prevAlt) open.heightgain += point.a - prevAlt;
-            else open.heightloss += prevAlt - point.a;
-            open.turncount += rawBearingChange;
-            open.direction += tdirection;
-            open.packets++;
-            if (timedif > open.maxDelay) open.maxDelay = timedif;
-
-            // Inside a thermal, sample speed-vs-bearing per rotation for wind
-            if (open.state === 'thermal') {
-                if (speed < open.ws.minSpeed) {
-                    open.ws.minSpeed = speed;
-                    open.ws.minAngle = bearing;
-                }
-                if (speed > open.ws.maxSpeed) {
-                    open.ws.maxSpeed = speed;
-                    open.ws.maxAngle = bearing;
-                }
-                open.ws.cumulative += rawBearingChange;
-                open.ws.packets++;
-                if (open.ws.cumulative < -361 || open.ws.cumulative > 361) {
-                    open.circles.push(open.ws);
-                    open.ws = makeEmptyCircle();
-                    computeWind(open);
-                }
-            }
-
+        // Big tracking gap: emit a synthetic gap segment, then resume
+        // classification afresh from this point.
+        if (timedif > MAX_GAP_S) {
+            pushOpen();
+            const gapSeg = makeSegment('gap', prevTime, prevLng, prevLat, prevAlt);
+            gapSeg.endTime = point.t;
+            gapSeg.endLng = point.lng;
+            gapSeg.endLat = point.lat;
+            gapSeg.endAlt = point.a;
+            segments.push(gapSeg);
+            mode = 'start';
             prevTime = point.t;
             prevAlt = point.a;
             prevLng = point.lng;
             prevLat = point.lat;
             prevBearing = bearing;
-
-            nextArg = yield v;
+            smoothedTurnRate = 0;
+            return;
         }
-        // Upstream done — finalize the in-progress segment
-        pushOpen();
-        log(`stats[${compno}]: ${segments.length} segments, wind=${lastWind ? `${lastWind.speed.toFixed(0)}kph @ ${lastWind.direction.toFixed(0)}°` : 'unknown'}`);
-    }
 
-    // === attacher: reads the same closure state at score time ===
-    async function* attacher(input: TaskScoresGenerator): TaskScoresGenerator {
-        for (let cur = await input.next(); !cur.done; cur = await input.next()) {
-            const score = cur.value;
-            if (!score) continue;
-            const stats = toStatsProto();
-            if (stats) score.stats = stats;
-            if (lastWind) {
-                score.wind = {speed: Math.round(lastWind.speed), direction: Math.round(lastWind.direction)};
+        // Decide what mode this fix belongs to
+        let nextMode: Mode = mode;
+        if (mode === 'start') {
+            nextMode = Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S ? 'thermal' : 'straight';
+        } else if (mode === 'straight') {
+            if (Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S) nextMode = 'thermal';
+        } else if (mode === 'thermal') {
+            if (Math.abs(bearingChange) < EXIT_THERMAL_DEG_PER_S) nextMode = 'straight';
+        }
+
+        // Mode transition: close current segment and open a new one that
+        // begins where the previous fix was so segments abut cleanly.
+        if (nextMode !== mode || !open) {
+            pushOpen();
+            open = makeSegment(nextMode, prevTime, prevLng, prevLat, prevAlt);
+            mode = nextMode;
+        }
+
+        // Accumulate this fix into the open segment
+        open.distance += distance;
+        open.endTime = point.t;
+        open.endLng = point.lng;
+        open.endLat = point.lat;
+        open.endAlt = point.a;
+        if (point.a > prevAlt) open.heightgain += point.a - prevAlt;
+        else open.heightloss += prevAlt - point.a;
+        open.turncount += rawBearingChange;
+        open.direction += tdirection;
+        open.packets++;
+        if (timedif > open.maxDelay) open.maxDelay = timedif;
+
+        // Inside a thermal, sample speed-vs-bearing per rotation for wind
+        if (open.state === 'thermal') {
+            if (speed < open.ws.minSpeed) {
+                open.ws.minSpeed = speed;
+                open.ws.minAngle = bearing;
             }
-            yield score;
+            if (speed > open.ws.maxSpeed) {
+                open.ws.maxSpeed = speed;
+                open.ws.maxAngle = bearing;
+            }
+            open.ws.cumulative += rawBearingChange;
+            open.ws.packets++;
+            if (open.ws.cumulative < -361 || open.ws.cumulative > 361) {
+                open.circles.push(open.ws);
+                open.ws = makeEmptyCircle();
+                computeWind(open);
+            }
         }
+
+        prevTime = point.t;
+        prevAlt = point.a;
+        prevLng = point.lng;
+        prevLat = point.lat;
+        prevBearing = bearing;
     }
 
-    return {observer, attacher};
+    function getWind(): Wind | undefined {
+        return lastWind ? {speed: Math.round(lastWind.speed), direction: Math.round(lastWind.direction)} : undefined;
+    }
+
+    return {addPosition, getStats: toStatsProto, getWind, reset};
 }
+
+export type FlightStatistics = ReturnType<typeof createFlightStatistics>;

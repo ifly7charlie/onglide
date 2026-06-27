@@ -16,7 +16,8 @@
 import {initialiseInsights} from '../insights';
 
 import {PositionMessage} from './positionmessage';
-import {Epoch, Datecode, ClassName_Compno, makeClassname_Compno, ClassName, Compno, InOrderGeneratorFunction, AirfieldLocation, PilotScore, Task} from '../types';
+import {Epoch, Datecode, ClassName_Compno, makeClassname_Compno, ClassName, Compno, InOrderGeneratorFunction, AirfieldLocation, PilotScore, Task, EnrichedPositionGenerator, TaskScoresGenerator, EnrichedPosition, isTick} from '../types';
+import {Wind} from '../protobuf/onglide';
 
 import {Worker, parentPort, isMainThread, SHARE_ENV, workerData} from 'node:worker_threads';
 
@@ -37,9 +38,6 @@ import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 import {taskPositionGenerator} from './taskpositiongenerator';
 import {taskScoresGenerator} from './taskScoresGenerator';
 import {scoreCollector} from './scoreCollector';
-
-// Optional flight statistics (thermals/straights/wind), per competition flag
-import {createFlightStatistics} from './flightStatistics';
 
 // Per-glider on-disk scoring log
 import {createGliderLog} from './gliderLogFile';
@@ -459,6 +457,35 @@ function rescoreGlider(compno: Compno, config: ScoringConfig, handicap: number, 
     }
 }
 
+// The APRS worker attaches the current wind to each position; scoring just
+// carries it onto the score. `observe` taps the enriched stream to remember the
+// latest wind (preserving the bidirectional rewind protocol the chain relies
+// on); `attach` welds it onto each emitted PilotScore.
+function createWindWelder() {
+    let lastWind: Wind | undefined;
+    async function* observe(input: EnrichedPositionGenerator): EnrichedPositionGenerator {
+        let nextArg: Epoch | void = void 0;
+        for (let cur = await input.next(); !cur.done; cur = await input.next(nextArg as Epoch | undefined)) {
+            const v = cur.value;
+            if (!v) continue;
+            if (!isTick(v)) {
+                const w = (v as EnrichedPosition).wind;
+                if (w) lastWind = w;
+            }
+            nextArg = yield v;
+        }
+    }
+    async function* attach(input: TaskScoresGenerator): TaskScoresGenerator {
+        for (let cur = await input.next(); !cur.done; cur = await input.next()) {
+            const score = cur.value;
+            if (!score) continue;
+            if (lastWind) score.wind = lastWind;
+            yield score;
+        }
+    }
+    return {observe, attach};
+}
+
 // Loop through all of them
 function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task) {
     // Per-glider on-disk log: logs/<datecode>/<class>/<compno>.<pid>.log,
@@ -475,14 +502,13 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
         //        handicap = 100;
     }
 
-    // Optional: per-flight statistics (thermals/straights/wind). When
-    // enabled we build a single FlightStatistics instance and wrap the
-    // chain with it at both ends so the rest of the pipeline is unaware.
-    const stats = config.flightstats ? createFlightStatistics(glider.compno, log) : null;
+    // Optional: carry the APRS-worker-computed wind through onto the score.
+    // Gated on the same per-comp flag that gates stats generation upstream.
+    const welder = config.flightstats ? createWindWelder() : null;
 
     // 0. Check if we are flying etc
     const epg = enrichedPositionGenerator(config.airfield, glider.inorder(getNow), log, getLocalRelief);
-    const observed = stats ? stats.observer(epg) : epg;
+    const observed = welder ? welder.observe(epg) : epg;
 
     // 1. Figure out where in the task we are
     const tpg = taskPositionGenerator(task, glider.utcStart, observed, log);
@@ -496,7 +522,7 @@ function getScoringChain(glider: GliderState, config: ScoringConfig, task: Task)
     //    and therefore speeds
     const scores = taskScoresGenerator(task, glider.compno, handicap, distances, log);
 
-    return autoCloseLog(stats ? stats.attacher(scores) : scores, log);
+    return autoCloseLog(welder ? welder.attach(scores) : scores, log);
 }
 
 // Wrap the final scoring chain so the per-glider logger is closed (and its

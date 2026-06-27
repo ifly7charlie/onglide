@@ -20,6 +20,7 @@ export interface OnglideWebSocketMessage {
   t?: number | undefined;
   task?: Task | undefined;
   competitions?: CompetitionsList | undefined;
+  stats?: ClassStats | undefined;
 }
 
 /**
@@ -370,6 +371,38 @@ export interface Stats {
   segments: StatSegment[];
 }
 
+/**
+ * Flight-statistics data plane — delivered independently of scores, keyed to
+ * trackVersion (position lineage) not scoreId. Mirrors ClassPositions / PilotTracks.
+ */
+export interface ClassStats {
+  /** keyed by className */
+  class: { [key: string]: PilotStatsUpdate };
+}
+
+export interface ClassStats_ClassEntry {
+  key: string;
+  value: PilotStatsUpdate | undefined;
+}
+
+export interface PilotStatsUpdate {
+  /** >0 => fetch the /stats snapshot first; 0 => merge inline (cf PilotTracks.baseTime) */
+  baseTime: number;
+  /** keyed by compno */
+  pilots: { [key: string]: PilotStats };
+}
+
+export interface PilotStatsUpdate_PilotsEntry {
+  key: string;
+  value: PilotStats | undefined;
+}
+
+export interface PilotStats {
+  /** bumps when the deck is rebuilt (tracker change) — client resets on change */
+  trackVersion: number;
+  segments: StatSegment[];
+}
+
 export interface BasePositionMessage {
   t: number;
   lat: number;
@@ -416,8 +449,10 @@ export interface PilotScore {
   /** Leg details */
   currentLeg: number;
   legs: { [key: number]: PilotScoreLeg };
-  /** If we are generating statistics then include that */
-  stats?: Stats | undefined;
+  /**
+   * Statistics now travel on their own ClassStats plane (keyed to trackVersion).
+   * field 43 (was: optional Stats stats) is retired — do not reuse.
+   */
   wind?:
     | Wind
     | undefined;
@@ -497,6 +532,7 @@ function createBaseOnglideWebSocketMessage(): OnglideWebSocketMessage {
     t: undefined,
     task: undefined,
     competitions: undefined,
+    stats: undefined,
   };
 }
 
@@ -525,6 +561,9 @@ export const OnglideWebSocketMessage: MessageFns<OnglideWebSocketMessage> = {
     }
     if (message.competitions !== undefined) {
       CompetitionsList.encode(message.competitions, writer.uint32(74).fork()).join();
+    }
+    if (message.stats !== undefined) {
+      ClassStats.encode(message.stats, writer.uint32(82).fork()).join();
     }
     return writer;
   },
@@ -600,6 +639,14 @@ export const OnglideWebSocketMessage: MessageFns<OnglideWebSocketMessage> = {
           message.competitions = CompetitionsList.decode(reader, reader.uint32());
           continue;
         }
+        case 10: {
+          if (tag !== 82) {
+            break;
+          }
+
+          message.stats = ClassStats.decode(reader, reader.uint32());
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -619,6 +666,7 @@ export const OnglideWebSocketMessage: MessageFns<OnglideWebSocketMessage> = {
       t: isSet(object.t) ? globalThis.Number(object.t) : undefined,
       task: isSet(object.task) ? Task.fromJSON(object.task) : undefined,
       competitions: isSet(object.competitions) ? CompetitionsList.fromJSON(object.competitions) : undefined,
+      stats: isSet(object.stats) ? ClassStats.fromJSON(object.stats) : undefined,
     };
   },
 
@@ -648,6 +696,9 @@ export const OnglideWebSocketMessage: MessageFns<OnglideWebSocketMessage> = {
     if (message.competitions !== undefined) {
       obj.competitions = CompetitionsList.toJSON(message.competitions);
     }
+    if (message.stats !== undefined) {
+      obj.stats = ClassStats.toJSON(message.stats);
+    }
     return obj;
   },
 
@@ -673,6 +724,9 @@ export const OnglideWebSocketMessage: MessageFns<OnglideWebSocketMessage> = {
     message.task = (object.task !== undefined && object.task !== null) ? Task.fromPartial(object.task) : undefined;
     message.competitions = (object.competitions !== undefined && object.competitions !== null)
       ? CompetitionsList.fromPartial(object.competitions)
+      : undefined;
+    message.stats = (object.stats !== undefined && object.stats !== null)
+      ? ClassStats.fromPartial(object.stats)
       : undefined;
     return message;
   },
@@ -4126,6 +4180,426 @@ export const Stats: MessageFns<Stats> = {
   },
 };
 
+function createBaseClassStats(): ClassStats {
+  return { class: {} };
+}
+
+export const ClassStats: MessageFns<ClassStats> = {
+  encode(message: ClassStats, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    globalThis.Object.entries(message.class).forEach(([key, value]: [string, PilotStatsUpdate]) => {
+      ClassStats_ClassEntry.encode({ key: key as any, value }, writer.uint32(10).fork()).join();
+    });
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ClassStats {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClassStats();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          const entry1 = ClassStats_ClassEntry.decode(reader, reader.uint32());
+          if (entry1.value !== undefined) {
+            message.class[entry1.key] = entry1.value;
+          }
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ClassStats {
+    return {
+      class: isObject(object.class)
+        ? (globalThis.Object.entries(object.class) as [string, any][]).reduce(
+          (acc: { [key: string]: PilotStatsUpdate }, [key, value]: [string, any]) => {
+            acc[key] = PilotStatsUpdate.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: ClassStats): unknown {
+    const obj: any = {};
+    if (message.class) {
+      const entries = globalThis.Object.entries(message.class) as [string, PilotStatsUpdate][];
+      if (entries.length > 0) {
+        obj.class = {};
+        entries.forEach(([k, v]) => {
+          obj.class[k] = PilotStatsUpdate.toJSON(v);
+        });
+      }
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ClassStats>, I>>(base?: I): ClassStats {
+    return ClassStats.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ClassStats>, I>>(object: I): ClassStats {
+    const message = createBaseClassStats();
+    message.class = (globalThis.Object.entries(object.class ?? {}) as [string, PilotStatsUpdate][]).reduce(
+      (acc: { [key: string]: PilotStatsUpdate }, [key, value]: [string, PilotStatsUpdate]) => {
+        if (value !== undefined) {
+          acc[key] = PilotStatsUpdate.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseClassStats_ClassEntry(): ClassStats_ClassEntry {
+  return { key: "", value: undefined };
+}
+
+export const ClassStats_ClassEntry: MessageFns<ClassStats_ClassEntry> = {
+  encode(message: ClassStats_ClassEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== undefined) {
+      PilotStatsUpdate.encode(message.value, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): ClassStats_ClassEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseClassStats_ClassEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = PilotStatsUpdate.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ClassStats_ClassEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? PilotStatsUpdate.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: ClassStats_ClassEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== undefined) {
+      obj.value = PilotStatsUpdate.toJSON(message.value);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ClassStats_ClassEntry>, I>>(base?: I): ClassStats_ClassEntry {
+    return ClassStats_ClassEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<ClassStats_ClassEntry>, I>>(object: I): ClassStats_ClassEntry {
+    const message = createBaseClassStats_ClassEntry();
+    message.key = object.key ?? "";
+    message.value = (object.value !== undefined && object.value !== null)
+      ? PilotStatsUpdate.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBasePilotStatsUpdate(): PilotStatsUpdate {
+  return { baseTime: 0, pilots: {} };
+}
+
+export const PilotStatsUpdate: MessageFns<PilotStatsUpdate> = {
+  encode(message: PilotStatsUpdate, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.baseTime !== 0) {
+      writer.uint32(8).uint32(message.baseTime);
+    }
+    globalThis.Object.entries(message.pilots).forEach(([key, value]: [string, PilotStats]) => {
+      PilotStatsUpdate_PilotsEntry.encode({ key: key as any, value }, writer.uint32(18).fork()).join();
+    });
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PilotStatsUpdate {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePilotStatsUpdate();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.baseTime = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          const entry2 = PilotStatsUpdate_PilotsEntry.decode(reader, reader.uint32());
+          if (entry2.value !== undefined) {
+            message.pilots[entry2.key] = entry2.value;
+          }
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PilotStatsUpdate {
+    return {
+      baseTime: isSet(object.baseTime) ? globalThis.Number(object.baseTime) : 0,
+      pilots: isObject(object.pilots)
+        ? (globalThis.Object.entries(object.pilots) as [string, any][]).reduce(
+          (acc: { [key: string]: PilotStats }, [key, value]: [string, any]) => {
+            acc[key] = PilotStats.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: PilotStatsUpdate): unknown {
+    const obj: any = {};
+    if (message.baseTime !== 0) {
+      obj.baseTime = Math.round(message.baseTime);
+    }
+    if (message.pilots) {
+      const entries = globalThis.Object.entries(message.pilots) as [string, PilotStats][];
+      if (entries.length > 0) {
+        obj.pilots = {};
+        entries.forEach(([k, v]) => {
+          obj.pilots[k] = PilotStats.toJSON(v);
+        });
+      }
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PilotStatsUpdate>, I>>(base?: I): PilotStatsUpdate {
+    return PilotStatsUpdate.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<PilotStatsUpdate>, I>>(object: I): PilotStatsUpdate {
+    const message = createBasePilotStatsUpdate();
+    message.baseTime = object.baseTime ?? 0;
+    message.pilots = (globalThis.Object.entries(object.pilots ?? {}) as [string, PilotStats][]).reduce(
+      (acc: { [key: string]: PilotStats }, [key, value]: [string, PilotStats]) => {
+        if (value !== undefined) {
+          acc[key] = PilotStats.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBasePilotStatsUpdate_PilotsEntry(): PilotStatsUpdate_PilotsEntry {
+  return { key: "", value: undefined };
+}
+
+export const PilotStatsUpdate_PilotsEntry: MessageFns<PilotStatsUpdate_PilotsEntry> = {
+  encode(message: PilotStatsUpdate_PilotsEntry, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== undefined) {
+      PilotStats.encode(message.value, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PilotStatsUpdate_PilotsEntry {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePilotStatsUpdate_PilotsEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = PilotStats.decode(reader, reader.uint32());
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PilotStatsUpdate_PilotsEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? PilotStats.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: PilotStatsUpdate_PilotsEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== undefined) {
+      obj.value = PilotStats.toJSON(message.value);
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PilotStatsUpdate_PilotsEntry>, I>>(base?: I): PilotStatsUpdate_PilotsEntry {
+    return PilotStatsUpdate_PilotsEntry.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<PilotStatsUpdate_PilotsEntry>, I>>(object: I): PilotStatsUpdate_PilotsEntry {
+    const message = createBasePilotStatsUpdate_PilotsEntry();
+    message.key = object.key ?? "";
+    message.value = (object.value !== undefined && object.value !== null)
+      ? PilotStats.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBasePilotStats(): PilotStats {
+  return { trackVersion: 0, segments: [] };
+}
+
+export const PilotStats: MessageFns<PilotStats> = {
+  encode(message: PilotStats, writer: BinaryWriter = new BinaryWriter()): BinaryWriter {
+    if (message.trackVersion !== 0) {
+      writer.uint32(8).uint32(message.trackVersion);
+    }
+    for (const v of message.segments) {
+      StatSegment.encode(v!, writer.uint32(18).fork()).join();
+    }
+    return writer;
+  },
+
+  decode(input: BinaryReader | Uint8Array, length?: number): PilotStats {
+    const reader = input instanceof BinaryReader ? input : new BinaryReader(input);
+    const end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBasePilotStats();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1: {
+          if (tag !== 8) {
+            break;
+          }
+
+          message.trackVersion = reader.uint32();
+          continue;
+        }
+        case 2: {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.segments.push(StatSegment.decode(reader, reader.uint32()));
+          continue;
+        }
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skip(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): PilotStats {
+    return {
+      trackVersion: isSet(object.trackVersion) ? globalThis.Number(object.trackVersion) : 0,
+      segments: globalThis.Array.isArray(object?.segments)
+        ? object.segments.map((e: any) => StatSegment.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: PilotStats): unknown {
+    const obj: any = {};
+    if (message.trackVersion !== 0) {
+      obj.trackVersion = Math.round(message.trackVersion);
+    }
+    if (message.segments?.length) {
+      obj.segments = message.segments.map((e) => StatSegment.toJSON(e));
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PilotStats>, I>>(base?: I): PilotStats {
+    return PilotStats.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<PilotStats>, I>>(object: I): PilotStats {
+    const message = createBasePilotStats();
+    message.trackVersion = object.trackVersion ?? 0;
+    message.segments = object.segments?.map((e) => StatSegment.fromPartial(e)) || [];
+    return message;
+  },
+};
+
 function createBaseBasePositionMessage(): BasePositionMessage {
   return { t: 0, lat: 0, lng: 0 };
 }
@@ -4236,7 +4710,6 @@ function createBasePilotScore(): PilotScore {
     home: undefined,
     currentLeg: 0,
     legs: {},
-    stats: undefined,
     wind: undefined,
     scoredPoints: [],
     minDistancePoints: [],
@@ -4301,9 +4774,6 @@ export const PilotScore: MessageFns<PilotScore> = {
     globalThis.Object.entries(message.legs).forEach(([key, value]: [string, PilotScoreLeg]) => {
       PilotScore_LegsEntry.encode({ key: key as any, value }, writer.uint32(290).fork()).join();
     });
-    if (message.stats !== undefined) {
-      Stats.encode(message.stats, writer.uint32(346).fork()).join();
-    }
     if (message.wind !== undefined) {
       Wind.encode(message.wind, writer.uint32(450).fork()).join();
     }
@@ -4490,14 +4960,6 @@ export const PilotScore: MessageFns<PilotScore> = {
           }
           continue;
         }
-        case 43: {
-          if (tag !== 346) {
-            break;
-          }
-
-          message.stats = Stats.decode(reader, reader.uint32());
-          continue;
-        }
         case 56: {
           if (tag !== 450) {
             break;
@@ -4681,7 +5143,6 @@ export const PilotScore: MessageFns<PilotScore> = {
           {},
         )
         : {},
-      stats: isSet(object.stats) ? Stats.fromJSON(object.stats) : undefined,
       wind: isSet(object.wind) ? Wind.fromJSON(object.wind) : undefined,
       scoredPoints: globalThis.Array.isArray(object?.scoredPoints)
         ? object.scoredPoints.map((e: any) => globalThis.Number(e))
@@ -4770,9 +5231,6 @@ export const PilotScore: MessageFns<PilotScore> = {
         });
       }
     }
-    if (message.stats !== undefined) {
-      obj.stats = Stats.toJSON(message.stats);
-    }
     if (message.wind !== undefined) {
       obj.wind = Wind.toJSON(message.wind);
     }
@@ -4842,7 +5300,6 @@ export const PilotScore: MessageFns<PilotScore> = {
       },
       {},
     );
-    message.stats = (object.stats !== undefined && object.stats !== null) ? Stats.fromPartial(object.stats) : undefined;
     message.wind = (object.wind !== undefined && object.wind !== null) ? Wind.fromPartial(object.wind) : undefined;
     message.scoredPoints = object.scoredPoints?.map((e) => e) || [];
     message.minDistancePoints = object.minDistancePoints?.map((e) => e) || [];

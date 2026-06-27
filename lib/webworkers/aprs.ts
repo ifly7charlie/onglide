@@ -45,6 +45,8 @@ interface InterimPositionMessage extends PositionMessage {
 }
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
+import {createFlightStatistics, FlightStatistics} from './flightStatistics';
+import {STATS_INTERIM_INTERVAL} from '../constants';
 import {APRS_MAX_FILTER_BYTES, Bbox, pointInBbox} from '../flightprocessing/taskBbox';
 import {distHaversine} from '../flightprocessing/taskhelper';
 
@@ -114,6 +116,7 @@ export interface AprsCommandTrack {
     tzoffset: number; // seconds east of UTC — used to derive competition start time for point backfill
     receiveNewPoints: boolean;
     trackerId: string | string[];
+    flightstats: boolean; // comp opted into flight-statistics — gate stats generation
 }
 
 export interface AprsCommandUntrack {
@@ -276,6 +279,16 @@ export interface Aircraft {
     ground: number;
 
     channel?: BroadcastChannel; // where to send packets
+
+    // Incremental flight-statistics for this aircraft (thermal/straight/gap
+    // segments + wind). Lives on the per-aircraft object — compno alone is only
+    // unique within a class, and a tracker change builds a fresh Aircraft so the
+    // stats start clean. Attached to emitted positions at a low cadence; the gate
+    // bookkeeping below decides when.
+    statsEnabled?: boolean; // comp opted into flight-statistics
+    flightStats?: FlightStatistics;
+    statsLastCount?: number; // segment count at last attach
+    statsLastEmitT?: Epoch; // fix time of last attach (for the open-thermal interim cadence)
 
     messages: InterimPositionMessage[]; // sorted array of all packets received for the glider
 
@@ -557,7 +570,7 @@ export class AprsController {
         return flarmIDs && flarmIDs.length > 0;
     }
 
-    trackGlider(compid: string, compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
+    trackGlider(compid: string, compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean, flightstats: boolean): boolean {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
@@ -574,7 +587,8 @@ export class AprsController {
             datecode,
             tzoffset,
             receiveNewPoints,
-            trackerId: flarmIDs
+            trackerId: flarmIDs,
+            flightstats
         };
         this.worker.postMessage?.(command);
         return true;
@@ -1065,6 +1079,7 @@ function trackGlider(task: AprsCommandTrack) {
 
         datecode: task.datecode,
         tzoffset: task.tzoffset,
+        statsEnabled: task.flightstats,
 
         stationary: 0,
         ground: 0,
@@ -1844,7 +1859,34 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // point and then get reverted when the "live" final point lands. The heartbeat tick below
         // (always _:true) is what signals the replay/live boundary to iog.
         const live = start != 0 || (position < messages.length && messages[position].t >= to);
-        aircraft.channel!.postMessage({...point, aircraft: undefined, _: live});
+
+        // Feed the incremental flight-statistics unit (decoupled from scoring —
+        // it only needs raw fix geometry) and piggyback the result onto the
+        // position at a low cadence: when a segment closes/opens (count change)
+        // or the open thermal has grown past the interim interval. The same
+        // emitted position carries it to both main (the stats data plane) and
+        // the scoring worker (which welds PilotScore.wind).
+        let attachStats: ReturnType<FlightStatistics['getStats']> = undefined;
+        let attachWind: ReturnType<FlightStatistics['getWind']> = undefined;
+        if (aircraft.statsEnabled) {
+            const stats = (aircraft.flightStats ??= createFlightStatistics());
+            stats.addPosition(point);
+            const cur = stats.getStats();
+            if (cur) {
+                const count = cur.segments.length;
+                const open = cur.segments[count - 1];
+                const countChanged = count !== aircraft.statsLastCount;
+                const tailAdvanced = open?.state === 'thermal' && point.t - (aircraft.statsLastEmitT ?? 0) > STATS_INTERIM_INTERVAL;
+                if (countChanged || tailAdvanced) {
+                    attachStats = cur;
+                    attachWind = stats.getWind();
+                    aircraft.statsLastCount = count;
+                    aircraft.statsLastEmitT = point.t as Epoch;
+                }
+            }
+        }
+
+        aircraft.channel!.postMessage({...point, aircraft: undefined, _: live, stats: attachStats, wind: attachWind});
         log('sent->', point);
     }
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {

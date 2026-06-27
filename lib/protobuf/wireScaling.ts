@@ -21,8 +21,8 @@ import {
     PilotScore,
     PilotScoreLeg,
     SpeedDist,
-    Stats,
     StatSegment,
+    ClassStats,
     Task,
     TaskLeg,
     ClassWinner,
@@ -98,9 +98,20 @@ function convStatSegment(seg: StatSegment, c: Codec): StatSegment {
     };
 }
 
-function convStats(stats: Stats | undefined, c: Codec): Stats | undefined {
-    if (!stats) return stats;
-    return {...stats, segments: stats.segments.map((s) => convStatSegment(s, c))};
+// Top-level ClassStats data plane: map<className, {baseTime, map<compno, {trackVersion, segments}>}>.
+// Only the StatSegment fields are ×10-scaled; trackVersion/baseTime pass through.
+function convClassStats(cs: ClassStats, c: Codec): ClassStats {
+    const klass: ClassStats['class'] = {};
+    for (const cn in cs.class) {
+        const update = cs.class[cn];
+        const pilots: (typeof update)['pilots'] = {};
+        for (const compno in update.pilots) {
+            const p = update.pilots[compno];
+            pilots[compno] = {...p, segments: p.segments.map((s) => convStatSegment(s, c))};
+        }
+        klass[cn] = {...update, pilots};
+    }
+    return {...cs, class: klass};
 }
 
 function convPilotScoreLeg(leg: PilotScoreLeg, c: Codec): PilotScoreLeg {
@@ -116,7 +127,6 @@ function convPilotScore(p: PilotScore, c: Codec): PilotScore {
         handicapped: convSpeedDist(p.handicapped, c),
         home: convSpeedDist(p.home, c),
         legs,
-        stats: convStats(p.stats, c),
     };
 }
 
@@ -154,13 +164,16 @@ function convCompetitions(list: CompetitionsList, c: Codec): CompetitionsList {
 }
 
 function convMessage(m: OnglideWebSocketMessage, c: Codec): OnglideWebSocketMessage {
-    // tracks / positions / keepalive frames carry no scaled fields
-    if (!m.scores && !m.task && !m.competitions) return m;
+    // tracks / positions / keepalive frames carry no scaled fields — but a
+    // position frame may now also carry the stats data plane (×10 StatSegment
+    // fields), so it must not be early-outed.
+    if (!m.scores && !m.task && !m.competitions && !m.stats) return m;
     return {
         ...m,
         scores: m.scores ? convScores(m.scores, c) : m.scores,
         task: m.task ? convTask(m.task, c) : m.task,
         competitions: m.competitions ? convCompetitions(m.competitions, c) : m.competitions,
+        stats: m.stats ? convClassStats(m.stats, c) : m.stats,
     };
 }
 
