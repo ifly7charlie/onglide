@@ -380,6 +380,11 @@ export function gaggleLayer(gaggles: Gaggle[], solos: Solo[], units: number | bo
             getAlignmentBaseline: 'center',
             getPixelOffset: (d) => [placeBeside(d.position, placement, discPixelRadius(d.count, d.position[1], placement.zoom) + 8).dx, 0],
             billboard: true,
+            // The disc lies flat at the bottom of the stack; in a pitched (3D) view
+            // the billboard label rises from that plane and the disc occludes its
+            // lower half via the depth buffer. Always-pass depth + no depth write so
+            // the label floats clear of its own footprint (no effect in 2D).
+            parameters: {depthCompare: 'always', depthWriteEnabled: false},
             pickable: false, // let picks fall through to the disc (carries the tooltip)
             updateTriggers: {
                 getText: [units],
