@@ -15,7 +15,8 @@ import {
     fa1,
     faRoad,
     faSatellite,
-    faPersonArrowUpFromLine
+    faPersonArrowUpFromLine,
+    faPeopleArrows
 } from '@fortawesome/free-solid-svg-icons';
 import {faCompass, faHandPointer, faCircleUp} from '@fortawesome/free-regular-svg-icons';
 
@@ -75,14 +76,32 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
         props.setOptions(structuredClone({...props.options, showClimb: !props.options.showClimb}));
     };
 
+    // The distance control cycles three states across two independent features:
+    // off -> measure (ruler tool, MeasureContext) -> compare (comparePilots option) -> off.
+    const distanceMode = measureEnabled ? 'measure' : props.options.comparePilots ? 'compare' : 'off';
+    const cycleDistance = () => {
+        if (measureEnabled) {
+            toggleMeasure?.(); // measure -> compare
+            props.setOptions(structuredClone({...props.options, comparePilots: true}));
+        } else if (props.options.comparePilots) {
+            props.setOptions(structuredClone({...props.options, comparePilots: false})); // compare -> off
+        } else {
+            toggleMeasure?.(); // off -> measure
+        }
+    };
+
     return (
         <div className="options">
-            {measureEnabled ? (
-                <button title={t('click_to_measure')} onClick={toggleMeasure}>
+            {distanceMode === 'measure' ? (
+                <button title={t('measure_active')} onClick={cycleDistance}>
                     <FontAwesomeIcon icon={faRuler} />
                 </button>
+            ) : distanceMode === 'compare' ? (
+                <button title={t('compare_active')} onClick={cycleDistance}>
+                    <FontAwesomeIcon icon={faPeopleArrows} />
+                </button>
             ) : (
-                <button title={t('click_to_stop_measuring')} onClick={toggleMeasure}>
+                <button title={t('distance_off')} onClick={cycleDistance}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={faSlash} />
                         <FontAwesomeIcon icon={faRuler} />

@@ -567,6 +567,9 @@ export interface Options {
     showClimb?: boolean;
     constructionLines?: boolean;
     fullPaths?: PathLength;
+    // Live distance/height readout between the selected glider and the
+    // hovered glider (or the leaderboard leader). Rendered by comparePilotsLayer.
+    comparePilots?: boolean;
 
     options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
     options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};

@@ -150,25 +150,30 @@ function resolveClimb(member: Circler, group: Circler[], avgClimb: Record<string
     return seg >= MIN_CLIMB_FOR_PROJECTION ? seg : null;
 }
 
-// Wind for a member's projection: its own segment wind, else any neighbour's.
-function resolveWind(member: Circler, group: Circler[]): Wind | undefined {
-    if (member.seg.wind) return member.seg.wind;
-    for (const o of group) if (o.seg.wind) return o.seg.wind;
+// Resolve a shared wind for the whole group - any available wind works since they're
+// all in roughly the same place. Returns the first valid wind found, or undefined.
+function resolveGroupWind(group: Circler[]): Wind | undefined {
+    for (const m of group) if (m.seg.wind?.speed) return m.seg.wind;
     return undefined;
 }
 
 // Of an on-screen cluster, the members that actually share one thermal: project
 // each to its ground core (along the wind) and keep the largest core-cluster.
-// Members we can't project (no usable climb or wind) are always kept — we have no
-// evidence to exclude them — so with no wind data this degrades to "all members".
+// Members we can't project (no usable climb) are always kept — we have no evidence
+// to exclude them. Wind is resolved once for the group since they're co-located.
 export function coLocatedMembers(group: Circler[], avgClimb: Record<string, number | null>): Circler[] {
     if (group.length <= 1) return group;
 
+    // Pass 1: resolve a shared wind for the whole group
+    const sharedWind = resolveGroupWind(group);
+
+    // Pass 2: project each member using their own climb and the shared wind
     const cores = group.map((m) => {
         const climb = resolveClimb(m, group, avgClimb);
-        const wind = resolveWind(m, group);
-        return climb == null || !wind ? null : projectToGround(m.position, m.agl, climb, wind);
+        if (!sharedWind || !climb) return null;
+        return projectToGround(m.position, m.agl, climb, sharedWind);
     });
+
     if (cores.every((c) => c == null)) return group;
 
     const coreless = group.filter((_, i) => !cores[i]);
@@ -239,6 +244,8 @@ export function computeGaggles(
         }
         if (group.length < 2) continue; // a lone glider is not a gaggle
 
+        const coLocated = coLocatedMembers(group, climbRate);
+
         // Centroid + member list span the whole visible cluster, but the averages
         // only count the members sharing one thermal (projected to the ground).
         // The disc lies flat at the centroid's lng/lat, but its altitude is the
@@ -257,7 +264,6 @@ export function computeGaggles(
         }
         memberList.sort((a, b) => b.climb - a.climb);
 
-        const coLocated = coLocatedMembers(group, climbRate);
         let bestClimb = -Infinity,
             sumVario = 0;
         for (const g of coLocated) {

@@ -323,6 +323,7 @@ export const OgnFeed = memo(
                     setViewport={setViewport}
                     selectedCompno={effectiveSelectedCompno}
                     hoveredCompno={hoveredCompno}
+                    setHoveredCompno={setHoveredCompno}
                     selectedHandicap={effectiveSelectedCompno ? pilots?.[effectiveSelectedCompno]?.handicap : undefined}
                     status={status}
                 />

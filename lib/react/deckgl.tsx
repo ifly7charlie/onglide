@@ -70,6 +70,7 @@ import {gaggleLayer, computeGaggles} from './gaggleLayer';
 import {pilotsTrackLayer, computeTripsFiltering} from './pilotstracklayer';
 import {OgnTripsLayer} from './ogntripslayer';
 import {homeLocationLayer} from './homeLocationLayer';
+import {computeCompare, compareLayers, compareEqual, type CompareResult, type CompareLabels} from './comparePilotsLayer';
 
 import {DISPLAY_CURSOR_LAG_S, DISPLAY_CURSOR_TICK_HZ, DISPLAY_CURSOR_MAX_CATCHUP_S} from '../constants';
 
@@ -79,7 +80,7 @@ const TICK_INTERVAL_MS = 1000 / DISPLAY_CURSOR_TICK_HZ;
 // with new currentTime / data, leaves the rest as same-reference (deck.gl
 // reconciliation early-outs on identical refs). Called from a RAF callback —
 // no React reconciliation happens.
-function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow: Epoch, fullPaths: any, selectedCompno: Compno, hoveredCompno: Compno | null) {
+function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow: Epoch, fullPaths: any, selectedCompno: Compno, hoveredCompno: Compno | null, comparePilots: boolean, grandPrix: boolean, units: any, labels: CompareLabels) {
     const props = (overlay as any).props;
     const layers = props?.layers;
     if (!Array.isArray(layers) || layers.length === 0) return;
@@ -88,6 +89,19 @@ function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow:
     // pass undefined here for the same reason.
     const startTimes = selectAllTimes(state, undefined);
     let positionsForLabels: any = null;
+
+    // Recompute the compare line/label endpoints once per frame from the live
+    // cursor (scores stay live → scoreT undefined). Lazily, so the cost is only
+    // paid when the layers are actually present.
+    let compareComputed = false;
+    let compareResult: CompareResult | null = null;
+    const getCompare = () => {
+        if (!compareComputed) {
+            compareResult = comparePilots && selectedCompno ? computeCompare(state, liveNow, undefined, selectedCompno, hoveredCompno, grandPrix, units, labels) : null;
+            compareComputed = true;
+        }
+        return compareResult;
+    };
 
     const updated = layers.map((layer: any) => {
         if (!layer) return layer;
@@ -100,6 +114,10 @@ function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow:
         if (layer.id === 'labels') {
             if (!positionsForLabels) positionsForLabels = selectAllPositions(state, liveNow);
             return layer.clone({data: positionsForLabels});
+        }
+        if (layer.id === 'compare-line' || layer.id === 'compare-label') {
+            const r = getCompare();
+            return layer.clone({data: r ? [r] : []});
         }
         return layer;
     });
@@ -118,6 +136,7 @@ export default function MApp(props: {
     vc: ClassName;
     selectedCompno: Compno;
     hoveredCompno?: Compno | null;
+    setHoveredCompno?: (compno: Compno | null) => void;
     selectedHandicap: number;
     setSelectedCompno: (compno: Compno) => void;
     tz: TZ;
@@ -173,6 +192,10 @@ export default function MApp(props: {
     const hoveredRef = useRef<Compno | null>(null);
     hoveredRef.current = props.hoveredCompno ?? null;
 
+    // Compare-mode params, read via a ref for the same reason — toggling compare
+    // or units shouldn't restart the RAF loop. Assigned below once `t` is available.
+    const compareRef = useRef<{comparePilots: boolean; grandPrix: boolean; units: any; labels: CompareLabels}>({comparePilots: false, grandPrix: false, units: props.options.units, labels: {km: 'km', sec: 's', min: 'm', hr: 'h', ahead: 'ahead', behind: 'behind', above: 'above', below: 'below'}});
+
     // Brief size pulse on first hover. Two React renders (grow → shrink),
     // deck.gl's getSize transition tweens the rendered size smoothly between
     // them. Cleared on hover end.
@@ -226,7 +249,7 @@ export default function MApp(props: {
                         if (next > state.target) next = state.target;
                         if (state.target - next > DISPLAY_CURSOR_MAX_CATCHUP_S) next = state.target;
                         state.display = next;
-                        applyCursorAnimation(overlayRef.current, store.getState(), next as Epoch, options.fullPaths, selectedCompno, hoveredRef.current);
+                        applyCursorAnimation(overlayRef.current, store.getState(), next as Epoch, options.fullPaths, selectedCompno, hoveredRef.current, compareRef.current.comparePilots, compareRef.current.grandPrix, compareRef.current.units, compareRef.current.labels);
                     }
                 }
             }
@@ -254,6 +277,13 @@ export default function MApp(props: {
     // Rain Radar
     const router = useRouter();
     const {t, i18n} = useTranslation('common');
+
+    // Distance "compare" mode (selected vs hovered/leader). Captured into the ref
+    // above so the RAF loop reads current values without re-subscribing.
+    const comparePilots = !!options.comparePilots;
+    const grandPrix = !!task?.rules?.grandprixstart;
+    const compareLabels: CompareLabels = {km: t('units.km'), sec: t('time.second_short'), min: t('time.minute_short'), hr: t('time.hour_short'), ahead: t('compare.ahead'), behind: t('compare.behind'), above: t('compare.above'), below: t('compare.below')};
+    compareRef.current = {comparePilots, grandPrix, units: options.units, labels: compareLabels};
 
     // Unmount the deck overlay around any route change. The deck.gl
     // MapboxOverlay/MapLibre teardown is racy: when the route changes (e.g.
@@ -317,11 +347,13 @@ export default function MApp(props: {
                 case 'Escape':
                     if (measure && measure.enabled) {
                         measure.toggle?.();
+                    } else if (options.comparePilots) {
+                        setOptions({...options, comparePilots: false});
                     }
                     break;
             }
         },
-        [measure, props.replayTime]
+        [measure, props.replayTime, options, setOptions]
     );
 
     useEffect(() => {
@@ -664,8 +696,10 @@ export default function MApp(props: {
 
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, pilotStats: allPilotStats, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, selectedCompno, t}), //
-        [vc, props.options.units, props.tz, mapRef?.current, allPilotStats, t, lang, selectedCompno]
+        // Compare mode uses hover to pick the comparison target — suppress the
+        // per-glider tooltip so it doesn't fight the compare line/label.
+        (input) => (comparePilots ? null : deckTooltip({...input, map: mapRef?.current, pilotStats: allPilotStats, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, selectedCompno, t})), //
+        [vc, props.options.units, props.tz, mapRef?.current, allPilotStats, t, lang, selectedCompno, comparePilots]
     );
 
     const attribution = useMemo(() => <AttributionInfo customParts={[radarOverlay.attribution, props.status]} />, [radarOverlay.key, radarOverlay.attribution, props.status]);
@@ -680,7 +714,7 @@ export default function MApp(props: {
 
     const onClick = useCallback((a, _b) => measure.click(a), [measure.enabled]);
 
-    const pilotLayer = pilotsLayer(selectedCompno, props.hoveredCompno ?? null, hoverFlash, props.setSelectedCompno, props.replayTime ?? liveNow);
+    const pilotLayer = pilotsLayer(selectedCompno, props.hoveredCompno ?? null, hoverFlash, props.setSelectedCompno, props.setHoveredCompno, props.replayTime ?? liveNow);
 
     // Gaggles: cluster the gliders circling together at the cursor, and the lone
     // circlers (solos) alongside them. The label layers hang each badge on the
@@ -718,6 +752,19 @@ export default function MApp(props: {
     // by the same time-indexed pilotStats store as the tooltip, so it follows the
     // replay cursor for free. The open thermal is owned by the gaggle/solo layer.
     const thermals = thermalLayer(selectedCompno, props.hoveredCompno ?? null, props.replayTime ?? liveNow, props.replayTime, props.options.units);
+
+    // Compare mode: line + label between the selected glider and the hovered
+    // glider (or the leaderboard leader). The RAF loop clones these forward each
+    // frame; this React-built version is the baseline (and the replay value).
+    const compareResult = useSelector(
+        (state: RootState) => (comparePilots && selectedCompno ? computeCompare(state, props.replayTime ?? liveNow, props.replayTime, selectedCompno, props.hoveredCompno ?? null, grandPrix, options.units, compareLabels) : null),
+        compareEqual
+    );
+    // Built fresh every render (never memoized): the RAF loop clones these and
+    // hands the clones to the overlay, which finalizes the originals — re-submitting
+    // a finalized layer instance draws with a disposed GL program. Matches how
+    // every other layer here (pilots/gaggle/track) is constructed per render.
+    const compareLayerList = comparePilots ? compareLayers(compareResult, map2d) : [];
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
@@ -863,7 +910,7 @@ export default function MApp(props: {
                     getTooltip={toolTip}
                     onClick={onClick}
                     onDragStart={onDragStart}
-                    layers={valid && !unmounting ? ([...pilotTrackLayer, thermals, ...gaggle, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
+                    layers={valid && !unmounting ? ([...pilotTrackLayer, thermals, ...gaggle, pilotLayer, otherPilotLayer, homeMarker, ...compareLayerList].filter(Boolean) as any[]) : []} //
                     interleaved={false}
                     overlayRef={overlayRef}
                 />

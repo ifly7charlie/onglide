@@ -93,7 +93,7 @@ const FLASH_PEAK_SIZE = 65;
 
 let isAndroid: boolean | undefined;
 
-export function pilotsLayer(selectedCompno: Compno, hoveredCompno: Compno | null, hoverFlash: HoverFlash, setSelectedCompno: (compno: Compno) => void, now: Epoch) {
+export function pilotsLayer(selectedCompno: Compno, hoveredCompno: Compno | null, hoverFlash: HoverFlash, setSelectedCompno: (compno: Compno) => void, setHoveredCompno: ((compno: Compno | null) => void) | undefined, now: Epoch) {
     const data = useSelector((state) => selectAllPositions(state, now));
 
     // Stable key for the pilot list so we only rebuild the atlas when pilots
@@ -139,6 +139,14 @@ export function pilotsLayer(selectedCompno: Compno, hoveredCompno: Compno | null
         getIcon: (d) => (d.compno === selectedCompno ? 'S/' + d.compno : d.compno === hoveredCompno ? 'H/' + d.compno : d.compno),
         onClick: (i) => {
             setSelectedCompno(i.object?.compno || '');
+        },
+        // Hovering a glider icon drives the shared hovered state (highlights the
+        // icon/track and is the target for compare mode). Guarded so we only
+        // dispatch on an actual change, not every pointer move over the icon.
+        onHover: (info) => {
+            if (!setHoveredCompno) return;
+            const c = (info.object?.compno as Compno) ?? null;
+            if (c !== hoveredCompno) setHoveredCompno(c);
         },
         updateTriggers: {
             getIcon: [selectedCompno, hoveredCompno],

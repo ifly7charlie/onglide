@@ -155,6 +155,9 @@
         "climb_hide": "Hide climb rates for circling gliders",
         "click_to_measure": "Click to measure",
         "click_to_stop_measuring": "Click to stop measuring",
+        "distance_off": "Distance tools off — click for the measuring tool",
+        "measure_active": "Measuring tool: click two points on the map. Click here to compare gliders",
+        "compare_active": "Comparing selected glider with the leader (or hovered glider). Click here to turn off",
         "rain_radar_showing": "Adjust rain radar timings, currently showing {{value}}, click to change timing or disable",
         "rain_radar_enable": "Click to enable rain radar",
         "rain_now": "now",
@@ -267,6 +270,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "ahead",
+        "behind": "behind",
+        "above": "above",
+        "below": "below"
     },
     "units": {
         "km": "km",
