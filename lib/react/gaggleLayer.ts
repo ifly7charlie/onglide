@@ -56,7 +56,7 @@ export interface GaggleMember {
 }
 
 export interface Gaggle {
-    position: [number, number, number]; // cluster centroid (lng, lat, mean alt)
+    position: [number, number, number]; // lng/lat at the cluster centroid, altitude at the lowest glider (footprint sits under the stack)
     count: number; // every glider in the on-screen cluster
     bestClimb: number; // m/s — strongest live vario among the co-located members (disc colour)
     varioAvg: number; // m/s — mean live vario over the co-located members
@@ -241,14 +241,17 @@ export function computeGaggles(
 
         // Centroid + member list span the whole visible cluster, but the averages
         // only count the members sharing one thermal (projected to the ground).
+        // The disc lies flat at the centroid's lng/lat, but its altitude is the
+        // *lowest* glider in the stack — a flat plane at the mean height occludes
+        // everyone circling below it, so sit it under the whole stack instead.
         let sx = 0,
             sy = 0,
-            sz = 0;
+            minZ = Infinity;
         const memberList: GaggleMember[] = [];
         for (const g of group) {
             sx += g.position[0];
             sy += g.position[1];
-            sz += g.position[2];
+            if (g.position[2] < minZ) minZ = g.position[2];
             memberList.push({compno: g.compno, climb: liveClimb(g.compno, g.seg)});
             members.add(g.compno);
         }
@@ -264,7 +267,7 @@ export function computeGaggles(
         }
 
         gaggles.push({
-            position: [sx / group.length, sy / group.length, sz / group.length],
+            position: [sx / group.length, sy / group.length, minZ],
             count: group.length,
             bestClimb,
             varioAvg: sumVario / coLocated.length,

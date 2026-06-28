@@ -863,7 +863,7 @@ export default function MApp(props: {
                     getTooltip={toolTip}
                     onClick={onClick}
                     onDragStart={onDragStart}
-                    layers={valid && !unmounting ? ([...pilotTrackLayer, thermals, pilotLayer, otherPilotLayer, ...gaggle, homeMarker].filter(Boolean) as any[]) : []} //
+                    layers={valid && !unmounting ? ([...pilotTrackLayer, thermals, ...gaggle, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
                     interleaved={false}
                     overlayRef={overlayRef}
                 />
