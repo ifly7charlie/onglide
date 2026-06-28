@@ -155,6 +155,10 @@
         "climb_hide": "Masquer les taux de montée des planeurs en spirale",
         "click_to_measure": "Cliquer pour mesurer",
         "click_to_stop_measuring": "Cliquer pour arrêter la mesure",
+        "measure_off": "Outil de mesure désactivé — cliquer pour mesurer des distances sur la carte",
+        "measure_active": "Outil de mesure : cliquer sur deux points de la carte. Cliquer ici pour désactiver",
+        "compare_off": "Comparaison de planeurs désactivée — cliquer pour comparer le planeur sélectionné au leader (ou au planeur sous le curseur)",
+        "compare_active": "Comparaison du planeur sélectionné au leader (ou au planeur sous le curseur). Cliquer ici pour désactiver",
         "rain_radar_showing": "Ajuster le timing du radar de pluie, actuellement {{value}}, cliquer pour changer ou désactiver",
         "rain_radar_enable": "Cliquer pour activer le radar de pluie",
         "rain_now": "actuel",
@@ -267,6 +271,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "devant",
+        "behind": "derrière",
+        "above": "au-dessus",
+        "below": "en dessous"
     },
     "units": {
         "km": "km",

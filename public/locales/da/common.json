@@ -155,6 +155,10 @@
         "climb_hide": "Skjul stigehastighed for kredsende svævefly",
         "click_to_measure": "Klik for at måle",
         "click_to_stop_measuring": "Klik for at stoppe måling",
+        "measure_off": "Måleværktøj fra — klik for at måle afstande på kortet",
+        "measure_active": "Måleværktøj: klik på to punkter på kortet. Klik her for at slå fra",
+        "compare_off": "Sammenligning af svævefly fra — klik for at sammenligne det valgte svævefly med føreren (eller svæveflyet under markøren)",
+        "compare_active": "Sammenligner det valgte svævefly med føreren (eller svæveflyet under markøren). Klik her for at slå fra",
         "rain_radar_showing": "Justér regnradar-tid, viser nu {{value}}, klik for at ændre eller slå fra",
         "rain_radar_enable": "Klik for at slå regnradar til",
         "rain_now": "nu",
@@ -267,6 +271,12 @@
         "hour_short": "t",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "foran",
+        "behind": "bagud",
+        "above": "over",
+        "below": "under"
     },
     "units": {
         "km": "km",

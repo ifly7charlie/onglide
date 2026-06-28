@@ -155,6 +155,10 @@
         "climb_hide": "Skrij hitrost dviganja krožečih jadralnih letal",
         "click_to_measure": "Klikni za merjenje",
         "click_to_stop_measuring": "Klikni za zaustavitev merjenja",
+        "measure_off": "Merilno orodje izklopljeno — klikni za merjenje razdalj na zemljevidu",
+        "measure_active": "Merilno orodje: klikni dve točki na zemljevidu. Klikni tukaj za izklop",
+        "compare_off": "Primerjava jadralnih letal izklopljena — klikni za primerjavo izbranega jadralnega letala z vodilnim (ali jadralnim letalom pod kazalcem)",
+        "compare_active": "Primerja izbrano jadralno letalo z vodilnim (ali jadralnim letalom pod kazalcem). Klikni tukaj za izklop",
         "rain_radar_showing": "Prilagodi čas dežnega radarja, trenutno {{value}}, klikni za spremembo ali izklop",
         "rain_radar_enable": "Klikni za vklop dežnega radarja",
         "rain_now": "zdaj",
@@ -267,6 +271,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "spredaj",
+        "behind": "zadaj",
+        "above": "višje",
+        "below": "nižje"
     },
     "units": {
         "km": "km",

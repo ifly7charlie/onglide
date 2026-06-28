@@ -155,6 +155,10 @@
         "climb_hide": "Nascondi i ratei di salita degli alianti in spirale",
         "click_to_measure": "Clicca per misurare",
         "click_to_stop_measuring": "Clicca per fermare la misurazione",
+        "measure_off": "Strumento di misura disattivato — clicca per misurare le distanze sulla mappa",
+        "measure_active": "Strumento di misura: clicca due punti sulla mappa. Clicca qui per disattivare",
+        "compare_off": "Confronto alianti disattivato — clicca per confrontare l'aliante selezionato con il leader (o l'aliante sotto il cursore)",
+        "compare_active": "Confronto dell'aliante selezionato con il leader (o l'aliante sotto il cursore). Clicca qui per disattivare",
         "rain_radar_showing": "Regola tempi del radar pioggia, ora {{value}}, clicca per cambiare o disattivare",
         "rain_radar_enable": "Clicca per attivare il radar pioggia",
         "rain_now": "ora",
@@ -267,6 +271,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "avanti",
+        "behind": "indietro",
+        "above": "sopra",
+        "below": "sotto"
     },
     "units": {
         "km": "km",

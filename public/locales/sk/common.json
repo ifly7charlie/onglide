@@ -155,6 +155,10 @@
         "climb_hide": "Skryť rýchlosť stúpania krúžiacich klzákov",
         "click_to_measure": "Kliknite na meranie",
         "click_to_stop_measuring": "Kliknite na ukončenie merania",
+        "measure_off": "Merací nástroj vypnutý — kliknite na meranie vzdialeností na mape",
+        "measure_active": "Merací nástroj: kliknite na dva body na mape. Kliknite sem na vypnutie",
+        "compare_off": "Porovnávanie klzákov vypnuté — kliknite na porovnanie vybraného klzáka s vedúcim (alebo klzákom pod kurzorom)",
+        "compare_active": "Porovnáva vybraný klzák s vedúcim (alebo klzákom pod kurzorom). Kliknite sem na vypnutie",
         "rain_radar_showing": "Nastavte čas dažďového radaru, teraz {{value}}, kliknite na zmenu alebo vypnutie",
         "rain_radar_enable": "Kliknite na zapnutie dažďového radaru",
         "rain_now": "teraz",
@@ -267,6 +271,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "vpredu",
+        "behind": "vzadu",
+        "above": "vyššie",
+        "below": "nižšie"
     },
     "units": {
         "km": "km",

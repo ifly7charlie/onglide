@@ -155,6 +155,10 @@
         "climb_hide": "Skjul stigehastighet for sirklende seilfly",
         "click_to_measure": "Klikk for å måle",
         "click_to_stop_measuring": "Klikk for å stoppe måling",
+        "measure_off": "Måleverktøy av — klikk for å måle avstander på kartet",
+        "measure_active": "Måleverktøy: klikk på to punkter på kartet. Klikk her for å slå av",
+        "compare_off": "Sammenligning av seilfly av — klikk for å sammenligne det valgte seilflyet med lederen (eller seilflyet under markøren)",
+        "compare_active": "Sammenligner det valgte seilflyet med lederen (eller seilflyet under markøren). Klikk her for å slå av",
         "rain_radar_showing": "Juster regnradar-tid, viser nå {{value}}, klikk for å endre eller slå av",
         "rain_radar_enable": "Klikk for å slå på regnradar",
         "rain_now": "nå",
@@ -267,6 +271,12 @@
         "hour_short": "t",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "foran",
+        "behind": "bak",
+        "above": "over",
+        "below": "under"
     },
     "units": {
         "km": "km",

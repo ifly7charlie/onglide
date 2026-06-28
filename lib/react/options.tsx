@@ -75,33 +75,18 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
     const toggleShowClimb = () => {
         props.setOptions(structuredClone({...props.options, showClimb: !props.options.showClimb}));
     };
-
-    // The distance control cycles three states across two independent features:
-    // off -> measure (ruler tool, MeasureContext) -> compare (comparePilots option) -> off.
-    const distanceMode = measureEnabled ? 'measure' : props.options.comparePilots ? 'compare' : 'off';
-    const cycleDistance = () => {
-        if (measureEnabled) {
-            toggleMeasure?.(); // measure -> compare
-            props.setOptions(structuredClone({...props.options, comparePilots: true}));
-        } else if (props.options.comparePilots) {
-            props.setOptions(structuredClone({...props.options, comparePilots: false})); // compare -> off
-        } else {
-            toggleMeasure?.(); // off -> measure
-        }
+    const toggleCompare = () => {
+        props.setOptions(structuredClone({...props.options, comparePilots: !props.options.comparePilots}));
     };
 
     return (
         <div className="options">
-            {distanceMode === 'measure' ? (
-                <button title={t('measure_active')} onClick={cycleDistance}>
+            {measureEnabled ? (
+                <button title={t('measure_active')} onClick={() => toggleMeasure?.()}>
                     <FontAwesomeIcon icon={faRuler} />
                 </button>
-            ) : distanceMode === 'compare' ? (
-                <button title={t('compare_active')} onClick={cycleDistance}>
-                    <FontAwesomeIcon icon={faPeopleArrows} />
-                </button>
             ) : (
-                <button title={t('distance_off')} onClick={cycleDistance}>
+                <button title={t('measure_off')} onClick={() => toggleMeasure?.()}>
                     <span className="fa-layers">
                         <FontAwesomeIcon icon={faSlash} />
                         <FontAwesomeIcon icon={faRuler} />
@@ -205,6 +190,19 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </button>
                 ][props.options.fullPaths || 0]
             }
+            &nbsp;
+            {props.options.comparePilots ? (
+                <button title={t('compare_active')} onClick={toggleCompare}>
+                    <FontAwesomeIcon icon={faPeopleArrows} />
+                </button>
+            ) : (
+                <button title={t('compare_off')} onClick={toggleCompare}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={faSlash} />
+                        <FontAwesomeIcon icon={faPeopleArrows} />
+                    </span>
+                </button>
+            )}
             &nbsp;
             {props.options.showClimb ? (
                 <button title={t('climb_hide')} onClick={toggleShowClimb}>

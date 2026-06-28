@@ -155,6 +155,10 @@
         "climb_hide": "Ocultar la tasa de ascenso de los planeadores en círculo",
         "click_to_measure": "Clic para medir",
         "click_to_stop_measuring": "Clic para detener la medición",
+        "measure_off": "Herramienta de medición desactivada — clic para medir distancias en el mapa",
+        "measure_active": "Herramienta de medición: haz clic en dos puntos del mapa. Clic aquí para desactivar",
+        "compare_off": "Comparación de planeadores desactivada — clic para comparar el planeador seleccionado con el líder (o el planeador bajo el cursor)",
+        "compare_active": "Comparando el planeador seleccionado con el líder (o el planeador bajo el cursor). Clic aquí para desactivar",
         "rain_radar_showing": "Ajustar tiempos del radar de lluvia, mostrando {{value}}, clic para cambiar o desactivar",
         "rain_radar_enable": "Clic para activar el radar de lluvia",
         "rain_now": "ahora",
@@ -267,6 +271,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "por delante",
+        "behind": "por detrás",
+        "above": "por encima",
+        "below": "por debajo"
     },
     "units": {
         "km": "km",

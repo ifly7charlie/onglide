@@ -155,6 +155,10 @@
         "climb_hide": "Piilota kaartavien purjelentokoneiden nousunopeus",
         "click_to_measure": "Klikkaa mitataksesi",
         "click_to_stop_measuring": "Klikkaa lopettaaksesi mittauksen",
+        "measure_off": "Mittaustyökalu pois — klikkaa mitataksesi etäisyyksiä kartalla",
+        "measure_active": "Mittaustyökalu: klikkaa kahta pistettä kartalla. Klikkaa tästä kytkeäksesi pois",
+        "compare_off": "Purjelentokoneiden vertailu pois — klikkaa vertaillaksesi valittua purjelentokonetta johtajaan (tai kohdistimen alla olevaan purjelentokoneeseen)",
+        "compare_active": "Vertaillaan valittua purjelentokonetta johtajaan (tai kohdistimen alla olevaan purjelentokoneeseen). Klikkaa tästä kytkeäksesi pois",
         "rain_radar_showing": "Säädä sadetutkan ajoitusta, näytetään {{value}}, klikkaa muuttaaksesi tai poistaaksesi käytöstä",
         "rain_radar_enable": "Klikkaa ottaaksesi sadetutkan käyttöön",
         "rain_now": "nyt",
@@ -267,6 +271,12 @@
         "hour_short": "h",
         "minute_short": "min",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "edellä",
+        "behind": "jäljessä",
+        "above": "ylempänä",
+        "below": "alempana"
     },
     "units": {
         "km": "km",

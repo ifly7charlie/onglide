@@ -155,6 +155,10 @@
         "climb_hide": "Köröző vitorlázógépek emelkedési értékének elrejtése",
         "click_to_measure": "Kattints a méréshez",
         "click_to_stop_measuring": "Kattints a mérés leállításához",
+        "measure_off": "Mérőeszköz kikapcsolva — kattints a térképen lévő távolságok méréséhez",
+        "measure_active": "Mérőeszköz: kattints két pontra a térképen. Kattints ide a kikapcsoláshoz",
+        "compare_off": "Vitorlázógép-összehasonlítás kikapcsolva — kattints a kiválasztott vitorlázógép összehasonlításához a vezetővel (vagy a kurzor alatti vitorlázógéppel)",
+        "compare_active": "A kiválasztott vitorlázógép összehasonlítása a vezetővel (vagy a kurzor alatti vitorlázógéppel). Kattints ide a kikapcsoláshoz",
         "rain_radar_showing": "Esőradár időzítésének beállítása, jelenleg {{value}}, kattints a változtatáshoz vagy kikapcsoláshoz",
         "rain_radar_enable": "Kattints az esőradár bekapcsolásához",
         "rain_now": "most",
@@ -267,6 +271,12 @@
         "hour_short": "ó",
         "minute_short": "p",
         "second_short": "mp"
+    },
+    "compare": {
+        "ahead": "előrébb",
+        "behind": "hátrébb",
+        "above": "feljebb",
+        "below": "lejjebb"
     },
     "units": {
         "km": "km",
