@@ -73,7 +73,8 @@ interface Segment {
     endLat: number;
     startAlt: number;
     endAlt: number;
-    turncount: number; // signed sum of bearing changes
+    turncount: number; // signed sum of bearing changes (cancels toward 0 on a reversing/mixed thermal)
+    grossTurn: number; // sum of |bearing change| — total rotation, survives a direction reversal
     distance: number; // km
     heightgain: number;
     heightloss: number;
@@ -118,6 +119,7 @@ function makeSegment(state: Mode, startTime: number, startLng: number, startLat:
         startAlt,
         endAlt: startAlt,
         turncount: 0,
+        grossTurn: 0,
         distance: 0,
         heightgain: 0,
         heightloss: 0,
@@ -179,7 +181,12 @@ export function createFlightStatistics() {
         }
         if (cur.state === 'thermal') {
             // Absorb only weak thermals; a proper circle stays its own segment.
-            return Math.abs(cur.turncount) < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6;
+            // Gate on *gross* rotation, not the signed turncount: a mixed thermal
+            // (the pilot turns one way, then reverses — two attempts in one core)
+            // cancels its signed sum toward 0 while still having flown a full
+            // circle or more, so the gross total is what separates a real climb
+            // from a stray course-correction.
+            return cur.grossTurn < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6;
         }
         return false;
     }
@@ -201,6 +208,7 @@ export function createFlightStatistics() {
             prev.turncount += cur.turncount;
         }
 
+        prev.grossTurn += cur.grossTurn;
         prev.direction += cur.direction;
         prev.packets += cur.packets;
         prev.maxDelay = Math.max(prev.maxDelay, cur.maxDelay);
@@ -268,9 +276,14 @@ export function createFlightStatistics() {
         let sumY = 0;
         for (const circle of seg.circles) {
             if (circle.minSpeed === Infinity || circle.maxSpeed <= 0) continue;
+            // The slowest and fastest ground-speed bearings should sit roughly
+            // opposite (into-wind vs down-wind). Allow ±30° of slop so a clean
+            // circle is still accepted when discrete sampling — or, on the IGC
+            // path, a chord bearing derived from successive positions that lags
+            // the true heading — puts its min/max ~168° apart rather than 180°.
+            // The bisector below handles the non-exact split.
             const angleDiff = Math.abs(((circle.maxAngle - circle.minAngle + 180) % 360) - 180);
-            const quality = 5 - Math.abs(180 - angleDiff) / 8;
-            if (quality < 3.5 || quality > 5) continue;
+            if (Math.abs(180 - angleDiff) > 30) continue;
 
             const maxAngleInverted = (circle.maxAngle + 180) % 360;
             const absAngleDiff = Math.abs(maxAngleInverted - circle.minAngle);
@@ -299,13 +312,23 @@ export function createFlightStatistics() {
         const achieved = distHaversineRaw([s.startLng, s.startLat], [s.endLng, s.endLat]);
         // Map sign aggregator to proto direction: 0 = mixed/none, 1 = left, 2 = right
         const sgn = Math.sign(s.direction);
-        const dirProto = sgn === 0 ? 0 : sgn < 0 ? 1 : 2;
+        let dirProto = sgn === 0 ? 0 : sgn < 0 ? 1 : 2;
+        // A thermal whose gross rotation far exceeds its net turned substantially
+        // in both directions — a mixed thermal (the pilot reversed; two attempts
+        // in one core). Flag it mixed (0) rather than its slim dominant side.
+        if (s.state === 'thermal' && s.grossTurn - Math.abs(s.turncount) >= MIN_CIRCLE_DEGREES) {
+            dirProto = 0;
+        }
         return {
             start: s.startTime,
             end: s.endTime,
             state: s.state,
             wind: s.wind ? {speed: Math.round(s.wind.speed), direction: Math.round(s.wind.direction)} : undefined,
-            turncount: Math.floor(Math.abs(s.turncount)),
+            // Report the gross rotation a thermal flew, so a mixed thermal shows
+            // the full ~1300° it turned rather than its near-zero signed sum
+            // (the cancelling that the dirProto below surfaces as "mixed"). A
+            // straight keeps its signed sum, which a long glide holds near 0.
+            turncount: Math.floor(s.state === 'thermal' ? s.grossTurn : Math.abs(s.turncount)),
             distance: Math.round(s.distance * 10) / 10,
             achievedDistance: Math.round(achieved * 10) / 10,
             delta: Math.round(s.heightgain - s.heightloss),
@@ -449,6 +472,7 @@ export function createFlightStatistics() {
         if (point.a > prevAlt) open.heightgain += point.a - prevAlt;
         else open.heightloss += prevAlt - point.a;
         open.turncount += turnDelta;
+        open.grossTurn += Math.abs(turnDelta);
         open.direction += tdirection;
         open.packets++;
         if (timedif > open.maxDelay) open.maxDelay = timedif;
