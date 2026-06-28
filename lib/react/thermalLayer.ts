@@ -1,57 +1,38 @@
 import {useMemo} from 'react';
 
-import {IconLayer} from '@deck.gl/layers';
+import {TextLayer} from '@deck.gl/layers';
+import {CollisionFilterExtension} from '@deck.gl/extensions';
+import type {CollisionFilterExtensionProps} from '@deck.gl/extensions';
 
 import {useSelector} from '../redux';
 import type {RootState} from '../redux/store';
 import {selectPilotStats, selectPilotScore} from '../redux/scoresSlice';
 
 import {sortedIndexNumber} from '../util/binarySearch';
+import {OPEN_THERMAL_TOLERANCE_S} from '../constants';
+import {displayClimb, displayHeight} from './displayunits';
 
 import type {Compno, Epoch, DeckData} from '../types';
 import type {StatSegment} from '../protobuf/onglide';
 
-// One white spiral glyph, used as an alpha mask so the IconLayer can tint each
-// thermal by climb strength via getColor (a single mask icon is far cheaper
-// than baking a coloured icon per strength bucket into an atlas). An
-// Archimedean spiral reads unambiguously as a thermal/circling at marker size
-// and needs no arrowhead geometry.
-function spiralPath(cx: number, cy: number, turns: number, rMax: number, points: number): string {
-    let d = '';
-    for (let i = 0; i <= points; i++) {
-        const f = i / points;
-        const ang = f * turns * 2 * Math.PI;
-        const r = f * rMax;
-        const x = cx + r * Math.cos(ang);
-        const y = cy + r * Math.sin(ang);
-        d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
-    }
-    return d.trim();
-}
+// The pilot's track already draws the circling spiral, so this layer no longer
+// re-draws the shape — it annotates each thermal with the numbers the track
+// can't convey: how strong the lift was and how much height it gained. A
+// number-led badge reads at a glance where a tinted glyph did not.
 
-const ICON_PX = 48;
-const SPIRAL_URL =
-    `data:image/svg+xml;utf8,` +
-    encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_PX}" height="${ICON_PX}" viewBox="0 0 ${ICON_PX} ${ICON_PX}">` +
-            `<path d="${spiralPath(24, 24, 2.5, 18, 80)}" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>` +
-            `</svg>`
-    );
-
-const SPIRAL_ICON = {url: SPIRAL_URL, width: ICON_PX, height: ICON_PX, anchorX: ICON_PX / 2, anchorY: ICON_PX / 2, mask: true};
-
-// Colour ramp keyed on average climb (m/s — avgDelta is already unscaled to m/s
-// by the wire codec). Weak climbs read cool/muted, strong climbs hot, matching
-// the way pilots think about thermal strength at a glance.
+// Colour ramp keyed on climb (m/s — avgDelta and the live vario are both already
+// unscaled to m/s). Sink reads red, neutral amber, and the stronger the lift the
+// greener then bluer — the way a glider pilot reads "is this any good": red = get
+// out, blue = stay. Spans negative (sink) through strong lift.
 const RAMP: Array<[number, [number, number, number]]> = [
-    [0, [120, 150, 170]], // grey-blue: barely lifting
-    [1, [49, 163, 84]], // green: workable
-    [2, [254, 196, 79]], // amber: good
-    [3.5, [227, 74, 51]] // red: strong
+    [-3, [200, 50, 45]], // red: strong sink
+    [0, [240, 190, 70]], // amber: neutral / barely moving
+    [1.5, [60, 175, 85]], // green: workable lift
+    [4, [45, 125, 215]] // blue: strong lift
 ];
 
-function climbColour(climb: number): [number, number, number] {
-    const c = Math.max(0, climb);
+export function climbColour(climb: number): [number, number, number] {
+    const c = climb;
     if (c <= RAMP[0][0]) return RAMP[0][1];
     for (let i = 1; i < RAMP.length; i++) {
         if (c <= RAMP[i][0]) {
@@ -66,23 +47,46 @@ function climbColour(climb: number): [number, number, number] {
 
 // Smallest thermal (seconds) worth marking — matches the 30s floor the tooltip
 // uses before it shows segment detail, and keeps brief circling blips off the map.
-const MIN_THERMAL_SECONDS = 30;
+export const MIN_THERMAL_SECONDS = 30;
 
 interface ThermalPoint {
     position: [number, number, number];
     compno: Compno;
     t: Epoch; // mid-thermal time (for the tooltip)
     climb: number; // m/s
+    heightgain: number; // m
     stats: StatSegment; // so the existing deckTooltip object.stats branch lights up
     utcStart?: Epoch; // pilot's task start, for the tooltip's relative (time-into-task) readout
 }
 
-// Resolve each thermal segment to a map position by sampling the glider's track
-// at the segment mid-time. StatSegment carries no position of its own, so the
-// deck is the source of truth. `t` (cursor) bounds how far we look so a replay
-// never paints a thermal the glider hasn't reached yet — the `seg.start > limit`
-// clip below drops future segments and the `mid` clamp guards the open segment's
-// position too (selectPilotStats returns the whole accumulator, unclipped).
+// Geometric centre of the track positions spanning a thermal, so the badge sits
+// in the middle of the visible loop rather than on its edge (a mid-*time* sample
+// lands on the rim). Returns undefined when no points fall in the range.
+function centroid(deck: DeckData, startIdx: number, endIdx: number): [number, number, number] | undefined {
+    let sx = 0,
+        sy = 0,
+        sz = 0,
+        n = 0;
+    for (let i = startIdx; i <= endIdx; i++) {
+        sx += deck.positions[i * 3];
+        sy += deck.positions[i * 3 + 1];
+        sz += deck.positions[i * 3 + 2];
+        n++;
+    }
+    return n ? [sx / n, sy / n, sz / n] : undefined;
+}
+
+// Resolve each thermal segment to a centred map position by averaging the
+// glider's track over the segment. StatSegment carries no position of its own,
+// so the deck is the source of truth. `t` (cursor) bounds how far we look so a
+// replay never paints a thermal the glider hasn't reached yet — the
+// `seg.start > limit` clip drops future segments and the `endIdx` clamp keeps
+// the open segment's centroid to the flown-so-far portion.
+//
+// The *open* thermal (the one the cursor sits inside) is dropped here: the
+// gaggle/solo layer labels the current climb of every circling glider, so
+// annotating it again would double up. This layer is just the completed-thermal
+// history of the selected/hovered glider.
 function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | undefined, utcStart: Epoch | undefined, t: Epoch | undefined): ThermalPoint[] {
     if (!deck?.posIndex || !segments?.length) return [];
     const limit = t ?? Infinity;
@@ -96,14 +100,23 @@ function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | und
         // line, so a pre-start marker would float with no trail beneath it.
         if (utcStart && seg.end <= utcStart) continue;
         if (seg.start > limit) continue;
-        const mid = Math.min((seg.start + seg.end) / 2, limit) as Epoch;
-        let i = sortedIndexNumber(ts, mid);
-        if (i >= deck.posIndex) i = deck.posIndex - 1;
+        // The open thermal is owned by the gaggle/solo layer, which extends the
+        // *final* thermal segment past its reported end by OPEN_THERMAL_TOLERANCE_S
+        // (its end lags the live cursor). Drop it over the same window so the two
+        // layers never both badge it.
+        const openEnd = seg === segments[segments.length - 1] ? seg.end + OPEN_THERMAL_TOLERANCE_S : seg.end;
+        if (seg.start <= limit && limit <= openEnd) continue;
+        const startIdx = sortedIndexNumber(ts, seg.start as Epoch);
+        let endIdx = sortedIndexNumber(ts, Math.min(seg.end, limit) as Epoch);
+        if (endIdx >= deck.posIndex) endIdx = deck.posIndex - 1;
+        const pos = centroid(deck, Math.min(startIdx, endIdx), endIdx);
+        if (!pos) continue;
         out.push({
-            position: [deck.positions[i * 3], deck.positions[i * 3 + 1], deck.positions[i * 3 + 2]],
+            position: pos,
             compno: deck.compno,
-            t: mid,
+            t: Math.min((seg.start + seg.end) / 2, limit) as Epoch,
             climb: seg.avgDelta ?? 0,
+            heightgain: seg.heightgain ?? 0,
             stats: seg,
             utcStart
         });
@@ -111,16 +124,20 @@ function thermalPoints(deck: DeckData | undefined, segments: StatSegment[] | und
     return out;
 }
 
-// Thermal-strength markers for the selected and/or hovered glider, including
-// the in-progress thermal (the open segment, which is always the last entry in
-// stats.segments). Returns null when neither pilot has thermals to show.
+// Number-led thermal-strength badges for the completed thermals of the selected
+// and/or hovered glider. The open (in-progress) thermal is omitted — the
+// gaggle/solo layer labels every circling glider's current climb. Returns null
+// when neither pilot has a completed thermal to show.
 //
 // `t` is the display cursor (replay time, or the live now) used to place markers
 // and trim the future. `replayTime` is the raw replay slider value — undefined
 // in live mode — which selectPilotScore needs to pick the live vs historical
 // score store for utcStart; passing the live cursor there would read the empty
 // historical store and silently drop the start-clip.
-export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: Compno | null, t: Epoch | undefined, replayTime: Epoch | undefined) {
+//
+// The badge is white text with a dark halo on a strength-coloured pill: legible
+// on the light, dark, and satellite basemaps alike, so it needs no mapLight.
+export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: Compno | null, t: Epoch | undefined, replayTime: Epoch | undefined, units: number | boolean) {
     // Only fetch the hovered pilot's stats when it differs from the selected one.
     const hovered = hoveredCompno && hoveredCompno !== selectedCompno ? hoveredCompno : undefined;
 
@@ -138,16 +155,45 @@ export function thermalLayer(selectedCompno: Compno | undefined, hoveredCompno: 
 
     if (!data.length) return null;
 
-    return new IconLayer<ThermalPoint>({
+    return new TextLayer<ThermalPoint, CollisionFilterExtensionProps<ThermalPoint>>({
         id: 'thermals',
         data,
         getPosition: (d) => d.position,
-        getIcon: () => SPIRAL_ICON,
-        getColor: (d) => climbColour(d.climb),
-        // Bigger spiral for stronger lift; clamped so a booming thermal doesn't
-        // swamp the map and a weak one is still legible.
-        getSize: (d) => Math.max(22, Math.min(48, 22 + d.climb * 6)),
-        sizeUnits: 'pixels',
-        pickable: true
+        // Climb on top (the headline), height gain below when there is any.
+        getText: (d) => `▲${displayClimb(d.climb, units)}${d.heightgain ? `\n+${displayHeight(d.heightgain, units)}` : ''}`,
+        getColor: [255, 255, 255, 255],
+        getSize: 13,
+        // Sit the badge just above the thermal rather than on its centroid: the
+        // circling track crosses densely through the middle and makes a centred
+        // label unreadable. Anchored at the centroid, drawn above it (baseline
+        // bottom + a small pixel lift), so it stays attached to the right loop.
+        getPixelOffset: [0, -10],
+        getBackgroundColor: (d) => {
+            const [r, g, b] = climbColour(d.climb);
+            return [r, g, b, 255]; // fully opaque so the track behind never bleeds through
+        },
+        background: true,
+        backgroundPadding: [6, 3, 6, 3],
+        // SDF + dark halo keeps the white text readable over the pill and over a
+        // busy satellite basemap. characterSet:'auto' picks up ▲ + digits + units.
+        fontSettings: {sdf: true},
+        characterSet: 'auto',
+        fontWeight: 700,
+        outlineWidth: 2,
+        outlineColor: [0, 0, 0, 220],
+        getTextAnchor: 'middle',
+        getAlignmentBaseline: 'bottom',
+        billboard: true, // face the camera when the map is pitched in 3D
+        pickable: true,
+        // On a phone a long flight has dozens of thermals; collision filtering
+        // drops overlapping badges by priority so only the strongest survive when
+        // zoomed out, revealing the rest on zoom-in.
+        extensions: [new CollisionFilterExtension()],
+        collisionEnabled: true,
+        collisionGroup: 'thermals',
+        getCollisionPriority: (d) => Math.min(900, Math.round(d.climb * 100)),
+        updateTriggers: {
+            getText: [units]
+        }
     });
 }

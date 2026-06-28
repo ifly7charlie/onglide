@@ -151,6 +151,8 @@
         "label_duration": "Trajanje"
     },
     "options": {
+        "climb_show": "Prikaži hitrost dviganja krožečih jadralnih letal",
+        "climb_hide": "Skrij hitrost dviganja krožečih jadralnih letal",
         "click_to_measure": "Klikni za merjenje",
         "click_to_stop_measuring": "Klikni za zaustavitev merjenja",
         "rain_radar_showing": "Prilagodi čas dežnega radarja, trenutno {{value}}, klikni za spremembo ali izklop",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} sekund",
         "thermal_average": "povprečje: {{climb}}",
+        "gaggle_count": "Jata {{count}}",
         "straight_distance_speed": "razdalja: {{distance}} km s hitrostjo {{speed}} km/h",
         "straight_ld": "Drsno število {{ld}}",
         "wind": "hitrost vetra: {{speed}} km/h @ {{direction}}°",

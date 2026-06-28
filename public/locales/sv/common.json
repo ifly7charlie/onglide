@@ -151,6 +151,8 @@
         "label_duration": "Tid"
     },
     "options": {
+        "climb_show": "Visa stighastighet för cirklande segelflygplan",
+        "climb_hide": "Dölj stighastighet för cirklande segelflygplan",
         "click_to_measure": "Klicka för att mäta",
         "click_to_stop_measuring": "Klicka för att sluta mäta",
         "rain_radar_showing": "Justera regnradarens tid, visar nu {{value}}, klicka för att ändra eller stänga av",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",
         "thermal_average": "medel: {{climb}}",
+        "gaggle_count": "Svärm på {{count}}",
         "straight_distance_speed": "distans: {{distance}} km i farten {{speed}} km/h",
         "straight_ld": "Glidtal {{ld}}",
         "wind": "vindhastighet: {{speed}} km/h @ {{direction}}°",

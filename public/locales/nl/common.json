@@ -151,6 +151,8 @@
         "label_duration": "Duur"
     },
     "options": {
+        "climb_show": "Stijgsnelheden van cirkelende zweefvliegtuigen tonen",
+        "climb_hide": "Stijgsnelheden van cirkelende zweefvliegtuigen verbergen",
         "click_to_measure": "Klik om te meten",
         "click_to_stop_measuring": "Klik om meten te stoppen",
         "rain_radar_showing": "Regenradar-timing aanpassen, nu {{value}}, klik om te wijzigen of uit te schakelen",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} gedurende {{seconds}} seconden",
         "thermal_average": "gemiddeld: {{climb}}",
+        "gaggle_count": "Pulk van {{count}}",
         "straight_distance_speed": "afstand: {{distance}} km met snelheid {{speed}} km/u",
         "straight_ld": "Glijgetal {{ld}}",
         "wind": "windsnelheid: {{speed}} km/u @ {{direction}}°",

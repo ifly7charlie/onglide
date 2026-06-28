@@ -151,6 +151,8 @@
         "label_duration": "Tid"
     },
     "options": {
+        "climb_show": "Vis stigehastighed for kredsende svævefly",
+        "climb_hide": "Skjul stigehastighed for kredsende svævefly",
         "click_to_measure": "Klik for at måle",
         "click_to_stop_measuring": "Klik for at stoppe måling",
         "rain_radar_showing": "Justér regnradar-tid, viser nu {{value}}, klik for at ændre eller slå fra",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",
         "thermal_average": "gennemsnit: {{climb}}",
+        "gaggle_count": "Sværm på {{count}}",
         "straight_distance_speed": "distance: {{distance}} km med hastighed {{speed}} km/t",
         "straight_ld": "Glidetal {{ld}}",
         "wind": "vindhastighed: {{speed}} km/t @ {{direction}}°",

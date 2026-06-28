@@ -151,6 +151,8 @@
         "label_duration": "Czas"
     },
     "options": {
+        "climb_show": "Pokaż prędkość wznoszenia krążących szybowców",
+        "climb_hide": "Ukryj prędkość wznoszenia krążących szybowców",
         "click_to_measure": "Kliknij, aby mierzyć",
         "click_to_stop_measuring": "Kliknij, aby zakończyć pomiar",
         "rain_radar_showing": "Dostosuj timing radaru deszczu, obecnie {{value}}, kliknij, aby zmienić lub wyłączyć",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} przez {{seconds}} sekund",
         "thermal_average": "średnio: {{climb}}",
+        "gaggle_count": "Stado {{count}}",
         "straight_distance_speed": "dystans: {{distance}} km z prędkością {{speed}} km/h",
         "straight_ld": "Doskonałość {{ld}}",
         "wind": "prędkość wiatru: {{speed}} km/h @ {{direction}}°",

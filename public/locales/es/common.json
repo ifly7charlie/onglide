@@ -151,6 +151,8 @@
         "label_duration": "Duración"
     },
     "options": {
+        "climb_show": "Mostrar la tasa de ascenso de los planeadores en círculo",
+        "climb_hide": "Ocultar la tasa de ascenso de los planeadores en círculo",
         "click_to_measure": "Clic para medir",
         "click_to_stop_measuring": "Clic para detener la medición",
         "rain_radar_showing": "Ajustar tiempos del radar de lluvia, mostrando {{value}}, clic para cambiar o desactivar",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} durante {{seconds}} segundos",
         "thermal_average": "media: {{climb}}",
+        "gaggle_count": "Grupo de {{count}}",
         "straight_distance_speed": "distancia: {{distance}} km a una velocidad de {{speed}} km/h",
         "straight_ld": "Planeo {{ld}}",
         "wind": "velocidad del viento: {{speed}} km/h @ {{direction}}°",

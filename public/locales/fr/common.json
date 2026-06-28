@@ -151,6 +151,8 @@
         "label_duration": "Durée"
     },
     "options": {
+        "climb_show": "Afficher les taux de montée des planeurs en spirale",
+        "climb_hide": "Masquer les taux de montée des planeurs en spirale",
         "click_to_measure": "Cliquer pour mesurer",
         "click_to_stop_measuring": "Cliquer pour arrêter la mesure",
         "rain_radar_showing": "Ajuster le timing du radar de pluie, actuellement {{value}}, cliquer pour changer ou désactiver",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} pendant {{seconds}} secondes",
         "thermal_average": "moyenne : {{climb}}",
+        "gaggle_count": "Grappe de {{count}}",
         "straight_distance_speed": "distance : {{distance}} km à une vitesse de {{speed}} km/h",
         "straight_ld": "finesse {{ld}}",
         "wind": "vitesse du vent : {{speed}} km/h @ {{direction}}°",

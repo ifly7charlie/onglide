@@ -81,6 +81,15 @@ export const scoreChunkSize = 30 * 60;
 // fresh during long thermals without sending stats on every tick.
 export const STATS_INTERIM_INTERVAL = 30;
 
+// How long past its reported end the open (last) thermal segment is still treated
+// as "current" by the live map badges. The open thermal's end only reaches the
+// client every STATS_INTERIM_INTERVAL, so the display cursor (which itself trails
+// the latest fix by DISPLAY_CURSOR_LAG_S) routinely sits past the reported end
+// while the glider is still circling; without this slack the gaggle/solo climb
+// badge would blink out for most of each interval. Only the final segment is
+// extended, so a thermal followed by a later segment is never resurrected.
+export const OPEN_THERMAL_TOLERANCE_S = STATS_INTERIM_INTERVAL + DISPLAY_CURSOR_LAG_S;
+
 // ETA threshold (minutes) for promoting a class compstatus to 'F' (finishing):
 // when any tracked pilot's distanceRemaining / taskSpeed implies arrival within
 // this many minutes, the class is treated as imminently finishing.

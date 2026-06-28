@@ -28,6 +28,7 @@ export function deckTooltip({
     tz,
     units,
     modifierHeld,
+    selectedCompno,
     t
 }: //
 {
@@ -41,6 +42,7 @@ export function deckTooltip({
     tz: TZ;
     units: number | boolean;
     modifierHeld?: boolean;
+    selectedCompno?: string;
     t: TFn;
 }) {
     if (!picked) {
@@ -73,6 +75,19 @@ export function deckTooltip({
             html += `<br/>${t('tooltip.thermal_for_seconds', {state: s.state, seconds})}`;
             if (s.heightgain) html += `<br/>⬆️ ${displayHeight(s.heightgain, units)}`;
             if (s.wind?.direction) html += `<br/>${t('tooltip.wind', {speed: s.wind.speed?.toFixed(0), direction: s.wind.direction.toFixed(0)})}`;
+            return {html};
+        }
+
+        // Gaggle marker (gaggleLayer) — how many gliders are sharing this thermal
+        // and how each is climbing, best first. The selected glider (if it's in
+        // the gaggle) is bolded so you can pick it out of the group.
+        if (layer?.id === 'gaggle' && object.members) {
+            let html = `<strong>${t('tooltip.gaggle_count', {count: object.count})}</strong><br/>`;
+            html += `${t('tooltip.thermal_average', {climb: displayClimb(object.varioAvg, units)})}<br/>`;
+            for (const m of object.members) {
+                const climb = displayClimb(m.climb, units);
+                html += m.compno === selectedCompno ? `<strong>${m.compno}: ${climb}</strong><br/>` : `${m.compno}: ${climb}<br/>`;
+            }
             return {html};
         }
 

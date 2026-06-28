@@ -563,6 +563,8 @@ export interface Options {
     zoomTurnpoint?: {lat: number; lng: number; radius?: number} | null;
     sortKey: SortKey;
     showOthers: boolean;
+    // Climb-rate badges beside circling gliders (gaggle + solo). Off by default.
+    showClimb?: boolean;
     constructionLines?: boolean;
     fullPaths?: PathLength;
 

@@ -151,6 +151,8 @@
         "label_duration": "Dauer"
     },
     "options": {
+        "climb_show": "Steigwerte kreisender Segelflugzeuge anzeigen",
+        "climb_hide": "Steigwerte kreisender Segelflugzeuge ausblenden",
         "click_to_measure": "Klicken zum Messen",
         "click_to_stop_measuring": "Klicken um Messung zu stoppen",
         "rain_radar_showing": "Regenradar-Zeitpunkt anpassen, derzeit {{value}}, klicken zum Ändern oder Deaktivieren",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} seit {{seconds}} Sekunden",
         "thermal_average": "Mittel: {{climb}}",
+        "gaggle_count": "Pulk von {{count}}",
         "straight_distance_speed": "Strecke: {{distance}} km mit Geschwindigkeit {{speed}} km/h",
         "straight_ld": "Gleitzahl {{ld}}",
         "wind": "Windgeschwindigkeit: {{speed}} km/h @ {{direction}}°",

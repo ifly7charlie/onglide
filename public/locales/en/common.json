@@ -151,6 +151,8 @@
         "label_duration": "Duration"
     },
     "options": {
+        "climb_show": "Show climb rates for circling gliders",
+        "climb_hide": "Hide climb rates for circling gliders",
         "click_to_measure": "Click to measure",
         "click_to_stop_measuring": "Click to stop measuring",
         "rain_radar_showing": "Adjust rain radar timings, currently showing {{value}}, click to change timing or disable",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} for {{seconds}} seconds",
         "thermal_average": "average: {{climb}}",
+        "gaggle_count": "Gaggle of {{count}}",
         "straight_distance_speed": "distance: {{distance}} km at a speed of {{speed}} kph",
         "straight_ld": "L/D {{ld}}",
         "wind": "wind speed: {{speed}} kph @ {{direction}}°",

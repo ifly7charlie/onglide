@@ -151,6 +151,8 @@
         "label_duration": "Tid"
     },
     "options": {
+        "climb_show": "Vis stigehastighet for sirklende seilfly",
+        "climb_hide": "Skjul stigehastighet for sirklende seilfly",
         "click_to_measure": "Klikk for å måle",
         "click_to_stop_measuring": "Klikk for å stoppe måling",
         "rain_radar_showing": "Juster regnradar-tid, viser nå {{value}}, klikk for å endre eller slå av",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",
         "thermal_average": "snitt: {{climb}}",
+        "gaggle_count": "Sverm på {{count}}",
         "straight_distance_speed": "distanse: {{distance}} km med fart {{speed}} km/t",
         "straight_ld": "Glidetall {{ld}}",
         "wind": "vindhastighet: {{speed}} km/t @ {{direction}}°",

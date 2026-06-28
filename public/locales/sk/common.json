@@ -151,6 +151,8 @@
         "label_duration": "Trvanie"
     },
     "options": {
+        "climb_show": "Zobraziť rýchlosť stúpania krúžiacich klzákov",
+        "climb_hide": "Skryť rýchlosť stúpania krúžiacich klzákov",
         "click_to_measure": "Kliknite na meranie",
         "click_to_stop_measuring": "Kliknite na ukončenie merania",
         "rain_radar_showing": "Nastavte čas dažďového radaru, teraz {{value}}, kliknite na zmenu alebo vypnutie",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} počas {{seconds}} sekúnd",
         "thermal_average": "priemer: {{climb}}",
+        "gaggle_count": "Kŕdeľ {{count}}",
         "straight_distance_speed": "vzdialenosť: {{distance}} km rýchlosťou {{speed}} km/h",
         "straight_ld": "Klzavosť {{ld}}",
         "wind": "rýchlosť vetra: {{speed}} km/h @ {{direction}}°",

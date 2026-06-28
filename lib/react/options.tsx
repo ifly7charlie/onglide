@@ -17,7 +17,7 @@ import {
     faSatellite,
     faPersonArrowUpFromLine
 } from '@fortawesome/free-solid-svg-icons';
-import {faCompass, faHandPointer} from '@fortawesome/free-regular-svg-icons';
+import {faCompass, faHandPointer, faCircleUp} from '@fortawesome/free-regular-svg-icons';
 
 import type {Options as OptionsType} from '../types';
 
@@ -70,6 +70,9 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
     };
     const toggleShowOthers = () => {
         props.setOptions(structuredClone({...props.options, showOthers: !props.options.showOthers}));
+    };
+    const toggleShowClimb = () => {
+        props.setOptions(structuredClone({...props.options, showClimb: !props.options.showClimb}));
     };
 
     return (
@@ -183,6 +186,19 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </button>
                 ][props.options.fullPaths || 0]
             }
+            &nbsp;
+            {props.options.showClimb ? (
+                <button title={t('climb_hide')} onClick={toggleShowClimb}>
+                    <FontAwesomeIcon icon={faCircleUp} />
+                </button>
+            ) : (
+                <button title={t('climb_show')} onClick={toggleShowClimb}>
+                    <span className="fa-layers">
+                        <FontAwesomeIcon icon={faSlash} />
+                        <FontAwesomeIcon icon={faCircleUp} />
+                    </span>
+                </button>
+            )}
             &nbsp;
             {!props.multipleClasses ? null : props.options.showOthers ? (
                 <button title={t('show_other_classes')} onClick={toggleShowOthers}>

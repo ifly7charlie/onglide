@@ -151,6 +151,8 @@
         "label_duration": "Kesto"
     },
     "options": {
+        "climb_show": "Näytä kaartavien purjelentokoneiden nousunopeus",
+        "climb_hide": "Piilota kaartavien purjelentokoneiden nousunopeus",
         "click_to_measure": "Klikkaa mitataksesi",
         "click_to_stop_measuring": "Klikkaa lopettaaksesi mittauksen",
         "rain_radar_showing": "Säädä sadetutkan ajoitusta, näytetään {{value}}, klikkaa muuttaaksesi tai poistaaksesi käytöstä",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} sekuntia",
         "thermal_average": "keskiarvo: {{climb}}",
+        "gaggle_count": "Parvi {{count}}",
         "straight_distance_speed": "matka: {{distance}} km nopeudella {{speed}} km/h",
         "straight_ld": "Liitosuhde {{ld}}",
         "wind": "tuulen nopeus: {{speed}} km/h @ {{direction}}°",

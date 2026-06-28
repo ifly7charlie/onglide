@@ -151,6 +151,8 @@
         "label_duration": "Idő"
     },
     "options": {
+        "climb_show": "Köröző vitorlázógépek emelkedési értékének megjelenítése",
+        "climb_hide": "Köröző vitorlázógépek emelkedési értékének elrejtése",
         "click_to_measure": "Kattints a méréshez",
         "click_to_stop_measuring": "Kattints a mérés leállításához",
         "rain_radar_showing": "Esőradár időzítésének beállítása, jelenleg {{value}}, kattints a változtatáshoz vagy kikapcsoláshoz",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} másodpercen át",
         "thermal_average": "átlag: {{climb}}",
+        "gaggle_count": "Raj: {{count}}",
         "straight_distance_speed": "távolság: {{distance}} km {{speed}} km/h sebességgel",
         "straight_ld": "Siklószám {{ld}}",
         "wind": "szélsebesség: {{speed}} km/h @ {{direction}}°",

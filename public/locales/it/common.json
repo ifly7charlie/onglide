@@ -151,6 +151,8 @@
         "label_duration": "Durata"
     },
     "options": {
+        "climb_show": "Mostra i ratei di salita degli alianti in spirale",
+        "climb_hide": "Nascondi i ratei di salita degli alianti in spirale",
         "click_to_measure": "Clicca per misurare",
         "click_to_stop_measuring": "Clicca per fermare la misurazione",
         "rain_radar_showing": "Regola tempi del radar pioggia, ora {{value}}, clicca per cambiare o disattivare",
@@ -232,6 +234,7 @@
     "tooltip": {
         "thermal_for_seconds": "{{state}} per {{seconds}} secondi",
         "thermal_average": "media: {{climb}}",
+        "gaggle_count": "Gruppo di {{count}}",
         "straight_distance_speed": "distanza: {{distance}} km a una velocità di {{speed}} km/h",
         "straight_ld": "Efficienza {{ld}}",
         "wind": "velocità del vento: {{speed}} km/h @ {{direction}}°",

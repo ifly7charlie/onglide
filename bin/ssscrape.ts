@@ -36,6 +36,7 @@ import {hideBin} from 'yargs/helpers';
 import {runScheduler, SourceRegistry, dumpSchedulerState} from '../lib/scoring/scheduler';
 import {SoaringSpotScrapeSource} from '../lib/scoring/sources/soaringspotscrape';
 import {SgpSource} from '../lib/scoring/sources/sgp';
+import {SgpaeroSource} from '../lib/scoring/sources/sgpaero';
 import {SoaringSpotApiSource} from '../lib/scoring/sources/soaringspot';
 import {RobocontrolSource} from '../lib/scoring/sources/robocontrol';
 import type {ScoringSource, SourceCtx} from '../lib/scoring/source';
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
     const registry = new SourceRegistry();
     registry.register(new SoaringSpotScrapeSource());
     registry.register(new SgpSource());
+    registry.register(new SgpaeroSource());
     registry.register(new SoaringSpotApiSource());
     registry.register(new RobocontrolSource());
     // Future: registry.register(new RstSource());
@@ -110,7 +112,7 @@ async function main(): Promise<void> {
         .option('compid', {type: 'string', describe: 'competition id (derived from url if omitted)'})
         .option('class', {type: 'string', describe: 'filter mode: classid or display name'})
         .option('datecode', {type: 'string', describe: 'filter mode: 3-char datecode (e.g. 6A5)', coerce: (v?: string) => v?.toUpperCase()})
-        .option('refetch', {type: 'string', describe: 'compid to refetch using whatever source type is configured for it'})
+        .option('refetch', {type: 'string', requiresArg: true, describe: 'compid to refetch using whatever source type is configured for it (value required)'})
         .check((a) => {
             const filterMode = !!(a.class || a.datecode);
             if (filterMode && (!a.class || !a.datecode)) throw new Error('--class and --datecode must be supplied together');
@@ -281,7 +283,7 @@ async function runOneShotRefetch(compid: string, registry: SourceRegistry, db: a
 
     // Prefer the OAuth API row when present — same precedence the
     // scheduler enforces via OVERRIDE_SOURCE_TYPE.
-    const order = ['soaringspotkey', 'soaringspotscrape', 'sgp'];
+    const order = ['soaringspotkey', 'soaringspotscrape', 'sgp', 'sgpaero'];
     const sorted = [...rows].sort((a, b) => {
         const ai = order.indexOf(a.type);
         const bi = order.indexOf(b.type);

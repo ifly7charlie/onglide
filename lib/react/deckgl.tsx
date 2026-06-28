@@ -29,7 +29,7 @@ import {distanceLineLabelStyle} from './distanceLine';
 import {selectTaskGeoJSON, selectTask, selectStartOpen} from '../redux/taskSlice';
 import {selectPilotScore, selectOptimalGrid, selectAllTimes} from '../redux/scoresSlice';
 import type {StatSegment} from '../protobuf/onglide';
-import {selectPilotPosition, selectLatestUpdate, selectAllPositions} from '../redux/tracksSlice';
+import {selectPilotPosition, selectLatestUpdate, selectAllPositions, selectAllAverageClimb} from '../redux/tracksSlice';
 import {useSelector} from '../redux';
 import {useStore} from 'react-redux';
 import type {RootState} from '../redux/store';
@@ -66,6 +66,7 @@ import buffer from '@turf/buffer';
 import {otherPilotsLayer} from './otherpilotslayer';
 import {pilotsLayer} from './pilotslayer';
 import {thermalLayer} from './thermalLayer';
+import {gaggleLayer, computeGaggles} from './gaggleLayer';
 import {pilotsTrackLayer, computeTripsFiltering} from './pilotstracklayer';
 import {OgnTripsLayer} from './ogntripslayer';
 import {homeLocationLayer} from './homeLocationLayer';
@@ -663,8 +664,8 @@ export default function MApp(props: {
 
     // Link up to a tooltip
     const toolTip = useCallback(
-        (input) => deckTooltip({...input, map: mapRef?.current, pilotStats: allPilotStats, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, t}), //
-        [vc, props.options.units, props.tz, mapRef?.current, allPilotStats, t, lang]
+        (input) => deckTooltip({...input, map: mapRef?.current, pilotStats: allPilotStats, lang, tz: props?.tz, units: props?.options?.units, modifierHeld: modifierRef.current, selectedCompno, t}), //
+        [vc, props.options.units, props.tz, mapRef?.current, allPilotStats, t, lang, selectedCompno]
     );
 
     const attribution = useMemo(() => <AttributionInfo customParts={[radarOverlay.attribution, props.status]} />, [radarOverlay.key, radarOverlay.attribution, props.status]);
@@ -681,10 +682,42 @@ export default function MApp(props: {
 
     const pilotLayer = pilotsLayer(selectedCompno, props.hoveredCompno ?? null, hoverFlash, props.setSelectedCompno, props.replayTime ?? liveNow);
 
-    // Thermal-strength spirals for the selected/hovered glider (incl. the
-    // in-progress thermal). Driven by the same time-indexed pilotStats store
-    // as the tooltip, so it follows the replay cursor for free.
-    const thermals = thermalLayer(selectedCompno, props.hoveredCompno ?? null, props.replayTime ?? liveNow, props.replayTime);
+    // Gaggles: cluster the gliders circling together at the cursor, and the lone
+    // circlers (solos) alongside them. The label layers hang each badge on the
+    // roomier side of the screen, so they need the live map camera to project a
+    // marker and know how wide the viewport is.
+    const gaggleTime = props.replayTime ?? liveNow;
+    const allPositions = useSelector((state) => selectAllPositions(state, gaggleTime));
+    const allAvgClimb = useSelector((state) => selectAllAverageClimb(state, gaggleTime));
+    // selectAllPositions exposes AGL as `g`; computeGaggles wants it as `agl` (to project the thermal core to the ground).
+    // Off by default — toggled by the climb option in the toolbar.
+    const showClimb = !!props.options.showClimb;
+    const {gaggles, solos} = useMemo(
+        () => (showClimb ? computeGaggles(allPositions.map((p) => ({...p, agl: p.g})), allPilotStats, allAvgClimb, gaggleTime) : {gaggles: [], solos: []}),
+        [showClimb, allPositions, allPilotStats, allAvgClimb, gaggleTime]
+    );
+    const labelPlacement = useMemo(() => {
+        const map = mapRef.current?.getMap();
+        return {
+            project: (lngLat: [number, number]) => {
+                try {
+                    const p = map?.project(lngLat);
+                    return p ? {x: p.x, y: p.y} : null;
+                } catch {
+                    return null;
+                }
+            },
+            screenWidth: map?.getContainer()?.offsetWidth ?? 1300,
+            zoom: props.viewport?.zoom ?? 10,
+            viewKey: `${props.viewport?.zoom}|${props.viewport?.longitude}|${props.viewport?.latitude}|${props.viewport?.bearing}|${props.viewport?.pitch}`
+        };
+    }, [mapRef.current, props.viewport]);
+    const gaggle = gaggleLayer(gaggles, solos, props.options.units, mapLight, selectedCompno, props.hoveredCompno ?? null, labelPlacement);
+
+    // Completed-thermal strength badges for the selected/hovered glider. Driven
+    // by the same time-indexed pilotStats store as the tooltip, so it follows the
+    // replay cursor for free. The open thermal is owned by the gaggle/solo layer.
+    const thermals = thermalLayer(selectedCompno, props.hoveredCompno ?? null, props.replayTime ?? liveNow, props.replayTime, props.options.units);
 
     // And the turnpoints
     //    const tpLayer = turnpointLayer(taskGeoJSONtp, map2d, mapLight, nextTp);
@@ -830,7 +863,7 @@ export default function MApp(props: {
                     getTooltip={toolTip}
                     onClick={onClick}
                     onDragStart={onDragStart}
-                    layers={valid && !unmounting ? ([...pilotTrackLayer, thermals, pilotLayer, otherPilotLayer, homeMarker].filter(Boolean) as any[]) : []} //
+                    layers={valid && !unmounting ? ([...pilotTrackLayer, thermals, pilotLayer, otherPilotLayer, ...gaggle, homeMarker].filter(Boolean) as any[]) : []} //
                     interleaved={false}
                     overlayRef={overlayRef}
                 />
