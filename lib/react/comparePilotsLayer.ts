@@ -10,12 +10,21 @@
 // straight-line geographic distance when remaining isn't available. The height
 // difference is the AMSL delta. Rendered as deck.gl layers using the gliders'
 // 3D positions so it connects them at altitude and tracks the RAF cursor in 3D.
+// The connector is routed along the course — from the glider that's behind,
+// through the turnpoint(s) it still has to round, to the one ahead — rather than
+// drawn straight across.
 //
 
 import {PathLayer, TextLayer} from '@deck.gl/layers';
 
 import type {Compno, Epoch, Units} from '../types';
 import type {RootState} from '../redux/store';
+
+// Only the turnpoint centres are needed to route the connector along the task;
+// keep the param structural so a redux WritableDraft<Task> is accepted as-is.
+export interface CompareTask {
+    legs?: {nlng: number; nlat: number}[];
+}
 
 import {selectAllPositions} from '../redux/tracksSlice';
 import {selectAllScores} from '../redux/scoresSlice';
@@ -36,15 +45,25 @@ const LABEL_BG: [number, number, number, number] = [20, 20, 20, 215];
 const SEP = '≈';
 const TIME_ICON = '⏱';
 
-// L-shaped path between the two gliders: a horizontal leg at the *lower* glider's
-// altitude, running across to directly beneath the *higher* glider, then a
-// vertical leg up to it. Decomposes the separation into horizontal distance +
-// height gain, which reads clearly when the map is pitched into 3D.
-function lPath(source: [number, number, number], target: [number, number, number]): [number, number, number][] {
-    const low = source[2] <= target[2] ? source : target;
-    const high = source[2] <= target[2] ? target : source;
-    const corner: [number, number, number] = [high[0], high[1], low[2]];
-    return [low, corner, high];
+type LngLat = [number, number];
+type LngLatAlt = [number, number, number];
+
+// Build the connector geometry. `vias` are the turnpoint centres the *behind*
+// glider still has to round to reach the one ahead, so the horizontal leg traces
+// the task course (behind → turnpoints → ahead) rather than cutting straight
+// across. The whole horizontal run sits at the *lower* glider's altitude and a
+// single vertical riser climbs to the *higher* glider — decomposing the gap into
+// along-task distance + height gain, which reads cleanly when pitched into 3D.
+// 2D drops the altitude axis to the bare routed polyline.
+function buildPaths(behind: LngLatAlt, ahead: LngLatAlt, vias: LngLat[]): {path3d: LngLatAlt[]; path2d: LngLat[]} {
+    const lowAlt = Math.min(behind[2], ahead[2]);
+    const flat: LngLatAlt[] = [[behind[0], behind[1], lowAlt], ...vias.map((v): LngLatAlt => [v[0], v[1], lowAlt]), [ahead[0], ahead[1], lowAlt]];
+    const path3d: LngLatAlt[] = [];
+    if (behind[2] > lowAlt) path3d.push([behind[0], behind[1], behind[2]]); // riser down from the (higher) behind glider
+    path3d.push(...flat);
+    if (ahead[2] > lowAlt) path3d.push([ahead[0], ahead[1], ahead[2]]); // riser up to the (higher) ahead glider
+    const path2d: LngLat[] = [[behind[0], behind[1]], ...vias, [ahead[0], ahead[1]]];
+    return {path3d, path2d};
 }
 
 // Localized unit labels, resolved by the caller (so this module stays free of
@@ -66,6 +85,8 @@ export interface CompareResult {
     source: [number, number, number]; // [lng, lat, amsl]
     target: [number, number, number];
     mid: [number, number, number];
+    path3d: [number, number, number][]; // routed connector (3D L-shape via turnpoints)
+    path2d: [number, number][]; // routed connector (flat, for 2D)
     label: string;
 }
 
@@ -110,7 +131,8 @@ export function computeCompare(
     hoveredCompno: Compno | null,
     grandPrix: boolean,
     units: Units | number | boolean,
-    labels: CompareLabels
+    labels: CompareLabels,
+    task?: CompareTask
 ): CompareResult | null {
     if (!selectedCompno) return null;
 
@@ -150,8 +172,9 @@ export function computeCompare(
     // Task-aware separation: difference in remaining task distance, else great-circle.
     const scores = selectAllScores(state, scoreT) ?? {};
     const selScore = scores[selectedCompno];
+    const tgtScore = scores[tgtCompno];
     const selRem = remaining(selScore?.actual);
-    const tgtRem = remaining(scores[tgtCompno]?.actual);
+    const tgtRem = remaining(tgtScore?.actual);
     // Everything below describes the TARGET (B) relative to the selected glider
     // (A): positive = B is ahead on task / above in height — the gap A has to make
     // up. Distance needs known task remaining for both, else falls back to an
@@ -178,17 +201,34 @@ export function computeCompare(
     // cover it; line 2 — height gap and the climb time; line 3 — the net.
     const distLine =
         gapSigned !== undefined
-            ? `${tgtCompno} ${Math.round(Math.abs(gapSigned) * 10) / 10} ${labels.km} ${dirH(gapSigned)}` + (dTime !== undefined ? ` ${SEP} ${dur(dTime)}` : '')
-            : `${tgtCompno} ${Math.round(distHaversineRaw(source, target) * 10) / 10} ${labels.km}`;
+            ? `${tgtCompno}: ${Math.round(Math.abs(gapSigned) * 10) / 10} ${labels.km} ${dirH(gapSigned)}` + (dTime !== undefined ? ` ${SEP} ${dur(dTime)}` : '')
+            : `${tgtCompno}: ${Math.round(distHaversineRaw(source, target) * 10) / 10} ${labels.km}`;
 
-    const heightLine = `${tgtCompno} ${displayHeight(Math.abs(heightSigned), units)} ${dirV(heightSigned)}` + (cTime !== undefined ? ` ${SEP} ${dur(cTime)}` : '');
+    const heightLine = `${tgtCompno}: ${displayHeight(Math.abs(heightSigned), units)} ${dirV(heightSigned)}` + (cTime !== undefined ? ` ${SEP} ${dur(cTime)}` : '');
 
     const totalTime = (dTime ?? 0) + (cTime ?? 0);
-    const totalLine = dTime !== undefined || cTime !== undefined ? `${tgtCompno} ${dur(totalTime)} ${dirH(totalTime)}` : '';
+    const totalLine = dTime !== undefined || cTime !== undefined ? `${tgtCompno}: ${dur(totalTime)} ${dirH(totalTime)}` : '';
 
     const label = [distLine, heightLine, totalLine].filter(Boolean).join('\n');
 
-    return {selCompno: selectedCompno, tgtCompno, source, target, mid, label};
+    // Route the connector along the task: from the glider that's behind (more
+    // remaining), through the turnpoint centres it still has to round to reach the
+    // one ahead, then on to that glider. `currentLeg` indexes the next turnpoint a
+    // pilot is heading to (racing scores the turn to legs[currentLeg]'s centre), so
+    // the behind glider must round legs[behindLeg..aheadLeg-1]. No task / same leg /
+    // unknown remaining → no via points, i.e. a direct connector.
+    const selBehind = selRem >= tgtRem;
+    const behindPos = selBehind ? source : target;
+    const aheadPos = selBehind ? target : source;
+    const behindLeg = (selBehind ? selScore : tgtScore)?.currentLeg ?? 0;
+    const aheadLeg = (selBehind ? tgtScore : selScore)?.currentLeg ?? 0;
+    let vias: [number, number][] = [];
+    if (haveRem && task?.legs && behindLeg >= 1 && aheadLeg > behindLeg) {
+        vias = task.legs.slice(behindLeg, Math.min(aheadLeg, task.legs.length)).map((l): [number, number] => [l.nlng, l.nlat]);
+    }
+    const {path3d, path2d} = buildPaths(behindPos, aheadPos, vias);
+
+    return {selCompno: selectedCompno, tgtCompno, source, target, mid, path3d, path2d, label};
 }
 
 // useSelector equality — only re-render when something visible changes, so the
@@ -210,19 +250,19 @@ export function compareEqual(a: CompareResult | null, b: CompareResult | null): 
 }
 
 //
-// Build the deck.gl layers for a comparison (thick yellow path + billboard
+// Build the deck.gl layers for a comparison (thick orange path + billboard
 // label). Returns empty-data layers when there's nothing to draw (so the RAF
 // loop can still find and clone them). depth compare is forced 'always' so the
-// path/label aren't occluded by terrain in 3D. In 2D there's no height axis, so
-// the path is just the straight connector between the two gliders; in 3D it's
-// the L-shape (horizontal at the lower glider, vertical up to the higher). The
-// layer ids are matched by the RAF loop in deckgl.tsx to clone fresh positions
-// each frame without a React render.
+// path/label aren't occluded by terrain in 3D. The path follows the task course
+// (behind glider → intervening turnpoints → ahead glider): flat in 2D, an L-shape
+// at altitude in 3D (horizontal at the lower glider, vertical up to the higher).
+// The layer ids are matched by the RAF loop in deckgl.tsx to clone fresh
+// positions each frame without a React render.
 export function compareLayers(result: CompareResult | null, map2d: boolean): any[] {
     const line = new PathLayer<CompareResult>({
         id: 'compare-line',
         data: result ? [result] : [],
-        getPath: (d) => (map2d ? [d.source, d.target] : lPath(d.source, d.target)),
+        getPath: (d) => (map2d ? d.path2d : d.path3d),
         getColor: LINE_COLOR,
         getWidth: 4,
         widthUnits: 'pixels',
@@ -234,7 +274,7 @@ export function compareLayers(result: CompareResult | null, map2d: boolean): any
         // billboard off in 2D (doesn't render on some devices).
         billboard: !map2d,
         parameters: {depthCompare: 'always', depthWriteEnabled: false},
-        updateTriggers: {getPath: [map2d, result?.source, result?.target]}
+        updateTriggers: {getPath: [map2d, result?.path3d, result?.path2d]}
     });
     const label = new TextLayer<CompareResult>({
         id: 'compare-label',
