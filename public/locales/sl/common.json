@@ -220,6 +220,7 @@
         "leg_completed": "krak končan",
         "view_leg": "krak",
         "view_task": "naloga",
+        "view_statistics": "Statistika",
         "view_actuals": "dejansko",
         "view_handicapped": "handicap",
         "view_task_or_leg": "naloga ali krak",
@@ -234,6 +235,20 @@
         "possible": "Možna",
         "shortest": "Najkrajša",
         "recent_wind": "Trenutni veter"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} termike · {{pct}}% kroženja · maks {{best}} · povpr {{avg}}",
+        "summary2": "povpr finesa {{ld}} · {{flown}} · vzpon {{gain}} · {{pctGap}}% brez pokritja",
+        "flown": "preletano {{dist}}",
+        "flown_with_extra": "preletano {{dist}} ({{extra}} naloge)",
+        "col_time": "Čas",
+        "col_duration": "Trajanje",
+        "col_wind": "Veter",
+        "state_thermal": "Termika",
+        "state_straight": "Prelet",
+        "state_gap": "Vrzel",
+        "turns": "{{count}} krogov",
+        "tracking_gap": "brez signala"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} sekund",

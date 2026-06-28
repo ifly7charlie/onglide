@@ -220,6 +220,7 @@
         "leg_completed": "ben afsluttet",
         "view_leg": "ben",
         "view_task": "opgave",
+        "view_statistics": "Statistik",
         "view_actuals": "faktisk",
         "view_handicapped": "handicap",
         "view_task_or_leg": "opgave eller ben",
@@ -234,6 +235,20 @@
         "possible": "Mulig",
         "shortest": "Korteste",
         "recent_wind": "Aktuel vind"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} termikker · {{pct}}% kredsning · bedst {{best}} · gns {{avg}}",
+        "summary2": "gns glidetal {{ld}} · {{flown}} · steget {{gain}} · {{pctGap}}% ingen dækning",
+        "flown": "fløjet {{dist}}",
+        "flown_with_extra": "fløjet {{dist}} ({{extra}} opgave)",
+        "col_time": "Tid",
+        "col_duration": "Varighed",
+        "col_wind": "Vind",
+        "state_thermal": "Termik",
+        "state_straight": "Glideflugt",
+        "state_gap": "Hul",
+        "turns": "{{count}} omgange",
+        "tracking_gap": "intet signal"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",

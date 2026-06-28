@@ -220,6 +220,7 @@
         "leg_completed": "leg completed",
         "view_leg": "leg",
         "view_task": "task",
+        "view_statistics": "stats",
         "view_actuals": "actuals",
         "view_handicapped": "handicapped",
         "view_task_or_leg": "task or leg",
@@ -234,6 +235,20 @@
         "possible": "Possible",
         "shortest": "Shortest",
         "recent_wind": "Recent Wind"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} thermals · {{pct}}% thermalling · best {{best}} · avg {{avg}}",
+        "summary2": "avg L/D {{ld}} · {{flown}} · climbed {{gain}} · {{pctGap}}% no coverage",
+        "flown": "flown {{dist}}",
+        "flown_with_extra": "flown {{dist}} ({{extra}} task)",
+        "col_time": "Time",
+        "col_duration": "Duration",
+        "col_wind": "Wind",
+        "state_thermal": "Thermal",
+        "state_straight": "Glide",
+        "state_gap": "Gap",
+        "turns": "{{count}} turns",
+        "tracking_gap": "tracking gap"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} for {{seconds}} seconds",

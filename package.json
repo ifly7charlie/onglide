@@ -24,7 +24,9 @@
         "x:dev": "yarn build:tsc && node  --enable-source-maps --experimental-fetch dist/test/x.js",
         "startai": "node --require ./lib/load-appinsights.js node_modules/next/dist/bin/next start",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "i18n:check": "node bin/checktranslations.js",
+        "i18n:fill": "node bin/checktranslations.js --fill"
     },
     "dependencies": {
         "@mapbox/tilebelt": ">=1.0.1",

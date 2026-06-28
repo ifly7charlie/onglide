@@ -483,7 +483,7 @@ export const Details = ({
                     {score?.taskTimeRemaining ? distance : null}
                     {times}
                 </ul>
-                <FlightLegs score={score} tz={tz} units={!!units} />
+                <FlightLegs compno={compno} score={score} tz={tz} units={!!units} replayTime={replayTime} />
             </>
         );
     } else {
@@ -492,7 +492,7 @@ export const Details = ({
                 <div>
                     {t('pilot.landed_out')}
                     <ul className={statusClassName}>{distance}</ul>
-                    <FlightLegs score={score} tz={tz} units={!!units} />
+                    <FlightLegs compno={compno} score={score} tz={tz} units={!!units} replayTime={replayTime} />
                 </div>
             );
         } else if (score?.flightStatus == PositionStatus.Home) {
@@ -500,7 +500,7 @@ export const Details = ({
                 <div>
                     {t('pilot.landed_back')}
                     <ul className={statusClassName}>{distance}</ul>
-                    <FlightLegs score={score} tz={tz} units={!!units} />
+                    <FlightLegs compno={compno} score={score} tz={tz} units={!!units} replayTime={replayTime} />
                 </div>
             );
         } else {
@@ -514,7 +514,7 @@ export const Details = ({
                         {gr}
                         {wind}
                     </ul>
-                    <FlightLegs score={score} tz={tz} units={!!units} />
+                    <FlightLegs compno={compno} score={score} tz={tz} units={!!units} replayTime={replayTime} />
                 </>
             );
         }

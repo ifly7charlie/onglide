@@ -220,6 +220,7 @@
         "leg_completed": "tratta completata",
         "view_leg": "tratta",
         "view_task": "prova",
+        "view_statistics": "Statistiche",
         "view_actuals": "reali",
         "view_handicapped": "handicap",
         "view_task_or_leg": "prova o tratta",
@@ -234,6 +235,20 @@
         "possible": "Possibile",
         "shortest": "Più breve",
         "recent_wind": "Vento recente"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} termiche · {{pct}}% in termica · max {{best}} · media {{avg}}",
+        "summary2": "efficienza media {{ld}} · {{flown}} · salita {{gain}} · {{pctGap}}% senza copertura",
+        "flown": "percorso {{dist}}",
+        "flown_with_extra": "percorso {{dist}} ({{extra}} tema)",
+        "col_time": "Ora",
+        "col_duration": "Durata",
+        "col_wind": "Vento",
+        "state_thermal": "Termica",
+        "state_straight": "Planata",
+        "state_gap": "Vuoto",
+        "turns": "{{count}} giri",
+        "tracking_gap": "perdita segnale"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} per {{seconds}} secondi",

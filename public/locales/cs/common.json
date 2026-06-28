@@ -220,6 +220,7 @@
         "leg_completed": "úsek dokončen",
         "view_leg": "úsek",
         "view_task": "úloha",
+        "view_statistics": "Statistika",
         "view_actuals": "skutečné",
         "view_handicapped": "s handicapem",
         "view_task_or_leg": "úloha nebo úsek",
@@ -234,6 +235,20 @@
         "possible": "Možná",
         "shortest": "Nejkratší",
         "recent_wind": "Aktuální vítr"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} termiky · {{pct}}% kroužení · max {{best}} · prům {{avg}}",
+        "summary2": "prům klouzavost {{ld}} · {{flown}} · nastoupáno {{gain}} · {{pctGap}}% bez pokrytí",
+        "flown": "nalétáno {{dist}}",
+        "flown_with_extra": "nalétáno {{dist}} ({{extra}} trati)",
+        "col_time": "Čas",
+        "col_duration": "Trvání",
+        "col_wind": "Vítr",
+        "state_thermal": "Termika",
+        "state_straight": "Přeskok",
+        "state_gap": "Mezera",
+        "turns": "{{count}} okruhů",
+        "tracking_gap": "bez signálu"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} po dobu {{seconds}} sekund",

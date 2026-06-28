@@ -1778,6 +1778,61 @@ hr {
     background: var(--card-bg);
 }
 
+// Statistics tab: one row per flight segment (thermal / glide / gap). Unlike
+// `.legs` (legs across columns) this is a normal vertical row-per-segment table.
+.stats-summary {
+    margin-top: 6px;
+    font-size: small;
+    opacity: 0.85;
+}
+// Second summary line (L/D · coverage) sits tight under the first.
+.stats-summary + .stats-summary {
+    margin-top: 0;
+}
+.stats-segments {
+    border: 1px solid var(--card-border);
+    width: 100%;
+    margin-top: 4px;
+    background: var(--card-bg);
+    color: var(--card-fg);
+    border-collapse: collapse;
+    font-size: small;
+}
+.stats-segments thead tr td {
+    font-weight: bold;
+    border-bottom: 1px solid var(--card-border);
+    padding: 2px 6px;
+}
+.stats-segments tbody tr td {
+    padding: 2px 6px;
+    white-space: nowrap;
+}
+.stats-segments td.stat-type {
+    width: 1.5rem;
+    text-align: center;
+    padding: 2px 4px;
+
+    .tooltipicon {
+        color: inherit;
+    }
+}
+// Detail metrics (climb/gain/turns or distance/delta/L-D) right-align so the
+// numbers and units line up down each column.
+.stats-segments td.stat-detail {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.stats-segments tbody tr:hover {
+    background: var(--panel-hover);
+}
+.stats-segments .stat-thermal .stat-climb {
+    font-weight: bold;
+}
+.stats-segments .stat-gap td {
+    opacity: 0.6;
+    font-style: italic;
+}
+
 .doclearboth:after {
     content: '';
     display: table;

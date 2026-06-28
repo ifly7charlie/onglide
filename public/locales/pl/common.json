@@ -220,6 +220,7 @@
         "leg_completed": "odcinek ukończony",
         "view_leg": "odcinek",
         "view_task": "konkurencja",
+        "view_statistics": "Statystyki",
         "view_actuals": "rzeczywiste",
         "view_handicapped": "z handicapem",
         "view_task_or_leg": "konkurencja lub odcinek",
@@ -234,6 +235,20 @@
         "possible": "Możliwy",
         "shortest": "Najkrótszy",
         "recent_wind": "Aktualny wiatr"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} kominy · {{pct}}% krążenia · maks {{best}} · śr {{avg}}",
+        "summary2": "śr doskonałość {{ld}} · {{flown}} · wznios {{gain}} · {{pctGap}}% brak zasięgu",
+        "flown": "przeleciano {{dist}}",
+        "flown_with_extra": "przeleciano {{dist}} ({{extra}} zadania)",
+        "col_time": "Czas",
+        "col_duration": "Czas trwania",
+        "col_wind": "Wiatr",
+        "state_thermal": "Komin",
+        "state_straight": "Przeskok",
+        "state_gap": "Przerwa",
+        "turns": "{{count}} okrążeń",
+        "tracking_gap": "brak sygnału"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} przez {{seconds}} sekund",

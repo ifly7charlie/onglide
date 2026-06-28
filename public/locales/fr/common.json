@@ -220,6 +220,7 @@
         "leg_completed": "branche terminée",
         "view_leg": "branche",
         "view_task": "épreuve",
+        "view_statistics": "Stats",
         "view_actuals": "réels",
         "view_handicapped": "handicapés",
         "view_task_or_leg": "épreuve ou branche",
@@ -234,6 +235,20 @@
         "possible": "Possible",
         "shortest": "Plus courte",
         "recent_wind": "Vent récent"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} pompes · {{pct}}% en spirale · max {{best}} · moy {{avg}}",
+        "summary2": "finesse moy {{ld}} · {{flown}} · gain {{gain}} · {{pctGap}}% sans couverture",
+        "flown": "parcouru {{dist}}",
+        "flown_with_extra": "parcouru {{dist}} ({{extra}} épreuve)",
+        "col_time": "Heure",
+        "col_duration": "Durée",
+        "col_wind": "Vent",
+        "state_thermal": "Ascendance",
+        "state_straight": "Transition",
+        "state_gap": "Trou",
+        "turns": "{{count}} tours",
+        "tracking_gap": "perte de signal"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} pendant {{seconds}} secondes",

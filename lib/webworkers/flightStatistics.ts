@@ -42,6 +42,13 @@ const MIN_STRAIGHT_TIME_S = 22;
 const ENTER_THERMAL_DEG_PER_S = 6; // 360/60
 const EXIT_THERMAL_DEG_PER_S = 3.75; // 15/4
 
+// Below this fraction of straight-line progress (net displacement vs the path
+// the airspeed would have flown straight) the glider must have curved, so a
+// sparse fix's aliased bearing delta is unwrapped to the real rotation rather
+// than trusted as-is. At/above it the glider tracked straight enough to take
+// the bearing delta at face value (and so to exit a thermal normally).
+const STRAIGHT_PROGRESS_RATIO = 0.7;
+
 // Anything bigger than this is treated as a tracking gap, not a flown segment
 const MAX_GAP_S = 60;
 
@@ -151,19 +158,28 @@ export function createFlightStatistics() {
         lastWind = undefined;
     }
 
-    // Decide whether a just-closed segment should be merged into its
-    // immediate predecessor. Mirrors the original coalesceStack rules but
+    // Decide whether a just-closed segment (cur) should be merged into its
+    // immediate predecessor (prev). Mirrors the original coalesceStack rules but
     // applied once per close (no triple-tolerance retry loop).
+    //
+    // Only a *minor* segment is ever absorbed: a brief straight (the pilot
+    // recentering inside a thermal) or a weak, sub-threshold thermal (a course
+    // adjustment / single stray turn inside a glide). A substantial straight is
+    // real gliding flight and is NEVER collapsed — so a thermal that grows into
+    // a proper circle beside a long glide leaves that glide intact as its own
+    // segment rather than swallowing it.
     function shouldMerge(prev: Segment, cur: Segment): boolean {
         if (cur.state === 'gap' || prev.state === 'gap') return false;
         if (prev.state === cur.state) return true;
         if (cur.state === 'straight') {
+            // Absorb only short straights; a long glide is protected.
             const elapsed = cur.endTime - cur.startTime;
             const dist = distHaversineRaw([cur.startLng, cur.startLat], [cur.endLng, cur.endLat]);
-            if (elapsed < MIN_STRAIGHT_TIME_S && dist < MIN_STRAIGHT_DISTANCE_KM) return true;
+            return elapsed < MIN_STRAIGHT_TIME_S && dist < MIN_STRAIGHT_DISTANCE_KM;
         }
         if (cur.state === 'thermal') {
-            if (Math.abs(cur.turncount) < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6) return true;
+            // Absorb only weak thermals; a proper circle stays its own segment.
+            return Math.abs(cur.turncount) < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6;
         }
         return false;
     }
@@ -196,10 +212,15 @@ export function createFlightStatistics() {
         }
         prev.circles.push(...cur.circles);
 
-        // If a thermal participated in the merge, the result is thermal-ish
-        // and wind needs a recalculation.
-        if (cur.state === 'thermal' || prev.state === 'thermal') {
-            prev.state = 'thermal';
+        // The merged segment keeps prev's classification: prev is the
+        // established/dominant phase and cur is the minor one being absorbed.
+        // shouldMerge only ever feeds a brief straight into a thermal (the pilot
+        // recentering) or a weak, sub-threshold thermal into a glide (a course
+        // adjustment or single stray turn) — so prev's state is already the
+        // correct one. Letting a weak thermal blip flip a long glide to
+        // 'thermal' is what folded whole legs of gliding into a phantom thermal.
+        // Recompute wind only when the result is actually a thermal.
+        if (prev.state === 'thermal') {
             computeWind(prev);
         }
     }
@@ -225,10 +246,8 @@ export function createFlightStatistics() {
             segments.push(seg);
         }
 
-        // Cascade back along the tail. A merge can flip a segment's state — a
-        // weak thermal absorbed into a straight turns that straight thermal —
-        // which can leave it adjacent to a like-state predecessor that was never
-        // re-checked. Collapse repeatedly so adjacent same-state segments never
+        // Defensive collapse along the tail: should a merge ever leave two
+        // adjacent same-state segments, fold them together so they never
         // survive (the archive's iterative coalesceStack, done incrementally).
         while (segments.length >= 2 && shouldMerge(segments[segments.length - 2], segments[segments.length - 1])) {
             const last = segments.pop()!;
@@ -336,18 +355,31 @@ export function createFlightStatistics() {
         if (bearingChange > 180) bearingChange -= 360;
         else if (bearingChange < -180) bearingChange += 360;
         const rawBearingChange = bearingChange;
+        // Degrees of rotation credited to the segment for this fix. Equals the
+        // raw delta except on a sparse in-thermal fix, where it's replaced below
+        // with the alias-corrected (unwrapped) rotation.
+        let turnDelta = rawBearingChange;
         // per-second turn rate (so sparse samples don't trigger thermal mode)
         bearingChange = bearingChange / timedif;
 
-        // While in a thermal, smooth the turn rate. If extrapolation from
-        // the previous smoothed rate matches the observed bearing closely,
-        // trust the forecast — points were probably dropped.
+        // While circling, a sparse fix can sweep more than 180° between samples,
+        // so the wrapped (-180,180] bearing delta loses its true magnitude and
+        // sign — a ~270° rotation reads as -90°, and blending that wrong-sign
+        // value into the smoothed rate cancels it toward zero, dropping us out
+        // of the thermal: a phantom "straight" through a climb. Bearing alone
+        // can't resolve the aliasing, but net displacement can: when the glider
+        // progressed far less than its airspeed would carry it straight, it must
+        // have turned, so unwrap the delta to the full rotation nearest what the
+        // established turn rate predicts. When it tracked straight, keep the raw
+        // delta so a genuine thermal exit still fires.
         if (mode === 'thermal') {
-            const forecast = (smoothedTurnRate * timedif + prevBearing) % 360;
-            let forecastErr = ((forecast - bearing + 540) % 360) - 180;
-            if (forecastErr < -180) forecastErr += 360;
-            if (timedif > 5 && timedif < 20 && Math.abs(forecastErr) < 10) {
-                bearingChange = smoothedTurnRate;
+            const pathIfStraight = (speed * timedif) / 3600; // km the airspeed would cover
+            const progress = pathIfStraight > 0 ? distance / pathIfStraight : 1;
+            if (progress < STRAIGHT_PROGRESS_RATIO) {
+                const expectedRotation = smoothedTurnRate * timedif;
+                turnDelta = rawBearingChange + 360 * Math.round((expectedRotation - rawBearingChange) / 360);
+                bearingChange = turnDelta / timedif;
+                smoothedTurnRate = bearingChange;
             } else {
                 smoothedTurnRate = (smoothedTurnRate + bearingChange) / 2;
                 bearingChange = smoothedTurnRate;
@@ -416,7 +448,7 @@ export function createFlightStatistics() {
         open.endAlt = point.a;
         if (point.a > prevAlt) open.heightgain += point.a - prevAlt;
         else open.heightloss += prevAlt - point.a;
-        open.turncount += rawBearingChange;
+        open.turncount += turnDelta;
         open.direction += tdirection;
         open.packets++;
         if (timedif > open.maxDelay) open.maxDelay = timedif;
@@ -431,7 +463,7 @@ export function createFlightStatistics() {
                 open.ws.maxSpeed = speed;
                 open.ws.maxAngle = bearing;
             }
-            open.ws.cumulative += rawBearingChange;
+            open.ws.cumulative += turnDelta;
             open.ws.packets++;
             if (open.ws.cumulative < -361 || open.ws.cumulative > 361) {
                 open.circles.push(open.ws);

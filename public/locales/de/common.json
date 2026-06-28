@@ -220,6 +220,7 @@
         "leg_completed": "Schenkel abgeschlossen",
         "view_leg": "Schenkel",
         "view_task": "Aufgabe",
+        "view_statistics": "Statistik",
         "view_actuals": "tatsächlich",
         "view_handicapped": "Index",
         "view_task_or_leg": "Aufgabe oder Schenkel",
@@ -234,6 +235,20 @@
         "possible": "Möglich",
         "shortest": "Kürzeste",
         "recent_wind": "Aktueller Wind"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} Bärte · {{pct}}% Kurbeln · max {{best}} · Ø {{avg}}",
+        "summary2": "Ø Gleitzahl {{ld}} · {{flown}} · gestiegen {{gain}} · {{pctGap}}% ohne Empfang",
+        "flown": "geflogen {{dist}}",
+        "flown_with_extra": "geflogen {{dist}} ({{extra}} Aufgabe)",
+        "col_time": "Zeit",
+        "col_duration": "Dauer",
+        "col_wind": "Wind",
+        "state_thermal": "Thermik",
+        "state_straight": "Gleiten",
+        "state_gap": "Lücke",
+        "turns": "{{count}} Kreise",
+        "tracking_gap": "Empfangslücke"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} seit {{seconds}} Sekunden",

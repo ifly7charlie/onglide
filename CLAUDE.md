@@ -22,6 +22,8 @@ yarn ogn:dev            # tsc-watch + node --inspect (auto-restarts on rebuild)
 yarn ssscrape:dev       # same pattern for the scoring scraper
 yarn test               # vitest run (test/**/*.test.ts)
 yarn test:watch         # vitest watch
+yarn i18n:check         # report locale key gaps / format drift vs en (same audit the test enforces)
+yarn i18n:fill          # stub every missing key into each locale (en value as placeholder) + canonicalise
 ```
 
 Run a single test file:
@@ -32,6 +34,14 @@ yarn vitest run test/trackerScore.test.ts
 `yarn build:protobuf` regenerates `lib/protobuf/onglide.ts` from `onglide.proto` via `protoc` + `ts-proto`. You need `protoc` installed locally. If types in `OnglideWebSocketMessage` look stale, rerun this before debugging.
 
 Prettier: 4-space, **225-char print width**, single quotes, no bracket spacing, no trailing comma. Don't fight it on long lines — the config is wide on purpose.
+
+### Internationalisation (i18n)
+
+Translations live in `public/locales/<lang>/common.json`; **`en` is the reference**. Front-end strings are looked up with `useTranslation('common')` + `t('dotted.key')` (interpolation is `{{var}}`), and locale-specific formatting like distance units comes from the same files (e.g. `units.km`).
+
+**Parity is CI-enforced.** `test/locales.test.ts` (part of `yarn test`) fails if any non-`en` locale is missing a key `en` has, carries a key `en` lacks, or isn't canonical 4-space JSON with a trailing newline. So **adding a `t('…')` key means adding it to `en/common.json` and every other locale** — `yarn test` goes red otherwise. Workflow: add the key to `en`, run `yarn i18n:fill` to stub it into the other ~14 locales (placeholder = the `en` value, inserted in `en`'s key order), then translate the stubs. `yarn i18n:check` runs the audit on demand.
+
+Both the CLI and the test share `bin/checktranslations.js` (ESM, dependency-free; the test imports its `audit()`). `--fill` is also the formatter — it rewrites any locale that has drifted from canonical 4-space JSON.
 
 ## Architecture
 

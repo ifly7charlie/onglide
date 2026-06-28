@@ -220,6 +220,7 @@
         "leg_completed": "szakasz teljesítve",
         "view_leg": "szakasz",
         "view_task": "feladat",
+        "view_statistics": "Statisztika",
         "view_actuals": "tényleges",
         "view_handicapped": "handicap",
         "view_task_or_leg": "feladat vagy szakasz",
@@ -234,6 +235,20 @@
         "possible": "Lehetséges",
         "shortest": "Legrövidebb",
         "recent_wind": "Aktuális szél"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} termik · {{pct}}% körözés · max {{best}} · átl {{avg}}",
+        "summary2": "átl siklószám {{ld}} · {{flown}} · emelkedés {{gain}} · {{pctGap}}% nincs lefedettség",
+        "flown": "repült {{dist}}",
+        "flown_with_extra": "repült {{dist}} ({{extra}} feladat)",
+        "col_time": "Idő",
+        "col_duration": "Időtartam",
+        "col_wind": "Szél",
+        "state_thermal": "Termik",
+        "state_straight": "Siklás",
+        "state_gap": "Hézag",
+        "turns": "{{count}} kör",
+        "tracking_gap": "jelkimaradás"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} másodpercen át",

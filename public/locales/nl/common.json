@@ -220,6 +220,7 @@
         "leg_completed": "been voltooid",
         "view_leg": "been",
         "view_task": "opdracht",
+        "view_statistics": "Statistiek",
         "view_actuals": "werkelijk",
         "view_handicapped": "handicap",
         "view_task_or_leg": "opdracht of been",
@@ -234,6 +235,20 @@
         "possible": "Mogelijk",
         "shortest": "Kortste",
         "recent_wind": "Recente wind"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} thermieken · {{pct}}% cirkelen · max {{best}} · gem {{avg}}",
+        "summary2": "glijgetal gem {{ld}} · {{flown}} · gestegen {{gain}} · {{pctGap}}% geen dekking",
+        "flown": "gevlogen {{dist}}",
+        "flown_with_extra": "gevlogen {{dist}} ({{extra}} opgave)",
+        "col_time": "Tijd",
+        "col_duration": "Duur",
+        "col_wind": "Wind",
+        "state_thermal": "Thermiek",
+        "state_straight": "Glijvlucht",
+        "state_gap": "Gat",
+        "turns": "{{count}} rondjes",
+        "tracking_gap": "geen ontvangst"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} gedurende {{seconds}} seconden",

@@ -11,12 +11,16 @@ import path from 'path';
 let cached: string | null = null;
 
 function readBuildId(): string | null {
+    // Dev mode (`next dev`) serves an in-memory buildId of 'development', but a
+    // stale .next/BUILD_ID from an earlier `next build` may still be on disk.
+    // Reading it would make every dev client see a mismatch and force a reload
+    // on each tab switch — so short-circuit to null ("no comparison possible").
+    if (process.env.NODE_ENV !== 'production') return null;
     if (cached) return cached;
     try {
         cached = fs.readFileSync(path.join(process.cwd(), '.next', 'BUILD_ID'), 'utf8').trim();
     } catch {
-        // Dev mode (`next dev`) doesn't write BUILD_ID — return null so the
-        // client treats it as "no comparison possible" rather than reloading.
+        // Build output missing — return null rather than triggering a reload.
         return null;
     }
     return cached;

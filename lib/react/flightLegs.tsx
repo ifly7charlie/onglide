@@ -2,9 +2,12 @@ import {memo} from 'react';
 import {useTranslation} from 'next-i18next/pages';
 import {TooltipIcon} from './htmlhelper';
 
-import {PilotScore, PilotScoreLeg, Epoch, PositionStatus, TZ} from '../types';
+import {PilotScore, PilotScoreLeg, Compno, Epoch, PositionStatus, TZ} from '../types';
 
 import {useState} from 'react';
+
+import {useSelector} from '../redux';
+import {selectPilotStats} from '../redux/scoresSlice';
 
 //import {TZ, Compno, PilotScore, PilotScoreLeg, VarioData, ScoreData, TrackData, Epoch, PositionStatus} from '../types';
 
@@ -12,6 +15,8 @@ import {useState} from 'react';
 
 import {OptionalTimeHHMM, OptionalDurationHHMM} from './optional';
 import {displayHeight} from './displayunits';
+
+import {FlightStatsSegments} from './flightStatsSegments';
 
 import {
     //
@@ -26,9 +31,13 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 
 
-export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: any; units: boolean; tz: TZ}) {
+export const FlightLegs = memo(function FlightLegs({compno, score, units, tz, replayTime}: {compno: Compno; score: any; units: boolean; tz: TZ; replayTime?: Epoch}) {
     const {t} = useTranslation('common');
-    const [viewOptions, setViewOptions] = useState({task: 1, hcapped: 0});
+    const [viewOptions, setViewOptions] = useState({view: 'statistics', hcapped: 0});
+
+    // Per-pilot flight-statistics segments (thermals/glides/gaps). Keyed to
+    // trackVersion, delivered on the stats data plane — see selectPilotStats.
+    const segments = useSelector((state) => selectPilotStats(state, compno));
 
     if (!score?.legs) {
         return <></>;
@@ -106,10 +115,20 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
     const actualLegs = (Object.values(score.legs) as PilotScoreLeg[]).filter((f) => f.legno != 0);
     const hasHandicappedResults = score?.handicapped;
 
-    const taskRadios: {key: string; label: string}[] = [
-        {key: 'leg', label: t('flight_legs.view_leg')},
-        {key: 'task', label: t('flight_legs.view_task')}
-    ];
+    // Statistics is the first/default view, but only appears once segments have
+    // been computed for the pilot (it has nothing to show otherwise).
+    const hasStats = !!segments?.length;
+    const taskRadios: {key: string; label: string}[] = [];
+    if (hasStats) {
+        taskRadios.push({key: 'statistics', label: t('flight_legs.view_statistics')});
+    }
+    taskRadios.push({key: 'leg', label: t('flight_legs.view_leg')});
+    taskRadios.push({key: 'task', label: t('flight_legs.view_task')});
+
+    // Fall back to the task table when statistics is selected (the default) but
+    // not yet available; once segments arrive the view switches to it on its own.
+    const activeView = viewOptions.view == 'statistics' && !hasStats ? 'task' : viewOptions.view;
+
     const hcapRadios: {key: string; label: string}[] = [
         {key: 'actuals', label: t('flight_legs.view_actuals')},
         {key: 'handicapped', label: t('flight_legs.view_handicapped')}
@@ -119,14 +138,14 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
         <>
             <br style={{clear: 'both'}} />
             <div className="btn-group-mini" role="group" aria-label={t('flight_legs.view_task_or_leg')} style={{float: 'left'}}>
-                {taskRadios.map((radio, idx) => (
-                    <button key={radio.key} className={idx == viewOptions.task ? 'active' : ''} onClick={() => setViewOptions({...viewOptions, task: idx})}>
+                {taskRadios.map((radio) => (
+                    <button key={radio.key} className={radio.key == activeView ? 'active' : ''} onClick={() => setViewOptions({...viewOptions, view: radio.key})}>
                         {radio.label}
                     </button>
                 ))}
             </div>
 
-            {hasHandicappedResults ? (
+            {hasHandicappedResults && activeView != 'statistics' ? (
                 <div className="btn-group-mini" role="group" aria-label={t('flight_legs.view_actual_or_handicapped')} style={{float: 'right'}}>
                     {hcapRadios.map((radio, idx) => (
                         <button
@@ -142,7 +161,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                 </div>
             ) : null}
 
-            {viewOptions.task < 2 ? (
+            {activeView != 'statistics' ? (
                 <table className="legs">
                     <thead>
                         <tr>
@@ -167,7 +186,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                             <td>{t('flight_legs.leg_duration')}</td>
                             {actualLegs.map((x) => (x.duration ? <td key={x.legno.toString()}>{OptionalDurationHHMM('+', x.duration as Epoch)}</td> : null))}
                         </tr>
-                        {!viewOptions.task ? (
+                        {activeView == 'leg' ? (
                             <>
                                 <tr>
                                     <td>{t('flight_legs.leg_distance')}</td>
@@ -189,7 +208,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                                 )}
                             </>
                         ) : null}
-                        {viewOptions.task ? (
+                        {activeView == 'task' ? (
                             <>
                                 <tr>
                                     <td>{t('flight_legs.task_speed')}</td>
@@ -214,13 +233,7 @@ export const FlightLegs = memo(function FlightLegs({score, units, tz}: {score: a
                     </tbody>
                 </table>
             ) : null}
-            {score.wind?.speed ? (
-                <>
-                    <br style={{clear: 'both'}} />
-                    {t('flight_legs.recent_wind')} {score.wind.speed} {t('units.kph')} @ {score.wind.direction}°
-                    <br />
-                </>
-            ) : null}
+            {activeView == 'statistics' && hasStats ? <FlightStatsSegments segments={segments} utcStart={score.utcStart as Epoch} scoredDistance={score.actual?.taskDistance} replayTime={replayTime} units={units} tz={tz} /> : null}
         </>
     );
 });

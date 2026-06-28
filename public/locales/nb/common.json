@@ -220,6 +220,7 @@
         "leg_completed": "etappe fullført",
         "view_leg": "etappe",
         "view_task": "oppgave",
+        "view_statistics": "Statistikk",
         "view_actuals": "faktisk",
         "view_handicapped": "handikap",
         "view_task_or_leg": "oppgave eller etappe",
@@ -234,6 +235,20 @@
         "possible": "Mulig",
         "shortest": "Korteste",
         "recent_wind": "Aktuell vind"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} termikker · {{pct}}% sirkling · best {{best}} · snitt {{avg}}",
+        "summary2": "snitt glidetall {{ld}} · {{flown}} · steget {{gain}} · {{pctGap}}% ingen dekning",
+        "flown": "fløyet {{dist}}",
+        "flown_with_extra": "fløyet {{dist}} ({{extra}} oppgave)",
+        "col_time": "Tid",
+        "col_duration": "Varighet",
+        "col_wind": "Vind",
+        "state_thermal": "Termikk",
+        "state_straight": "Glideflukt",
+        "state_gap": "Hull",
+        "turns": "{{count}} runder",
+        "tracking_gap": "ingen signal"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",

@@ -220,6 +220,7 @@
         "leg_completed": "benet avslutat",
         "view_leg": "ben",
         "view_task": "uppgift",
+        "view_statistics": "Statistik",
         "view_actuals": "verkliga",
         "view_handicapped": "handicap",
         "view_task_or_leg": "uppgift eller ben",
@@ -234,6 +235,20 @@
         "possible": "Möjlig",
         "shortest": "Kortaste",
         "recent_wind": "Aktuell vind"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} termikar · {{pct}}% cirkling · bäst {{best}} · snitt {{avg}}",
+        "summary2": "snitt glidtal {{ld}} · {{flown}} · stigit {{gain}} · {{pctGap}}% ingen täckning",
+        "flown": "flugit {{dist}}",
+        "flown_with_extra": "flugit {{dist}} ({{extra}} uppgift)",
+        "col_time": "Tid",
+        "col_duration": "Varaktighet",
+        "col_wind": "Vind",
+        "state_thermal": "Termik",
+        "state_straight": "Glidflykt",
+        "state_gap": "Lucka",
+        "turns": "{{count}} varv",
+        "tracking_gap": "ingen signal"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",

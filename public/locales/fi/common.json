@@ -220,6 +220,7 @@
         "leg_completed": "osuus suoritettu",
         "view_leg": "osuus",
         "view_task": "tehtävä",
+        "view_statistics": "Tilastot",
         "view_actuals": "todelliset",
         "view_handicapped": "tasoitettu",
         "view_task_or_leg": "tehtävä tai osuus",
@@ -234,6 +235,20 @@
         "possible": "Mahdollinen",
         "shortest": "Lyhin",
         "recent_wind": "Tuore tuuli"
+    },
+    "flight_stats": {
+        "summary": "{{thermals}} nostoa · {{pct}}% kierrossa · paras {{best}} · ka {{avg}}",
+        "summary2": "ka liitosuhde {{ld}} · {{flown}} · nousua {{gain}} · {{pctGap}}% ei kuuluvuutta",
+        "flown": "lennetty {{dist}}",
+        "flown_with_extra": "lennetty {{dist}} ({{extra}} tehtävä)",
+        "col_time": "Aika",
+        "col_duration": "Kesto",
+        "col_wind": "Tuuli",
+        "state_thermal": "Nosto",
+        "state_straight": "Liito",
+        "state_gap": "Katko",
+        "turns": "{{count}} kierrosta",
+        "tracking_gap": "seurantakatko"
     },
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} sekuntia",
