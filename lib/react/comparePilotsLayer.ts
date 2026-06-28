@@ -16,6 +16,7 @@
 //
 
 import {PathLayer, TextLayer} from '@deck.gl/layers';
+import {PathStyleExtension} from '@deck.gl/extensions';
 
 import type {Compno, Epoch, Units} from '../types';
 import type {RootState} from '../redux/store';
@@ -264,9 +265,15 @@ export function compareLayers(result: CompareResult | null, map2d: boolean): any
         data: result ? [result] : [],
         getPath: (d) => (map2d ? d.path2d : d.path3d),
         getColor: LINE_COLOR,
-        getWidth: 4,
+        // Very fine dotted line: 1px dots with a 4px gap (dash array is in the same
+        // pixel units as the width). dashJustified evens the run out per segment.
+        getWidth: 3,
         widthUnits: 'pixels',
-        widthMinPixels: 4,
+        widthMinPixels: 3,
+        extensions: [new PathStyleExtension({dash: true})],
+        // getDashArray/dashJustified are contributed by PathStyleExtension and
+        // aren't on PathLayer's base prop type — cast just these two.
+        ...({getDashArray: [3, 5], dashJustified: true} as object),
         jointRounded: true,
         capRounded: true,
         // Screen-space width in 3D — otherwise the vertical leg (zero horizontal
