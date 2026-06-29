@@ -19,6 +19,17 @@ if (typeof window !== 'undefined' && !(maplibregl as any).__onglidePmtilesRegist
 
 const ONGLIDE_MAP_STYLE = buildMapStyle();
 
+// RainViewer radar tiles are loaded from a third-party host. Force same-origin
+// credentials so the browser neither sends nor stores cookies for those requests
+// (a cross-origin request with same-origin credentials carries none). Every other
+// request is left untouched for MapLibre's default handling.
+const transformMapRequest = (url: string) => {
+    if (url.includes('rainviewer.com')) {
+        return {url, credentials: 'same-origin' as const};
+    }
+    return undefined;
+};
+
 import {deckTooltip} from './decktooltip';
 
 import type {Epoch, ClassName, Compno, Options, TZ} from '../types';
@@ -877,6 +888,7 @@ export default function MApp(props: {
                 onError={onMapError}
                 cursor={measure.enabled ? 'crosshair' : 'auto'}
                 mapStyle={ONGLIDE_MAP_STYLE}
+                transformRequest={transformMapRequest}
                 ref={mapRef}
                 attributionControl={false}
                 interactiveLayerIds={gridInteractiveLayerIds}

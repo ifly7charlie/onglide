@@ -9,6 +9,9 @@ import {Source, Layer, LayerProps} from 'react-map-gl/maplibre';
 
 import type {Options, TZ} from '../types';
 
+// A single frame in the RainViewer weather-maps.json feed
+type RadarFrame = {time: number; path: string};
+
 export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
     const {t, i18n} = useTranslation('common');
     const lang = i18n.language;
@@ -60,11 +63,22 @@ export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
                             }, 60000);
                             return;
                         }
-                        var imageMeta;
-                        if (options.rainRadarAdvance) {
-                            imageMeta = apiData.radar.nowcast[options.rainRadarAdvance - 1];
-                        } else {
-                            imageMeta = apiData.radar.past.reduce((a, b) => (a.time >= b.time ? a : b));
+                        const nowcast: RadarFrame[] | undefined = apiData.radar?.nowcast;
+                        const past: RadarFrame[] | undefined = apiData.radar?.past;
+                        let imageMeta: RadarFrame | undefined;
+                        if (options.rainRadarAdvance && nowcast?.length) {
+                            // Requested forecast frame (+10/+20/+30); fall back to the furthest available one
+                            imageMeta = nowcast[options.rainRadarAdvance - 1] ?? nowcast[nowcast.length - 1];
+                        } else if (past?.length) {
+                            // Latest observed frame (also the fallback when no nowcast is published)
+                            imageMeta = past.reduce((a, b) => (a.time >= b.time ? a : b));
+                        }
+                        if (!imageMeta) {
+                            console.log(new Date(), 'no radar frames available, will try again in two minutes');
+                            timer = setTimeout(() => {
+                                loadRadar();
+                            }, 2 * 1000 * 60);
+                            return;
                         }
                         setURL(apiData.host + imageMeta.path + '/256/{z}/{x}/{y}/2/1_1.png');
 
@@ -108,7 +122,7 @@ export function RadarOverlay({options, tz}: {options: Options; tz: TZ}) {
             attribution: attribution,
             key: 'rainradar',
             layer: (
-                <Source type="raster" tiles={[radarTileURL]} key="rainmap">
+                <Source type="raster" tiles={[radarTileURL]} maxzoom={7} key="rainmap">
                     <Layer {...rainviewerLayer} />
                 </Source>
             )

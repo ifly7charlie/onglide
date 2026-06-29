@@ -1,3 +1,4 @@
+import type {CSSProperties} from 'react';
 import {useMeasure} from './measure';
 import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
@@ -8,7 +9,7 @@ import {selectHasStats} from '../redux/scoresSlice';
 import {
     faRuler,
     faSlash,
-    faUmbrella,
+    faCloudShowersHeavy,
     faCompassDrafting,
     faMap,
     faGlobe,
@@ -25,7 +26,23 @@ import {faCompass, faHandPointer, faCircleUp} from '@fortawesome/free-regular-sv
 
 import type {Options as OptionsType} from '../types';
 
-export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean}) {
+// The +Xmin / off label is overlaid on the umbrella icon — bottom-aligned and
+// nudged 2px right of centre — so it sits on the icon rather than widening the
+// toolbar button (which was causing the layout issues).
+const rainTimeStyle: CSSProperties = {
+    position: 'absolute',
+    top: 2,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    fontSize: '9px',
+    lineHeight: 1,
+    pointerEvents: 'none',
+    whiteSpace: 'nowrap',
+    color: 'white',
+    background: 'transparent'
+};
+
+export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean; showRainRadar?: boolean}) {
     const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
     const {t} = useTranslation('common', {keyPrefix: 'options'});
 
@@ -87,6 +104,10 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
         props.setOptions(structuredClone({...props.options, comparePilots: !props.options.comparePilots}));
     };
 
+    // Indexed by rainRadarAdvance (0 = latest observed, 1-3 = nowcast +10/+20/+30 min)
+    const rainLabels = [t('rain_now'), t('rain_plus_10'), t('rain_plus_20'), t('rain_plus_30')];
+    const rainIconLabels = rainLabels.map((l) => l.replace('min', ''));
+
     return (
         <div className="options">
             {measureEnabled ? (
@@ -101,25 +122,27 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            {/* Rain radar temporarily disabled — upstream tiles not working.
-            {props.options.rainRadar ? (
-                <button title={'Adjust rain radar timings, currently showing ' + ['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance] + ', click to change timing or disable'} onClick={radarFunction}>
-                    <FontAwesomeIcon icon={faUmbrella} />
-                    &nbsp;
-                    <span style={{fontSize: '9px'}}>{['now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
-                </button>
-            ) : (
-                <button title={'Click to enable rain radar'} onClick={radarFunction}>
-                    <span className="fa-layers">
-                        <FontAwesomeIcon icon={faSlash} />
-                        <FontAwesomeIcon icon={faUmbrella} />
-                    </span>
-                    &nbsp;
-                    <span style={{fontSize: '9px'}}>{['off', 'now', '+10min', '+20min', '+30min'][props.options.rainRadarAdvance]}</span>
-                </button>
-            )}
-            &nbsp;
-            */}
+            {/* Rain radar relies on the live OGN feed, so it is hidden on the replay viewer */}
+            {(props.showRainRadar ?? true) ? (
+                <>
+                    {props.options.rainRadar ? (
+                        <button title={t('rain_radar_showing', {value: rainLabels[props.options.rainRadarAdvance]})} onClick={radarFunction}>
+                            <span className="fa-layers">
+                                <FontAwesomeIcon icon={faCloudShowersHeavy} transform="grow-3" />
+                                <span style={rainTimeStyle}>{rainIconLabels[props.options.rainRadarAdvance]}</span>
+                            </span>
+                        </button>
+                    ) : (
+                        <button title={t('rain_radar_enable')} onClick={radarFunction}>
+                            <span className="fa-layers">
+                                <FontAwesomeIcon icon={faSlash} />
+                                <FontAwesomeIcon icon={faCloudShowersHeavy} transform="grow-3" />
+                                <span style={rainTimeStyle}>{t('rain_off')}</span>
+                            </span>
+                        </button>
+                    )}
+                </>
+            ) : null}
             {props.options.constructionLines ? (
                 <button title={t('construction_lines_hide')} onClick={constructionLines}>
                     <FontAwesomeIcon icon={faCompassDrafting} />
@@ -132,10 +155,9 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            &nbsp;
             {props.options.map2d ? (
                 <button title={t('switch_to_3d')} onClick={toggle2d}>
-                    <FontAwesomeIcon icon={faMap} />{' '}
+                    <FontAwesomeIcon icon={faMap} />
                 </button>
             ) : (
                 <button title={t('switch_to_2d')} onClick={toggle2d}>
@@ -165,7 +187,6 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </button>
                 ][props.options.taskUp || 0]
             }
-            &nbsp;
             {props.options.follow ? (
                 <button title={t('follow_pilot')} onClick={toggleFollow}>
                     <FontAwesomeIcon icon={faLocationCrosshairs} />
@@ -178,7 +199,6 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            &nbsp;
             {
                 [
                     <button title={t('paths_recent')} onClick={toggleFullPaths}>
@@ -198,7 +218,6 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </button>
                 ][props.options.fullPaths || 0]
             }
-            &nbsp;
             {props.options.comparePilots ? (
                 <button title={t('compare_active')} onClick={toggleCompare}>
                     <FontAwesomeIcon icon={faPeopleArrows} />
@@ -211,7 +230,6 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            &nbsp;
             {!hasStats ? null : props.options.showClimb ? (
                 <button title={t('climb_hide')} onClick={toggleShowClimb}>
                     <FontAwesomeIcon icon={faCircleUp} />
@@ -224,7 +242,6 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            &nbsp;
             {!props.multipleClasses ? null : props.options.showOthers ? (
                 <button title={t('show_other_classes')} onClick={toggleShowOthers}>
                     <span className="fa-layers">
@@ -239,7 +256,6 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                     </span>
                 </button>
             )}
-            &nbsp;
             {props.options.units ? (
                 <button title={t('switch_to_metric')} onClick={toggleUnits} className="units-toggle">
                     ft

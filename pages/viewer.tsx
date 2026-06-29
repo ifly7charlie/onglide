@@ -530,7 +530,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             </div>
                         </div>
                         <div className="sidepanel-tools">
-                            <Options options={viewOptions} setOptions={setOptions} multipleClasses={false} />
+                            <Options options={viewOptions} setOptions={setOptions} multipleClasses={false} showRainRadar={false} />
                         </div>
                         <div className="sidepanel-fixed-head">
                             {error && (
