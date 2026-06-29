@@ -185,7 +185,9 @@
         "switch_to_metric": "Bytt til metriske enheter",
         "switch_to_imperial": "Bytt til imperiale enheter",
         "map_attribution": "Kartattribusjon",
-        "close": "Lukk"
+        "close": "Lukk",
+        "follow_suspended": "Følging satt på pause fordi du flyttet kartet. Klikk for å gjenoppta, eller velg en pilot",
+        "orientation_suspended": "Orienteringslås satt på pause fordi du flyttet kartet. Klikk for å gjenoppta, eller velg en pilot"
     },
     "drawer": {
         "class": "Klasse",

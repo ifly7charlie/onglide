@@ -51,6 +51,9 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
     // uses). True once any pilot has stats — i.e. the comp has them enabled.
     const hasStats = useSelector(selectHasStats);
 
+    // The user panned the map, temporarily pausing follow + orientation lock.
+    const suspended = props.options.viewSuspended;
+
     const radarFunction = () => {
         let nextRadar = props.options.rainRadarAdvance + 1;
         let rainRadar = props.options.rainRadar;
@@ -85,10 +88,21 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
     const toggleUnits = () => {
         props.setOptions(structuredClone({...props.options, units: !props.options.units}));
     };
+    // When the user has panned the map (viewSuspended), the orientation and follow
+    // controls are temporarily paused. The first click on either resumes them
+    // (clears the suspend) without otherwise changing the underlying setting.
     const toggleTaskUp = () => {
+        if (props.options.viewSuspended) {
+            props.setOptions(structuredClone({...props.options, viewSuspended: false}));
+            return;
+        }
         props.setOptions(structuredClone({...props.options, taskUp: (props.options.taskUp + 1) % 3}));
     };
     const toggleFollow = () => {
+        if (props.options.viewSuspended) {
+            props.setOptions(structuredClone({...props.options, viewSuspended: false}));
+            return;
+        }
         props.setOptions(structuredClone({...props.options, follow: !props.options.follow}));
     };
     const toggleFullPaths = () => {
@@ -176,19 +190,19 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
             )}
             {
                 [
-                    <button title={t('north_up')} onClick={toggleTaskUp}>
+                    <button title={suspended ? t('orientation_suspended') : t('north_up')} className={suspended ? 'view-suspended' : undefined} onClick={toggleTaskUp}>
                         <FontAwesomeIcon icon={faCompass} transform={{rotate: -45}} />
                     </button>,
-                    <button title={t('task_track_up')} onClick={toggleTaskUp}>
+                    <button title={suspended ? t('orientation_suspended') : t('task_track_up')} className={suspended ? 'view-suspended' : undefined} onClick={toggleTaskUp}>
                         <FontAwesomeIcon icon={faPersonArrowUpFromLine} />
                     </button>,
-                    <button title={t('manual_orientation')} onClick={toggleTaskUp}>
+                    <button title={suspended ? t('orientation_suspended') : t('manual_orientation')} className={suspended ? 'view-suspended' : undefined} onClick={toggleTaskUp}>
                         <FontAwesomeIcon icon={faHandPointer} />
                     </button>
                 ][props.options.taskUp || 0]
             }
             {props.options.follow ? (
-                <button title={t('follow_pilot')} onClick={toggleFollow}>
+                <button title={suspended ? t('follow_suspended') : t('follow_pilot')} className={suspended ? 'view-suspended' : undefined} onClick={toggleFollow}>
                     <FontAwesomeIcon icon={faLocationCrosshairs} />
                 </button>
             ) : (

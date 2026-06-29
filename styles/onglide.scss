@@ -1410,6 +1410,17 @@ ul.task-legs {
             color: #fff;
         }
 
+        // Temporarily paused because the user repositioned the map. Dashed
+        // amber outline + dimmed icon reads as "suspended, click to resume"
+        // (distinct from the slashed "off" state).
+        &.view-suspended {
+            border-color: #e0a000;
+            border-style: dashed;
+            color: #e0a000;
+            opacity: 0.85;
+            animation: view-suspended-pulse 1.4s ease-in-out infinite;
+        }
+
         // Make the bare-icon and `.fa-layers` stacks render at the same
         // visual width. FontAwesome defaults `.fa-layers` to 1.25em wide
         // so a slashed icon visibly grows on toggle; clamp it to 1em.
@@ -1424,6 +1435,16 @@ ul.task-legs {
             font-weight: 800;
             font-size: 16px;
         }
+    }
+}
+
+@keyframes view-suspended-pulse {
+    0%,
+    100% {
+        opacity: 0.85;
+    }
+    50% {
+        opacity: 0.45;
     }
 }
 

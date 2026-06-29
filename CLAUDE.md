@@ -41,6 +41,8 @@ Translations live in `public/locales/<lang>/common.json`; **`en` is the referenc
 
 **Parity is CI-enforced.** `test/locales.test.ts` (part of `yarn test`) fails if any non-`en` locale is missing a key `en` has, carries a key `en` lacks, or isn't canonical 4-space JSON with a trailing newline. So **adding a `t('…')` key means adding it to `en/common.json` and every other locale** — `yarn test` goes red otherwise. Workflow: add the key to `en`, run `yarn i18n:fill` to stub it into the other ~14 locales (placeholder = the `en` value, inserted in `en`'s key order), then translate the stubs. `yarn i18n:check` runs the audit on demand.
 
+**`i18n:fill` does not translate — it only stubs English placeholders, which makes the parity test pass while the strings are still English.** So any time `fill` reports new fills, those keys still need real translation. To translate, set each key's value in every `public/locales/<lang>/common.json`, matching that locale's existing terminology and register (formal vs informal "you") — compare against sibling keys like `options.north_up` / `options.follow_pilot`. Edit values in place (don't reorder keys) and keep files canonical: `JSON.stringify(obj, null, 4) + '\n'` (exactly what `canonical()` in `checktranslations.js` writes), or the format check fails. A quick script over the ~14 locale files is faster than per-file edits; `yarn i18n:check` then confirms parity + format.
+
 Both the CLI and the test share `bin/checktranslations.js` (ESM, dependency-free; the test imports its `audit()`). `--fill` is also the formatter — it rewrites any locale that has drifted from canonical 4-space JSON.
 
 ## Architecture

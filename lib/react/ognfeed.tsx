@@ -123,7 +123,6 @@ export const OgnFeed = memo(
         //        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
-        const [follow, setFollow] = useState(false);
         const [hoveredCompno, setHoveredCompno] = useState<Compno | null>(null);
         const router = useRouter();
 
@@ -231,10 +230,12 @@ export const OgnFeed = memo(
             (cn) => {
                 setSelectedCompno(cn);
                 if (cn && pilots && pilots[cn]) {
-                    setFollow(true);
+                    // Selecting a pilot re-engages follow/orientation if the user had
+                    // panned the map away (viewSuspended) — see deckgl onDragStart.
+                    if (options?.viewSuspended) setOptions({...options, viewSuspended: false});
                 }
             },
-            [setSelectedCompno, pilots]
+            [setSelectedCompno, pilots, options, setOptions]
         );
 
         // Cache the calculated times and only refresh every 60 seconds
@@ -311,8 +312,6 @@ export const OgnFeed = memo(
                     key="map"
                     comp={comp}
                     vc={vc}
-                    follow={follow}
-                    setFollow={setFollow}
                     setSelectedCompno={setCompno}
                     options={options}
                     setOptions={setOptions}

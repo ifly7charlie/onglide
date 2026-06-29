@@ -561,6 +561,11 @@ export interface Options {
     map2d: boolean;
     taskUp: TaskUp;
     follow: boolean;
+    // Transient (not meaningfully persisted — reset to false on load). Set when
+    // the user manually repositions the map, which temporarily suspends both the
+    // follow-pilot effect and the orientation lock (north/task/track up) until a
+    // new pilot is selected or the follow/orientation buttons are clicked.
+    viewSuspended?: boolean;
     zoomTask: boolean;
     // Per-turnpoint zoom request — set by the task leg list, consumed and
     // cleared by deckgl's easeTo effect. Same one-shot pattern as zoomTask.

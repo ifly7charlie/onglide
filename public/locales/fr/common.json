@@ -185,7 +185,9 @@
         "switch_to_metric": "Passer en unités métriques",
         "switch_to_imperial": "Passer en unités impériales",
         "map_attribution": "Attribution de la carte",
-        "close": "Fermer"
+        "close": "Fermer",
+        "follow_suspended": "Suivi en pause car vous avez déplacé la carte. Cliquer pour reprendre, ou sélectionner un pilote",
+        "orientation_suspended": "Verrouillage de l'orientation en pause car vous avez déplacé la carte. Cliquer pour reprendre, ou sélectionner un pilote"
     },
     "drawer": {
         "class": "Classe",

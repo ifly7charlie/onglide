@@ -185,7 +185,9 @@
         "switch_to_metric": "Váltás metrikus mértékegységekre",
         "switch_to_imperial": "Váltás brit mértékegységekre",
         "map_attribution": "Térkép-hivatkozás",
-        "close": "Bezárás"
+        "close": "Bezárás",
+        "follow_suspended": "Követés szüneteltetve, mert elmozdítottad a térképet. Kattints a folytatáshoz, vagy válassz pilótát",
+        "orientation_suspended": "Tájolás zárolása szüneteltetve, mert elmozdítottad a térképet. Kattints a folytatáshoz, vagy válassz pilótát"
     },
     "drawer": {
         "class": "Osztály",

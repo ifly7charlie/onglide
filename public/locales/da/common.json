@@ -185,7 +185,9 @@
         "switch_to_metric": "Skift til metriske enheder",
         "switch_to_imperial": "Skift til imperiale enheder",
         "map_attribution": "Kortattribution",
-        "close": "Luk"
+        "close": "Luk",
+        "follow_suspended": "Følgning sat på pause, fordi du flyttede kortet. Klik for at genoptage, eller vælg en pilot",
+        "orientation_suspended": "Orienteringslås sat på pause, fordi du flyttede kortet. Klik for at genoptage, eller vælg en pilot"
     },
     "drawer": {
         "class": "Klasse",
