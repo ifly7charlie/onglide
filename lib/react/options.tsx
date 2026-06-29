@@ -2,6 +2,9 @@ import {useMeasure} from './measure';
 import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
+import {useSelector} from '../redux';
+import {selectHasStats} from '../redux/scoresSlice';
+
 import {
     faRuler,
     faSlash,
@@ -25,6 +28,11 @@ import type {Options as OptionsType} from '../types';
 export function Options(props: {options: OptionsType; setOptions: Function; multipleClasses: boolean}) {
     const {enabled: measureEnabled, toggle: toggleMeasure} = useMeasure();
     const {t} = useTranslation('common', {keyPrefix: 'options'});
+
+    // Climb-rate map badges read flight-statistics segments; with no stats there
+    // is nothing to show, so hide the toggle entirely (same signal the stats tab
+    // uses). True once any pilot has stats — i.e. the comp has them enabled.
+    const hasStats = useSelector(selectHasStats);
 
     const radarFunction = () => {
         let nextRadar = props.options.rainRadarAdvance + 1;
@@ -204,7 +212,7 @@ export function Options(props: {options: OptionsType; setOptions: Function; mult
                 </button>
             )}
             &nbsp;
-            {props.options.showClimb ? (
+            {!hasStats ? null : props.options.showClimb ? (
                 <button title={t('climb_hide')} onClick={toggleShowClimb}>
                     <FontAwesomeIcon icon={faCircleUp} />
                 </button>

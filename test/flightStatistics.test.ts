@@ -256,6 +256,53 @@ describe('flightStatistics coalescing', () => {
         // and the 40 s glide between them survives as straight flight
         expect(segs.some((s) => s.state === 'straight' && s.start > thermals[0].end - 1 && s.end < thermals[1].start + 1)).toBe(true);
     });
+
+    // finish() closes the flight when the glider crosses the line and tracking
+    // stops. The open tail segment is normally only roll-up-merged when the next
+    // segment opens; at the finish there is no next segment, so finish() runs the
+    // same merge so a stray recentre/blip at the end doesn't survive as its own.
+    test('finish() collapses a stray open tail into its neighbour', () => {
+        const fs = createFlightStatistics();
+        const fixes = buildTrack([
+            {steps: 30, turnPerStep: 40, speed: 80, climb: 2}, // strong thermal
+            {steps: 3, turnPerStep: 0, speed: 90, climb: 0} // brief straight — left open at the end
+        ]);
+        for (const f of fixes) fs.addPosition(f);
+        // While open, the brief straight is still its own (uncollapsed) segment.
+        expect((fs.getStats()?.segments ?? []).filter((s) => s.state === 'straight')).toHaveLength(1);
+        fs.finish();
+        const after = fs.getStats()?.segments ?? [];
+        expect(after).toHaveLength(1);
+        expect(after[0].state).toBe('thermal');
+    });
+
+    // A substantial final glide is real flight and must survive finish() — the
+    // tail roll-up only absorbs a brief/short stray, never a proper segment.
+    test('finish() keeps a substantial final glide', () => {
+        const fs = createFlightStatistics();
+        const fixes = buildTrack([
+            {steps: 30, turnPerStep: 40, speed: 80, climb: 2}, // thermal
+            {steps: 40, turnPerStep: 0, speed: 120, climb: -2} // long final glide (160 s)
+        ]);
+        for (const f of fixes) fs.addPosition(f);
+        fs.finish();
+        const after = fs.getStats()?.segments ?? [];
+        expect(after.map((s) => s.state)).toEqual(['thermal', 'straight']);
+    });
+
+    // After finish() the unit is closed: later fixes (here a whole new glide) are
+    // dropped, and finish() is idempotent.
+    test('addPosition after finish() is ignored, and finish() is idempotent', () => {
+        const fs = createFlightStatistics();
+        for (const f of buildTrack([{steps: 30, turnPerStep: 40, speed: 80, climb: 2}])) fs.addPosition(f);
+        fs.finish();
+        const frozen = JSON.stringify(fs.getStats());
+        let t = 100000; // well after the first track, in forward order
+        for (let i = 0; i < 40; i++, t += 4) fs.addPosition({t, a: 2000 - i, lat: 50 + i * 0.001, lng: 19, b: 0, s: 120});
+        expect(JSON.stringify(fs.getStats())).toBe(frozen);
+        fs.finish();
+        expect(JSON.stringify(fs.getStats())).toBe(frozen);
+    });
 });
 
 // Documented contracts that aren't about coalescing: gap insertion, wind

@@ -14,6 +14,7 @@
  *   addPosition(fix) — advance the state machine for one forward fix
  *   getStats()       — the current Stats (closed segments + the open one)
  *   getWind()        — the most recently estimated wind
+ *   finish()         — close the flight (collapse the tail, ignore later fixes)
  *   reset()          — drop all state (a new track / tracker change)
  */
 
@@ -145,6 +146,7 @@ export function createFlightStatistics() {
     let prevBearing = 0;
     let smoothedTurnRate = 0;
     let lastWind: {speed: number; direction: number} | undefined;
+    let finished = false;
 
     function reset(): void {
         segments = [];
@@ -158,6 +160,18 @@ export function createFlightStatistics() {
         prevBearing = 0;
         smoothedTurnRate = 0;
         lastWind = undefined;
+        finished = false;
+    }
+
+    // Close the flight: fold the open segment into the closed list (applying the
+    // same roll-up a normal segment close does, so a stray tail collapses into
+    // its neighbour) and stop accepting positions. Used when the glider crosses
+    // the finish line and tracking stops — anything that arrives afterwards is
+    // post-task flying we don't want in the statistics. Idempotent.
+    function finish(): void {
+        if (finished) return;
+        finished = true;
+        pushOpen();
     }
 
     // Decide whether a just-closed segment (cur) should be merged into its
@@ -351,6 +365,9 @@ export function createFlightStatistics() {
     // Caller must feed fixes in ascending time order (out-of-order/duplicate
     // fixes are ignored) and call reset() when the track restarts.
     function addPosition(point: StatsFix): void {
+        // After finish() the flight is closed — drop any post-task fixes.
+        if (finished) return;
+
         // First fix: just remember it, no segment yet
         if (!havePrev) {
             havePrev = true;
@@ -507,7 +524,7 @@ export function createFlightStatistics() {
         return lastWind ? {speed: Math.round(lastWind.speed), direction: Math.round(lastWind.direction)} : undefined;
     }
 
-    return {addPosition, getStats: toStatsProto, getWind, reset};
+    return {addPosition, getStats: toStatsProto, getWind, reset, finish};
 }
 
 export type FlightStatistics = ReturnType<typeof createFlightStatistics>;

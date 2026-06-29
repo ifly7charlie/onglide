@@ -1264,6 +1264,18 @@ function finishGlider(task: AprsCommandFinish) {
             tracker.receiveNewPoints = false;
         }
     });
+
+    // The flight is over — freeze the statistics (collapsing any stray tail
+    // segment) and broadcast the final list so main's statsStore reflects the
+    // closed-out flight. finish() also makes the unit ignore any stray points
+    // that arrive before reception fully stops, so the stats can't grow again.
+    if (toFinish.flightStats && toFinish.lastSent) {
+        toFinish.flightStats.finish();
+        const finalStats = toFinish.flightStats.getStats();
+        if (finalStats) {
+            toFinish.channel?.postMessage({c: toFinish.compno, t: toFinish.lastSent.t, statsFinal: true, stats: finalStats} as any);
+        }
+    }
 }
 
 function untrackGlider(task: AprsCommandUntrack) {

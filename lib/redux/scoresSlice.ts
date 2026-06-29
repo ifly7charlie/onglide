@@ -273,7 +273,11 @@ export const scoresSlice = createSlice({
                     resultEqualityCheck: (a, b) => a === b
                 }
             }
-        )
+        ),
+        // True once any pilot has flight-statistics segments — i.e. the comp has
+        // flight stats enabled and has produced some. Climb-rate map badges and
+        // their toggle have nothing to show otherwise, so the toggle is hidden.
+        selectHasStats: (state: ScoresSliceState): boolean => Object.values(state.pilotStats).some((s) => !!s?.length)
     }
 });
 
@@ -390,7 +394,7 @@ export const fetchOldStats = createAsyncThunk<
 
 export default scoresSlice.reducer;
 export const {updateScores, setPilotStats} = scoresSlice.actions;
-export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus, selectOptimalGrid, selectPilotStats} = scoresSlice.selectors;
+export const {selectReplayAvailable, selectAllScores, selectAllTimes, selectPilotScore, selectAllStatus, selectOptimalGrid, selectPilotStats, selectHasStats} = scoresSlice.selectors;
 
 //////////////////////////////////////////
 // Logic for updates

@@ -61,6 +61,11 @@ export const DISPLAY_CURSOR_LAG_S = 7;
 export const DISPLAY_CURSOR_TICK_HZ = 5;
 export const DISPLAY_CURSOR_MAX_CATCHUP_S = 30;
 
+// How long after a pilot crosses the finish line we keep tracking them if they
+// haven't been seen to land (seconds). Past this we stop APRS reception and
+// freeze their flight statistics, so post-task flying doesn't keep accumulating.
+export const FINISH_TRACKING_GRACE_S = 5 * 60;
+
 // How long till pilot is considered offline
 export const offlineTime = 600;
 

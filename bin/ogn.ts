@@ -85,7 +85,7 @@ function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
 import {AprsController, AirfieldSpec, type AprsWorkerEvent, type TrackerSnapshotEntry} from '../lib/webworkers/aprs';
 import {fidHexOf, fidLabel, protoOf} from '../lib/webworkers/pointlog';
 
-import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE, WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, FINISH_TRACKING_GRACE_S, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE, WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -350,6 +350,9 @@ interface Glider {
     scoredFinish: Epoch;
     scoredStatus: 'S' | 'F' | 'H'; // from scoring
     scoringConfigured?: boolean;
+    // Latched once we've stopped APRS reception after the pilot finished and
+    // landed (or 5 min elapsed since the finish). Keeps the stop one-shot.
+    trackingStopped?: boolean;
     // True if dbTrackerId === 'blocked' on the last tick. We never send blocked
     // pilots to the scoring worker, so flipping back to unblocked has to reset
     // scoringConfigured so setInitialTrack runs on the next tick.
@@ -2773,6 +2776,22 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             // its scores carry the proposed scoreId and won't take this branch.
             if (scoreId === channel.liveScoreId) {
                 updateCompStatus(channel);
+
+                // Once a pilot has crossed the finish line, stop tracking them —
+                // and so stop collecting flight statistics — as soon as they've
+                // landed, or FINISH_TRACKING_GRACE_S after the finish if we never
+                // see them land. finishGlider freezes and tail-collapses the
+                // stats. One-shot via glider.trackingStopped. Only the live chain
+                // gets here, so a historical replay never triggers it mid-track.
+                const finished = gliders[makeClassname_Compno(channel.className, compno as Compno)];
+                if (finished && !finished.trackingStopped && score.utcFinish) {
+                    const landed = score.flightStatus === PositionStatus.Home || score.flightStatus === PositionStatus.Landed;
+                    if (landed || score.t >= score.utcFinish + FINISH_TRACKING_GRACE_S) {
+                        finished.trackingStopped = true;
+                        console.log(`${channel.className}:${compno}: finished @ ${d(score.utcFinish as Epoch)} — ${landed ? 'landed' : `${FINISH_TRACKING_GRACE_S}s elapsed`}, stopping tracking`);
+                        aprsController?.finishGlider(compno as Compno, channel.className, finished.channelName);
+                    }
+                }
             }
         }
     }
@@ -3328,6 +3347,17 @@ async function processAprsMessage(className: string, channel: Channel, message: 
 
     // We ignore ticks
     if ('tick' in message) {
+        return;
+    }
+
+    // Final stats broadcast from the APRS worker: the glider has finished and
+    // tracking stopped, so this carries the frozen, tail-collapsed segment list
+    // with no position. Replace the canonical list and flag for the next residual.
+    if (message.statsFinal) {
+        if (message.stats) {
+            channel.statsStore[message.c as Compno] = message.stats.segments;
+            channel.statsDirty.add(message.c as Compno);
+        }
         return;
     }
 

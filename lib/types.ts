@@ -114,6 +114,10 @@ export interface PositionMessage extends BasePositionMessage {
     // over the BroadcastChannel, never serialised to the wire here.
     stats?: Stats; // full current segment list (incl. per-segment wind)
     wind?: Wind; // most recent wind estimate (scoring welds it onto PilotScore.wind)
+    // Final stats broadcast: the glider has finished and tracking has stopped,
+    // so this carries the frozen, tail-collapsed segment list with no position.
+    // Main applies it to its statsStore; the (now-terminal) scoring chain ignores it.
+    statsFinal?: boolean;
 }
 
 export function isTick(m: any): m is TickMessage {
