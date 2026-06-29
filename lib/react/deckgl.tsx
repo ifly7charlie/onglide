@@ -131,8 +131,6 @@ import {DmPointStyle, hullLineStyle, hullPointStyle, maxLineStyle, maxSignStyle,
 export default function MApp(props: {
     options: Options;
     setOptions: Function; //
-    follow: boolean;
-    setFollow: Function;
     vc: ClassName;
     selectedCompno: Compno;
     hoveredCompno?: Compno | null;
@@ -152,7 +150,7 @@ export default function MApp(props: {
     const measure = useMeasure();
 
     // So we get some type info
-    const {options, setOptions, follow, setFollow, vc, selectedCompno, tz, viewport} = props;
+    const {options, setOptions, vc, selectedCompno, tz, viewport} = props;
 
     // Score details for selected pilot
     const selectedScore = useSelector((state) => selectPilotScore(state, selectedCompno, props.replayTime));
@@ -432,7 +430,7 @@ export default function MApp(props: {
                 !map?.isMoving() &&
                 !measure.enabled &&
                 props.options.follow &&
-                follow &&
+                !props.options.viewSuspended &&
                 selectedPosition && //
                 taskGeoJSON?.track?.features
             ) {
@@ -486,9 +484,9 @@ export default function MApp(props: {
                 }
             }
         },
-        follow && props.options.follow //
-            ? [selectedCompno, selectedPosition, nextPoint, props.options, isMoving, follow]
-            : [null, null, null, null, null, null]
+        !props.options.viewSuspended && props.options.follow //
+            ? [selectedCompno, selectedPosition, nextPoint, props.options, isMoving]
+            : [null, null, null, null, null]
     );
 
     // ====== PITCH RESTRICTION FOR 2D/3D =======
@@ -601,8 +599,8 @@ export default function MApp(props: {
                 ],
                 {padding, bearing: 0}
             );
-            if (follow) setFollow(false);
-            setOptions({...options, zoomTurnpoint: null});
+            // Zooming to a turnpoint is a manual reposition — suspend follow/orientation.
+            setOptions({...options, zoomTurnpoint: null, viewSuspended: true});
             if (camera) {
                 map.easeTo({
                     center: camera.center,
@@ -624,7 +622,8 @@ export default function MApp(props: {
     // introduce sub-degree bearing drift, doesn't repeatedly trigger a 250ms
     // resetNorth animation that shows up as a pan-release stutter.
     useEffect(() => {
-        if (options.taskUp !== 0) return;
+        // Suspended while the user is repositioning the map — don't fight their rotation.
+        if (options.taskUp !== 0 || options.viewSuspended) return;
         const timer = setTimeout(() => {
             const map = mapRef?.current;
             if (!map || map.isMoving()) return;
@@ -634,7 +633,7 @@ export default function MApp(props: {
             }
         }, 150);
         return () => clearTimeout(timer);
-    }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving]);
+    }, [options.taskUp === 0 ? viewport.bearing : 0, isMoving, options.viewSuspended]);
 
     // Runtime-generated icon images for map symbols (track arrows, peaks,
     // airports). Registered via the Map's onLoad below — running it via a
@@ -800,12 +799,15 @@ export default function MApp(props: {
         props.setOptions({...props.options, loadId: (props.options.loadId ?? 0) + 1});
     }, []);
 
-    // Cancel any follow
+    // Cancel any follow / orientation lock when the user drags the map. The flag
+    // stays set (so the user can look around) until a new pilot is selected or the
+    // follow/orientation buttons are clicked — see Options + setCompno. It is held
+    // in-memory only; useOptions strips it from the persisted copy.
     const onDragStart = useCallback(() => {
-        if (follow) {
-            setFollow(false);
+        if (!options.viewSuspended) {
+            setOptions({...options, viewSuspended: true});
         }
-    }, [setFollow, follow]);
+    }, [setOptions, options]);
 
     // Competition site coordinates for the X marker. CompetitionSummary
     // exposes lat/lng at the top level (see summaryToCompetition / protobuf),

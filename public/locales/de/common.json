@@ -185,7 +185,9 @@
         "switch_to_metric": "Auf metrisch umschalten",
         "switch_to_imperial": "Auf imperial umschalten",
         "map_attribution": "Kartenattribution",
-        "close": "Schließen"
+        "close": "Schließen",
+        "follow_suspended": "Folgen pausiert, weil die Karte verschoben wurde. Zum Fortsetzen klicken oder einen Piloten auswählen",
+        "orientation_suspended": "Ausrichtungssperre pausiert, weil die Karte verschoben wurde. Zum Fortsetzen klicken oder einen Piloten auswählen"
     },
     "drawer": {
         "class": "Klasse",

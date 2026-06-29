@@ -203,7 +203,6 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const [error, setError] = useState<string | null>(null);
     const [selectedCompno, setSelectedCompno] = useState<Compno | undefined>(undefined);
     const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
-    const [follow, setFollow] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
 
     // Handicaps stored in localStorage, keyed by compno
@@ -394,9 +393,10 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const setCompno = useCallback(
         (cn) => {
             setSelectedCompno(cn);
-            if (cn) setFollow(true);
+            // Selecting a pilot re-engages follow/orientation after a manual pan.
+            if (cn && options?.viewSuspended) setOptions({...options, viewSuspended: false});
         },
-        [setSelectedCompno]
+        [setSelectedCompno, options, setOptions]
     );
 
     const handleReset = useCallback(() => {
@@ -506,8 +506,6 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         <MApp
                             key="map"
                             vc={VC}
-                            follow={follow}
-                            setFollow={setFollow}
                             setSelectedCompno={setCompno}
                             options={viewOptions}
                             setOptions={setOptions}

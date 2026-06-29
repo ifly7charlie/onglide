@@ -185,7 +185,9 @@
         "switch_to_metric": "Przełącz na jednostki metryczne",
         "switch_to_imperial": "Przełącz na jednostki imperialne",
         "map_attribution": "Atrybucja mapy",
-        "close": "Zamknij"
+        "close": "Zamknij",
+        "follow_suspended": "Śledzenie wstrzymane, ponieważ przesunięto mapę. Kliknij, aby wznowić, lub wybierz pilota",
+        "orientation_suspended": "Blokada orientacji wstrzymana, ponieważ przesunięto mapę. Kliknij, aby wznowić, lub wybierz pilota"
     },
     "drawer": {
         "class": "Klasa",

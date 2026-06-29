@@ -177,6 +177,8 @@
         "manual_orientation": "Follow orientation is currently Manual (user controlled), Change to be always North Up",
         "follow_pilot": "Will follow selected pilot, Click to leave map alone when selecting a pilot",
         "follow_disabled": "Do not follow selected pilot, Click to follow",
+        "follow_suspended": "Following paused because you moved the map. Click to resume, or select a pilot",
+        "orientation_suspended": "Orientation lock paused because you moved the map. Click to resume, or select a pilot",
         "paths_recent": "Show recent paths for all pilots",
         "paths_selected_full": "Show full path for selected pilot",
         "paths_all_full": "Show full paths for all pilots",

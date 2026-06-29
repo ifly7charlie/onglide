@@ -185,7 +185,9 @@
         "switch_to_metric": "Byt till metriska enheter",
         "switch_to_imperial": "Byt till imperiska enheter",
         "map_attribution": "Kartattribution",
-        "close": "Stäng"
+        "close": "Stäng",
+        "follow_suspended": "Följning pausad eftersom du flyttade kartan. Klicka för att återuppta, eller välj en pilot",
+        "orientation_suspended": "Orienteringslås pausat eftersom du flyttade kartan. Klicka för att återuppta, eller välj en pilot"
     },
     "drawer": {
         "class": "Klass",

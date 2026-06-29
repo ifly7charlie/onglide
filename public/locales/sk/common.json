@@ -185,7 +185,9 @@
         "switch_to_metric": "Prepnúť na metrické jednotky",
         "switch_to_imperial": "Prepnúť na imperiálne jednotky",
         "map_attribution": "Atribúcia mapy",
-        "close": "Zavrieť"
+        "close": "Zavrieť",
+        "follow_suspended": "Sledovanie pozastavené, pretože ste posunuli mapu. Kliknite na obnovenie alebo vyberte pilota",
+        "orientation_suspended": "Uzamknutie orientácie pozastavené, pretože ste posunuli mapu. Kliknite na obnovenie alebo vyberte pilota"
     },
     "drawer": {
         "class": "Trieda",

@@ -185,7 +185,9 @@
         "switch_to_metric": "Schakel naar metrische eenheden",
         "switch_to_imperial": "Schakel naar imperiale eenheden",
         "map_attribution": "Kaartattributie",
-        "close": "Sluiten"
+        "close": "Sluiten",
+        "follow_suspended": "Volgen gepauzeerd omdat je de kaart hebt verplaatst. Klik om te hervatten, of selecteer een piloot",
+        "orientation_suspended": "Oriëntatievergrendeling gepauzeerd omdat je de kaart hebt verplaatst. Klik om te hervatten, of selecteer een piloot"
     },
     "drawer": {
         "class": "Klasse",

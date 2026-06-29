@@ -185,7 +185,9 @@
         "switch_to_metric": "Vaihda metrisiin yksiköihin",
         "switch_to_imperial": "Vaihda brittiläisiin yksiköihin",
         "map_attribution": "Karttatiedot",
-        "close": "Sulje"
+        "close": "Sulje",
+        "follow_suspended": "Seuraaminen keskeytetty, koska siirsit karttaa. Klikkaa jatkaaksesi tai valitse lentäjä",
+        "orientation_suspended": "Suunnan lukitus keskeytetty, koska siirsit karttaa. Klikkaa jatkaaksesi tai valitse lentäjä"
     },
     "drawer": {
         "class": "Luokka",

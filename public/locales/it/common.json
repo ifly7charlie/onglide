@@ -185,7 +185,9 @@
         "switch_to_metric": "Passa alle unità metriche",
         "switch_to_imperial": "Passa alle unità imperiali",
         "map_attribution": "Attribuzione della mappa",
-        "close": "Chiudi"
+        "close": "Chiudi",
+        "follow_suspended": "Inseguimento in pausa perché hai spostato la mappa. Clicca per riprendere, o seleziona un pilota",
+        "orientation_suspended": "Blocco orientamento in pausa perché hai spostato la mappa. Clicca per riprendere, o seleziona un pilota"
     },
     "drawer": {
         "class": "Classe",

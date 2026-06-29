@@ -185,7 +185,9 @@
         "switch_to_metric": "Preklopi na metrične enote",
         "switch_to_imperial": "Preklopi na imperialne enote",
         "map_attribution": "Atribucija zemljevida",
-        "close": "Zapri"
+        "close": "Zapri",
+        "follow_suspended": "Sledenje začasno ustavljeno, ker si premaknil zemljevid. Klikni za nadaljevanje ali izberi pilota",
+        "orientation_suspended": "Zaklep orientacije začasno ustavljen, ker si premaknil zemljevid. Klikni za nadaljevanje ali izberi pilota"
     },
     "drawer": {
         "class": "Razred",
