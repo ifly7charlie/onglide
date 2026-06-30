@@ -259,7 +259,7 @@ export const taskScoresGenerator = async function* (task: Task, compno: Compno, 
             // Calculate the GR to home
             if (item.lastProcessedPoint) {
                 score.home = {
-                    taskDistance: score.actual.distance ?? 0,
+                    taskDistance: score.actual.taskDistance ?? 0,
                     distanceRemaining: item.lastProcessedPoint ? distHaversineRaw([item.lastProcessedPoint.lng, item.lastProcessedPoint.lat], finishLeg.point!) : 0
                 };
                 doGrCalc(score.home, item.lastProcessedPoint.a - finishAlt);

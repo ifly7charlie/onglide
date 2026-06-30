@@ -70,8 +70,21 @@ export function scoreChanged(oldScore: PilotScore | undefined, newScore: PilotSc
         return oa !== na;
     }
 
-    // moved more than 1.5km
-    if (Math.abs((oa.distance ?? 0) - (na.distance ?? 0)) > 1.5) {
+    // Task distance flown changed by more than the proximity-scaled threshold.
+    // Gate on taskDistance (the cumulative whole-task total the UI shows) —
+    // actual.distance is the per-leg increment and is never populated on the
+    // task-level summary, so reading it here would compare 0-0 and never fire.
+    //
+    // The threshold shrinks as the pilot nears the next turnpoint, so the score
+    // (and the displayed position rounding the turn) refreshes more often there:
+    // full 1.5km while >9km out on the leg, easing linearly down to a 0.5km floor
+    // at the turn. distToTurn is the current leg's remaining distance (current
+    // point -> next turnpoint, in km, same source as taskDistance); when it isn't
+    // populated (e.g. sitting in-sector, where inSector already gates) it defaults
+    // to the flat 1.5km.
+    const distToTurn = newScore.legs?.[newScore.currentLeg]?.actual?.distanceRemaining ?? Infinity;
+    const distanceThreshold = Math.min(1.5, Math.max(0.5, distToTurn / 6));
+    if (Math.abs((oa.taskDistance ?? 0) - (na.taskDistance ?? 0)) > distanceThreshold) {
         return true;
     }
 
