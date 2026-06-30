@@ -384,7 +384,7 @@ CREATE TABLE `trackerhistory` (
   `flarmtype` char(3) DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch','evidence','startmatch-swap','uncorrelated') DEFAULT 'none',
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','displaced','flarmnet-blocked','ddb-blocked','startmatch','evidence','startmatch-swap','uncorrelated') DEFAULT 'none',
   `class` char(15) DEFAULT NULL,
   `datecode` char(3) DEFAULT NULL,
   `delta_start` smallint DEFAULT NULL,
