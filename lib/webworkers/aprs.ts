@@ -27,7 +27,7 @@ import {getElevationOffset} from '../getelevationoffset';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {makeGetNow, d, readOnly} from '../now';
+import {makeGetNow, replay, d, readOnly} from '../now';
 
 import {PositionMessage, StreamId} from '../types';
 interface InterimPositionMessage extends PositionMessage {
@@ -794,7 +794,7 @@ function applyFilter(filter: string) {
 //
 // Connect to the APRS Server
 function startAprsListener(config: AprsListenerConfig) {
-    if (process.env.REPLAY_DB || process.env.NEXT_PUBLIC_REPLAY) {
+    if (replay())
         return;
     }
 
