@@ -1,6 +1,30 @@
 import {describe, test, expect} from 'vitest';
-import {scoreSignals, computeMargins, decayPrior, summarisePrior, inBboxRatio, passesCandidateFilter, type Signals} from '../lib/scoring/shared/trackerScore';
-import {DEFAULT_TOLERANCE_SEC, DEFAULT_DIST_TOLERANCE_KM, DEFAULT_INBBOX_FULL_COUNT, LEGACY_PRIOR_NATS, DEFAULT_PRIOR_DECAY_DAYS} from '../lib/constants';
+import {
+    scoreSignals,
+    computeMargins,
+    summarisePrior,
+    crossingScore,
+    negCrossScore,
+    contentionPenalty,
+    pilotContentionPenalty,
+    applyContentionPenalties,
+    inBboxRatio,
+    passesCandidateFilter,
+    physicalMatchScore,
+    type Signals
+} from '../lib/scoring/shared/trackerScore';
+import {
+    DEFAULT_TOLERANCE_SEC,
+    DEFAULT_DIST_TOLERANCE_KM,
+    DEFAULT_GAP_MODULATION_SEC,
+    DEFAULT_INBBOX_FULL_COUNT,
+    AMBIGUOUS_DELTA_FACTOR,
+    MAX_PRIOR_PER_DAY_NATS,
+    MAX_TOTAL_PRIOR_NATS,
+    PRIOR_PROTECT_NATS,
+    TRACKER_SCORE_WEIGHTS,
+    WRONG_CROSS_SCALE
+} from '../lib/constants';
 
 const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     deltaStart: null,
@@ -17,6 +41,7 @@ const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     ddbGliderMatch: false,
     baselineMatch: false,
     priorNats: 0,
+    xcNats: 0,
     ...over
 });
 
@@ -50,6 +75,20 @@ describe('scoreSignals', () => {
         expect(both.distAtStart).toBeGreaterThan(0);
     });
 
+    test('a within-tolerance start crossing zeroes distAtStart (the crossing already carries it)', () => {
+        // Same tight distance + gap, but now a clean start crossing exists.
+        const noCross = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1}));
+        const withCross = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1, deltaStart: 0}));
+        expect(noCross.distAtStart).toBeGreaterThan(0);
+        expect(withCross.distAtStart).toBe(0);
+        // A start crossing OUTSIDE tolerance does not suppress the distance signal.
+        const outOfTol = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1, deltaStart: DEFAULT_TOLERANCE_SEC + 5}));
+        expect(outOfTol.distAtStart).toBeGreaterThan(0);
+        // Finish distance is unaffected by a start crossing.
+        const withFinishDist = scoreSignals(baseSignals({distAtFinishKm: 0.05, gapAroundFinishSec: 1, deltaStart: 0}));
+        expect(withFinishDist.distAtFinish).toBeGreaterThan(0);
+    });
+
     test('large bracketing gap suppresses the distance contribution', () => {
         const tight = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1}));
         const wide = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 120}));
@@ -60,9 +99,41 @@ describe('scoreSignals', () => {
         const at0 = scoreSignals(baseSignals({distAtStartKm: 0, gapAroundStartSec: 0}));
         const atKnee = scoreSignals(baseSignals({distAtStartKm: DEFAULT_DIST_TOLERANCE_KM, gapAroundStartSec: 0}));
         const atDouble = scoreSignals(baseSignals({distAtStartKm: 2 * DEFAULT_DIST_TOLERANCE_KM, gapAroundStartSec: 0}));
-        expect(at0.distAtStart).toBeCloseTo(1.0, 4);
-        expect(atKnee.distAtStart).toBeCloseTo(0.5, 4);
+        expect(at0.distAtStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.distAtStart, 4);
+        expect(atKnee.distAtStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.distAtStart * 0.5, 4);
         expect(atDouble.distAtStart).toBeCloseTo(0, 4);
+    });
+
+    test('a within-tolerance finish crossing zeroes distAtFinish, mirroring the start gate', () => {
+        const noCross = scoreSignals(baseSignals({distAtFinishKm: 0.05, gapAroundFinishSec: 1}));
+        const withCross = scoreSignals(baseSignals({distAtFinishKm: 0.05, gapAroundFinishSec: 1, deltaFinish: 0}));
+        expect(noCross.distAtFinish).toBeGreaterThan(0);
+        expect(withCross.distAtFinish).toBe(0);
+        // A finish crossing OUTSIDE tolerance does not suppress the distance signal.
+        const outOfTol = scoreSignals(baseSignals({distAtFinishKm: 0.05, gapAroundFinishSec: 1, deltaFinish: DEFAULT_TOLERANCE_SEC + 5}));
+        expect(outOfTol.distAtFinish).toBeGreaterThan(0);
+        // Start distance is unaffected by a finish crossing.
+        const withStartDist = scoreSignals(baseSignals({distAtStartKm: 0.05, gapAroundStartSec: 1, deltaFinish: 0}));
+        expect(withStartDist.distAtStart).toBeGreaterThan(0);
+    });
+
+    test('ambiguous flag downgrades only the Δ supports by AMBIGUOUS_DELTA_FACTOR', () => {
+        // distAtFinish kept live by leaving deltaFinish out of tolerance.
+        const sig = {deltaStart: -1, deltaFinish: DEFAULT_TOLERANCE_SEC + 2, distAtFinishKm: 0.1, gapAroundFinishSec: 1, inBboxPackets: 800, ddbCnMatch: true};
+        const plain = scoreSignals(baseSignals(sig));
+        const ambig = scoreSignals(baseSignals({...sig, ambiguous: true}));
+        expect(plain.deltaStart).toBeGreaterThan(0);
+        expect(ambig.deltaStart).toBeCloseTo(plain.deltaStart * AMBIGUOUS_DELTA_FACTOR, 6);
+        expect(plain.distAtFinish).toBeGreaterThan(0);
+        expect(ambig.distAtFinish).toBeCloseTo(plain.distAtFinish, 6);
+        expect(ambig.inBbox).toBeCloseTo(plain.inBbox, 6);
+        expect(ambig.ddbCn).toBeCloseTo(plain.ddbCn, 6);
+    });
+
+    test('ambiguous defaults to false — omitting it scores identically to today', () => {
+        const explicit = scoreSignals(baseSignals({deltaStart: 0, ambiguous: false}));
+        const omitted = scoreSignals(baseSignals({deltaStart: 0}));
+        expect(explicit.total).toBeCloseTo(omitted.total, 6);
     });
 
     test('low in-bbox ratio kills the presence contribution entirely', () => {
@@ -117,7 +188,9 @@ describe('scoreSignals', () => {
             })
         );
         // Expect comfortably above any reasonable auto-apply floor (0.8 nats).
-        expect(b.total).toBeGreaterThan(5.0);
+        // Both dist signals are gated by the within-tolerance crossings, so
+        // ≈ Δs 0.8 + Δf 1.0 + presence 0.48 + pre 0.3 + ddbCN 1.5 + base 1.0.
+        expect(b.total).toBeGreaterThan(4.5);
     });
 
     test('missing signals contribute exactly 0 (no penalty for absence)', () => {
@@ -130,6 +203,175 @@ describe('scoreSignals', () => {
         const withPrior = scoreSignals(baseSignals({priorNats: 1.5}));
         expect(withPrior.prior).toBeCloseTo(1.5, 6);
         expect(withPrior.total).toBeCloseTo(1.5, 6);
+    });
+
+    // ---- Cross-competition identity (single collapsed nats value) ----------
+    test('xcNats is added with the xc weight (default 1) and nothing else', () => {
+        const b = scoreSignals(baseSignals({xcNats: 1.4}));
+        expect(b.xc).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xc * 1.4, 6);
+        expect(b.total).toBeCloseTo(TRACKER_SCORE_WEIGHTS.xc * 1.4, 6);
+    });
+
+    test('zero xcNats contributes nothing', () => {
+        const b = scoreSignals(baseSignals({xcNats: 0}));
+        expect(b.xc).toBe(0);
+        expect(b.total).toBe(0);
+    });
+
+    test('xc stacks additively with same-comp signals', () => {
+        const b = scoreSignals(baseSignals({deltaStart: 0, xcNats: 2.0}));
+        expect(b.total).toBeCloseTo(1.0 + TRACKER_SCORE_WEIGHTS.xc * 2.0, 6);
+    });
+});
+
+describe('negStart / negFinish in scoreSignals', () => {
+    test('no crossing, no dist data → both zero', () => {
+        const b = scoreSignals(baseSignals());
+        expect(b.negStart).toBe(0);
+        expect(b.negFinish).toBe(0);
+    });
+
+    test('within-tolerance crossing → negStart stays 0 (positive evidence wins)', () => {
+        const b = scoreSignals(baseSignals({deltaStart: 0, distAtStartKm: 1.0, gapAroundStartSec: 10}));
+        expect(b.negStart).toBe(0);
+        expect(b.deltaStart).toBeGreaterThan(0);
+    });
+
+    test('wrong-time crossing (|Δ| > T_tol) with tight gap → negative negStart', () => {
+        // Δ = T_tol + WRONG_CROSS_SCALE×T_tol/2 → wrongTimeFactor = 0.5
+        const delta = DEFAULT_TOLERANCE_SEC + (WRONG_CROSS_SCALE * DEFAULT_TOLERANCE_SEC) / 2;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0}));
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross * 0.5, 4);
+    });
+
+    test('wrong-time crossing saturates at |Δ| = (1+WRONG_CROSS_SCALE)×T_tol', () => {
+        // At full saturation, wrongTimeFactor = 1; gapMod(0) = 1 → negStart = -negCross weight
+        const saturated = (1 + WRONG_CROSS_SCALE) * DEFAULT_TOLERANCE_SEC;
+        const b = scoreSignals(baseSignals({deltaStart: saturated, gapAroundStartSec: 0}));
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+
+        // Beyond saturation the value is clamped
+        const beyond = saturated * 5;
+        const b2 = scoreSignals(baseSignals({deltaStart: beyond, gapAroundStartSec: 0}));
+        expect(b2.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('confirmed absent (dist > 2×D_tol, no crossing) → negStart = -weight × gapMod', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM; // 1km > 2×0.3
+        const gap = DEFAULT_GAP_MODULATION_SEC; // gapMod = 0.5
+        const b = scoreSignals(baseSignals({distAtStartKm: farKm, gapAroundStartSec: gap}));
+        // notHereFactor = 1, gapMod(30,30) = 0.5 → raw = -0.5 → weighted by negCross
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross * 0.5, 4);
+    });
+
+    test('Math.max: both strands fire, stronger one wins', () => {
+        // wrongTimeFactor = 0.5 (Δ = midpoint), notHereFactor = 1 → max is 1
+        const delta = DEFAULT_TOLERANCE_SEC + (WRONG_CROSS_SCALE * DEFAULT_TOLERANCE_SEC) / 2;
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        const b = scoreSignals(baseSignals({deltaStart: delta, distAtStartKm: farKm, gapAroundStartSec: 0}));
+        // notHere wins; gapMod(0) = 1 → raw = -1 → weighted
+        expect(b.negStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('large gap attenuates the negative signal toward zero', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        const tight = scoreSignals(baseSignals({distAtStartKm: farKm, gapAroundStartSec: 1}));
+        const wide = scoreSignals(baseSignals({distAtStartKm: farKm, gapAroundStartSec: 3000}));
+        expect(tight.negStart).toBeLessThan(-0.1);
+        expect(wide.negStart).toBeGreaterThan(-0.01); // large gap → gapMod near 0
+    });
+
+    test('null gapAroundStartSec → negStart ≈ 0 (no coverage info, gapMod(Infinity)→0)', () => {
+        // Even with a wrong-time crossing, if gap is null the modulator collapses to 0.
+        // gapMod(Infinity) = 1/(1+Infinity) = 0; result may be -0 vs 0 in IEEE 754.
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: null}));
+        expect(Math.abs(b.negStart)).toBeCloseTo(0, 6);
+    });
+
+    test('negStart and negFinish are independent (symmetric behaviour)', () => {
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const bStart = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0}));
+        const bFinish = scoreSignals(baseSignals({deltaFinish: delta, gapAroundFinishSec: 0}));
+        expect(bStart.negStart).toBeLessThan(0);
+        expect(bStart.negFinish).toBe(0);
+        expect(bFinish.negFinish).toBeLessThan(0);
+        expect(bFinish.negStart).toBe(0);
+        // symmetric
+        expect(bStart.negStart).toBeCloseTo(bFinish.negFinish, 6);
+    });
+
+    test('negStart / negFinish are excluded from physicalMatchScore', () => {
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0, deltaFinish: delta, gapAroundFinishSec: 0}));
+        expect(b.negStart).toBeLessThan(0);
+        expect(b.negFinish).toBeLessThan(0);
+        expect(physicalMatchScore(b)).toBe(0); // no positive physical components
+    });
+
+    test('negative signals reduce the total (can drive it below zero)', () => {
+        const delta = DEFAULT_TOLERANCE_SEC * 10;
+        const b = scoreSignals(baseSignals({deltaStart: delta, gapAroundStartSec: 0, deltaFinish: delta, gapAroundFinishSec: 0}));
+        expect(b.total).toBeLessThan(0);
+    });
+});
+
+describe('negCrossScore', () => {
+    test('all null → 0', () => {
+        expect(negCrossScore(null, null, null, null, null, null)).toBe(0);
+    });
+
+    test('wrong-time start crossing at saturation → -(negCross weight)', () => {
+        const saturated = (1 + WRONG_CROSS_SCALE) * DEFAULT_TOLERANCE_SEC;
+        const score = negCrossScore(saturated, 0, null, null, null, null);
+        expect(score).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('confirmed absent on both sides adds both contributions', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        const score = negCrossScore(null, 0, farKm, null, 0, farKm);
+        // Each side: notHereFactor=1, gapMod(0)=1 → raw=-1 → weight × -1 per side
+        expect(score).toBeCloseTo(-2 * TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('within-tolerance crossing on start side → start contribution = 0', () => {
+        const farKm = 3 * DEFAULT_DIST_TOLERANCE_KM;
+        // deltaStart within tolerance: even though dist is far, crossing took priority
+        const score = negCrossScore(0, 0, farKm, null, 0, farKm);
+        // start is clear (within tol), finish is absent → only finish contributes
+        expect(score).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+    });
+
+    test('gap modulation applies: large gap attenuates negative contribution', () => {
+        const saturated = (1 + WRONG_CROSS_SCALE) * DEFAULT_TOLERANCE_SEC;
+        const tightGap = negCrossScore(saturated, 0, null, null, null, null);
+        const wideGap = negCrossScore(saturated, 3000, null, null, null, null);
+        expect(tightGap).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.negCross, 4);
+        expect(wideGap).toBeGreaterThan(-0.01); // almost zero
+    });
+});
+
+describe('physicalMatchScore', () => {
+    test('sums only the physical-track components, excluding prior/baseline/ddb/xc', () => {
+        const b = scoreSignals(
+            baseSignals({
+                deltaStart: 0,
+                deltaFinish: 0,
+                distAtStartKm: 0,
+                gapAroundStartSec: 0,
+                inBboxPackets: DEFAULT_INBBOX_FULL_COUNT,
+                bboxRejectedPackets: 0,
+                firstSeenT: 1700000000 - 60 * 60,
+                ddbCnMatch: true, // excluded from physical score
+                baselineMatch: true, // excluded
+                priorNats: 5, // excluded
+                xcNats: 5 // excluded
+            })
+        );
+        const physical = b.deltaStart + b.deltaFinish + b.distAtStart + b.distAtFinish + b.inBbox + b.preLaunch;
+        expect(physicalMatchScore(b)).toBeCloseTo(physical, 6);
+        // strictly less than the inflated total (which includes ddb/baseline/prior/xc)
+        expect(physicalMatchScore(b)).toBeLessThan(b.total);
     });
 });
 
@@ -153,20 +395,6 @@ describe('computeMargins', () => {
     });
 });
 
-describe('decayPrior', () => {
-    test('zero age preserves the score', () => {
-        expect(decayPrior(2.0, 0)).toBe(2.0);
-    });
-
-    test('ages decay by the configured τ (default 4 days)', () => {
-        const decayed = decayPrior(2.0, 4);
-        expect(decayed).toBeCloseTo(2.0 / Math.E, 4);
-    });
-
-    test('large ages decay toward zero', () => {
-        expect(decayPrior(2.0, 100)).toBeLessThan(0.001);
-    });
-});
 
 describe('inBboxRatio / passesCandidateFilter', () => {
     test('zero packets → ratio 0, fails filter', () => {
@@ -186,67 +414,266 @@ describe('inBboxRatio / passesCandidateFilter', () => {
     });
 });
 
+describe('crossingScore', () => {
+    test('no crossings (both null) → 0', () => {
+        expect(crossingScore(null, null)).toBe(0);
+    });
+
+    test('both crossings spot-on → capped at MAX_PRIOR_PER_DAY_NATS', () => {
+        // sStart = sFinish = 1, weighted sum = 2, capped to 1.
+        expect(crossingScore(0, 0)).toBeCloseTo(MAX_PRIOR_PER_DAY_NATS, 6);
+    });
+
+    test('one-sided start crossing → just that side, ≤ cap', () => {
+        // sStart=1 (weight 1), finish absent → 1.0; still ≤ cap.
+        expect(crossingScore(0, null)).toBeCloseTo(Math.min(MAX_PRIOR_PER_DAY_NATS, TRACKER_SCORE_WEIGHTS.deltaStart), 6);
+    });
+
+    test('crossing at the tolerance knee contributes 0', () => {
+        expect(crossingScore(DEFAULT_TOLERANCE_SEC, null)).toBeCloseTo(0, 6);
+    });
+
+    test('partial crossings below the cap sum linearly', () => {
+        // |Δ| = half the knee → support 0.5 on each side; 0.5+0.5 = 1.0 (= cap).
+        const half = DEFAULT_TOLERANCE_SEC / 2;
+        expect(crossingScore(half, half)).toBeCloseTo(MAX_PRIOR_PER_DAY_NATS, 6);
+        // A single half-knee crossing stays well under the cap.
+        expect(crossingScore(half, null)).toBeCloseTo(0.5 * TRACKER_SCORE_WEIGHTS.deltaStart, 6);
+    });
+});
+
 describe('summarisePrior', () => {
     test('zero rows → zero prior', () => {
-        expect(summarisePrior([], LEGACY_PRIOR_NATS)).toBe(0);
+        expect(summarisePrior([])).toBe(0);
     });
 
-    test('single row at age 0 contributes its full score', () => {
-        expect(summarisePrior([{scoreNats: 2.5, taskDaysAgo: 0}], LEGACY_PRIOR_NATS)).toBeCloseTo(2.5, 6);
+    test('single row contributes its full score regardless of age', () => {
+        expect(summarisePrior([{scoreNats: 0.8, taskDaysAgo: 0}])).toBeCloseTo(0.8, 6);
+        expect(summarisePrior([{scoreNats: 0.8, taskDaysAgo: 10}])).toBeCloseTo(0.8, 6);
     });
 
-    test('decay is exp(-ageDays / τ) with default τ', () => {
-        const decayed = summarisePrior([{scoreNats: 2.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}], LEGACY_PRIOR_NATS);
-        expect(decayed).toBeCloseTo(2.0 / Math.E, 4);
+    test('repeated confirmations sum directly without decay', () => {
+        const total = summarisePrior([
+            {scoreNats: 0.6, taskDaysAgo: 1},
+            {scoreNats: 0.8, taskDaysAgo: 2},
+            {scoreNats: 1.0, taskDaysAgo: 3}
+        ]);
+        expect(total).toBeCloseTo(2.4, 6);
     });
 
-    test('multiple rows for same pair sum (each independently decayed)', () => {
-        const total = summarisePrior(
+    test("negative ages (future rows, shouldn't happen) are ignored", () => {
+        const total = summarisePrior([
+            {scoreNats: 1.0, taskDaysAgo: -1},
+            {scoreNats: 0.7, taskDaysAgo: 0}
+        ]);
+        expect(total).toBeCloseTo(0.7, 6);
+    });
+
+    test('positive total is capped at MAX_TOTAL_PRIOR_NATS', () => {
+        const rows = Array.from({length: 10}, (_, i) => ({scoreNats: MAX_PRIOR_PER_DAY_NATS, taskDaysAgo: i + 1}));
+        expect(summarisePrior(rows)).toBeCloseTo(MAX_TOTAL_PRIOR_NATS, 6);
+    });
+
+    test('negative total is capped at -MAX_TOTAL_PRIOR_NATS', () => {
+        const rows = Array.from({length: 10}, (_, i) => ({scoreNats: -MAX_PRIOR_PER_DAY_NATS, taskDaysAgo: i + 1}));
+        expect(summarisePrior(rows)).toBeCloseTo(-MAX_TOTAL_PRIOR_NATS, 6);
+    });
+
+    test('mixed positive and negative rows combine before cap', () => {
+        // 2 good days then 1 bad day: net = 2*1.0 + 1*(-0.5) = 1.5 (under cap)
+        const total = summarisePrior([
+            {scoreNats: 1.0, taskDaysAgo: 3},
+            {scoreNats: 1.0, taskDaysAgo: 2},
+            {scoreNats: -0.5, taskDaysAgo: 1}
+        ]);
+        expect(total).toBeCloseTo(1.5, 6);
+    });
+});
+
+describe('contentionPenalty', () => {
+    const key = (c: string, f: string) => `${c}|${f}`;
+
+    test('no competitor → nobody penalised', () => {
+        const out = contentionPenalty([{compno: 'AA', flarmid: 'F1', total: 5, baseline: true}], key);
+        expect(out.size).toBe(0);
+    });
+
+    test('confident baseline holder protects flarmid; weaker contender penalised', () => {
+        const out = contentionPenalty(
             [
-                {scoreNats: 2.0, taskDaysAgo: 0},
-                {scoreNats: 2.0, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS},
-                {scoreNats: 2.0, taskDaysAgo: 2 * DEFAULT_PRIOR_DECAY_DAYS}
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: 2, baseline: false}
             ],
-            LEGACY_PRIOR_NATS
+            key
         );
-        expect(total).toBeCloseTo(2.0 + 2.0 / Math.E + 2.0 / (Math.E * Math.E), 4);
+        expect(out.has('BB|F1')).toBe(true);
+        expect(out.has('AA|F1')).toBe(false);
     });
 
-    test('NULL pair_score → uses LEGACY_PRIOR_NATS, then decays normally', () => {
-        const decayed = summarisePrior([{scoreNats: null, taskDaysAgo: DEFAULT_PRIOR_DECAY_DAYS}], LEGACY_PRIOR_NATS);
-        expect(decayed).toBeCloseTo(LEGACY_PRIOR_NATS / Math.E, 4);
-    });
-
-    test('legacy + scored rows mixed', () => {
-        const total = summarisePrior(
+    test('baseline below threshold does not protect — best-this-run holder used instead', () => {
+        // AA is baseline but weak (≤ threshold); BB is the strong run winner.
+        const out = contentionPenalty(
             [
-                {scoreNats: 2.0, taskDaysAgo: 0},
-                {scoreNats: null, taskDaysAgo: 4} // legacy → 1.0 decayed by 1/e
+                {compno: 'AA', flarmid: 'F1', total: 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: false}
             ],
-            LEGACY_PRIOR_NATS
+            key
         );
-        expect(total).toBeCloseTo(2.0 + LEGACY_PRIOR_NATS / Math.E, 4);
+        expect(out.has('AA|F1')).toBe(true); // weak baseline contender is penalised
+        expect(out.has('BB|F1')).toBe(false); // strong run winner holds it
     });
 
-    test('negative ages (future rows, shouldn\'t happen) are ignored', () => {
-        const total = summarisePrior(
+    test('baseline precedence: protected even when a contender scores higher', () => {
+        const out = contentionPenalty(
             [
-                {scoreNats: 2.0, taskDaysAgo: -1},
-                {scoreNats: 1.5, taskDaysAgo: 0}
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 5, baseline: false}
             ],
-            LEGACY_PRIOR_NATS
+            key
         );
-        expect(total).toBeCloseTo(1.5, 4);
+        expect(out.has('BB|F1')).toBe(true); // higher-scoring contender still loses to baseline
+        expect(out.has('AA|F1')).toBe(false);
     });
 
-    test('task-day decay ignores calendar gaps — a 4-task-day prior decays as 4 days regardless of intervening weather days', () => {
-        // The caller computes taskDaysAgo from task-day rank deltas, so by
-        // construction summarisePrior never sees the calendar gap. Verify
-        // that consuming the same taskDaysAgo regardless of context
-        // produces the expected value.
-        const a = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}], LEGACY_PRIOR_NATS);
-        const b = summarisePrior([{scoreNats: 1.0, taskDaysAgo: 4}], LEGACY_PRIOR_NATS);
-        expect(a).toBeCloseTo(b, 6);
-        expect(a).toBeCloseTo(1.0 / Math.E, 4);
+    test('no holder clears the threshold → nobody penalised', () => {
+        const out = contentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: 2, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: 2.5, baseline: false}
+            ],
+            key
+        );
+        expect(out.size).toBe(0);
+    });
+
+    test('independent flarmids do not cross-penalise', () => {
+        const out = contentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'BB', flarmid: 'F1', total: 2, baseline: false},
+                {compno: 'CC', flarmid: 'F2', total: 5, baseline: true}
+            ],
+            key
+        );
+        expect(out.has('BB|F1')).toBe(true);
+        expect(out.has('CC|F2')).toBe(false);
+        expect(out.size).toBe(1);
+    });
+});
+
+describe('pilotContentionPenalty', () => {
+    const key = (c: string, f: string) => `${c}|${f}`;
+
+    test('single claim per pilot → nobody penalised', () => {
+        const out = pilotContentionPenalty([{compno: 'AA', flarmid: 'F1', total: 5, baseline: true}], key);
+        expect(out.size).toBe(0);
+    });
+
+    test('confident pilot-holder demotes that pilot’s other claims', () => {
+        const out = pilotContentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'AA', flarmid: 'F2', total: 2, baseline: false}
+            ],
+            key
+        );
+        expect(out.has('AA|F2')).toBe(true);
+        expect(out.has('AA|F1')).toBe(false);
+    });
+
+    test('baseline precedence: held even when another of the pilot’s claims scores higher', () => {
+        const out = pilotContentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'AA', flarmid: 'F2', total: PRIOR_PROTECT_NATS + 5, baseline: false}
+            ],
+            key
+        );
+        expect(out.has('AA|F2')).toBe(true);
+        expect(out.has('AA|F1')).toBe(false);
+    });
+
+    test('no claim clears the threshold → nobody penalised', () => {
+        const out = pilotContentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: 2, baseline: true},
+                {compno: 'AA', flarmid: 'F2', total: 2.5, baseline: false}
+            ],
+            key
+        );
+        expect(out.size).toBe(0);
+    });
+
+    test('multi-unit pilot: the second baseline flarmid is never penalised', () => {
+        const out = pilotContentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 2, baseline: true},
+                {compno: 'AA', flarmid: 'F2', total: 1, baseline: true},
+                {compno: 'AA', flarmid: 'F3', total: 1, baseline: false}
+            ],
+            key
+        );
+        expect(out.has('AA|F2')).toBe(false); // operator's statement, not a competing claim
+        expect(out.has('AA|F3')).toBe(true);
+    });
+
+    test('independent pilots do not cross-penalise', () => {
+        const out = pilotContentionPenalty(
+            [
+                {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+                {compno: 'AA', flarmid: 'F2', total: 2, baseline: false},
+                {compno: 'BB', flarmid: 'F2', total: 2, baseline: false}
+            ],
+            key
+        );
+        expect(out.has('AA|F2')).toBe(true);
+        expect(out.has('BB|F2')).toBe(false);
+        expect(out.size).toBe(1);
+    });
+});
+
+describe('applyContentionPenalties', () => {
+    const key = (c: string, f: string) => `${c}|${f}`;
+
+    test('union of both sides with per-key reasons; each key reported once', () => {
+        // AA confidently holds F1 (baseline). BB weakly claims F1 (flarm-side
+        // demotion) — and BB also confidently holds F2, so BB's F1 claim is
+        // demoted from the pilot side too → 'both'.
+        const pairs = [
+            {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 2, baseline: true},
+            {compno: 'BB', flarmid: 'F1', total: 2, baseline: false},
+            {compno: 'BB', flarmid: 'F2', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+            {compno: 'CC', flarmid: 'F2', total: 1, baseline: false}
+        ];
+        const {penalised, reason} = applyContentionPenalties(pairs, key);
+        expect(penalised.has('BB|F1')).toBe(true);
+        expect(reason.get('BB|F1')).toBe('both');
+        expect(penalised.has('CC|F2')).toBe(true);
+        expect(reason.get('CC|F2')).toBe('flarm');
+        expect(penalised.has('AA|F1')).toBe(false);
+        expect(penalised.has('BB|F2')).toBe(false);
+    });
+
+    test('pilot-only demotion gets the pilot reason', () => {
+        // AA confidently holds F1; AA's weak claim on F2 has no flarm-side
+        // competitor, so only the pilot side demotes it.
+        const pairs = [
+            {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+            {compno: 'AA', flarmid: 'F2', total: 1.5, baseline: false}
+        ];
+        const {penalised, reason} = applyContentionPenalties(pairs, key);
+        expect(penalised.has('AA|F2')).toBe(true);
+        expect(reason.get('AA|F2')).toBe('pilot');
+    });
+
+    test('deterministic: both sets computed from pre-penalty totals (re-running on the same input is identical)', () => {
+        const pairs = [
+            {compno: 'AA', flarmid: 'F1', total: PRIOR_PROTECT_NATS + 1, baseline: true},
+            {compno: 'BB', flarmid: 'F1', total: 2, baseline: false},
+            {compno: 'BB', flarmid: 'F2', total: PRIOR_PROTECT_NATS + 1, baseline: true}
+        ];
+        const a = applyContentionPenalties(pairs, key);
+        const b = applyContentionPenalties(pairs, key);
+        expect([...a.penalised].sort()).toEqual([...b.penalised].sort());
     });
 });

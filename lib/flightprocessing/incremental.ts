@@ -1,16 +1,18 @@
 import {gapLength, deckPointIncrement, deckSegmentIncrement} from '../constants';
 
-import {Compno, PositionMessage, PilotTrackData, DisplayPilotTrackData, Epoch, DeckData, VarioData} from '../types';
+import {Compno, PositionMessage, PilotTrackData, Epoch, DeckData, VarioData} from '../types';
 import {PilotPosition} from '../protobuf/onglide';
 
 // Helper fro resizing TypedArrays so we don't end up with them being huge
-export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint32Array | Float32Array>(allocator: {new (number): T}, a: T, b: number) {
+export function resize<T extends Uint8Array | Int8Array | Int16Array | Uint16Array | Uint32Array | Float32Array>(allocator: {new (n: number): T}, a: T, b: number) {
     let c = new allocator(Math.max(b, a.length));
     c.set(a);
     return c;
 }
 
-export function getEmptyDeck(compno: Compno, trackVersion: number) {
+export function getEmptyDeck(compno: Compno, trackVersion: number): DeckData {
+    const bearing = new Int16Array(deckPointIncrement);
+    bearing.fill(-1);
     return {
         compno: compno,
         positions: new Float32Array(deckPointIncrement * 3),
@@ -18,6 +20,8 @@ export function getEmptyDeck(compno: Compno, trackVersion: number) {
         agl: new Int16Array(deckPointIncrement),
         t: new Uint32Array(deckPointIncrement),
         climbRate: new Int8Array(deckPointIncrement),
+        bearing,
+        speed: new Uint16Array(deckPointIncrement),
         posIndex: 0,
         segmentIndex: 1,
         trackVersion
@@ -30,7 +34,7 @@ export function initialiseDeck(compno: Compno, glider: PilotTrackData, trackVers
 
 //
 // Go through all the points and update the segments - this is needed when we merge two files
-export function generateIndices(deck: DeckData, glider: PilotTrackData) {
+export function generateIndices(deck: DeckData, _glider: PilotTrackData) {
     if (!deck) {
         return;
     }
@@ -89,26 +93,43 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
         deck.t = resize(Uint32Array, deck.t, newLength);
         deck.agl = resize(Int16Array, deck.agl, newLength);
         deck.climbRate = resize(Int8Array, deck.climbRate, newLength);
+        const grown = resize(Int16Array, deck.bearing, newLength);
+        // Fill the new tail with the "absent" sentinel so unpopulated
+        // anchors don't accidentally read as bearing=0.
+        grown.fill(-1, deck.bearing.length);
+        deck.bearing = grown;
+        deck.speed = resize(Uint16Array, deck.speed, newLength);
     }
 
     if (deck.segmentIndex + 3 >= deck.indices.length) {
         deck.indices = resize(Uint32Array, deck.indices, deck.segmentIndex + deckSegmentIncrement);
     }
 
-    function pushPoint(positions: Float32Array | number[], g: number, t: number) {
+    function pushPoint(positions: Float32Array | number[], g: number, t: number, b: number, s: number) {
         deck.positions.set(positions, deck.posIndex * 3);
         deck.t[deck.posIndex] = t;
         deck.agl[deck.posIndex] = g;
+        deck.bearing[deck.posIndex] = b;
+        deck.speed[deck.posIndex] = s;
         //		deck.colours.set( [ 64, 64, 64 ], deck.posIndex*3 );
         deck.posIndex++;
         // Also the indicies array needs to be terminated
         deck.indices[deck.segmentIndex] = deck.posIndex;
     }
 
+    // Bracket bearing/speed for client-side spline smoothing.
+    // Both PositionMessage (server-side raw) and PilotPosition (per-tick
+    // wire format) use degrees (0–359) and kph; the wire-format encoder
+    // truncates to int. Store plain int; sentinel -1 means "absent".
+    const pb = (point as any).b;
+    const ps = (point as any).s;
+    const newB = pb == null || pb < 0 ? -1 : Math.round(pb);
+    const newS = ps == null || ps < 0 ? 0 : Math.round(ps);
+
     // Start the first segment
     if (deck.posIndex == 0) {
         deck.indices[deck.segmentIndex++] = 0;
-        pushPoint([point.lng, point.lat, point.a], point.g, point.t); // always have two points ;)
+        pushPoint([point.lng, point.lat, point.a], point.g, point.t, newB, newS); // always have two points ;)
     } else {
         const previousSegmentStart = deck.indices[deck.segmentIndex - 1];
         // If the gap is too long then we need to start the next segment as well
@@ -117,14 +138,20 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
             if (previousSegmentStart == deck.posIndex - 1) {
                 // add it to the previous segment so there are two points in it, it's not a line
                 // without two points
-                pushPoint(deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3), deck.agl[previousSegmentStart], deck.t[previousSegmentStart]);
+                pushPoint(
+                    deck.positions.subarray(previousSegmentStart * 3, (previousSegmentStart + 1) * 3),
+                    deck.agl[previousSegmentStart],
+                    deck.t[previousSegmentStart],
+                    deck.bearing[previousSegmentStart],
+                    deck.speed[previousSegmentStart]
+                );
             }
             deck.indices[deck.segmentIndex] = deck.posIndex;
             // Start a new segment, on the next point (which has not yet been pushed)
             deck.segmentIndex++;
         } else {
             if (deck.posIndex - previousSegmentStart > 100) {
-                pushPoint([point.lng, point.lat, point.a], point.g, point.t);
+                pushPoint([point.lng, point.lat, point.a], point.g, point.t, newB, newS);
                 deck.segmentIndex++;
             }
             deck.climbRate[deck.posIndex] = Math.trunc((point.a - deck.positions[(deck.posIndex - 1) * 3 + 2]) / (point.t - lastTime!));
@@ -132,7 +159,7 @@ export function mergePoint(point: PositionMessage | PilotPosition, glider: Pilot
     }
 
     // Push the new point into the data array
-    pushPoint([point.lng, point.lat, point.a], point.g, point.t);
+    pushPoint([point.lng, point.lat, point.a], point.g, point.t, newB, newS);
 
     return {start, end: deck.posIndex};
 }

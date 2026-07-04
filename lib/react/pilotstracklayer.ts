@@ -18,7 +18,22 @@ import {referenceDate} from '../flightprocessing/referenceDate';
 
 const complexColours = {height: true, aheight: true, climb: true};
 
+// Time-derived TripsLayer props for one pilot. Recomputed both at React
+// render time (when data changes) and from the RAF loop in deckgl.tsx
+// (when only the cursor time changes — same arithmetic, no React work).
+// `showFull` covers both selected and hovered: either should reveal the
+// pilot's full trail when fullPaths == selectedFull.
+export function computeTripsFiltering(currentTime: number, clipStartAt: number, fullPaths: PathLength, showFull: boolean) {
+    return {
+        currentTime: currentTime - referenceDate - 2,
+        fadeTrail: fullPaths == PathLength.recent || (fullPaths == PathLength.selectedFull && !showFull) || currentTime <= clipStartAt,
+        trailLength: recentTrackLength,
+        startTime: currentTime > clipStartAt ? clipStartAt - 5 - referenceDate : 0
+    };
+}
+
 const selectedColour = [255, 0, 255];
+const hoveredColour = [255, 170, 0];
 const c = {
     light: {
         all: [32, 32, 32, 128],
@@ -32,11 +47,12 @@ const c = {
 
 export function pilotsTrackLayer(
     props: {selectedCompno: Compno; setSelectedCompno: Function; replayTime: Epoch}, //
-    latestUpdate: Epoch,
+    liveNow: Epoch,
     sortKey: SortKey,
     map2d: boolean,
     mapLight: boolean,
-    fullPaths: PathLength
+    fullPaths: PathLength,
+    hoveredCompno: Compno | null
 ) {
     const trackData = useSelector((state) => selectAllTracks(state));
     const startTimes = useSelector((state) => selectAllTimes(state, props.replayTime));
@@ -50,22 +66,23 @@ export function pilotsTrackLayer(
     let layers = Object.entries(trackData).map(([compno, track]) => {
         // Don't include current pilot in list of all
         const selected = compno == props.selectedCompno;
+        const hovered = compno == hoveredCompno;
 
         const p = track.deck;
         if (!p || !p.posIndex) {
             return;
         }
+        // Render from the smoothed (Hermite-subdivided) sidecar when
+        // present; the anchor arrays remain authoritative for scoring.
+        const s = p.smoothed ?? p;
 
-        const currentTime = props.replayTime || latestUpdate;
+        const currentTime = props.replayTime || liveNow;
         const clipStartAt = (startTimes[compno]?.startUtc ?? Infinity) - 30;
 
-        // For all but selected gliders just show most recent track
-        const tripsFiltering = {
-            currentTime: currentTime - referenceDate - 2,
-            fadeTrail: fullPaths == PathLength.recent || (fullPaths == PathLength.selectedFull && !selected) || currentTime <= clipStartAt,
-            trailLength: recentTrackLength,
-            startTime: currentTime > clipStartAt ? clipStartAt - 5 - referenceDate : 0
-        };
+        // For all but selected/hovered gliders just show most recent track.
+        // The same arithmetic is re-run from deckgl.tsx's RAF loop to
+        // imperatively bump currentTime/startTime without a React re-render.
+        const tripsFiltering = computeTripsFiltering(currentTime, clipStartAt, fullPaths, selected || hovered);
 
         const getColor = sortKey == 'climb' ? {value: track.deckAdditional.climb, size: 3} : sortKey == 'aheight' ? {value: track.deckAdditional.aheight, size: 3} : undefined;
 
@@ -73,15 +90,14 @@ export function pilotsTrackLayer(
             id: compno + p.trackVersion,
             compno: compno,
             data: {
-                length: p.segmentIndex, // note this is not segmentIndex-1 (segmentIndex is one we are in, indices[segmentIndex] is defined)
-                startIndices: p.indices,
-                numberOfPoints: p.posIndex,
-                t: p.t,
-                v: p.climbRate,
-                g: p.agl,
-                p: p.positions,
+                length: s.segmentIndex, // note this is not segmentIndex-1 (segmentIndex is one we are in, indices[segmentIndex] is defined)
+                startIndices: s.indices,
+                numberOfPoints: s.posIndex,
+                v: s.climbRate,
+                g: s.agl,
+                p: s.positions,
                 attributes: {
-                    getPath: {value: p.positions, size: 3},
+                    getPath: {value: s.positions, size: 3},
                     getTimestamps: {value: track.deckAdditional.tr, size: 1},
                     getColor
                 }
@@ -96,23 +112,25 @@ export function pilotsTrackLayer(
             // For 2d we don't want to use billboard as it doesn't render on some devices
             billboard: map2d ? false : true,
 
-            // How wide is the line
-            getWidth: selected ? 5 : 3,
+            // How wide is the line. Hover gets the same emphasis as selected.
+            getWidth: selected || hovered ? 5 : 3,
             widthUnits: 'meters',
-            widthMinPixels: selected ? 3 : 2,
+            widthMinPixels: selected || hovered ? 3 : 2,
 
-            // this only works if we aren't using a UInt array for colours
-            getColor: getColor ? undefined : selected ? selectedColour : c[mapLight ? 'light' : 'dark'][fullPaths ? 'all' : 'normal'],
+            // this only works if we aren't using a UInt array for colours.
+            // Selected takes priority over hover, so hovering the already-
+            // selected pilot keeps the selected colour.
+            getColor: getColor ? undefined : selected ? selectedColour : hovered ? hoveredColour : c[mapLight ? 'light' : 'dark'][fullPaths ? 'all' : 'normal'],
 
             // if number of points has changed then we need to redraw, nothing else can change without this changing
             dataComparator: (newData: any, oldData: any) => newData.numberOfPoints == oldData.numberOfPoints,
             // as this is a path layer the primary data structure is segments - we only need to redraw the last segment
             _dataDiff: (newData: any, oldData: any) => [{startRow: oldData.length - 1, endRow: newData.length}],
             updateTriggers: {
-                getPath: [p.posIndex, clipStartAt],
-                getColor: [mapLight, complexColours[sortKey] ? sortKey : 'normal', mapLight, selected, fullPaths],
+                getPath: [s.posIndex, clipStartAt],
+                getColor: [mapLight, complexColours[sortKey] ? sortKey : 'normal', mapLight, selected, hovered, fullPaths],
                 getTimestamps: [track.deckAdditional?.tr?.length],
-                getWidth: selected
+                getWidth: selected || hovered
             },
 
             // Hover & click handlers

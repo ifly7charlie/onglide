@@ -25,13 +25,12 @@ describe('selectAircraftForPosition', () => {
         expect(selectAircraftForPosition([], POINT_IN_A.lat, POINT_IN_A.lng)).toEqual([]);
     });
 
-    test('out-of-bbox known tracker drops to no aircraft → fallback returns full list', () => {
-        // Single comp A, point in neither — fallback rule kicks in so we
-        // don't silently drop. Caller still does the right thing for the
-        // single-aircraft case (the one entry receives).
+    test('out-of-bbox known tracker is dropped (no fallback)', () => {
+        // Single comp A, point in neither — the bbox is a hard clip, so a
+        // lone tracker outside its task bbox is dropped rather than delivered.
         const ac = makeAircraft('A', BBOX_A);
         const result = selectAircraftForPosition([ac], POINT_IN_NEITHER.lat, POINT_IN_NEITHER.lng);
-        expect(result).toEqual([ac]);
+        expect(result).toEqual([]);
     });
 
     test('multi-comp disjoint bboxes: only the matching comp receives', () => {
@@ -61,12 +60,12 @@ describe('selectAircraftForPosition', () => {
         expect(result).toEqual([acA, acB]);
     });
 
-    test('all aircraft out of bbox → fallback to broadcast (no silent drop)', () => {
-        // Both have bboxes, neither contains the point. Stale-bbox safety
-        // net: deliver to all rather than discard.
+    test('all aircraft out of bbox → all dropped (hard clip)', () => {
+        // Both have bboxes, neither contains the point: every aircraft is
+        // outside its task area, so nothing is delivered.
         const acA = makeAircraft('A', BBOX_A);
         const acB = makeAircraft('B', BBOX_B);
         const result = selectAircraftForPosition([acA, acB], POINT_IN_NEITHER.lat, POINT_IN_NEITHER.lng);
-        expect(result).toEqual([acA, acB]);
+        expect(result).toEqual([]);
     });
 });

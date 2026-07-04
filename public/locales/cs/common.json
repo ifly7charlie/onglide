@@ -151,8 +151,14 @@
         "label_duration": "Trvání"
     },
     "options": {
+        "climb_show": "Zobrazit rychlost stoupání kroužících kluzáků",
+        "climb_hide": "Skrýt rychlost stoupání kroužících kluzáků",
         "click_to_measure": "Klikněte pro měření",
         "click_to_stop_measuring": "Klikněte pro ukončení měření",
+        "measure_off": "Měřicí nástroj vypnut — klikněte pro měření vzdáleností na mapě",
+        "measure_active": "Měřicí nástroj: klikněte na dva body na mapě. Klikněte zde pro vypnutí",
+        "compare_off": "Porovnání kluzáků vypnuto — klikněte pro porovnání vybraného kluzáku s vedoucím (nebo kluzákem pod kurzorem)",
+        "compare_active": "Porovnává vybraný kluzák s vedoucím (nebo kluzákem pod kurzorem). Klikněte zde pro vypnutí",
         "rain_radar_showing": "Upravit načasování dešťového radaru, nyní {{value}}, klikněte pro změnu nebo vypnutí",
         "rain_radar_enable": "Klikněte pro zapnutí dešťového radaru",
         "rain_now": "nyní",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Přepnout na metrické jednotky",
         "switch_to_imperial": "Přepnout na imperiální jednotky",
         "map_attribution": "Atribuce mapy",
-        "close": "Zavřít"
+        "close": "Zavřít",
+        "follow_suspended": "Sledování pozastaveno, protože jste posunuli mapu. Klikněte pro obnovení nebo vyberte pilota",
+        "orientation_suspended": "Uzamčení orientace pozastaveno, protože jste posunuli mapu. Klikněte pro obnovení nebo vyberte pilota"
     },
     "drawer": {
         "class": "Třída",
@@ -214,6 +222,7 @@
         "leg_completed": "úsek dokončen",
         "view_leg": "úsek",
         "view_task": "úloha",
+        "view_statistics": "Statistika",
         "view_actuals": "skutečné",
         "view_handicapped": "s handicapem",
         "view_task_or_leg": "úloha nebo úsek",
@@ -229,9 +238,24 @@
         "shortest": "Nejkratší",
         "recent_wind": "Aktuální vítr"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termiky · {{pct}}% kroužení · max {{best}} · prům {{avg}}",
+        "summary2": "prům klouzavost {{ld}} · {{flown}} · nastoupáno {{gain}} · {{pctGap}}% bez pokrytí",
+        "flown": "nalétáno {{dist}}",
+        "flown_with_extra": "nalétáno {{dist}} ({{extra}} trati)",
+        "col_time": "Čas",
+        "col_duration": "Trvání",
+        "col_wind": "Vítr",
+        "state_thermal": "Termika",
+        "state_straight": "Přeskok",
+        "state_gap": "Mezera",
+        "turns": "{{count}} okruhů",
+        "tracking_gap": "bez signálu"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} po dobu {{seconds}} sekund",
         "thermal_average": "průměr: {{climb}}",
+        "gaggle_count": "Hejno {{count}}",
         "straight_distance_speed": "vzdálenost: {{distance}} km rychlostí {{speed}} km/h",
         "straight_ld": "Klouzavost {{ld}}",
         "wind": "rychlost větru: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "napřed",
+        "behind": "pozadu",
+        "above": "výše",
+        "below": "níže"
     },
     "units": {
         "km": "km",

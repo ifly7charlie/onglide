@@ -10,6 +10,7 @@ message OnglideWebSocketMessage {
     optional uint32 t = 5;
     optional Task task = 8;
     optional CompetitionsList competitions = 9;
+    optional ClassStats stats = 10;
 }
 
 // Winner of a flown day — populated for /all CompetitionClassStatus when
@@ -35,6 +36,7 @@ message CompetitionClassStatus {
 	optional string datecode = 8;      // per-class WS-channel datecode (10am-local cutoff)
 	optional TaskDetails taskDetails = 9;  // current day's task; FE picks distance (speed task) or duration (AAT)
 	optional ClassWinner winner = 10;      // home/yesterday with at least one score
+	optional bool replayYesterday = 11;    // pre-10am-local: yesterday flew (replay available) AND a task is briefed for today, so the globe shows both the 'replay yesterday' and the task pill
 }
 
 message CompetitionSummary {
@@ -175,9 +177,15 @@ message PilotTrack {
 	//    bytes leg = 11;
 
     optional bytes agl = 12; // int16
-	
+
 	// This changes if we need to replace the pilot track
 	uint32 trackVersion = 13;
+
+	// Bracket bearing/speed per anchor (for client-side spline smoothing).
+	// bearing: int16, degrees 0–359, or -1 if absent
+	// speed: uint16, kph (truncated to int by the per-tick PilotPosition encoder)
+	optional bytes bearing = 14;
+	optional bytes speed = 15;
 };
 
 message Scores {
@@ -249,6 +257,22 @@ message Stats {
 	repeated StatSegment segments = 1;
 }
 
+// Flight-statistics data plane — delivered independently of scores, keyed to
+// trackVersion (position lineage) not scoreId. Mirrors ClassPositions / PilotTracks.
+message ClassStats {
+	map<string, PilotStatsUpdate> class = 1; // keyed by className
+}
+
+message PilotStatsUpdate {
+	uint32 baseTime = 1; // >0 => fetch the /stats snapshot first; 0 => merge inline (cf PilotTracks.baseTime)
+	map<string, PilotStats> pilots = 2; // keyed by compno
+}
+
+message PilotStats {
+	uint32 trackVersion = 1; // bumps when the deck is rebuilt (tracker change) — client resets on change
+	repeated StatSegment segments = 2;
+}
+
 message BasePositionMessage {
 	uint32 t = 1;
 	float lat = 2;
@@ -290,8 +314,8 @@ message PilotScore {
     uint32 currentLeg = 37;
     map<uint32,PilotScoreLeg> legs = 36;
 
-    // If we are generating statistics then include that
-    optional Stats stats = 43;
+    // Statistics now travel on their own ClassStats plane (keyed to trackVersion).
+    // field 43 (was: optional Stats stats) is retired — do not reuse.
     optional Wind wind = 56;
 
 

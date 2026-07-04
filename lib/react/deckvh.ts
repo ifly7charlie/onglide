@@ -1,10 +1,5 @@
-import {PositionMessage, DeckData, DisplayPilotTrackData, SortKey} from '../types';
+import {DisplayPilotTrackData} from '../types';
 
-import {PilotPosition} from '../protobuf/onglide';
-
-import {deckPointIncrement} from '../constants';
-
-import {resize} from '../flightprocessing/incremental';
 import {referenceDate} from '../flightprocessing/referenceDate';
 
 const colourMaps = ['800009', '9F0033', 'BF0069', 'DF00AC', 'FF00F8', 'DF22FF', 'C144FF', 'AD66FF', 'A688FF', 'ADAAFF', 'CCCCFF'].map(
@@ -19,36 +14,31 @@ const climb = (v: number) => colourMaps[clamp(v + 5)];
 const aheight = (v: number) => colourMaps[clamp(Math.log(Math.max(v >> 5, 0)))];
 //const    height = (v) => colourise(Math.min(255, Math.log2(v >> 5) * 35))
 
-const climbBulk = (deck: DeckData) => Array.from(deck.climbRate, climb).flat(2);
-//const aheightBulk = (deck: DeckData) => deck.agl.values().map(aheight).flat(2);
-//const heightBulk = (cf, deck: DeckData) => _map(deck.t, (_v, index) => cf(deck.positions[3 * index + 2])).flat(2);
-
-function doFlatMap<T extends Int16Array | Int8Array>(ta: T, cb: (v: T[0]) => [number, number, number]): Uint8Array {
-    const result = new Uint8Array(ta.length * 3);
-    const l = ta.length;
-    for (let i = 0, r = 0; i < l; i++, r += 3) {
-        result.set(cb(ta[i]), r);
-    }
-    return result;
-}
-
+// Renderer-side per-vertex sidecar (timestamps + RGB). Sourced from the
+// smoothed sidecar when present (Hermite-subdivided), falling back to
+// the raw anchor arrays otherwise. RGB is computed per-vertex from the
+// (interpolated) agl/climb so colour gradients stay continuous along
+// smoothed sections.
+//
+// `tr` is Float32 fractional seconds-from-baseline (referenceDate). Smoothed
+// sources already store t in those units; raw fallback is epoch-seconds and
+// gets baseline-subtracted here.
 export function initaliseVH(glider: DisplayPilotTrackData): void {
+    const smoothed = glider.deck.smoothed;
+    const src = smoothed ?? glider.deck;
+    const len = src.posIndex;
+    const tr = new Float32Array(len);
+    const climbArr = new Uint8Array(len * 3);
+    const aheightArr = new Uint8Array(len * 3);
+    for (let i = 0; i < len; i++) {
+        tr[i] = smoothed ? src.t[i] : src.t[i] - referenceDate;
+        climbArr.set(climb(src.climbRate[i]), i * 3);
+        aheightArr.set(aheight(src.agl[i]), i * 3);
+    }
     glider.deckAdditional = {
-        tr: new Uint32Array(glider.deck.t.map((t) => t - referenceDate)),
-        climb: doFlatMap(glider.deck.climbRate, climb),
-        aheight: doFlatMap(glider.deck.agl, aheight)
+        tr,
+        climb: climbArr,
+        aheight: aheightArr
     };
 }
 
-export function mergeVHPoint(point: PositionMessage | PilotPosition, {deckAdditional, deck}: DisplayPilotTrackData, position: number) {
-    // Resize required
-    const newLength = position + deckPointIncrement;
-    if (position >= deckAdditional.tr.length) {
-        deckAdditional.tr = resize(Uint32Array, deckAdditional.tr, newLength);
-        deckAdditional.climb = resize(Uint8Array, deckAdditional.climb, newLength * 3);
-        deckAdditional.aheight = resize(Uint8Array, deckAdditional.aheight, newLength * 3);
-    }
-    deckAdditional.tr[position] = point.t - referenceDate;
-    deckAdditional.climb.set(climb(deck.climbRate[position]), position * 3);
-    deckAdditional.aheight.set(climb(deck.agl[position]), position * 3);
-}

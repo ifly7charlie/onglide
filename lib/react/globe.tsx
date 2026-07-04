@@ -16,6 +16,7 @@ import {faClockRotateLeft, faHourglassStart, faTrophy} from '@fortawesome/free-s
 import type {TaskDetails, ClassWinner} from '../protobuf/onglide';
 import type {Epoch} from '../types';
 import {OptionalDurationMM} from './optional';
+import {useElementSize} from './useElementSize';
 import {STATUS_COLOURS, STATUS_LABEL_KEYS, StatusIcon, statusCss, statusIconDataUrl, type CompetitionDisplayStatus} from './competition-status';
 import {useStatusSummary, type StatusSummary} from './statusSummary';
 import {LanguageSwitcher} from './language-switcher';
@@ -47,6 +48,10 @@ export interface CompetitionClass {
     taskDetails?: TaskDetails;
     winner?: ClassWinner;
     nostartutc?: number;
+    // Pre-10:00-local: yesterday flew (replay available) AND a task is briefed
+    // for today. The row then shows a 'replay yesterday' pill alongside the
+    // main task pill (displayStatus). Set server-side in buildCompetitionSummary.
+    replayYesterday?: boolean;
 }
 
 export interface Competition {
@@ -158,20 +163,7 @@ export function CompetitionGlobe({competitions, countriesGeoJson}: {competitions
     // re-render — toggling the in-view filter pre-interaction would otherwise
     // do nothing because width/height were still 0). Used together with the
     // live viewState to construct a Viewport for the in-view projection test.
-    const canvasRef = useRef<HTMLDivElement | null>(null);
-    const [canvasSize, setCanvasSize] = useState<{width: number; height: number}>({width: 0, height: 0});
-    useEffect(() => {
-        const el = canvasRef.current;
-        if (!el) return;
-        const update = () => {
-            const r = el.getBoundingClientRect();
-            setCanvasSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : {width: r.width, height: r.height}));
-        };
-        update();
-        const ro = new ResizeObserver(update);
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
+    const [canvasRef, canvasSize] = useElementSize<HTMLDivElement>();
 
     // Refs to each list entry, keyed by compid, so hovering/clicking a marker
     // on the globe can scroll the corresponding row into view in the side panel.
@@ -659,7 +651,10 @@ function CompetitionListEntry({
     // (AAT). Returns null when there's nothing meaningful to show — pre-task
     // and upcoming classes render with just the status pill and class name.
     const renderClassMetric = (cls: CompetitionClass) => {
-        if ((cls.displayStatus === 'home' || cls.displayStatus === 'yesterday') && cls.winner) {
+        // Show yesterday's winner whenever we have one — including the dual
+        // 'replay yesterday + task today' state, where displayStatus is
+        // 'task_set' but the row still represents a flown day with a result.
+        if ((cls.displayStatus === 'home' || cls.displayStatus === 'yesterday' || cls.replayYesterday) && cls.winner) {
             const w = cls.winner;
             const value =
                 typeof w.taskSpeed === 'number' && w.taskSpeed > 0
@@ -743,6 +738,12 @@ function CompetitionListEntry({
                                   Router.push('/' + comp.compid + '?className=' + cls.class);
                               }}
                           >
+                              {cls.replayYesterday ? (
+                                  <span className="status-pill" style={{background: statusCss('yesterday')}}>
+                                      <StatusIcon status="yesterday" />
+                                      {t(STATUS_LABEL_KEYS.yesterday)}
+                                  </span>
+                              ) : null}
                               <span className="status-pill" style={{background: statusCss(cls.displayStatus)}}>
                                   <StatusIcon status={cls.displayStatus} />
                                   {t(STATUS_LABEL_KEYS[cls.displayStatus])}

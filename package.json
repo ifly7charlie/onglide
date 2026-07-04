@@ -24,7 +24,9 @@
         "x:dev": "yarn build:tsc && node  --enable-source-maps --experimental-fetch dist/test/x.js",
         "startai": "node --require ./lib/load-appinsights.js node_modules/next/dist/bin/next start",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "i18n:check": "node bin/checktranslations.js",
+        "i18n:fill": "node bin/checktranslations.js --fill"
     },
     "dependencies": {
         "@mapbox/tilebelt": ">=1.0.1",
@@ -49,10 +51,10 @@
         "js-aprs-is": ">=1.0.1",
         "kalmanjs": "^1.1.0",
         "lru-cache": "^11.2.4",
-        "maplibre-gl": "^4.7.0",
+        "maplibre-gl": "^5.0.0",
         "ndarray": ">=1.0.19",
         "next-i18next": "^16.0.5",
-        "pmtiles": "^3.2.0",
+        "pmtiles": "^4.3.0",
         "pngjs": ">=5.0.0",
         "prompts": ">=2.3.2",
         "react-i18next": "^17.0.4",
@@ -64,7 +66,7 @@
         "suncalc": "^1.8.0",
         "tabletojson": "^4.0.0",
         "web-push": "^3.6.7",
-        "ws": ">=7.3"
+        "ws": "8.21.0"
     },
     "devDependencies": {
         "@babel/core": "^7.24.7",
@@ -96,7 +98,7 @@
         "react": "^19.2.1",
         "react-dom": "^19.2.1",
         "react-error-boundary": "^4.0.13",
-        "react-map-gl": "^7.1.7",
+        "react-map-gl": "^8.0.0",
         "react-redux": "^9.1.2",
         "react-use-websocket": "^4.0.0",
         "sass": "^1.36.0",

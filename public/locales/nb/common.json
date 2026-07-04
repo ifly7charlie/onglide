@@ -151,8 +151,14 @@
         "label_duration": "Tid"
     },
     "options": {
+        "climb_show": "Vis stigehastighet for sirklende seilfly",
+        "climb_hide": "Skjul stigehastighet for sirklende seilfly",
         "click_to_measure": "Klikk for å måle",
         "click_to_stop_measuring": "Klikk for å stoppe måling",
+        "measure_off": "Måleverktøy av — klikk for å måle avstander på kartet",
+        "measure_active": "Måleverktøy: klikk på to punkter på kartet. Klikk her for å slå av",
+        "compare_off": "Sammenligning av seilfly av — klikk for å sammenligne det valgte seilflyet med lederen (eller seilflyet under markøren)",
+        "compare_active": "Sammenligner det valgte seilflyet med lederen (eller seilflyet under markøren). Klikk her for å slå av",
         "rain_radar_showing": "Juster regnradar-tid, viser nå {{value}}, klikk for å endre eller slå av",
         "rain_radar_enable": "Klikk for å slå på regnradar",
         "rain_now": "nå",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Bytt til metriske enheter",
         "switch_to_imperial": "Bytt til imperiale enheter",
         "map_attribution": "Kartattribusjon",
-        "close": "Lukk"
+        "close": "Lukk",
+        "follow_suspended": "Følging satt på pause fordi du flyttet kartet. Klikk for å gjenoppta, eller velg en pilot",
+        "orientation_suspended": "Orienteringslås satt på pause fordi du flyttet kartet. Klikk for å gjenoppta, eller velg en pilot"
     },
     "drawer": {
         "class": "Klasse",
@@ -214,6 +222,7 @@
         "leg_completed": "etappe fullført",
         "view_leg": "etappe",
         "view_task": "oppgave",
+        "view_statistics": "Statistikk",
         "view_actuals": "faktisk",
         "view_handicapped": "handikap",
         "view_task_or_leg": "oppgave eller etappe",
@@ -229,9 +238,24 @@
         "shortest": "Korteste",
         "recent_wind": "Aktuell vind"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termikker · {{pct}}% sirkling · best {{best}} · snitt {{avg}}",
+        "summary2": "snitt glidetall {{ld}} · {{flown}} · steget {{gain}} · {{pctGap}}% ingen dekning",
+        "flown": "fløyet {{dist}}",
+        "flown_with_extra": "fløyet {{dist}} ({{extra}} oppgave)",
+        "col_time": "Tid",
+        "col_duration": "Varighet",
+        "col_wind": "Vind",
+        "state_thermal": "Termikk",
+        "state_straight": "Glideflukt",
+        "state_gap": "Hull",
+        "turns": "{{count}} runder",
+        "tracking_gap": "ingen signal"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",
         "thermal_average": "snitt: {{climb}}",
+        "gaggle_count": "Sverm på {{count}}",
         "straight_distance_speed": "distanse: {{distance}} km med fart {{speed}} km/t",
         "straight_ld": "Glidetall {{ld}}",
         "wind": "vindhastighet: {{speed}} km/t @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "t",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "foran",
+        "behind": "bak",
+        "above": "over",
+        "below": "under"
     },
     "units": {
         "km": "km",

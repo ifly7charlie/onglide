@@ -31,6 +31,7 @@ const defaultOptions: Options = {
     zoomTask: true,
     sortKey: 'auto',
     showOthers: true,
+    showClimb: false,
     fullPaths: PathLength.selectedFull,
     options2d: {taskUp: TaskUp.north, mapType: MapType.street, follow: true},
     options3d: {taskUp: TaskUp.track, mapType: MapType.satellite, follow: true},
@@ -43,7 +44,7 @@ export function useOptions() {
         const saved = window?.localStorage.getItem('options');
         if (saved) {
             try {
-                set({...JSON.parse(saved), zoomTask: true, rainRadar: false});
+                set({...JSON.parse(saved), zoomTask: true, viewSuspended: false});
             } catch (e) {
                 set(defaultOptions);
             }
@@ -54,7 +55,11 @@ export function useOptions() {
     const setOptions = useCallback(
         (newOptions: Options) => {
             try {
-                window?.localStorage.setItem('options', JSON.stringify(newOptions));
+                // viewSuspended is a transient interaction flag (user panned the map) —
+                // keep it in-memory only so it never survives a reload.
+                const persisted = {...newOptions};
+                delete persisted.viewSuspended;
+                window?.localStorage.setItem('options', JSON.stringify(persisted));
             } catch (e) {
                 /**/
             }

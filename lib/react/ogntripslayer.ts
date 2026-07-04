@@ -15,11 +15,12 @@
 
 import {TripsLayer} from '@deck.gl/geo-layers';
 
+import {referenceDate} from '../flightprocessing/referenceDate';
+
 interface OgnTripsData {
     length: number;
     numberOfPoints: number;
     startIndices: Uint32Array;
-    t: Uint32Array;
     v: Uint8Array;
     g: Int16Array;
 }
@@ -96,12 +97,16 @@ discard;
         const props = pickParams?.info?.layer?.props;
         if (info.picked && props && props.data) {
             const coordinate = props.data.attributes.getPath.value.subarray(pickParams.info.index * 3, (pickParams.info.index + 1) * 3);
+            // getTimestamps.value is fractional seconds-from-referenceDate (see
+            // lib/react/deckvh.ts); add referenceDate to recover epoch-seconds
+            // for the tooltip.
+            const tr = props.data.attributes.getTimestamps.value[pickParams.info.index];
             info.object = {
                 compno: props.compno, //
                 a: Math.floor(coordinate[2]),
                 g: props.data?.g[pickParams.info.index],
                 v: props.data?.v[pickParams.info.index] || undefined,
-                t: props.data.t[pickParams.info.index]
+                t: Math.round(tr + referenceDate)
             };
         }
         return info;

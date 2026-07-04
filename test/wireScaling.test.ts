@@ -30,7 +30,6 @@ const pilot = (over: Partial<PilotScore> = {}): PilotScore => ({
         0: {legno: 0, time: 1, actual: speedDist({distance: 10.1}), handicapped: speedDist({distance: 11.2}), convexHull: [1.5, 2.5]},
         1: {legno: 1, time: 2, actual: speedDist({distance: 50.4}), handicapped: speedDist({distance: 55.6}), convexHull: []}
     },
-    stats: {segments: [{start: 1, end: 2, state: 'climb', wind: undefined, turncount: 3, distance: 12.4, achievedDistance: 8.8, delta: -5, avgDelta: -1.7, direction: 0, heightgain: 100, heightloss: 20}]},
     scoredPoints: [51.5, -1.2, 10, 11],
     minDistancePoints: [],
     maxDistancePoints: [],
@@ -41,6 +40,12 @@ const pilot = (over: Partial<PilotScore> = {}): PilotScore => ({
 });
 
 const scoresMessage = (p: PilotScore = pilot()): OnglideWebSocketMessage => ({scores: {scoreId: 'abc', pilots: {[p.compno]: p}}});
+
+// Flight statistics now travel on their own ClassStats plane, not on PilotScore.
+const statsSegment = (over: Partial<import('../lib/protobuf/onglide').StatSegment> = {}) => ({
+    start: 1, end: 2, state: 'climb', wind: undefined, turncount: 3, distance: 12.4, achievedDistance: 8.8, delta: -5, avgDelta: -1.7, direction: 0, heightgain: 100, heightloss: 20, ...over
+});
+const statsMessage = (seg = statsSegment()): OnglideWebSocketMessage => ({stats: {class: {A: {baseTime: 0, pilots: {'42': {trackVersion: 7, segments: [seg]}}}}}});
 
 const task = (): Task => ({
     legs: [
@@ -71,10 +76,16 @@ describe('round-trip', () => {
     });
 
     test('StatSegment distance/achievedDistance/avgDelta survive (avgDelta signed)', () => {
-        const seg = roundTrip(scoresMessage()).scores!.pilots['42'].stats!.segments[0];
+        const seg = roundTrip(statsMessage()).stats!.class['A'].pilots['42'].segments[0];
         expect(seg.distance).toBeCloseTo(12.4, 5);
         expect(seg.achievedDistance).toBeCloseTo(8.8, 5);
         expect(seg.avgDelta).toBeCloseTo(-1.7, 5);
+    });
+
+    test('ClassStats trackVersion / baseTime pass through unscaled', () => {
+        const back = roundTrip(statsMessage()).stats!.class['A'];
+        expect(back.baseTime).toBe(0);
+        expect(back.pilots['42'].trackVersion).toBe(7);
     });
 
     test('TaskLeg / TaskRules / TaskDetails fields survive', () => {
@@ -121,7 +132,7 @@ describe('wire form', () => {
         const scaled = scaleForWire(scoresMessage());
         expect(scaled.scores!.pilots['42'].actual!.distance).toBe(101);
         expect(scaled.scores!.pilots['42'].actual!.taskDistance).toBe(2149);
-        expect(scaled.scores!.pilots['42'].stats!.segments[0].avgDelta).toBe(-17);
+        expect(scaleForWire(statsMessage()).stats!.class['A'].pilots['42'].segments[0].avgDelta).toBe(-17);
     });
 
     test('grRemaining is not scaled (already a uint32)', () => {
@@ -147,7 +158,6 @@ describe('no mutation', () => {
         const scaled = scaleForWire(m);
         expect(original.actual!.distance).toBe(10.1);
         expect(original.actual!.taskDistance).toBe(214.9);
-        expect(original.stats!.segments[0].avgDelta).toBe(-1.7);
         expect(scaled.scores!.pilots['42']).not.toBe(original);
         expect(scaled.scores!.pilots['42'].actual).not.toBe(original.actual);
     });
@@ -181,8 +191,8 @@ describe('defensive handling', () => {
     });
 
     test('negative avgDelta is preserved (signed sint32 field)', () => {
-        const m = scoresMessage(pilot({stats: {segments: [{start: 0, end: 1, state: 'x', wind: undefined, turncount: 0, distance: 1, achievedDistance: 1, delta: 0, avgDelta: -9.9, direction: 0, heightgain: 0, heightloss: 0}]}}));
-        expect(roundTrip(m).scores!.pilots['42'].stats!.segments[0].avgDelta).toBeCloseTo(-9.9, 5);
+        const m = statsMessage(statsSegment({avgDelta: -9.9}));
+        expect(roundTrip(m).stats!.class['A'].pilots['42'].segments[0].avgDelta).toBeCloseTo(-9.9, 5);
     });
 
     test('absent optional fields stay undefined', () => {

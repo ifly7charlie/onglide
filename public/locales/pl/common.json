@@ -151,8 +151,14 @@
         "label_duration": "Czas"
     },
     "options": {
+        "climb_show": "Pokaż prędkość wznoszenia krążących szybowców",
+        "climb_hide": "Ukryj prędkość wznoszenia krążących szybowców",
         "click_to_measure": "Kliknij, aby mierzyć",
         "click_to_stop_measuring": "Kliknij, aby zakończyć pomiar",
+        "measure_off": "Narzędzie pomiaru wyłączone — kliknij, aby zmierzyć odległości na mapie",
+        "measure_active": "Narzędzie pomiaru: kliknij dwa punkty na mapie. Kliknij tutaj, aby wyłączyć",
+        "compare_off": "Porównywanie szybowców wyłączone — kliknij, aby porównać wybrany szybowiec z liderem (lub szybowcem pod kursorem)",
+        "compare_active": "Porównywanie wybranego szybowca z liderem (lub szybowcem pod kursorem). Kliknij tutaj, aby wyłączyć",
         "rain_radar_showing": "Dostosuj timing radaru deszczu, obecnie {{value}}, kliknij, aby zmienić lub wyłączyć",
         "rain_radar_enable": "Kliknij, aby włączyć radar deszczu",
         "rain_now": "teraz",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Przełącz na jednostki metryczne",
         "switch_to_imperial": "Przełącz na jednostki imperialne",
         "map_attribution": "Atrybucja mapy",
-        "close": "Zamknij"
+        "close": "Zamknij",
+        "follow_suspended": "Śledzenie wstrzymane, ponieważ przesunięto mapę. Kliknij, aby wznowić, lub wybierz pilota",
+        "orientation_suspended": "Blokada orientacji wstrzymana, ponieważ przesunięto mapę. Kliknij, aby wznowić, lub wybierz pilota"
     },
     "drawer": {
         "class": "Klasa",
@@ -214,6 +222,7 @@
         "leg_completed": "odcinek ukończony",
         "view_leg": "odcinek",
         "view_task": "konkurencja",
+        "view_statistics": "Statystyki",
         "view_actuals": "rzeczywiste",
         "view_handicapped": "z handicapem",
         "view_task_or_leg": "konkurencja lub odcinek",
@@ -229,9 +238,24 @@
         "shortest": "Najkrótszy",
         "recent_wind": "Aktualny wiatr"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} kominy · {{pct}}% krążenia · maks {{best}} · śr {{avg}}",
+        "summary2": "śr doskonałość {{ld}} · {{flown}} · wznios {{gain}} · {{pctGap}}% brak zasięgu",
+        "flown": "przeleciano {{dist}}",
+        "flown_with_extra": "przeleciano {{dist}} ({{extra}} zadania)",
+        "col_time": "Czas",
+        "col_duration": "Czas trwania",
+        "col_wind": "Wiatr",
+        "state_thermal": "Komin",
+        "state_straight": "Przeskok",
+        "state_gap": "Przerwa",
+        "turns": "{{count}} okrążeń",
+        "tracking_gap": "brak sygnału"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} przez {{seconds}} sekund",
         "thermal_average": "średnio: {{climb}}",
+        "gaggle_count": "Stado {{count}}",
         "straight_distance_speed": "dystans: {{distance}} km z prędkością {{speed}} km/h",
         "straight_ld": "Doskonałość {{ld}}",
         "wind": "prędkość wiatru: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "z przodu",
+        "behind": "z tyłu",
+        "above": "wyżej",
+        "below": "niżej"
     },
     "units": {
         "km": "km",

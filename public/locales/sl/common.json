@@ -151,8 +151,14 @@
         "label_duration": "Trajanje"
     },
     "options": {
+        "climb_show": "Prikaži hitrost dviganja krožečih jadralnih letal",
+        "climb_hide": "Skrij hitrost dviganja krožečih jadralnih letal",
         "click_to_measure": "Klikni za merjenje",
         "click_to_stop_measuring": "Klikni za zaustavitev merjenja",
+        "measure_off": "Merilno orodje izklopljeno — klikni za merjenje razdalj na zemljevidu",
+        "measure_active": "Merilno orodje: klikni dve točki na zemljevidu. Klikni tukaj za izklop",
+        "compare_off": "Primerjava jadralnih letal izklopljena — klikni za primerjavo izbranega jadralnega letala z vodilnim (ali jadralnim letalom pod kazalcem)",
+        "compare_active": "Primerja izbrano jadralno letalo z vodilnim (ali jadralnim letalom pod kazalcem). Klikni tukaj za izklop",
         "rain_radar_showing": "Prilagodi čas dežnega radarja, trenutno {{value}}, klikni za spremembo ali izklop",
         "rain_radar_enable": "Klikni za vklop dežnega radarja",
         "rain_now": "zdaj",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Preklopi na metrične enote",
         "switch_to_imperial": "Preklopi na imperialne enote",
         "map_attribution": "Atribucija zemljevida",
-        "close": "Zapri"
+        "close": "Zapri",
+        "follow_suspended": "Sledenje začasno ustavljeno, ker si premaknil zemljevid. Klikni za nadaljevanje ali izberi pilota",
+        "orientation_suspended": "Zaklep orientacije začasno ustavljen, ker si premaknil zemljevid. Klikni za nadaljevanje ali izberi pilota"
     },
     "drawer": {
         "class": "Razred",
@@ -214,6 +222,7 @@
         "leg_completed": "krak končan",
         "view_leg": "krak",
         "view_task": "naloga",
+        "view_statistics": "Statistika",
         "view_actuals": "dejansko",
         "view_handicapped": "handicap",
         "view_task_or_leg": "naloga ali krak",
@@ -229,9 +238,24 @@
         "shortest": "Najkrajša",
         "recent_wind": "Trenutni veter"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termike · {{pct}}% kroženja · maks {{best}} · povpr {{avg}}",
+        "summary2": "povpr finesa {{ld}} · {{flown}} · vzpon {{gain}} · {{pctGap}}% brez pokritja",
+        "flown": "preletano {{dist}}",
+        "flown_with_extra": "preletano {{dist}} ({{extra}} naloge)",
+        "col_time": "Čas",
+        "col_duration": "Trajanje",
+        "col_wind": "Veter",
+        "state_thermal": "Termika",
+        "state_straight": "Prelet",
+        "state_gap": "Vrzel",
+        "turns": "{{count}} krogov",
+        "tracking_gap": "brez signala"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} sekund",
         "thermal_average": "povprečje: {{climb}}",
+        "gaggle_count": "Jata {{count}}",
         "straight_distance_speed": "razdalja: {{distance}} km s hitrostjo {{speed}} km/h",
         "straight_ld": "Drsno število {{ld}}",
         "wind": "hitrost vetra: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "spredaj",
+        "behind": "zadaj",
+        "above": "višje",
+        "below": "nižje"
     },
     "units": {
         "km": "km",

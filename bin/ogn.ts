@@ -22,7 +22,7 @@ import {point} from '@turf/helpers';
 import {WebSocket, WebSocketServer} from 'ws';
 import type {IncomingMessage} from 'http';
 
-import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore, CompetitionSummary, CompetitionClassStatus, ClassWinner} from '../lib/protobuf/onglide';
+import {OnglideWebSocketMessage, Positions, PilotPosition, ClassScoreHistory, PilotScore, CompetitionSummary, CompetitionClassStatus, ClassWinner, StatSegment} from '../lib/protobuf/onglide';
 
 import {setTimeout as setTimeoutPromise} from 'timers/promises';
 
@@ -35,7 +35,7 @@ import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
 import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
-import {taskBbox, unionBboxes, expandBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
+import {taskBbox, unionBboxes, expandBbox, accumulateCompBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
 import {fromDateCode, toDateCode, competitionStartTs} from '../lib/datecode';
@@ -82,9 +82,10 @@ function removeInPlace<T>(arr: T[], pred: (x: T) => boolean): T[] {
 }
 
 // Launch our listener
-import {AprsController, AirfieldSpec} from '../lib/webworkers/aprs';
+import {AprsController, AirfieldSpec, type AprsWorkerEvent, type TrackerSnapshotEntry} from '../lib/webworkers/aprs';
+import {fidHexOf, fidLabel, protoOf} from '../lib/webworkers/pointlog';
 
-import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE} from '../lib/constants';
+import {webPathBaseTimeDuration, scoreChunkSize, FINISHING_ETA_MINUTES, FINISH_TRACKING_GRACE_S, LAUNCHING_TRACKED_FRACTION, LAUNCHING_TOTAL_FRACTION, HOME_OGN_COVERAGE, WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../lib/constants';
 
 import {createHash, randomBytes, createHmac} from 'crypto';
 
@@ -160,6 +161,7 @@ interface CompetitionContext {
     ownedChannels: Set<ChannelName>;
     unknownChannel?: BroadcastChannel;
     lastDatecode?: Datecode;
+    unknownTrackers: Record<FlarmID, UnknownTracker>;
     state: 'starting' | 'running' | 'stopping' | 'stopped';
     // 'Y' if the comp has obtained explicit livetracking consent from
     // pilots; bypasses the DDB Permit-Livetracking block.
@@ -244,6 +246,19 @@ interface Channel {
 
     allScores: Record<Compno, PilotScore>;
 
+    // Flight-statistics data plane (mirrors the tracks snapshot/residual). Stats
+    // are generated in the APRS worker and arrive piggybacked on PositionMessage;
+    // here we keep the canonical per-pilot segment list, freeze immutable
+    // snapshots on the tracks `baseTime` cadence, and ship a residual on the
+    // 500ms position frame. Keyed by compno (the channel is one class, so compno
+    // is unique). Invalidation tracks trackVersion (position lineage), not scoreId
+    // — a rescore does not change segments; a tracker change (deck rebuild) does.
+    statsStore: Record<Compno, StatSegment[]>; // canonical full list per pilot
+    statsBaseTime: Epoch; // epoch of the current frozen stats snapshot (mirrors webPathBaseTime)
+    statsData: Record<string, Buffer>; // frozen snapshots keyed by baseTime string (mirrors webPathData)
+    statsDirty: Set<Compno>; // pilots whose stats changed since the last 500ms residual
+    statsLastTrackVersion: Record<Compno, number>; // last trackVersion shipped per pilot (full-resend on change)
+
     scoreId: string;
     proposedScoreId: string;
     liveScoreId: string;
@@ -289,6 +304,11 @@ let competitionsListeners: OgnWebSocket[] = [];
 // staring at an empty "can't find competition" overlay.
 let shuttingDown = false;
 
+// Every listening server (HTTP + any SSL). handleExit closes these first so the
+// freshly-started daemon (sharing the port via SO_REUSEPORT) becomes the sole
+// listener before we hand the live client sockets over.
+const httpServers: (http.Server | https.Server)[] = [];
+
 // Maintained set of current per-comp CompetitionSummary objects, keyed by
 // compid. broadcastCompetitionsDelta rebuilds an entry whenever a comp
 // changes; the /all snapshot sent to a joining client is built straight from
@@ -330,6 +350,9 @@ interface Glider {
     scoredFinish: Epoch;
     scoredStatus: 'S' | 'F' | 'H'; // from scoring
     scoringConfigured?: boolean;
+    // Latched once we've stopped APRS reception after the pilot finished and
+    // landed (or 5 min elapsed since the finish). Keeps the stop one-shot.
+    trackingStopped?: boolean;
     // True if dbTrackerId === 'blocked' on the last tick. We never send blocked
     // pilots to the scoring worker, so flipping back to unblocked has to reset
     // scoringConfigured so setInitialTrack runs on the next tick.
@@ -353,7 +376,6 @@ interface UnknownTracker {
     matched?: any;
 }
 
-let unknownTrackers: Record<FlarmID, UnknownTracker> = {}; // All the ones we have seen in launch area but matched or not matched
 
 // DDB entry shape — see lib/ddb for the merged (OGN + FlarmNet) loader.
 type DDBEntry = SharedDDBEntry;
@@ -370,6 +392,10 @@ interface OgnWebSocket extends WebSocket {
     isInteracting: boolean;
     isVisible: boolean;
     connectedAt: Epoch;
+    // performance.now() stamped at the top of the wss 'connection' handler —
+    // the earliest JS hook for this socket. Used to log connect→first-send
+    // latency for the /all snapshot (TIMING instrumentation).
+    connectPerf?: number;
     sendBinary: (data: Uint8Array) => void;
 }
 
@@ -392,6 +418,11 @@ function channelNow(channel: Channel): Epoch {
 // other listen error (EACCES, etc.) is fatal — those are config problems,
 // not deploy races. Resolves once `listening` fires.
 async function listenWithRetry(server: http.Server | https.Server, port: number, label: string) {
+    // SO_REUSEPORT lets an incoming daemon bind the port alongside the still-
+    // listening outgoing one during a rolling deploy — the port is served the
+    // whole time, and handleExit drops the old listener to hand connections over
+    // cleanly. Degrades to a plain bind on kernels/platforms without it.
+    let reusePort = true;
     while (true) {
         try {
             await new Promise<void>((resolve, reject) => {
@@ -405,10 +436,16 @@ async function listenWithRetry(server: http.Server | https.Server, port: number,
                 };
                 server.once('error', onError);
                 server.once('listening', onListening);
-                server.listen(port);
+                server.listen(reusePort ? {port, reusePort: true} : {port});
             });
             return;
         } catch (e: any) {
+            // SO_REUSEPORT unsupported here — retry once without it.
+            if (reusePort && (e?.code === 'ENOTSUP' || e?.code === 'EINVAL')) {
+                console.log(`${label}: SO_REUSEPORT unsupported (${e.code}), binding without it`);
+                reusePort = false;
+                continue;
+            }
             if (e?.code !== 'EADDRINUSE') throw e;
             console.log(`${label}: port ${port} in use, waiting for previous process to release it…`);
             await setTimeoutPromise(5000);
@@ -485,6 +522,7 @@ async function main() {
     // One APRS worker for the whole process. Airfields are added by
     // createCompetitionContext as each competition starts.
     aprsController = new AprsController({airfields: []});
+    aprsController.onWorkerEvent = handleAprsWorkerEvent;
 
     // Wait until we can see at least one competition before we start the
     // web server. After that the discovery loop runs on the 60s tick and
@@ -593,6 +631,7 @@ async function main() {
                 const sslPort = parseInt(process.env.WEBSOCKET_PORT!) + 1000;
                 const server = https.createServer(options, setupOgnWebServer);
                 await listenWithRetry(server, sslPort, `SSL ${host}`);
+                httpServers.push(server);
                 setupWebSocketServer(server);
                 console.log(`listening on [SSL] ${sslPort} ssh key for ${host}`);
                 return true;
@@ -611,6 +650,7 @@ async function main() {
         console.log('****> clientError', ex);
     });
     await listenWithRetry(server, port, 'HTTP');
+    httpServers.push(server);
     setupWebSocketServer(server);
     console.log(`Onglide startup ${gitVersion()} listening on ${port}`);
 
@@ -655,24 +695,39 @@ async function main() {
                 {} as Record<string, Positions>
             );
 
+            // Flight-statistics residual piggybacks the same frame: for each
+            // class with changed stats this tick, ship the tail past the frozen
+            // snapshot (baseTime:0 => the client merges inline, no fetch). Built
+            // once for the comp; each client filters to its own class.
+            const statsByClass: Record<string, {baseTime: number; pilots: Record<string, {trackVersion: number; segments: StatSegment[]}>}> = {};
+            for (const c of compChannels) {
+                if (!c.statsDirty.size) continue;
+                const pilots = buildStatsPilots(c, c.statsDirty, c.statsBaseTime ?? (0 as Epoch));
+                if (Object.keys(pilots).length) {
+                    statsByClass[c.className] = {baseTime: 0, pilots};
+                    for (const cn in pilots) c.statsLastTrackVersion[cn as Compno] = pilots[cn].trackVersion;
+                }
+            }
+            const haveStats = Object.keys(statsByClass).length > 0;
+
             const compid = compChannels[0]?.compid;
             // Per-comp "now" so the message timestamp matches the delayed
             // position stream — frontend reads this as its current-time
             // reference for staleness / uptodate detection.
             const compNow = contexts[compid]?.getNow?.() ?? now;
-            const msg = safeEncode(OnglideWebSocketMessage, {positions: {class: positions}, t: Math.trunc(compNow)}, `positions ${compid}`);
+            const msg = safeEncode(OnglideWebSocketMessage, {positions: {class: positions}, stats: haveStats ? {class: statsByClass} : undefined, t: Math.trunc(compNow)}, `positions ${compid}`);
 
             for (const channel of compChannels) {
                 channel.statistics.activeListeners += channel.clients.length;
                 channel.statistics.listenerCycles++;
 
                 if (channel.clients.length) {
-                    // Throttle sibling-only updates: a channel with no
-                    // positions of its own only forwards the comp's
+                    // Throttle sibling-only updates: a channel with no positions
+                    // (and no stats) of its own only forwards the comp's
                     // multi-class broadcast every 15s.
-                    if (!channel.toSend.length) {
+                    if (!channel.toSend.length && !channel.statsDirty.size) {
                         if (now - channel.lastSentPositions < 15) continue;
-                    } else {
+                    } else if (channel.toSend.length) {
                         // if we sent an actual coordinate then this will ensure
                         // that the webPathData is regenerated
                         channel.mostRecentPosition = now;
@@ -683,12 +738,14 @@ async function main() {
                     channel.statistics.positionsSentCycles++;
                     // We don't want to send it twice so it can go
                     channel.toSend = [];
+                    channel.statsDirty.clear();
                     channel.lastSentPositions = now;
 
                     // Send to each client and if they don't respond they will be cleaned up next time around
                     if (msg) channel.sendBinary(msg);
                 } else {
                     channel.toSend = [];
+                    channel.statsDirty.clear();
                 }
             }
         }
@@ -839,6 +896,29 @@ process.on('SIGHUP', handleExit);
 process.on('SIGQUIT', handleExit);
 process.on('SIGTERM', handleExit);
 
+// Tell every connected client to reconnect — they land on the incoming daemon
+// (the sole listener once handleExit has closed our servers). The signal is the
+// bare WS_MOVE sentinel; each client picks its own random delay < CLIENT_MOVE_
+// WINDOW_MS, so the herd is staggered without the daemon tracking per-client
+// timers. Returns how many clients were signalled.
+function signalClientsToMove(): number {
+    let signalled = 0;
+    const send = (ws: OgnWebSocket) => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        try {
+            ws.send(WS_MOVE);
+            signalled++;
+        } catch (e) {
+            // Socket already going away — nothing to do.
+        }
+    };
+    for (const channelName in channels) {
+        for (const client of channels[channelName as ChannelName].clients) send(client);
+    }
+    for (const client of competitionsListeners) send(client);
+    return signalled;
+}
+
 //
 // Tidily exit if the user requests it
 // we need to stop receiving,
@@ -847,6 +927,25 @@ process.on('SIGTERM', handleExit);
 async function handleExit(signal: string) {
     console.log(`received signal: ${signal}`);
     shuttingDown = true;
+
+    // Stop listening first so the freshly-started daemon (sharing the port via
+    // SO_REUSEPORT) becomes the sole listener — every new/reconnecting client
+    // now routes to it. Existing client sockets stay open; we hand them over
+    // deliberately below rather than dropping them.
+    for (const server of httpServers) {
+        try {
+            server.close();
+        } catch (e) {
+            console.error('server.close during exit:', e);
+        }
+    }
+
+    // Ask every live client to migrate, then give them the full move window to
+    // do so before we tear anything down — so they keep getting live data from
+    // us until each individually reconnects to the new daemon.
+    const moved = signalClientsToMove();
+    console.log(`signalled ${moved} client(s) to move to the incoming daemon`);
+    if (moved) await setTimeoutPromise(CLIENT_MOVE_WINDOW_MS);
 
     // Fan out over every active context so each one gets its full
     // destroy path — reload clients, close broadcast channels, wait
@@ -900,7 +999,8 @@ async function discoverCompetitions(): Promise<{active: any[]; upcoming: any[]}>
                           JOIN classes cl2 ON cl2.class = t.class
                           WHERE cl2.compid = c.compid AND t.flown = 'Y') AS currentTaskCount
                   FROM competition c
-                  WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)`;
+                  WHERE EXISTS (SELECT 1 FROM classes cl WHERE cl.compid = c.compid)
+                    AND COALESCE(c.disable, 'N') != 'Y'`;
     const rows: any[] = envCompId //
         ? await db.query<any[]>(base + ' AND c.compid = ?', [envCompId])
         : await db.query<any[]>(base);
@@ -1085,6 +1185,7 @@ async function createCompetitionContext(row: any): Promise<CompetitionContext> {
         location,
         getNow: makeGetNow(location.officialDelay),
         ownedChannels: new Set(),
+        unknownTrackers: {},
         state: 'starting',
         trackingconsent: row.trackingconsent || 'N',
         summary: {
@@ -1173,7 +1274,15 @@ async function destroyCompetitionContext(competition: CompetitionContext) {
 
     let droppedGliders = 0;
     for (const key of Object.keys(gliders)) {
-        if (gliders[key as ClassName_Compno].compid === competition.compid) {
+        const g = gliders[key as ClassName_Compno];
+        if (g.compid === competition.compid) {
+            // Drop the glider from the APRS worker's allAircraft map too —
+            // nothing else issues untrackGlider for a destroyed comp, so
+            // without this they leak forever (still scored against APRS and
+            // still listed on /status/trackers under "(unassigned)").
+            if (g.dbTrackerId && g.dbTrackerId != 'unknown' && g.dbTrackerId != 'blocked') {
+                aprsController?.untrackGlider(g.compno, g.className, g.channelName, g.dbTrackerId);
+            }
             delete gliders[key as ClassName_Compno];
             droppedGliders++;
         }
@@ -1215,6 +1324,13 @@ async function tickCompetition(competition: CompetitionContext) {
 async function tickCompetitionClasses(competition: CompetitionContext): Promise<Datecode | null> {
     if (competition.state === 'stopping' || competition.state === 'stopped') return null;
     const datecode = await getDCode(competition);
+    if (competition.lastDatecode !== datecode) {
+        if (competition.lastDatecode !== undefined) {
+            console.log(`${compShort(competition.compid)}: datecode ${competition.lastDatecode} -> ${datecode}, resetting unknownTrackers`);
+        }
+        competition.unknownTrackers = {};
+        competition.lastDatecode = datecode;
+    }
     getSunset(competition, datecode);
     getProposedScoreId(competition);
     await updateClasses(competition, datecode);
@@ -1387,6 +1503,11 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                 tracksBroadcastRequired: false,
                 scoreHistory: new Map(),
                 allScores: {},
+                statsStore: {},
+                statsBaseTime: 0 as Epoch,
+                statsData: {},
+                statsDirty: new Set(),
+                statsLastTrackVersion: {},
                 scoreId,
                 proposedScoreId: scoreId,
                 liveScoreId: '',
@@ -1580,6 +1701,11 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
                 console.log(`${channel.className}: ** clear task`);
                 channel.scoring?.clearTask();
                 channel.scoreHistory.clear();
+                channel.statsStore = {};
+                channel.statsData = {};
+                channel.statsDirty.clear();
+                channel.statsLastTrackVersion = {};
+                channel.statsBaseTime = 0 as Epoch;
                 channel.allScores = {};
                 channel.task = undefined;
                 channel.geoTask = undefined;
@@ -1636,10 +1762,17 @@ function rebuildAprsFilter() {
     // preprocessSector from the published task geometry), so the worker
     // only needs a refresh when a task is republished — which already
     // routes through here.
+    //
+    // A comp can run several classes (one channel each), all sharing one
+    // compid and one Airfield record in the worker. Union every class's
+    // task bbox into the comp's box so a class flying a larger task isn't
+    // clipped to a smaller class's area — the prefilter is per-comp, so it
+    // must cover every class's turnpoints.
     const perCompExpanded = new Map<string, Bbox>();
     for (const c of withTasks) {
         const b = taskBbox(c.task!);
-        if (b) perCompExpanded.set(c.compid, expandBbox(b, 10));
+        if (!b) continue;
+        accumulateCompBbox(perCompExpanded, c.compid, expandBbox(b, 10));
     }
 
     const boxes = Array.from(perCompExpanded.values());
@@ -2045,7 +2178,7 @@ async function updateTrackers(competition: CompetitionContext, datecode: Datecod
                 }
 
                 if (!hadTracker) {
-                    aprsController?.trackGlider(competition.compid, t.compno, t.className, datecode, location.tzoffset, glider.channelName, t.dbTrackerId, listening);
+                    aprsController?.trackGlider(competition.compid, t.compno, t.className, datecode, location.tzoffset, glider.channelName, t.dbTrackerId, listening, (location as any)?.flightstats === 'Y');
                     glider.flarmIdRegex = new RegExp(
                         `^(${t.dbTrackerId
                             .split(',')
@@ -2252,9 +2385,44 @@ async function sendCurrentState(client: OgnWebSocket) {
     // Send the current task
     sendTask(client, channel);
     client.sendBinary(await generateRecentPilotTracks(channel));
+    sendCurrentStats(client, channel);
     if (channel.lastKeepAliveMsg) {
         client.sendBinary(channel.lastKeepAliveMsg);
     }
+}
+
+// Build the ClassStats `pilots` map for the given compnos from the channel's
+// canonical statsStore. Each entry carries the deck's current trackVersion so
+// the client rebuilds the pilot's accumulator when the deck was rebuilt (tracker
+// change). `tailFrom`, when set, ships only the segments ending at/after it
+// (the residual window); omit it for a full snapshot.
+function buildStatsPilots(channel: Channel, compnos: Iterable<Compno>, tailFrom?: Epoch): Record<string, {trackVersion: number; segments: StatSegment[]}> {
+    const pilots: Record<string, {trackVersion: number; segments: StatSegment[]}> = {};
+    for (const compno of compnos) {
+        let segments = channel.statsStore[compno];
+        if (!segments?.length) continue;
+        const trackVersion = gliders[makeClassname_Compno(channel.className, compno)]?.deck?.trackVersion ?? 0;
+        // Ship only the tail unless the pilot's trackVersion changed since the
+        // last residual — then the client must rebuild, so resend the full list.
+        if (tailFrom != null && channel.statsLastTrackVersion[compno] === trackVersion) {
+            segments = segments.filter((s) => s.end >= tailFrom);
+            if (!segments.length) continue;
+        }
+        pilots[compno] = {trackVersion, segments};
+    }
+    return pilots;
+}
+
+// Send a connecting client the stats bootstrap: when a snapshot has been frozen
+// (statsBaseTime > 0) advertise its baseTime so the client fetches the immutable
+// /stats blob, plus the tail past it; before the first freeze, ship the full
+// store inline (baseTime 0 => merge as baseline). Mirrors generateRecentPilotTracks.
+function sendCurrentStats(client: OgnWebSocket, channel: Channel) {
+    const baseTime = channel.statsBaseTime ?? (0 as Epoch);
+    const pilots = buildStatsPilots(channel, Object.keys(channel.statsStore) as Compno[], baseTime ? baseTime : undefined);
+    if (!Object.keys(pilots).length && !baseTime) return;
+    const msg = safeEncode(OnglideWebSocketMessage, {stats: {class: {[channel.className]: {baseTime, pilots}}}}, `currentStats ${channel.className}`);
+    if (msg) client.sendBinary(msg);
 }
 
 async function generateHistoricalTracks(channel: Channel): Promise<void> {
@@ -2265,6 +2433,7 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
 
     if (now - (channel.webPathBaseTime ?? 0) > webPathBaseTimeDuration) {
         console.log(`${channel.className}: generateHistoricalTracks mostRecentPosition: ${d(now)}, base: ${d(base)}, previous: ${d(channel.webPathBaseTime)}`);
+        const reduceStart = performance.now();
         const toStream = Object.entries(gliders).reduce<Record<string, any>>((result, [compno, glider]) => {
             if (glider.className == channel.className) {
                 const p = glider.deck;
@@ -2279,6 +2448,8 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
                             t: new Uint8Array(p.t.buffer, start * 4, length * 4),
                             climbRate: new Uint8Array(p.climbRate.buffer, start, length),
                             agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                            bearing: new Uint8Array(p.bearing.buffer, start * 2, length * 2),
+                            speed: new Uint8Array(p.speed.buffer, start * 2, length * 2),
                             posIndex: length,
                             trackVersion: p.trackVersion
                         };
@@ -2290,22 +2461,44 @@ async function generateHistoricalTracks(channel: Channel): Promise<void> {
             }
             return result;
         }, {});
+        const reduceMs = performance.now() - reduceStart;
         // Send the client the current version of the tracks
+        const encodeStart = performance.now();
         const webPath = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: 0}}, `webPath ${channel.className}`);
+        const encodeMs = performance.now() - encodeStart;
+        // TIMING: confirm whether the freeze is the multi-second main-thread
+        // block. Logs pilot count, encoded size, and a split of reduce (cheap
+        // array views) vs safeEncode (the suspected synchronous CPU cost).
+        console.log(`TIMING freeze ${channel.className}: pilots=${Object.keys(toStream).length} bytes=${webPath?.byteLength ?? 0} reduce=${reduceMs.toFixed(1)}ms encode=${encodeMs.toFixed(1)}ms`);
         // Don't advertise a baseTime for a snapshot with no pilots — viewers
         // would fetch the empty .bin and the proxy/browser would cache it.
         if (webPath && Object.keys(toStream).length > 0) {
             channel.webPathData[now.toString()] = Buffer.from(webPath);
             channel.webPathBaseTime = now;
         }
+
+        // Freeze a stats snapshot on the same trigger/baseTime as the tracks
+        // snapshot. It is self-contained (inner baseTime:0 => the client treats
+        // it as the baseline). Full segment lists for every pilot in the store.
+        const statsPilots = buildStatsPilots(channel, Object.keys(channel.statsStore) as Compno[]);
+        if (Object.keys(statsPilots).length > 0) {
+            const statsSnap = safeEncode(OnglideWebSocketMessage, {stats: {class: {[channel.className]: {baseTime: 0, pilots: statsPilots}}}}, `statsSnap ${channel.className}`);
+            if (statsSnap) {
+                channel.statsData[now.toString()] = Buffer.from(statsSnap);
+                channel.statsBaseTime = now;
+            }
+        }
     }
 }
 
 // Send the abbreviated track for all gliders, used when a new client connects
 async function generateRecentPilotTracks(channel: Channel) {
+    const fnStart = performance.now();
     // Make sure they are up to date (does nothing if they are)
     await generateHistoricalTracks(channel);
+    const freezeMs = performance.now() - fnStart;
 
+    const reduceStart = performance.now();
     const toStream = Object.values(gliders).reduce<Record<string, any>>((result, glider) => {
         if (glider.className == channel.className) {
             const p = glider.deck;
@@ -2320,6 +2513,8 @@ async function generateRecentPilotTracks(channel: Channel) {
                         t: new Uint8Array(p.t.buffer, start * 4, length * 4),
                         climbRate: new Uint8Array(p.climbRate.buffer, start, length),
                         agl: new Uint8Array(p.agl.buffer, start * 2, length * 2),
+                        bearing: new Uint8Array(p.bearing.buffer, start * 2, length * 2),
+                        speed: new Uint8Array(p.speed.buffer, start * 2, length * 2),
                         posIndex: length,
                         trackVersion: p.trackVersion
                     };
@@ -2336,8 +2531,16 @@ async function generateRecentPilotTracks(channel: Channel) {
         }
         return result;
     }, {});
+    const reduceMs = performance.now() - reduceStart;
     // Send the client the current version of the tracks
-    return safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.className}`) ?? new Uint8Array(0);
+    const encodeStart = performance.now();
+    const msg = safeEncode(OnglideWebSocketMessage, {tracks: {pilots: toStream, baseTime: channel.webPathBaseTime ?? 0}}, `recentTracks ${channel.className}`) ?? new Uint8Array(0);
+    const encodeMs = performance.now() - encodeStart;
+    // TIMING: residual (post-snapshot delta) cost on a connect. `freeze` is the
+    // time spent inside generateHistoricalTracks above — non-zero only when this
+    // call triggered a 5-min freeze (and so paid the full-class encode).
+    console.log(`TIMING recent ${channel.className}: pilots=${Object.keys(toStream).length} bytes=${msg.byteLength} freeze=${freezeMs.toFixed(1)}ms reduce=${reduceMs.toFixed(1)}ms encode=${encodeMs.toFixed(1)}ms`);
+    return msg;
 }
 
 // Build the tracks message and broadcast it to all clients of the channel.
@@ -2349,30 +2552,34 @@ async function primeAndBroadcast(channel: Channel, label: string): Promise<void>
     if (!msg.byteLength) return;
 
     const baseTime = channel.webPathBaseTime ?? 0;
-    if (baseTime) {
-        const host = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_SITEURL;
-        if (host) {
-            // Respect an explicit scheme if one was baked into the env var,
-            // otherwise pick http for loopback hosts (where the daemon's
-            // own HTTP listener answers) and https everywhere else (where
-            // an upstream proxy is terminating TLS).
-            let url: string;
-            if (/^https?:\/\//i.test(host)) {
-                url = `${host.replace(/\/$/, '')}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
-            } else {
-                const proto = /^(localhost|127\.|\[::1\])/i.test(host) ? 'http' : 'https';
-                url = `${proto}://${host}/tracks/${(channel.className + channel.datecode).toUpperCase()}.${baseTime}.bin`;
-            }
-            const ctl = new AbortController();
-            const timer = setTimeout(() => ctl.abort(), 1000);
-            try {
-                await fetch(url, {signal: ctl.signal, method: 'GET'});
-            } catch (e) {
-                console.log(`${label}: prime failed for ${url}: ${(e as Error).message}`);
-            } finally {
-                clearTimeout(timer);
-            }
-        }
+    const host = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_SITEURL;
+    if (baseTime && host) {
+        // Respect an explicit scheme if one was baked into the env var,
+        // otherwise pick http for loopback hosts (where the daemon's
+        // own HTTP listener answers) and https everywhere else (where
+        // an upstream proxy is terminating TLS).
+        const prefix = /^https?:\/\//i.test(host) ? host.replace(/\/$/, '') : `${/^(localhost|127\.|\[::1\])/i.test(host) ? 'http' : 'https'}://${host}`;
+        const cn = (channel.className + channel.datecode).toUpperCase();
+        // Match the client's oldTracksUrl cache key exactly (baseTime +
+        // scoreId) so this prime warms the entry the client will fetch —
+        // without the scoreId segment we'd warm the wrong key on a rescore.
+        const scoreId = channel.liveScoreId || 0;
+        // Warm tracks and (if frozen) the scoreId-free stats snapshot.
+        const urls = [`${prefix}/tracks/${cn}.${baseTime}/${scoreId}.bin`];
+        if (channel.statsBaseTime) urls.push(`${prefix}/stats/${cn}.${channel.statsBaseTime}.bin`);
+        await Promise.all(
+            urls.map(async (url) => {
+                const ctl = new AbortController();
+                const timer = setTimeout(() => ctl.abort(), 1000);
+                try {
+                    await fetch(url, {signal: ctl.signal, method: 'GET'});
+                } catch (e) {
+                    console.log(`${label}: prime failed for ${url}: ${(e as Error).message}`);
+                } finally {
+                    clearTimeout(timer);
+                }
+            })
+        );
     }
 
     channel.sendBinary(msg);
@@ -2455,6 +2662,8 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
         console.log(`${channel.className}: received _live marker for [${scoreId}], channel scoreIds live:${channel.liveScoreId}, current: ${channel.scoreId} ${d(t)}`);
         if (channel.liveScoreId != scoreId) {
             channel.scoreHistory.delete(channel.liveScoreId);
+            // statsStore is keyed to trackVersion (position lineage), not scoreId,
+            // so a rescore leaves it intact — only a deck rebuild clears it.
         }
         channel.liveScoreId = scoreId;
         channel.webPathBaseTime = 0 as Epoch; // we rescored so probably all the tracks have changed
@@ -2495,6 +2704,11 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             shidTo.set(compno, shCompno ?? []);
         }
 
+        // The score carries only its own fields (incl. wind, welded by the scoring
+        // worker). Flight statistics travel on their own data plane
+        // (channel.statsStore -> /stats snapshot + 500ms residual).
+        const scoreToSend = score;
+
         // Historical scores
         if (t) {
             let shid = channel.scoreHistory.get(scoreId);
@@ -2516,20 +2730,20 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
                 // land a row via scoreChanged so we never silently swallow
                 // a meaningful event.
                 if (!prev || t - prev.t >= scoreFrequency || scoreChanged(prev, score, false)) {
-                    sh.push(score);
+                    sh.push(scoreToSend);
                 }
             } else {
                 // Out-of-order arrival: the chain rewound (e.g. dogleg
                 // backtrack in taskpositiongenerator) and is now re-emitting
                 // from t. Drop the stale tail and insert.
                 console.log(`***** ${compno} rewind score history from ${d(sh.at(-1)?.t ?? 0)} to ${d(sh[i].t)} sh:[${i}/${sh.length}]`);
-                sh.splice(i, Infinity, score);
+                sh.splice(i, Infinity, scoreToSend);
             }
         }
 
         // Score from Live packets (either end of rescore or end of current score)
         if (score.live) {
-            const msg = safeEncode(OnglideWebSocketMessage, {scores: {scoreId, pilots: {[compno]: score}}}, `live score ${channel.className}/${compno}`);
+            const msg = safeEncode(OnglideWebSocketMessage, {scores: {scoreId, pilots: {[compno]: scoreToSend}}}, `live score ${channel.className}/${compno}`);
             if (msg) {
                 channel.statistics.bytesSent += channel.clients.length * msg.byteLength;
                 trackMetric(channel.className + '.scoring.bytesSent', msg.byteLength * channel.clients.length);
@@ -2562,6 +2776,22 @@ async function sendScore(channel: Channel, compno: Compno, score: PilotScore, re
             // its scores carry the proposed scoreId and won't take this branch.
             if (scoreId === channel.liveScoreId) {
                 updateCompStatus(channel);
+
+                // Once a pilot has crossed the finish line, stop tracking them —
+                // and so stop collecting flight statistics — as soon as they've
+                // landed, or FINISH_TRACKING_GRACE_S after the finish if we never
+                // see them land. finishGlider freezes and tail-collapses the
+                // stats. One-shot via glider.trackingStopped. Only the live chain
+                // gets here, so a historical replay never triggers it mid-track.
+                const finished = gliders[makeClassname_Compno(channel.className, compno as Compno)];
+                if (finished && !finished.trackingStopped && score.utcFinish) {
+                    const landed = score.flightStatus === PositionStatus.Home || score.flightStatus === PositionStatus.Landed;
+                    if (landed || score.t >= score.utcFinish + FINISH_TRACKING_GRACE_S) {
+                        finished.trackingStopped = true;
+                        console.log(`${channel.className}:${compno}: finished @ ${d(score.utcFinish as Epoch)} — ${landed ? 'landed' : `${FINISH_TRACKING_GRACE_S}s elapsed`}, stopping tracking`);
+                        aprsController?.finishGlider(compno as Compno, channel.className, finished.channelName);
+                    }
+                }
             }
         }
     }
@@ -2766,6 +2996,40 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
         } else {
             displayStatus = classDisplayStatus(ch.compStatus, inWindow);
         }
+        // Leader from this channel's scored pilots — the same data that backs
+        // the winner trophy, and our signal for "is there a flown day worth
+        // replaying". Rank by handicapped score when the class is handicapped,
+        // otherwise by actual: most classes are non-handicapped and carry no
+        // `handicapped` block at all, so we must always fall back to `actual`
+        // or they'd never produce a winner. Prefer speed (a pilot who completed
+        // the task), then distance. Computed unconditionally so it can gate
+        // replayYesterday below; only attached to the row in the home/yesterday/
+        // replay cases.
+        const scores = Object.values(ch.allScores);
+        const rankScore = (s: PilotScore) => s.handicapped ?? s.actual;
+        let winnerCandidate: ClassWinner | undefined;
+        const bySpeed = scores.filter((s) => (rankScore(s)?.taskSpeed ?? 0) > 0).sort((a, b) => rankScore(b)!.taskSpeed! - rankScore(a)!.taskSpeed!)[0];
+        if (bySpeed) {
+            winnerCandidate = {compno: bySpeed.compno, taskSpeed: rankScore(bySpeed)!.taskSpeed};
+        } else {
+            const byDistance = scores.filter((s) => (rankScore(s)?.taskDistance ?? 0) > 0).sort((a, b) => (rankScore(b)!.taskDistance ?? 0) - (rankScore(a)!.taskDistance ?? 0))[0];
+            if (byDistance) winnerCandidate = {compno: byDistance.compno, taskDistance: rankScore(byDistance)!.taskDistance};
+        }
+        const hasFlownScores = !!winnerCandidate;
+
+        // Pre-10:00-local "replay yesterday + new task" dual state: the comp
+        // day flips at 10:00, so before then the channel still represents the
+        // just-flown day (ch.datecode), while a briefed task for today has
+        // advanced the compstatus datecode past it (sdc > ch.datecode). When
+        // that day actually flew (real scores exist), the globe shows both the
+        // 'replay yesterday' pill and today's task pill (displayStatus above,
+        // e.g. 'task_set'). After 10:00 the channel rolls to today and sdc ==
+        // ch.datecode, so this is naturally false. Scores (not compstatus) are
+        // the gate: they survive a daemon restart (the channel re-scores its
+        // day) and a post-flight scrub, and a task cancelled before anyone flew
+        // leaves no scores, so it correctly shows no replay.
+        const channelDatecode = ch.datecode ? String(ch.datecode).toUpperCase() : null;
+        const replayYesterday = !!(hasFlownScores && sdc && channelDatecode && sdc > channelDatecode);
         // Prefer the live TaskRules from the briefed task. Pre-task, fall back
         // to a stub carrying just the class's configured handicapped/dh flags
         // so the per-comp page can still tell whether to surface handicapped
@@ -2783,21 +3047,10 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
                     maxHandicap: 0
                 }
               : undefined;
-        // Pick the leader from allScores when the day has flown — used by the
-        // landing-page side panel to show a trophy/winner once everyone is
-        // home or the day has rolled to 'yesterday'. Prefer handicapped speed
-        // (any pilot who completed task), otherwise handicapped distance.
-        let winner: ClassWinner | undefined;
-        if (displayStatus === 'home' || displayStatus === 'yesterday') {
-            const scores = Object.values(ch.allScores);
-            const bySpeed = scores.filter((s) => (s.handicapped?.taskSpeed ?? 0) > 0).sort((a, b) => b.handicapped!.taskSpeed! - a.handicapped!.taskSpeed!)[0];
-            if (bySpeed) {
-                winner = {compno: bySpeed.compno, taskSpeed: bySpeed.handicapped!.taskSpeed};
-            } else {
-                const byDistance = scores.filter((s) => (s.handicapped?.taskDistance ?? 0) > 0).sort((a, b) => b.handicapped!.taskDistance - a.handicapped!.taskDistance)[0];
-                if (byDistance) winner = {compno: byDistance.compno, taskDistance: byDistance.handicapped!.taskDistance};
-            }
-        }
+        // Attach the winner trophy on the landing page only once the day is
+        // done (home/yesterday) or in the dual replay state — never mid-race,
+        // where winnerCandidate would just be the current leader.
+        const winner = displayStatus === 'home' || displayStatus === 'yesterday' || replayYesterday ? winnerCandidate : undefined;
 
         classes.push({
             class: ch.className,
@@ -2809,7 +3062,8 @@ function buildCompetitionSummary(competition: CompetitionContext): CompetitionSu
             taskRules,
             datecode: ch.datecode,
             taskDetails: ch.task?.details,
-            winner
+            winner,
+            replayYesterday: replayYesterday || undefined
         });
     }
     classes.sort((a, b) => a.classname.localeCompare(b.classname));
@@ -2919,15 +3173,31 @@ function encodeCompetitionsSnapshot(group: string | null): Uint8Array | null {
 // and broadcastCompetitionsDelta keeps the cache rebuilt — so a connect never
 // re-walks or re-encodes the list.
 function sendCompetitionsSnapshot(client: OgnWebSocket) {
+    const fnStart = performance.now();
     const groupKey = client.ognGroup ?? '';
     let msg = competitionsSnapshotCache.get(groupKey);
+    const cacheHit = msg !== undefined;
+    let encodeMs = 0;
     if (msg === undefined) {
+        const encodeStart = performance.now();
         msg = encodeCompetitionsSnapshot(client.ognGroup);
+        encodeMs = performance.now() - encodeStart;
         competitionsSnapshotCache.set(groupKey, msg);
     }
     if (msg && client.readyState === WebSocket.OPEN) {
+        const sendStart = performance.now();
         client.send(msg, {binary: true});
-        console.log('sendCompetitionsSnapshot', client.ognPeer, groupKey || 'all');
+        const sendMs = performance.now() - sendStart;
+        // TIMING: the /all snapshot. `connectToSend` is the wall-clock from the
+        // wss 'connection' handler firing for this socket to the first send
+        // completing — the latency the joining client actually experiences.
+        // cacheHit=true with a large connectToSend means the loop was blocked
+        // before this function ran (correlate with the `TIMING freeze` lines and
+        // the `EVENT-LOOP BLOCKED` monitor), not that the snapshot itself is slow.
+        const connectToSend = client.connectPerf !== undefined ? performance.now() - client.connectPerf : -1;
+        console.log(
+            `sendCompetitionsSnapshot ${client.ognPeer} ${groupKey || 'all'} TIMING cacheHit=${cacheHit} bytes=${msg.byteLength} encode=${encodeMs.toFixed(1)}ms send=${sendMs.toFixed(1)}ms total=${(performance.now() - fnStart).toFixed(1)}ms connectToSend=${connectToSend.toFixed(1)}ms`
+        );
     }
 }
 
@@ -3066,11 +3336,28 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     if (message.t == (0 as Epoch)) {
         console.log(`${channel.className}/${message.c}: new track start received`);
         initialiseDeck(message.c as Compno, glider, randomBytes(4).readUInt32BE(0));
+        // The deck (and its trackVersion) was rebuilt — discard the pilot's stats
+        // so the worker's fresh post-reset segments rebuild them. The bumped
+        // trackVersion (stamped on the next residual) makes the client reset too.
+        delete channel.statsStore[message.c as Compno];
+        channel.statsDirty.delete(message.c as Compno);
+        delete channel.statsLastTrackVersion[message.c as Compno];
         return;
     }
 
     // We ignore ticks
     if ('tick' in message) {
+        return;
+    }
+
+    // Final stats broadcast from the APRS worker: the glider has finished and
+    // tracking stopped, so this carries the frozen, tail-collapsed segment list
+    // with no position. Replace the canonical list and flag for the next residual.
+    if (message.statsFinal) {
+        if (message.stats) {
+            channel.statsStore[message.c as Compno] = message.stats.segments;
+            channel.statsDirty.add(message.c as Compno);
+        }
         return;
     }
 
@@ -3080,6 +3367,15 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     if (!mergePoint(message, glider)) {
         channel.statistics.outOfOrderPackets++;
     } else {
+        // Flight statistics piggyback the position from the APRS worker (low
+        // cadence). Replace the canonical full segment list and flag the pilot
+        // for the next 500ms residual. Applies to backfill points too so the
+        // store covers the whole flight, not just the live tail.
+        if (message.stats) {
+            channel.statsStore[message.c as Compno] = message.stats.segments;
+            channel.statsDirty.add(message.c as Compno);
+        }
+
         // If the packet isn't delayed then we should send it out over our websocket
         if (message._) {
             // Buffer the message they get batched every second
@@ -3092,6 +3388,237 @@ async function processAprsMessage(className: string, channel: Channel, message: 
     }
 }
 
+// Latest tracker-status snapshot pushed by the APRS worker every
+// TRACKER_STATUS_SNAPSHOT_MS. Keyed by ClassName_Compno so the
+// /status/trackers route can render grouped-by-class with O(1) lookup.
+const trackerStatusByKey = new Map<ClassName_Compno, TrackerSnapshotEntry>();
+let trackerStatusSnapshotT: Epoch = 0 as Epoch;
+
+// Minimal HTML escape — the page renders a small known set of fields
+// (compno, class, hex IDs, numbers) so we just need to prevent stray
+// markup from operator-controlled glider names / class names breaking
+// the layout. Not a general-purpose escape.
+function escHtml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]!);
+}
+
+// Render the /status/trackers page from the latest worker snapshot +
+// main-side per-glider scoring state. Plain HTML + a tiny inline style
+// so it's readable in a terminal browser as well as in Chrome. 30 s
+// auto-refresh aligns with the worker's snapshot cadence.
+function renderTrackerStatusPage(): string {
+    const now = Math.floor(Date.now() / 1000);
+    const snapshotAgeS = trackerStatusSnapshotT ? now - trackerStatusSnapshotT : null;
+
+    // Resolve className → {compid, classname (human label)} from the
+    // channels map (the only place that carries the human class label).
+    // Pilots whose className doesn't have an active channel land in an
+    // "unassigned" group.
+    const classMeta = new Map<ClassName, {compid: string; classname: string}>();
+    for (const cname in channels) {
+        const ch = channels[cname as ChannelName];
+        if (!classMeta.has(ch.className)) classMeta.set(ch.className, {compid: ch.compid, classname: ch.classname});
+    }
+
+    // Group pilots: compid → className → entries.
+    const byComp = new Map<string, Map<ClassName, TrackerSnapshotEntry[]>>();
+    for (const entry of trackerStatusByKey.values()) {
+        const meta = classMeta.get(entry.className);
+        const compid = meta?.compid ?? '(unassigned)';
+        let classMap = byComp.get(compid);
+        if (!classMap) {
+            classMap = new Map();
+            byComp.set(compid, classMap);
+        }
+        let bucket = classMap.get(entry.className);
+        if (!bucket) {
+            bucket = [];
+            classMap.set(entry.className, bucket);
+        }
+        bucket.push(entry);
+    }
+
+    // Stable display order: by competition name (falling back to compid),
+    // then by className inside each comp.
+    const compOrder = [...byComp.keys()].sort((a, b) => {
+        const an = contexts[a]?.summary?.name ?? a;
+        const bn = contexts[b]?.summary?.name ?? b;
+        return an.localeCompare(bn);
+    });
+
+    const statusLabels: Record<Glider['scoredStatus'], string> = {S: 'started', F: 'finished', H: 'home'};
+    const out: string[] = [];
+    out.push('<!doctype html><html lang="en"><head><meta charset="utf-8"><title>onglide tracker status</title>');
+    out.push('<meta http-equiv="refresh" content="30">');
+    out.push('<style>');
+    out.push('body{font-family:-apple-system,Segoe UI,Helvetica,sans-serif;font-size:13px;margin:1em;color:#111}');
+    out.push('h1{font-size:1.2em;margin:0 0 .25em}');
+    out.push('h2{font-size:1.1em;margin:1.5em 0 .25em;border-bottom:2px solid #999}');
+    out.push('h3{font-size:1em;margin:1em 0 .25em;border-bottom:1px solid #ccc}');
+    out.push('p.meta{color:#666;margin:.25em 0 1em}');
+    out.push('p.protocols{color:#444;margin:.25em 0 .5em;font-size:.95em}');
+    out.push('table{border-collapse:collapse;width:100%;margin-bottom:1em}');
+    out.push('th,td{padding:3px 6px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}');
+    out.push('th{background:#f4f4f4;font-weight:600}');
+    out.push('tr:nth-child(even) td{background:#fafafa}');
+    out.push('.untrusted{color:#a40000;font-weight:600}');
+    out.push('.primary{font-weight:600}');
+    out.push('.muted{color:#888}');
+    out.push('.stale{color:#a40000}');
+    out.push('.tag{display:inline-block;background:#eef;border:1px solid #ccd;border-radius:3px;padding:0 5px;margin:0 3px 2px 0;font-size:.9em}');
+    out.push('</style></head><body>');
+    out.push(`<h1>onglide tracker status</h1>`);
+    out.push(`<p class="meta">snapshot ${snapshotAgeS === null ? 'pending' : snapshotAgeS + 's ago'} · ${trackerStatusByKey.size} pilot${trackerStatusByKey.size === 1 ? '' : 's'} tracked · auto-refresh 30 s</p>`);
+    out.push(
+        '<p class="meta"><strong>◆</strong> = primary stream (operator-configured first) · <strong>n</strong> = packets received from this stream · <strong>age</strong> = seconds since last fix from this stream · <strong>pairs</strong> = co-occurrences with primary in the MAD trust buffer (need 20+ to evaluate, 64 max)</p>'
+    );
+
+    if (compOrder.length === 0) {
+        out.push('<p class="muted">no pilots tracked yet — waiting for first worker snapshot.</p>');
+    }
+
+    // Overall protocol summary across all pilots — quick "is anything
+    // weird arriving today" eyeball check.
+    const globalProto = countProtocols([...trackerStatusByKey.values()]);
+    if (globalProto.length) {
+        out.push('<p class="protocols"><strong>all protocols in use:</strong> ' + globalProto.map(([k, v]) => `<span class="tag">${escHtml(k)} ${v}</span>`).join('') + '</p>');
+    }
+
+    for (const compid of compOrder) {
+        const compName = contexts[compid]?.summary?.name ?? null;
+        const classMap = byComp.get(compid)!;
+        const compEntries: TrackerSnapshotEntry[] = [];
+        for (const bucket of classMap.values()) compEntries.push(...bucket);
+
+        const compHeader = compName ? `${escHtml(compName)} <span class="muted">(${escHtml(compid)})</span>` : `<span class="muted">${escHtml(compid)}</span>`;
+        out.push(`<h2>${compHeader}</h2>`);
+        const compProto = countProtocols(compEntries);
+        if (compProto.length) {
+            out.push('<p class="protocols"><strong>protocols:</strong> ' + compProto.map(([k, v]) => `<span class="tag">${escHtml(k)} ${v}</span>`).join('') + '</p>');
+        }
+
+        const classNames = [...classMap.keys()].sort();
+        for (const className of classNames) {
+            const meta = classMeta.get(className);
+            const classLabel = meta ? `${escHtml(meta.classname)} <span class="muted">(${escHtml(String(className))})</span>` : escHtml(String(className));
+            const pilots = classMap
+                .get(className)!
+                .slice()
+                .sort((a, b) => String(a.compno).localeCompare(String(b.compno)));
+
+            out.push(`<h3>${classLabel} <span class="muted">— ${pilots.length} pilot${pilots.length === 1 ? '' : 's'}</span></h3>`);
+            out.push('<table><thead><tr>');
+            out.push('<th>compno</th><th>status</th><th>last fix</th><th>configured</th><th>observed streams</th>');
+            out.push('</tr></thead><tbody>');
+            for (const p of pilots) {
+                const key = makeClassname_Compno(p);
+                const g = gliders[key];
+                const statusLabel = g?.scoredStatus ? statusLabels[g.scoredStatus] : '';
+                const ageStr = p.lastEmittedT ? `${now - p.lastEmittedT}s` : '—';
+                const ageClass = p.lastEmittedT && now - p.lastEmittedT > 120 ? ' class="stale"' : '';
+
+                // For each configured tracker, list the protocols we've
+                // actually seen for that 24-bit device. Configured slots
+                // start with high byte 0 (no protocol yet); on first
+                // match pickStickyPrimary promotes index 0 to the
+                // observed combined value, but other slots keep the
+                // placeholder — so the protocol would be missing here.
+                // We pull the observed protocols from the streams list
+                // instead, so the operator sees e.g.
+                // "DD9C70 (OGFLR, OGNAVI)".
+                const configured = p.configured.length
+                    ? p.configured
+                          .map((cf) => {
+                              const cfid24 = (cf & 0xffffff) >>> 0;
+                              const cfHex = cfid24.toString(16).toUpperCase().padStart(6, '0');
+                              const protos = new Set<string>();
+                              for (const s of p.observed) {
+                                  if ((s.f & 0xffffff) >>> 0 !== cfid24) continue;
+                                  const code = (s.f >>> 24) & 0xff;
+                                  protos.add(code === 0 ? '?' : (protoOf(s.f) ?? '?'));
+                              }
+                              return protos.size ? `${cfHex} <span class="muted">(${[...protos].sort().join(', ')})</span>` : `${cfHex} <span class="muted">(no fix)</span>`;
+                          })
+                          .join('<br>')
+                    : '<span class="muted">—</span>';
+
+                const streams = p.observed
+                    .map((s) => {
+                        const label = escHtml(fidLabel(s.f));
+                        const ageS = now - s.lastT;
+                        const cls = s.untrusted ? 'untrusted' : s.isPrimary ? 'primary' : '';
+                        const badge = s.untrusted ? ' [uncorrelated]' : s.isPrimary ? ' ◆' : '';
+                        return `<span class="${cls}">${label}${badge}</span> <span class="muted">n=${s.count} age=${ageS}s${s.sampleCount ? ` pairs=${s.sampleCount}` : ''}</span>`;
+                    })
+                    .join('<br>');
+
+                out.push('<tr>');
+                out.push(`<td>${escHtml(String(p.compno))}</td>`);
+                out.push(`<td>${escHtml(statusLabel)}</td>`);
+                out.push(`<td${ageClass}>${ageStr}</td>`);
+                out.push(`<td>${configured}</td>`);
+                out.push(`<td>${streams || '<span class="muted">—</span>'}</td>`);
+                out.push('</tr>');
+            }
+            out.push('</tbody></table>');
+        }
+    }
+
+    out.push('</body></html>');
+    return out.join('');
+}
+
+// Count distinct (protocol → number of streams) across a set of pilot
+// snapshots. A "stream" is one (proto, fid) combination; one pilot can
+// contribute several rows (e.g. OGFLR + OGNAVI). Code 0 = legacy /
+// unknown protocol shows up as the empty string in the protocol slot —
+// relabel as '?' so the operator can spot pre-v4 (no recorded protocol)
+// records arriving.
+function countProtocols(entries: TrackerSnapshotEntry[]): Array<[string, number]> {
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+        for (const s of entry.observed) {
+            const code = (s.f >>> 24) & 0xff;
+            const key = code === 0 ? '?' : (protoOf(s.f) ?? '?');
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
+
+// Handle structured events posted by the APRS worker.
+function handleAprsWorkerEvent(e: AprsWorkerEvent): void {
+    if (e.type === 'trackerStatus') {
+        trackerStatusByKey.clear();
+        for (const p of e.pilots) {
+            trackerStatusByKey.set(makeClassname_Compno(p), p);
+        }
+        trackerStatusSnapshotT = e.snapshotT;
+        return;
+    }
+    if (e.type !== 'uncorrelated') return;
+    if (readOnly) return;
+    const secHex = fidHexOf(e.secondary);
+    const secType = protoOf(e.secondary); // 'OGFLR' / 'OGNAVI' / 'OGNTRK' / … or null
+    const horizMad = Math.max(e.madLatM, e.madLngM);
+    // Negative pair_score follows the existing 'evidence' sign convention
+    // where larger magnitude = worse evidence; we encode the horizontal
+    // MAD as the magnitude. margin carries the altitude MAD separately.
+    db.query(
+        escape`
+            INSERT INTO trackerhistory
+                (compno, changed, flarmid, flarmtype, method, class, datecode,
+                 pair_score, margin)
+            VALUES
+                (${e.compno}, now(), ${secHex}, ${secType},
+                 'uncorrelated', ${e.className}, ${String(e.datecode)},
+                 ${-horizMad}, ${e.madAltM})
+        `
+    ).catch((err: any) => {
+        console.log(`trackerhistory uncorrelated insert failed ${e.className}/${e.compno} ${fidLabel(e.secondary)}: ${err?.message ?? err}`);
+    });
+}
+
 // If we don't know the glider then we need to figure out who it is and make sure we
 // process it properly
 function identifyUnknownGlider(competition: CompetitionContext, data: PositionMessage, datecode: Datecode): void {
@@ -3102,12 +3629,13 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     // Check if it's a possible launch
     capturePossibleLaunchLanding(flarmId, datecode, data.t, [data.lng, data.lat], data.g, readOnly ? undefined : db, 'flarm', competition.compid);
 
-    const firstSighting = !unknownTrackers[flarmId];
+    const ut = competition.unknownTrackers;
+    const firstSighting = !ut[flarmId];
 
     // Store in the unknown list for status display
-    unknownTrackers[flarmId] = {
+    ut[flarmId] = {
         firstTime: data.t,
-        ...unknownTrackers[flarmId],
+        ...ut[flarmId],
         lastTime: data.t,
         flarmid: flarmId
     };
@@ -3122,7 +3650,7 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
     const ddbf = ddb[flarmId];
 
     // If we have matched before then don't do it again
-    if (unknownTrackers[flarmId].message) {
+    if (ut[flarmId].message) {
         return;
     }
 
@@ -3147,8 +3675,8 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
         }
 
         if (!Object.keys(matches).length) {
-            unknownTrackers[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
-            console.log(unknownTrackers[flarmId].message);
+            ut[flarmId].message = `No DDB match in competition ${ddbf.cn} (${ddbf.registration}) - ${ddbf.aircraft_model}`;
+            console.log(ut[flarmId].message);
             return;
         }
 
@@ -3166,9 +3694,9 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
             // check on next load and restores the in-memory block state.
             for (const match of matches) {
                 match.dbTrackerId = 'blocked';
-                unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
-                unknownTrackers[flarmId].message = `${flarmId}: matched to ${match.compno} (${match.className}) from DDB but blocked — declined livetracking (sources: ${sources}, method: ${method})`;
-                console.log(unknownTrackers[flarmId].message);
+                ut[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
+                ut[flarmId].message = `${flarmId}: matched to ${match.compno} (${match.className}) from DDB but blocked — declined livetracking (sources: ${sources}, method: ${method})`;
+                console.log(ut[flarmId].message);
                 if (!readOnly) {
                     db.transaction()
                         .query(
@@ -3207,29 +3735,29 @@ function identifyUnknownGlider(competition: CompetitionContext, data: PositionMe
 
         if (matches.length > 1) {
             console.log(flarmId + ': warning more than one candidate matched from ddb (' + matches.toString() + ')');
-            unknownTrackers[flarmId].message = 'Multiple DDB matches ' + matches.toString();
+            ut[flarmId].message = 'Multiple DDB matches ' + matches.toString();
         }
 
         // And we will use the first one
         const match = matches[0];
 
-        unknownTrackers[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
+        ut[flarmId].matched = `${match.compno} ${match.className} (${ddbf.registration}/${ddbf.cn})`;
 
         // If it's another match for somebody we have matched then ignore it
         if (match.dbTrackerId != flarmId && match.dbTrackerId != 'unknown' && match.dbTrackerId != 'blocked') {
-            unknownTrackers[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
-            console.log(unknownTrackers[flarmId].message);
+            ut[flarmId].message = `${flarmId} matches ${match.compno} from DDB but ${match.compno} has already got ID ${match.dbTrackerId}`;
+            console.log(ut[flarmId].message);
             return;
         }
 
-        unknownTrackers[flarmId].message = `${flarmId}:  found in ddb, matched to ${match.compno} (${match.className})`;
-        console.log(unknownTrackers[flarmId].message);
+        ut[flarmId].message = `${flarmId}:  found in ddb, matched to ${match.compno} (${match.className})`;
+        console.log(ut[flarmId].message);
 
         // Link the two together (same as the db update)
         match.dbTrackerId = flarmId;
 
         // And we should ask the flarm handler to listen for them properly
-        aprsController?.trackGlider(competition.compid, match.compno, match.className, datecode, competition.location.tzoffset, channelName(match.className, datecode), flarmId, true);
+        aprsController?.trackGlider(competition.compid, match.compno, match.className, datecode, competition.location.tzoffset, channelName(match.className, datecode), flarmId, true, (competition.location as any)?.flightstats === 'Y');
 
         // Save in the database so we will reuse them later ;)
         if (!readOnly) {
@@ -3277,6 +3805,7 @@ function setupWebSocketServer(server) {
 
     // What to do when a client connects
     wss.on('connection', (ws: OgnWebSocket, req: IncomingMessage) => {
+        ws.connectPerf = performance.now();
         if (!req.url?.length) {
             ws.isAlive = false;
             ws.isValid = false;
@@ -3323,7 +3852,7 @@ function setupWebSocketServer(server) {
         }
 
         if (!(channelName in channels)) {
-            ws.send('reload');
+            ws.send(WS_RELOAD);
             ws.isAlive = false;
             ws.isValid = false;
             return;
@@ -3367,6 +3896,37 @@ function setupWebSocketServer(server) {
     });
 }
 
+// Basic-auth gate for all /status routes. Credentials come from
+// .env.local — OGN_STATUS_USER / OGN_STATUS_PASS. If either is unset the
+// gate fails closed: every /status request returns 503 with a clear
+// "configure these env vars" message, so an operator never accidentally
+// exposes the dashboard unauthenticated.
+function requireStatusAuth(req: any, res: any): boolean {
+    const user = process.env.OGN_STATUS_USER;
+    const pass = process.env.OGN_STATUS_PASS;
+    if (!user || !pass) {
+        res.writeHead(503, {'Content-Type': 'text/plain'});
+        res.end('OGN_STATUS_USER / OGN_STATUS_PASS not set in .env.local — /status disabled');
+        return false;
+    }
+    const hdr = req.headers?.authorization ?? '';
+    if (hdr.startsWith('Basic ')) {
+        const decoded = Buffer.from(hdr.slice(6), 'base64').toString('utf8');
+        const sep = decoded.indexOf(':');
+        if (sep > 0) {
+            const u = decoded.slice(0, sep);
+            const p = decoded.slice(sep + 1);
+            if (u === user && p === pass) return true;
+        }
+    }
+    res.writeHead(401, {
+        'WWW-Authenticate': 'Basic realm="onglide status", charset="UTF-8"',
+        'Content-Type': 'text/plain'
+    });
+    res.end('Authentication required');
+    return false;
+}
+
 function setupOgnWebServer(req, res) {
     const headers = {
         'Access-Control-Allow-Origin': '*',
@@ -3381,11 +3941,23 @@ function setupOgnWebServer(req, res) {
         return;
     }
 
-    // health check
+    // Health check stays unauthenticated so upstream probes (load
+    // balancers, container orchestration, monitoring) don't need
+    // credentials. Every *other* /status* route is gated.
     if (req?.url == '/status') {
         console.log('request for status - ok');
         res.writeHead(200, headers);
         res.end(http.STATUS_CODES[200]);
+        return;
+    }
+
+    if (req?.url == '/status/trackers') {
+        if (!requireStatusAuth(req, res)) {
+            return;
+        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.writeHead(200, headers);
+        res.end(renderTrackerStatusPage());
         return;
     }
 
@@ -3425,6 +3997,7 @@ function setupOgnWebServer(req, res) {
             return value;
         };
 
+        const unknownTrackers = Object.values(contexts).reduce((acc, c) => Object.assign(acc, c.unknownTrackers), {} as Record<string, UnknownTracker>);
         res.end(JSON.stringify({channels: channels, gliders, unknownTrackers}, replacer));
         return;
     }
@@ -3483,7 +4056,9 @@ function setupOgnWebServer(req, res) {
                     console.log('sending scores for ', channelName);
                     res.setHeader('Content-Type', 'application/json');
                     res.writeHead(200, headers);
-                    res.end(JSON.stringify({scores: {scoreId: channel.scoreId, pilots: channel.allScores}}));
+                    // statsBaseTime advertises the current /stats snapshot so tools
+                    // (bin/dumpstats.ts) can discover it without a websocket.
+                    res.end(JSON.stringify({scores: {scoreId: channel.scoreId, pilots: channel.allScores}, statsBaseTime: channel.statsBaseTime}));
                     return;
                 }
                 case 'scorehistory': {
@@ -3569,6 +4144,22 @@ function setupOgnWebServer(req, res) {
                         return;
                     }
                     console.log('no historical data matching', channelName, timestamp);
+                    headers['Cache-Control'] = 'no-store';
+                    headers['Retry-After'] = '2';
+                    res.writeHead(503, headers);
+                    res.end();
+                    return;
+                }
+                case 'stats': {
+                    // Immutable per-baseTime flight-statistics snapshot (mirrors tracks).
+                    if (channel.statsData[timestamp]) {
+                        headers['Content-Type'] = 'application/octet-stream';
+                        res.writeHead(200, headers);
+                        res.write(channel.statsData[timestamp], 'binary');
+                        res.end(null, 'binary');
+                        return;
+                    }
+                    console.log('no stats snapshot matching', channelName, timestamp);
                     headers['Cache-Control'] = 'no-store';
                     headers['Retry-After'] = '2';
                     res.writeHead(503, headers);

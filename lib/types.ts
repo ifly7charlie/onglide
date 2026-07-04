@@ -36,6 +36,18 @@ export type Datecode = string & As<'Datecode'>;
 
 export type FlarmID = string & As<'FlarmID'>;
 
+// Combined 32-bit stream identifier carried through the ingest + fusion
+// pipeline. Low 24 bits = the 6-hex flarmid; high 8 bits = protocol enum
+// (OGFLR=1, OGNAVI=2, OGNTRK=3, …; see lib/webworkers/pointlog.ts) — the
+// OGN APRS destCallsign of the packet, which identifies the upload /
+// processing pipeline (e.g. radio gateway vs. Naviter cloud relay vs.
+// OGN-Delay). Two packets that share the 6-hex but came via different
+// protocols produce different StreamIds and land in their own bucket
+// inside stickyPrimary. Branded so a bare `number` (e.g. an epoch or
+// array index) can't be accidentally substituted at a call site that
+// expects a stream.
+export type StreamId = number & As<'StreamId'>;
+
 export type StartTime = string & As<'StartTime'>;
 export type Duration = string & As<'Duration'>;
 
@@ -97,6 +109,15 @@ export interface PositionMessage extends BasePositionMessage {
     s?: Speed; // speed
     l?: boolean | null; // picked
     _?: boolean; // live
+    // Flight-statistics piggyback (APRS worker -> main + scoring, low cadence).
+    // Attached only when the segment set materially changes; structured-clone
+    // over the BroadcastChannel, never serialised to the wire here.
+    stats?: Stats; // full current segment list (incl. per-segment wind)
+    wind?: Wind; // most recent wind estimate (scoring welds it onto PilotScore.wind)
+    // Final stats broadcast: the glider has finished and tracking has stopped,
+    // so this carries the frozen, tail-collapsed segment list with no position.
+    // Main applies it to its statsStore; the (now-terminal) scoring chain ignores it.
+    statsFinal?: boolean;
 }
 
 export function isTick(m: any): m is TickMessage {
@@ -310,9 +331,36 @@ export interface DeckData {
     agl: Int16Array;
     t: Uint32Array;
     climbRate: Int8Array;
+    // Per-anchor bracket bearing (degrees 0–359) and speed (kph × 10).
+    // bearing[i] === -1 means absent (OGN packet without course).
+    bearing: Int16Array;
+    speed: Uint16Array;
     posIndex: number;
     segmentIndex?: number;
     trackVersion: number;
+    // Optional sidecar of Hermite-subdivided vertices for display only.
+    // Built by lib/flightprocessing/spline.ts; renderers should source from
+    // `deck.smoothed ?? deck`. Scoring path never reads it.
+    smoothed?: SmoothedDeck;
+}
+
+export interface SmoothedDeck {
+    positions: Float32Array;
+    indices?: Uint32Array;
+    agl: Int16Array;
+    // Display-side time: fractional seconds since referenceDate. Float32 has
+    // ~0.06s precision at the 10-day baseline-relative scale, plenty for the
+    // TripsLayer animation cursor. Picking adds referenceDate back to recover
+    // epoch-seconds (lib/react/ogntripslayer.ts).
+    t: Float32Array;
+    climbRate: Int8Array;
+    // For each smoothed vertex, the index of the anchor it is emitted FOR
+    // (the bracket's END anchor — inner vertices share the end anchor's
+    // index, anchors themselves have their own index). Used for incremental
+    // truncation: drop smoothed vertices whose anchorIndex >= fromAnchor.
+    anchorIndex: Uint32Array;
+    posIndex: number;
+    segmentIndex?: number;
 }
 
 export interface VarioData {
@@ -351,7 +399,9 @@ export type SortKey =
 
 export interface DisplayPilotTrackData extends PilotTrackData {
     deckAdditional: {
-        tr: Uint32Array;
+        // Float32 fractional seconds-from-referenceDate. Built in
+        // lib/react/deckvh.ts; passed straight to TripsLayer's getTimestamps.
+        tr: Float32Array;
         climb: Uint8Array;
         aheight: Uint8Array;
     };
@@ -376,7 +426,7 @@ export interface NearestSectorPoint {
 }
 
 export {PilotScore, PilotScoreLeg} from './protobuf/onglide';
-import {PilotScore} from './protobuf/onglide';
+import {PilotScore, Stats, Wind} from './protobuf/onglide';
 //import {API_ClassName_Pilots_PilotDetail} from './rest-api-types';
 
 export type TrackData = Record<Compno, DisplayPilotTrackData>;
@@ -511,14 +561,24 @@ export interface Options {
     map2d: boolean;
     taskUp: TaskUp;
     follow: boolean;
+    // Transient (not meaningfully persisted — reset to false on load). Set when
+    // the user manually repositions the map, which temporarily suspends both the
+    // follow-pilot effect and the orientation lock (north/task/track up) until a
+    // new pilot is selected or the follow/orientation buttons are clicked.
+    viewSuspended?: boolean;
     zoomTask: boolean;
     // Per-turnpoint zoom request — set by the task leg list, consumed and
     // cleared by deckgl's easeTo effect. Same one-shot pattern as zoomTask.
     zoomTurnpoint?: {lat: number; lng: number; radius?: number} | null;
     sortKey: SortKey;
     showOthers: boolean;
+    // Climb-rate badges beside circling gliders (gaggle + solo). Off by default.
+    showClimb?: boolean;
     constructionLines?: boolean;
     fullPaths?: PathLength;
+    // Live distance/height readout between the selected glider and the
+    // hovered glider (or the leaderboard leader). Rendered by comparePilotsLayer.
+    comparePilots?: boolean;
 
     options2d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};
     options3d: {taskUp: 0 | 1 | 2; mapType: 0 | 1; follow: boolean};

@@ -151,8 +151,14 @@
         "label_duration": "Tid"
     },
     "options": {
+        "climb_show": "Vis stigehastighed for kredsende svævefly",
+        "climb_hide": "Skjul stigehastighed for kredsende svævefly",
         "click_to_measure": "Klik for at måle",
         "click_to_stop_measuring": "Klik for at stoppe måling",
+        "measure_off": "Måleværktøj fra — klik for at måle afstande på kortet",
+        "measure_active": "Måleværktøj: klik på to punkter på kortet. Klik her for at slå fra",
+        "compare_off": "Sammenligning af svævefly fra — klik for at sammenligne det valgte svævefly med føreren (eller svæveflyet under markøren)",
+        "compare_active": "Sammenligner det valgte svævefly med føreren (eller svæveflyet under markøren). Klik her for at slå fra",
         "rain_radar_showing": "Justér regnradar-tid, viser nu {{value}}, klik for at ændre eller slå fra",
         "rain_radar_enable": "Klik for at slå regnradar til",
         "rain_now": "nu",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Skift til metriske enheder",
         "switch_to_imperial": "Skift til imperiale enheder",
         "map_attribution": "Kortattribution",
-        "close": "Luk"
+        "close": "Luk",
+        "follow_suspended": "Følgning sat på pause, fordi du flyttede kortet. Klik for at genoptage, eller vælg en pilot",
+        "orientation_suspended": "Orienteringslås sat på pause, fordi du flyttede kortet. Klik for at genoptage, eller vælg en pilot"
     },
     "drawer": {
         "class": "Klasse",
@@ -214,6 +222,7 @@
         "leg_completed": "ben afsluttet",
         "view_leg": "ben",
         "view_task": "opgave",
+        "view_statistics": "Statistik",
         "view_actuals": "faktisk",
         "view_handicapped": "handicap",
         "view_task_or_leg": "opgave eller ben",
@@ -229,9 +238,24 @@
         "shortest": "Korteste",
         "recent_wind": "Aktuel vind"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termikker · {{pct}}% kredsning · bedst {{best}} · gns {{avg}}",
+        "summary2": "gns glidetal {{ld}} · {{flown}} · steget {{gain}} · {{pctGap}}% ingen dækning",
+        "flown": "fløjet {{dist}}",
+        "flown_with_extra": "fløjet {{dist}} ({{extra}} opgave)",
+        "col_time": "Tid",
+        "col_duration": "Varighed",
+        "col_wind": "Vind",
+        "state_thermal": "Termik",
+        "state_straight": "Glideflugt",
+        "state_gap": "Hul",
+        "turns": "{{count}} omgange",
+        "tracking_gap": "intet signal"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",
         "thermal_average": "gennemsnit: {{climb}}",
+        "gaggle_count": "Sværm på {{count}}",
         "straight_distance_speed": "distance: {{distance}} km med hastighed {{speed}} km/t",
         "straight_ld": "Glidetal {{ld}}",
         "wind": "vindhastighed: {{speed}} km/t @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "t",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "foran",
+        "behind": "bagud",
+        "above": "over",
+        "below": "under"
     },
     "units": {
         "km": "km",

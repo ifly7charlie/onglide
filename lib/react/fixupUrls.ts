@@ -6,9 +6,24 @@ const httpsTest = new RegExp(/^(https|wss)/i, 'i');
 export function oldTracksUrl(vc: ClassName, datecode: Datecode, baseTime: string, scoreId: string) {
     const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
     //    console.log('oldTracksUrl', hn);
+    // scoreId is a cache-buster, not consumed by the server (the tracks route
+    // serves webPathData by timestamp and ignores the segment) — but a rescore
+    // mints a new scoreId at the same baseTime, so without it the immutable
+    // snapshot cache would return the pre-rescore body. Mirrors oldScoresUrl.
     return (
         (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST ?? '') || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX ?? '') ? 'https://' : 'http://') +
-        `${hn}/tracks/${(vc + datecode + '.' + baseTime).toUpperCase()}.bin`
+        `${hn}/tracks/${(vc + datecode + '.' + baseTime).toUpperCase()}/${scoreId || 0}.bin`
+    );
+}
+
+// Flight-statistics snapshot. No scoreId segment — stats are keyed to
+// trackVersion (position lineage), not scoreId, so a rescore does not
+// invalidate the snapshot. Mirrors the /stats route on the daemon.
+export function oldStatsUrl(vc: ClassName, datecode: Datecode, baseTime: string) {
+    const hn = process.env.NEXT_PUBLIC_HISTORY_HOST || process.env.NEXT_PUBLIC_WEBSOCKET_HOST || window.location.host;
+    return (
+        (httpsTest.test(window.location.protocol) || httpsTest.test(process.env.NEXT_PUBLIC_HISTORY_HOST ?? '') || httpsTest.test(process.env.NEXT_PUBLIC_WEBSOCKET_PREFIX ?? '') ? 'https://' : 'http://') +
+        `${hn}/stats/${(vc + datecode + '.' + baseTime).toUpperCase()}.bin`
     );
 }
 

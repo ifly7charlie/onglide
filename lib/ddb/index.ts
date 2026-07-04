@@ -43,7 +43,7 @@ const flarmnetCachePath = () => `${dbPath()}/flarmnet-cache.json`;
 const OGN_URL = 'http://ddb.glidernet.org/download/?j=1';
 const FLARMNET_URL = 'https://www.flarmnet.org/files/ddb.json';
 
-function cleanRegistration(reg: string | undefined | null): string {
+export function cleanRegistration(reg: string | undefined | null): string {
     return (reg || '').replace(/[^A-Z0-9]/gi, '');
 }
 
@@ -53,14 +53,19 @@ function cleanRegistration(reg: string | undefined | null): string {
 // "Ventus 3T/18m" ~ "Ventus 3T", "JS3 18m" ~ "JS-3 18M RES",
 // "Ventus 2cxM/18m" ~ "Ventus", "ASG 29E/18m" ~ "ASG-29E", but
 // "JS3 18m" ≠ "UFO" and "ASG 27" ≠ "ASG 29".
+// Reduce a glider type string to its leading "model key" (alphabetic prefix +
+// first digit run, alphanumerics only, uppercase). Exported so cross-comp
+// identity evidence (lib/scoring/shared/identity.ts) keys on the exact same
+// normalisation gliderEquivalent uses.
+export function gliderKey(s: string | null | undefined): string {
+    const norm = (s || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const m = norm.match(/^[A-Z]+\d*/);
+    return m ? m[0] : norm;
+}
+
 export function gliderEquivalent(a: string | null | undefined, b: string | null | undefined): boolean {
-    const key = (s: string | null | undefined): string => {
-        const norm = (s || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-        const m = norm.match(/^[A-Z]+\d*/);
-        return m ? m[0] : norm;
-    };
-    const ka = key(a);
-    const kb = key(b);
+    const ka = gliderKey(a);
+    const kb = gliderKey(b);
     if (!ka || !kb) return false;
     return ka.startsWith(kb) || kb.startsWith(ka);
 }

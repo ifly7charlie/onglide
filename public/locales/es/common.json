@@ -151,8 +151,14 @@
         "label_duration": "Duración"
     },
     "options": {
+        "climb_show": "Mostrar la tasa de ascenso de los planeadores en círculo",
+        "climb_hide": "Ocultar la tasa de ascenso de los planeadores en círculo",
         "click_to_measure": "Clic para medir",
         "click_to_stop_measuring": "Clic para detener la medición",
+        "measure_off": "Herramienta de medición desactivada — clic para medir distancias en el mapa",
+        "measure_active": "Herramienta de medición: haz clic en dos puntos del mapa. Clic aquí para desactivar",
+        "compare_off": "Comparación de planeadores desactivada — clic para comparar el planeador seleccionado con el líder (o el planeador bajo el cursor)",
+        "compare_active": "Comparando el planeador seleccionado con el líder (o el planeador bajo el cursor). Clic aquí para desactivar",
         "rain_radar_showing": "Ajustar tiempos del radar de lluvia, mostrando {{value}}, clic para cambiar o desactivar",
         "rain_radar_enable": "Clic para activar el radar de lluvia",
         "rain_now": "ahora",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Cambiar a unidades métricas",
         "switch_to_imperial": "Cambiar a unidades imperiales",
         "map_attribution": "Atribución del mapa",
-        "close": "Cerrar"
+        "close": "Cerrar",
+        "follow_suspended": "Seguimiento en pausa porque moviste el mapa. Clic para reanudar, o selecciona un piloto",
+        "orientation_suspended": "Bloqueo de orientación en pausa porque moviste el mapa. Clic para reanudar, o selecciona un piloto"
     },
     "drawer": {
         "class": "Clase",
@@ -214,6 +222,7 @@
         "leg_completed": "tramo completado",
         "view_leg": "tramo",
         "view_task": "prueba",
+        "view_statistics": "Estadísticas",
         "view_actuals": "reales",
         "view_handicapped": "handicap",
         "view_task_or_leg": "prueba o tramo",
@@ -229,9 +238,24 @@
         "shortest": "Más corta",
         "recent_wind": "Viento reciente"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} térmicas · {{pct}}% en térmica · máx {{best}} · med {{avg}}",
+        "summary2": "planeo med {{ld}} · {{flown}} · ascenso {{gain}} · {{pctGap}}% sin cobertura",
+        "flown": "recorrido {{dist}}",
+        "flown_with_extra": "recorrido {{dist}} ({{extra}} prueba)",
+        "col_time": "Hora",
+        "col_duration": "Duración",
+        "col_wind": "Viento",
+        "state_thermal": "Térmica",
+        "state_straight": "Planeo",
+        "state_gap": "Hueco",
+        "turns": "{{count}} giros",
+        "tracking_gap": "sin señal"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} durante {{seconds}} segundos",
         "thermal_average": "media: {{climb}}",
+        "gaggle_count": "Grupo de {{count}}",
         "straight_distance_speed": "distancia: {{distance}} km a una velocidad de {{speed}} km/h",
         "straight_ld": "Planeo {{ld}}",
         "wind": "velocidad del viento: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "por delante",
+        "behind": "por detrás",
+        "above": "por encima",
+        "below": "por debajo"
     },
     "units": {
         "km": "km",

@@ -151,8 +151,14 @@
         "label_duration": "Duur"
     },
     "options": {
+        "climb_show": "Stijgsnelheden van cirkelende zweefvliegtuigen tonen",
+        "climb_hide": "Stijgsnelheden van cirkelende zweefvliegtuigen verbergen",
         "click_to_measure": "Klik om te meten",
         "click_to_stop_measuring": "Klik om meten te stoppen",
+        "measure_off": "Meetgereedschap uit — klik om afstanden op de kaart te meten",
+        "measure_active": "Meetgereedschap: klik op twee punten op de kaart. Klik hier om uit te schakelen",
+        "compare_off": "Vergelijking van zweefvliegtuigen uit — klik om het geselecteerde zweefvliegtuig te vergelijken met de leider (of het zweefvliegtuig onder de cursor)",
+        "compare_active": "Vergelijkt het geselecteerde zweefvliegtuig met de leider (of het zweefvliegtuig onder de cursor). Klik hier om uit te schakelen",
         "rain_radar_showing": "Regenradar-timing aanpassen, nu {{value}}, klik om te wijzigen of uit te schakelen",
         "rain_radar_enable": "Klik om regenradar in te schakelen",
         "rain_now": "nu",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Schakel naar metrische eenheden",
         "switch_to_imperial": "Schakel naar imperiale eenheden",
         "map_attribution": "Kaartattributie",
-        "close": "Sluiten"
+        "close": "Sluiten",
+        "follow_suspended": "Volgen gepauzeerd omdat je de kaart hebt verplaatst. Klik om te hervatten, of selecteer een piloot",
+        "orientation_suspended": "Oriëntatievergrendeling gepauzeerd omdat je de kaart hebt verplaatst. Klik om te hervatten, of selecteer een piloot"
     },
     "drawer": {
         "class": "Klasse",
@@ -214,6 +222,7 @@
         "leg_completed": "been voltooid",
         "view_leg": "been",
         "view_task": "opdracht",
+        "view_statistics": "Statistiek",
         "view_actuals": "werkelijk",
         "view_handicapped": "handicap",
         "view_task_or_leg": "opdracht of been",
@@ -229,9 +238,24 @@
         "shortest": "Kortste",
         "recent_wind": "Recente wind"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} thermieken · {{pct}}% cirkelen · max {{best}} · gem {{avg}}",
+        "summary2": "glijgetal gem {{ld}} · {{flown}} · gestegen {{gain}} · {{pctGap}}% geen dekking",
+        "flown": "gevlogen {{dist}}",
+        "flown_with_extra": "gevlogen {{dist}} ({{extra}} opgave)",
+        "col_time": "Tijd",
+        "col_duration": "Duur",
+        "col_wind": "Wind",
+        "state_thermal": "Thermiek",
+        "state_straight": "Glijvlucht",
+        "state_gap": "Gat",
+        "turns": "{{count}} rondjes",
+        "tracking_gap": "geen ontvangst"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} gedurende {{seconds}} seconden",
         "thermal_average": "gemiddeld: {{climb}}",
+        "gaggle_count": "Pulk van {{count}}",
         "straight_distance_speed": "afstand: {{distance}} km met snelheid {{speed}} km/u",
         "straight_ld": "Glijgetal {{ld}}",
         "wind": "windsnelheid: {{speed}} km/u @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "u",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "voor",
+        "behind": "achter",
+        "above": "boven",
+        "below": "onder"
     },
     "units": {
         "km": "km",

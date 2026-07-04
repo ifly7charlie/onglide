@@ -151,8 +151,14 @@
         "label_duration": "Durata"
     },
     "options": {
+        "climb_show": "Mostra i ratei di salita degli alianti in spirale",
+        "climb_hide": "Nascondi i ratei di salita degli alianti in spirale",
         "click_to_measure": "Clicca per misurare",
         "click_to_stop_measuring": "Clicca per fermare la misurazione",
+        "measure_off": "Strumento di misura disattivato — clicca per misurare le distanze sulla mappa",
+        "measure_active": "Strumento di misura: clicca due punti sulla mappa. Clicca qui per disattivare",
+        "compare_off": "Confronto alianti disattivato — clicca per confrontare l'aliante selezionato con il leader (o l'aliante sotto il cursore)",
+        "compare_active": "Confronto dell'aliante selezionato con il leader (o l'aliante sotto il cursore). Clicca qui per disattivare",
         "rain_radar_showing": "Regola tempi del radar pioggia, ora {{value}}, clicca per cambiare o disattivare",
         "rain_radar_enable": "Clicca per attivare il radar pioggia",
         "rain_now": "ora",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Passa alle unità metriche",
         "switch_to_imperial": "Passa alle unità imperiali",
         "map_attribution": "Attribuzione della mappa",
-        "close": "Chiudi"
+        "close": "Chiudi",
+        "follow_suspended": "Inseguimento in pausa perché hai spostato la mappa. Clicca per riprendere, o seleziona un pilota",
+        "orientation_suspended": "Blocco orientamento in pausa perché hai spostato la mappa. Clicca per riprendere, o seleziona un pilota"
     },
     "drawer": {
         "class": "Classe",
@@ -214,6 +222,7 @@
         "leg_completed": "tratta completata",
         "view_leg": "tratta",
         "view_task": "prova",
+        "view_statistics": "Statistiche",
         "view_actuals": "reali",
         "view_handicapped": "handicap",
         "view_task_or_leg": "prova o tratta",
@@ -229,9 +238,24 @@
         "shortest": "Più breve",
         "recent_wind": "Vento recente"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termiche · {{pct}}% in termica · max {{best}} · media {{avg}}",
+        "summary2": "efficienza media {{ld}} · {{flown}} · salita {{gain}} · {{pctGap}}% senza copertura",
+        "flown": "percorso {{dist}}",
+        "flown_with_extra": "percorso {{dist}} ({{extra}} tema)",
+        "col_time": "Ora",
+        "col_duration": "Durata",
+        "col_wind": "Vento",
+        "state_thermal": "Termica",
+        "state_straight": "Planata",
+        "state_gap": "Vuoto",
+        "turns": "{{count}} giri",
+        "tracking_gap": "perdita segnale"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} per {{seconds}} secondi",
         "thermal_average": "media: {{climb}}",
+        "gaggle_count": "Gruppo di {{count}}",
         "straight_distance_speed": "distanza: {{distance}} km a una velocità di {{speed}} km/h",
         "straight_ld": "Efficienza {{ld}}",
         "wind": "velocità del vento: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "avanti",
+        "behind": "indietro",
+        "above": "sopra",
+        "below": "sotto"
     },
     "units": {
         "km": "km",

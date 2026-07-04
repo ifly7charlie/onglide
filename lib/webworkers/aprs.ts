@@ -27,17 +27,26 @@ import {getElevationOffset} from '../getelevationoffset';
 // For smoothing altitudes
 //import KalmanFilter from 'kalmanjs';
 
-import {makeGetNow, d, readOnly} from '../now';
+import {makeGetNow, replay, d, readOnly} from '../now';
 
-import {PositionMessage} from '../types';
+import {PositionMessage, StreamId} from '../types';
 interface InterimPositionMessage extends PositionMessage {
     //    aircraft: Aircraft;
-    f: FlarmID; // id
+    // Combined StreamId: low 24 bits = flarmid hex, high 8 bits =
+    // protocol enum (OGFLR=1, OGNAVI=2, OGNTRK=3, …) — the OGN APRS
+    // destCallsign, identifying the uploader / processing pipeline the
+    // packet travelled through. Two streams with the same 6-hex but
+    // different protocol arrived via different paths (e.g. the same
+    // FLARM relayed via Naviter cloud vs. heard directly by an OGN
+    // radio gateway) and land in their own stickyPrimary bucket.
+    f: StreamId;
     o: string; // sender
     ad: number; // airfield distance
 }
 
 import {Epoch, ClassName_Compno, ClassName, AltitudeAgl, makeClassname_Compno, Compno, FlarmID, ChannelName, Bearing, Speed, Datecode} from '../types';
+import {createFlightStatistics, FlightStatistics} from './flightStatistics';
+import {STATS_INTERIM_INTERVAL} from '../constants';
 import {APRS_MAX_FILTER_BYTES, Bbox, pointInBbox} from '../flightprocessing/taskBbox';
 import {distHaversine} from '../flightprocessing/taskhelper';
 
@@ -107,6 +116,7 @@ export interface AprsCommandTrack {
     tzoffset: number; // seconds east of UTC — used to derive competition start time for point backfill
     receiveNewPoints: boolean;
     trackerId: string | string[];
+    flightstats: boolean; // comp opted into flight-statistics — gate stats generation
 }
 
 export interface AprsCommandUntrack {
@@ -188,10 +198,40 @@ const statistics = {
 };
 
 // Keep track of the aircraft requested
+// Per-flarmid offset sample buffer used by the stickyPrimary picker in
+// processMessageQueue. Each time both primary and a secondary flarmid
+// produce a record in the same t-bucket we push one sample; the median
+// over the last STICKY_OFFSET_WINDOW samples is the offset applied to
+// secondary records during primary-gap fill. Median is robust against
+// the single-sample GPS noise that wrecks a simple running mean.
+export interface FlarmOffsetState {
+    dLats: number[];
+    dLngs: number[];
+    dAlts: number[];
+    cursor: number; // next write index modulo window
+    count: number; // total samples ever taken (capped at window for median)
+    // Latch for discrepancy logging — true while the running-median offset
+    // exceeds the threshold (lat/lng > ~150 m, or alt > 50 m). One log line
+    // emitted per transition; reset when median drops back below.
+    loggedOver?: boolean;
+    // Sticky-session latch for the correlation gate: true once MAD of
+    // recent samples shows the secondary's offset isn't stationary against
+    // primary (e.g. Naviter left at the airfield while FLR flies the
+    // task). Untrusted streams are excluded from gap-fill entirely and a
+    // 'uncorrelated' row is written to trackerhistory. No reset path —
+    // cleared only when the aircraft entry is rebuilt (new datecode).
+    untrusted?: boolean;
+}
+
 export interface Aircraft {
     compno: Compno;
     className: ClassName;
-    trackers: FlarmID[];
+    // Stream identifiers for this aircraft. At configure time the high
+    // byte is 0 (we only know the 6-hex device) — that's effectively
+    // "primary, protocol TBD". pickStickyPrimary upgrades the entry to
+    // the first observed combined value on first match, so subsequent
+    // bucket comparisons are direct equality.
+    trackers: StreamId[];
 
     // Direct reference to this aircraft's competition airfield, set once at
     // trackGlider time. The aircraft↔competition relationship is permanent
@@ -210,6 +250,26 @@ export interface Aircraft {
     lastMoved: number;
     lastTick: Epoch;
 
+    // stickyPrimary picker state — see processMessageQueue. lastPrimaryTime
+    // is the t of the most recent accepted primary record; bucket processing
+    // skips secondary-only buckets unless (t - lastPrimaryTime) exceeds
+    // STICKY_GAP_FILL_S, which keeps secondary GPS noise out of dense
+    // primary regions. flarmOffsets accumulates per-secondary-flarmid offset
+    // samples (collected whenever primary and secondary co-occur in the same
+    // bucket) used to subtract the static GPS-unit-to-GPS-unit bias when a
+    // secondary record fills a primary gap.
+    lastPrimaryTime?: Epoch;
+    flarmOffsets?: Map<StreamId, FlarmOffsetState>;
+
+    // Per-StreamId tally maintained as packets land in this aircraft's
+    // queue (in processPacket / flushLoads dispatch). Drives the
+    // /status/trackers operator page so the snapshot picker doesn't have
+    // to re-scan `messages` every tick. Counts packets received (not
+    // emitted) — a high count for an untrusted stream is the signal that
+    // a real device is broadcasting but its positions don't track the
+    // primary.
+    streamsSeen?: Map<StreamId, {count: number; lastT: Epoch}>;
+
     //    kf?: any; // altitude smoothing
     stationary: number; // consecutive stationary fixes
     // Capped 0-10 ground-state counter. Saturated to 10 while the
@@ -219,6 +279,16 @@ export interface Aircraft {
     ground: number;
 
     channel?: BroadcastChannel; // where to send packets
+
+    // Incremental flight-statistics for this aircraft (thermal/straight/gap
+    // segments + wind). Lives on the per-aircraft object — compno alone is only
+    // unique within a class, and a tracker change builds a fresh Aircraft so the
+    // stats start clean. Attached to emitted positions at a low cadence; the gate
+    // bookkeeping below decides when.
+    statsEnabled?: boolean; // comp opted into flight-statistics
+    flightStats?: FlightStatistics;
+    statsLastCount?: number; // segment count at last attach
+    statsLastEmitT?: Epoch; // fix time of last attach (for the open-thermal interim cadence)
 
     messages: InterimPositionMessage[]; // sorted array of all packets received for the glider
 
@@ -235,6 +305,54 @@ export interface Tracker {
     aircraftList: Aircraft[];
     receiveNewPoints: boolean;
 }
+
+// Worker → main thread event. Fired once per (aircraft, secondary stream)
+// when stickyPrimary's MAD gate decides the secondary isn't tracking the
+// primary (e.g. Naviter device left at the airfield). Consumed by
+// bin/ogn.ts to write a 'uncorrelated' row into trackerhistory.
+export interface UncorrelatedTrackerEvent {
+    type: 'uncorrelated';
+    compno: Compno;
+    className: ClassName;
+    datecode: Datecode;
+    primary: StreamId;
+    secondary: StreamId;
+    madLatM: number;
+    madLngM: number;
+    madAltM: number;
+    sampleCount: number;
+}
+
+// Snapshot of per-pilot tracker state for the operator status page.
+// Pushed from the worker every TRACKER_STATUS_SNAPSHOT_MS so the main
+// thread cache stays fresh without a request/response round-trip.
+export interface TrackerSnapshotEntry {
+    compno: Compno;
+    className: ClassName;
+    datecode: Datecode;
+    // aircraft.trackers — combined StreamIds. High byte 0 means the
+    // configured-but-not-yet-promoted placeholder; primaryUpgraded
+    // signals whether the first packet has bumped it to the actual src.
+    configured: StreamId[];
+    // Every (src, fid) we've actually seen for this aircraft, with
+    // received packet count and last-seen epoch.
+    observed: Array<{
+        f: StreamId;
+        count: number;
+        lastT: Epoch;
+        sampleCount: number; // offset pair samples against primary (0 if no overlap yet)
+        untrusted: boolean;
+        isPrimary: boolean;
+    }>;
+    lastEmittedT?: Epoch; // aircraft.lastTime — most recent emitted fix
+}
+export interface TrackerStatusEvent {
+    type: 'trackerStatus';
+    snapshotT: Epoch; // worker wall-clock when this snapshot was built
+    pilots: TrackerSnapshotEntry[];
+}
+
+export type AprsWorkerEvent = UncorrelatedTrackerEvent | TrackerStatusEvent;
 
 // All active airfields with their elevation. Populated from the initial
 // config and updated at runtime via AprsCommandEnum.setAirfields.
@@ -368,14 +486,9 @@ function airfieldForCompid(compid: string): Airfield | undefined {
 // positives the aprsc filter let through (wide union slop) and routes a
 // shared FLARM ID into only the comp(s) whose bbox contain the position
 // (both pass when bboxes overlap).
-//
-// No-match fallback: if every aircraft fails the filter (e.g. the worker
-// is briefly stale between a task republish and the next rebuildAprsFilter
-// push), broadcast to all rather than silently drop. Exported for testing.
 export function selectAircraftForPosition(aircraftList: Aircraft[], lat: number, lng: number): Aircraft[] {
     if (aircraftList.length === 0) return aircraftList;
-    const matched = aircraftList.filter((ac) => !ac.airfield.bbox || pointInBbox(ac.airfield.bbox, lat, lng));
-    return matched.length > 0 ? matched : aircraftList;
+    return aircraftList.filter((ac) => !ac.airfield.bbox || pointInBbox(ac.airfield.bbox, lat, lng));
 }
 
 // Mapping by class/compno to aircraft record
@@ -407,7 +520,15 @@ let pendingLoads: PendingLoad[] = [];
 let loadTimer: NodeJS.Timeout | null = null;
 
 // Our persistence
-import {appendPoint, closeLog, loadPointsForIds, openLog} from './pointlog';
+import {appendPoint, closeLog, fidFromFlarm, fidLabel, loadPointsForIds, openLog, packFlarmId, protoCodeFor} from './pointlog';
+
+// 24-bit fid (low 24 bits of a combined StreamId) as a 6-hex uppercase
+// string. Used when crossing from the combined StreamId
+// (aircraft.trackers) back to the device-identity key for the global
+// `trackers` map.
+function combinedToHex6(combined: StreamId): string {
+    return (combined & 0xffffff).toString(16).toUpperCase().padStart(6, '0');
+}
 import {competitionStartForDatecode} from '../datecode';
 import {aprsAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
 
@@ -416,6 +537,12 @@ import {aprsAdditionalDelay, PENDING_LOAD_DEBOUNCE_MS} from '../constants';
 export class AprsController {
     worker: Worker;
 
+    // Set by the host (bin/ogn.ts) to receive structured events from the
+    // worker thread — currently just the `uncorrelated` notification when
+    // pickStickyPrimary drops a secondary. Worker has no DB handle, so the
+    // host is responsible for persistence.
+    onWorkerEvent: (e: AprsWorkerEvent) => void = () => {};
+
     constructor(config: AprsListenerConfig) {
         if (!isMainThread) {
             throw new Error('umm, this is only available in main thread');
@@ -423,6 +550,13 @@ export class AprsController {
         console.log('Starting APRS worker thread');
 
         this.worker = new Worker(__filename, {env: SHARE_ENV, workerData: config, name: 'aprs'});
+        this.worker.on('message', (e: AprsWorkerEvent) => {
+            try {
+                this.onWorkerEvent(e);
+            } catch (err: any) {
+                console.log(`AprsController: onWorkerEvent threw on ${e?.type}: ${err?.message ?? err}`);
+            }
+        });
     }
 
     validateGlider(trackerIds: string): boolean {
@@ -436,7 +570,7 @@ export class AprsController {
         return flarmIDs && flarmIDs.length > 0;
     }
 
-    trackGlider(compid: string, compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean): boolean {
+    trackGlider(compid: string, compno: Compno, className: ClassName, datecode: Datecode, tzoffset: number, channelName: ChannelName, trackerIds: string, receiveNewPoints: boolean, flightstats: boolean): boolean {
         const flarmIDs = trackerIds
             .split(/[:,]/)
             .map((i) => i.toUpperCase())
@@ -453,7 +587,8 @@ export class AprsController {
             datecode,
             tzoffset,
             receiveNewPoints,
-            trackerId: flarmIDs
+            trackerId: flarmIDs,
+            flightstats
         };
         this.worker.postMessage?.(command);
         return true;
@@ -528,6 +663,10 @@ export class AprsController {
     }
 }
 
+// Snapshot cadence drives the staleness of /status/trackers, which uses
+// a 30 s auto-refresh meta tag — keep them aligned.
+const TRACKER_STATUS_SNAPSHOT_MS = 30_000;
+
 if (!isMainThread && parentPort) {
     console.log('Started APRS worker thread');
 
@@ -574,6 +713,46 @@ if (!isMainThread && parentPort) {
     // skip opening the write stream entirely so no file is created and the
     // per-packet appendPoint below short-circuits.
     (readOnly ? Promise.resolve() : openLog()).then(() => startAprsListener(<AprsListenerConfig>workerData));
+
+    // Push a snapshot of per-pilot tracker state to the main thread every
+    // TRACKER_STATUS_SNAPSHOT_MS for the /status/trackers operator page.
+    // Cheap to build (O(aircraft) × O(streams per aircraft)) and only
+    // includes pilots that have been registered for tracking.
+    setInterval(emitTrackerStatusSnapshot, TRACKER_STATUS_SNAPSHOT_MS);
+}
+
+function emitTrackerStatusSnapshot(): void {
+    if (!parentPort) return;
+    const now = Math.floor(Date.now() / 1000) as Epoch;
+    const pilots: TrackerSnapshotEntry[] = [];
+    for (const key in allAircraft) {
+        const ac = allAircraft[key as ClassName_Compno];
+        const primary = ac.trackers[0];
+        const observed: TrackerSnapshotEntry['observed'] = [];
+        if (ac.streamsSeen) {
+            for (const [f, info] of ac.streamsSeen) {
+                const off = ac.flarmOffsets?.get(f);
+                observed.push({
+                    f,
+                    count: info.count,
+                    lastT: info.lastT,
+                    sampleCount: off?.count ?? 0,
+                    untrusted: !!off?.untrusted,
+                    isPrimary: f === primary
+                });
+            }
+            observed.sort((a, b) => b.lastT - a.lastT);
+        }
+        pilots.push({
+            compno: ac.compno,
+            className: ac.className,
+            datecode: ac.datecode,
+            configured: ac.trackers.slice(),
+            observed,
+            lastEmittedT: ac.lastTime as Epoch | undefined
+        });
+    }
+    parentPort.postMessage({type: 'trackerStatus', snapshotT: now, pilots} satisfies TrackerStatusEvent);
 }
 
 //
@@ -615,7 +794,7 @@ function applyFilter(filter: string) {
 //
 // Connect to the APRS Server
 function startAprsListener(config: AprsListenerConfig) {
-    if (process.env.REPLAY_DB || process.env.NEXT_PUBLIC_REPLAY) {
+    if (replay()) {
         return;
     }
 
@@ -871,12 +1050,14 @@ function trackGlider(task: AprsCommandTrack) {
 
     const existingTracker = allAircraft[key];
     if (existingTracker) {
-        console.log(`${task.compno}: closing existing tracker entry ${existingTracker.trackers.join(',')}`);
+        console.log(`${task.compno}: closing existing tracker entry ${existingTracker.trackers.map(fidLabel).join(',')}`);
         existingTracker.trackers.forEach((t) => {
-            const tracker = trackers[t];
+            const key = combinedToHex6(t) as FlarmID;
+            const tracker = trackers[key];
+            if (!tracker) return;
             tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != existingTracker.channel || a.compno != existingTracker.compno);
             if (!tracker.aircraftList.length) {
-                delete trackers[t];
+                delete trackers[key];
             }
         });
         clearInterval(existingTracker.interval);
@@ -886,14 +1067,19 @@ function trackGlider(task: AprsCommandTrack) {
         pendingLoads = pendingLoads.filter((b) => b.key !== key);
     }
 
+    // task.trackerId can be a single string or an array — normalise, then
+    // map each 6-hex device id to a combined uint32 with src code 0
+    // (placeholder; upgraded on first matching packet in pickStickyPrimary).
+    const configuredIds: FlarmID[] = typeof task.trackerId === 'string' ? [task.trackerId as FlarmID] : ((task.trackerId ?? []) as FlarmID[]);
     const glider: Aircraft = {
         compno: task.compno,
         className: task.className,
-        trackers: task.trackerId as FlarmID[],
+        trackers: configuredIds.map((id) => packFlarmId(fidFromFlarm(id), 0)),
         airfield,
 
         datecode: task.datecode,
         tzoffset: task.tzoffset,
+        statsEnabled: task.flightstats,
 
         stationary: 0,
         ground: 0,
@@ -920,7 +1106,7 @@ function trackGlider(task: AprsCommandTrack) {
     const since = competitionStartForDatecode(task.datecode, task.tzoffset);
 
     const trackerList = typeof task.trackerId == 'string' ? [task.trackerId] : task.trackerId;
-    const dedupedIds = [...new Set(trackerList)];
+    const dedupedIds = [...new Set(trackerList)] as FlarmID[];
     let index = 0;
     for (const id of dedupedIds) {
         console.log('load tracker', glider.compno, id);
@@ -941,10 +1127,11 @@ function trackGlider(task: AprsCommandTrack) {
     // during the load window land on this glider (the final sort fixes
     // any interleaving). The per-glider interval starts only after the
     // batch flush.
-    if (!channels[task.channelName]) {
-        channels[task.channelName] = new BroadcastChannel(task.channelName);
+    const channelName = task.channelName as ChannelName;
+    if (!channels[channelName]) {
+        channels[channelName] = new BroadcastChannel(channelName);
     }
-    glider.channel = channels[task.channelName];
+    glider.channel = channels[channelName];
     glider.messages = interimQueue;
 
     if (dedupedIds.length === 0) {
@@ -983,6 +1170,11 @@ interface LoadTarget {
     // expanded task bbox so multi-comp shared FLARM IDs don't pollute the
     // wrong queue at registration time.
     airfield: Airfield;
+    // Aircraft reference so flushLoads can bump streamsSeen for the
+    // backfilled records — the per-aircraft tally that drives
+    // /status/trackers should reflect history loaded from pointlog as
+    // well as live packets.
+    aircraft: Aircraft;
 }
 
 async function flushLoads() {
@@ -991,22 +1183,26 @@ async function flushLoads() {
     pendingLoads = [];
     if (batch.length === 0) return;
 
-    // Build flarmId → [target] map. One flarm ID can map to multiple
+    // Build 24-bit-fid → [target] map. One flarm ID can map to multiple
     // gliders if two pilots share a tracker (rare but supported by the
-    // existing trackers[id].aircraftList structure).
-    const idToTargets = new Map<string, LoadTarget[]>();
+    // existing trackers[id].aircraftList structure). Pointlog yields a
+    // combined StreamId; we look up by 24-bit device identity (src is for
+    // downstream stream-disambiguation, not for the routing decision).
+    const idToTargets = new Map<number, LoadTarget[]>();
+    const allIds = new Set<string>();
     let minSince = Infinity;
     for (const b of batch) {
         if (b.since < minSince) minSince = b.since;
-        const target: LoadTarget = {queue: b.queue, compno: b.glider.compno, since: b.since, airfield: b.glider.airfield};
+        const target: LoadTarget = {queue: b.queue, compno: b.glider.compno, since: b.since, airfield: b.glider.airfield, aircraft: b.glider};
         for (const id of b.flarmIds) {
-            const existing = idToTargets.get(id);
+            allIds.add(id);
+            const fid24 = fidFromFlarm(id);
+            const existing = idToTargets.get(fid24);
             if (existing) existing.push(target);
-            else idToTargets.set(id, [target]);
+            else idToTargets.set(fid24, [target]);
         }
     }
 
-    const allIds = new Set(idToTargets.keys());
     const startMs = Date.now();
     let yielded = 0;
     let dispatched = 0;
@@ -1014,7 +1210,7 @@ async function flushLoads() {
     try {
         for await (const raw of loadPointsForIds({flarmIds: allIds, since: minSince})) {
             yielded++;
-            const targets = idToTargets.get(raw.f);
+            const targets = idToTargets.get((raw.f & 0xffffff) >>> 0);
             if (!targets) continue;
             const baseMessage = raw as InterimPositionMessage & {d?: number};
             if (typeof baseMessage.d === 'number' && baseMessage.d > 1200) continue;
@@ -1027,6 +1223,7 @@ async function flushLoads() {
                 // each point to whichever comp(s) actually contain it.
                 if (target.airfield.bbox && !pointInBbox(target.airfield.bbox, baseMessage.lat, baseMessage.lng)) continue;
                 target.queue.push({...baseMessage, c: target.compno, ad: distHaversine(baseMessage, target.airfield.point)});
+                bumpStreamSeen(target.aircraft, raw.f, raw.t as Epoch);
                 dispatched++;
             }
         }
@@ -1058,7 +1255,8 @@ function finishGlider(task: AprsCommandFinish) {
     toFinish.receiveNewPoints = false;
 
     toFinish.trackers.forEach((t) => {
-        const tracker = trackers[t];
+        const tracker = trackers[combinedToHex6(t) as FlarmID];
+        if (!tracker) return;
         // If all are marked as done receving then we can stop it
         const exclusive = tracker.aircraftList.every((a) => a.receiveNewPoints);
         if (exclusive) {
@@ -1066,6 +1264,18 @@ function finishGlider(task: AprsCommandFinish) {
             tracker.receiveNewPoints = false;
         }
     });
+
+    // The flight is over — freeze the statistics (collapsing any stray tail
+    // segment) and broadcast the final list so main's statsStore reflects the
+    // closed-out flight. finish() also makes the unit ignore any stray points
+    // that arrive before reception fully stops, so the stats can't grow again.
+    if (toFinish.flightStats && toFinish.lastSent) {
+        toFinish.flightStats.finish();
+        const finalStats = toFinish.flightStats.getStats();
+        if (finalStats) {
+            toFinish.channel?.postMessage({c: toFinish.compno, t: toFinish.lastSent.t, statsFinal: true, stats: finalStats} as any);
+        }
+    }
 }
 
 function untrackGlider(task: AprsCommandUntrack) {
@@ -1078,10 +1288,12 @@ function untrackGlider(task: AprsCommandUntrack) {
 
     // remove the trackers
     toRemove.trackers.forEach((t) => {
-        const tracker = trackers[t];
+        const key = combinedToHex6(t) as FlarmID;
+        const tracker = trackers[key];
+        if (!tracker) return;
         tracker.aircraftList = tracker.aircraftList.filter((a) => a.channel != toRemove.channel || a.compno != toRemove.compno);
         if (!tracker.aircraftList.length) {
-            delete trackers[t];
+            delete trackers[key];
         }
     });
 
@@ -1089,7 +1301,7 @@ function untrackGlider(task: AprsCommandUntrack) {
 
     // Remove the glider details
     delete allAircraft[makeClassname_Compno(task)];
-    console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers}`);
+    console.log(`APRS: stop tracking ${task.className}/${task.compno} ids: ${toRemove.trackers.map(fidLabel).join(',')}`);
 }
 
 function messageSortKey(m: InterimPositionMessage): number {
@@ -1103,9 +1315,26 @@ function messageSortKeyCompare(a: InterimPositionMessage, b: InterimPositionMess
 //
 // collect points, emit to competition db every 30 seconds
 export async function processPacket(packet: aprsPacket) {
-    // Flarm ID we use is last 6 characters, check if OGN tracker or regular flarm
-    const flarmId = packet.sourceCallsign?.slice(packet.sourceCallsign?.length - 6) as FlarmID;
-    const ognTracker = packet.sourceCallsign?.slice(0, 3) == 'OGN';
+    // The trackers[] map is still keyed by 6-hex device identity (same
+    // FLARM device through any relay path is the same configured tracker
+    // for a pilot). The stream identifier we hand to the fusion pipeline
+    // is the combined uint32 — same 6-hex but a different protocol
+    // (OGFLR vs OGNAVI vs OGNTRK …) means a different upload pipeline
+    // (e.g. radio gateway vs. Naviter cloud relay), with different
+    // latency and accuracy characteristics, so it lands in its own
+    // stickyPrimary bucket. The 3-char SRC prefix (FLR/ICA/OGN/…) is
+    // just the device's address-type namespace and is deliberately NOT
+    // used here.
+    const sourceCallsign = packet.sourceCallsign ?? '';
+    const flarmId = sourceCallsign.slice(-6) as FlarmID;
+    // OGN-Delay pipeline keeps the original dstcall (e.g. OGNTRK) but
+    // stamps OGNDELAY* into the digipeater path and gates the q-construct
+    // via DLY2APRS. Same physical device but a very different upload
+    // pipeline — synthesise the OGNDLY proto code so direct and delayed
+    // streams land in their own stickyPrimary buckets.
+    const isDelayed = packet.digipeaters?.some((d) => d.callsign === 'OGNDELAY' || d.callsign === 'DLY2APRS') ?? false;
+    const protoCode = isDelayed ? protoCodeFor('OGNDLY') : protoCodeFor(packet.destCallsign);
+    const fCombined = packFlarmId(fidFromFlarm(flarmId), protoCode);
 
     if (!packet.latitude || !packet.longitude || !flarmId || !packet.timestamp || !packet.altitude) {
         statistics.invalidPacket++;
@@ -1179,7 +1408,7 @@ export async function processPacket(packet: aprsPacket) {
         t: packet.timestamp as Epoch,
         b: packet.course as Bearing,
         s: (Math.round((packet.speed ?? 0) * 10) / 10) as Speed,
-        f: flarmId,
+        f: fCombined,
         o: sender,
         l: null,
         d: td,
@@ -1228,10 +1457,286 @@ export async function processPacket(packet: aprsPacket) {
         } else {
             messageQueue.push(perAircraftMessage);
         }
+        bumpStreamSeen(aircraft, fCombined, perAircraftMessage.t);
+    }
+}
+
+// Maintain the per-aircraft (StreamId → count + lastT) tally that backs
+// the /status/trackers snapshot. Updated as packets land in the
+// aircraft's queue — captures every stream that has produced at least
+// one fix for this pilot, independent of whether it's currently trusted
+// or used by pickStickyPrimary.
+function bumpStreamSeen(aircraft: Aircraft, f: StreamId, t: Epoch): void {
+    if (!aircraft.streamsSeen) aircraft.streamsSeen = new Map();
+    const cur = aircraft.streamsSeen.get(f);
+    if (cur) {
+        cur.count++;
+        if (t > cur.lastT) cur.lastT = t;
+    } else {
+        aircraft.streamsSeen.set(f, {count: 1, lastT: t});
     }
 }
 
 //
+
+// stickyPrimary picker constants. STICKY_GAP_FILL_S mirrors the
+// GAP_FILL_THRESHOLD_S in lib/fusion/stickyPrimary.ts (the offline
+// reference). STICKY_OFFSET_WINDOW is the running-median window for
+// per-secondary-flarmid offset estimation; the bake-off used 1:1 matched
+// pairwise samples and median over all available pairs, but in the
+// streaming path we don't keep the full history, so a 64-sample circular
+// buffer is the memory-bounded equivalent. STICKY_MIN_PAIRS gates
+// whether to apply offset correction at all — below this we emit
+// secondary records uncorrected (preferring "raw secondary" to
+// "ill-estimated offset").
+const STICKY_GAP_FILL_S = 15;
+const STICKY_OFFSET_WINDOW = 64;
+const STICKY_MIN_PAIRS = 5;
+
+function speedSanityOk(point: InterimPositionMessage, lastSent: InterimPositionMessage): boolean {
+    const dT = point.t - lastSent.t;
+    if (dT <= 0) return false;
+    const dH_km = distHaversine(point, lastSent);
+    const dV = point.a - lastSent.a;
+    const dSH = (3600 * dH_km) / dT;
+    const dSV = Math.abs(dV / dT);
+    return dSH < (point.s || 160) * 2.3 && dSV < 30;
+}
+
+export function medianOf(xs: number[]): number {
+    if (xs.length === 0) return 0;
+    const sorted = xs.slice().sort((a, b) => a - b);
+    const m = sorted.length;
+    return m % 2 === 0 ? (sorted[m / 2 - 1] + sorted[m / 2]) / 2 : sorted[(m - 1) / 2];
+}
+
+// Median absolute deviation — robust scale estimate. MAD ≈ 0.67 × stdev
+// for normal data, but one bad sample doesn't move it (whereas it
+// dominates max-min spread for the full window length). Used to decide
+// whether a secondary's offset against primary is stationary (low MAD,
+// keep) or drifting (high MAD, untrust the secondary for the session).
+export function madOf(xs: number[]): number {
+    if (xs.length === 0) return 0;
+    const med = medianOf(xs);
+    const dev = xs.map((x) => Math.abs(x - med));
+    return medianOf(dev);
+}
+
+export function pushOffsetSample(state: FlarmOffsetState, dLat: number, dLng: number, dAlt: number): void {
+    const i = state.cursor;
+    if (state.count < STICKY_OFFSET_WINDOW) {
+        state.dLats.push(dLat);
+        state.dLngs.push(dLng);
+        state.dAlts.push(dAlt);
+        state.count++;
+    } else {
+        state.dLats[i] = dLat;
+        state.dLngs[i] = dLng;
+        state.dAlts[i] = dAlt;
+    }
+    state.cursor = (i + 1) % STICKY_OFFSET_WINDOW;
+}
+
+function getOrInitOffset(aircraft: Aircraft, f: StreamId): FlarmOffsetState {
+    if (!aircraft.flarmOffsets) aircraft.flarmOffsets = new Map();
+    let s = aircraft.flarmOffsets.get(f);
+    if (!s) {
+        s = {dLats: [], dLngs: [], dAlts: [], cursor: 0, count: 0};
+        aircraft.flarmOffsets.set(f, s);
+    }
+    return s;
+}
+
+// Per-secondary discrepancy log. We track which secondary streams are
+// currently *over* a position-offset threshold against the primary —
+// flipping into / out of that state emits one log line per transition.
+// Reason for the latch: the offset is recomputed every primary co-occurrence
+// (every few seconds), so without it a sustained mis-registered secondary
+// would spam every bucket.
+const STICKY_OFFSET_LOG_LAT_M = 150;
+const STICKY_OFFSET_LOG_ALT_M = 50;
+const METERS_PER_DEG_LAT = 111_111;
+
+// Correlation-quality gate. MAD threshold above which a secondary is
+// presumed not to be tracking the primary at all (e.g. a Naviter device
+// left at the airfield while the FLR flies the task — offsets grow with
+// every co-occurrence, producing a large MAD). Tighter than the
+// discrepancy-log threshold because the elimination is sticky for the
+// session; once latched the secondary is excluded from gap-fill until
+// the aircraft entry is rebuilt (new datecode).
+const STICKY_TRUST_MIN_SAMPLES = 20;
+const STICKY_TRUST_REJECT_LAT_M = 50;
+const STICKY_TRUST_REJECT_LNG_M = 50;
+const STICKY_TRUST_REJECT_ALT_M = 30;
+
+export function checkSecondaryOffset(aircraft: Aircraft, secF: StreamId, state: FlarmOffsetState, primaryF: StreamId, lat: number): void {
+    if (state.count < STICKY_MIN_PAIRS) return;
+    const cosLat = Math.cos((lat * Math.PI) / 180) || 1;
+    const mLat = medianOf(state.dLats);
+    const mLng = medianOf(state.dLngs);
+    const mAlt = medianOf(state.dAlts);
+    const dLat_m = Math.abs(mLat * METERS_PER_DEG_LAT);
+    const dLng_m = Math.abs(mLng * METERS_PER_DEG_LAT * cosLat);
+    const dAlt_m = Math.abs(mAlt);
+    const over = dLat_m > STICKY_OFFSET_LOG_LAT_M || dLng_m > STICKY_OFFSET_LOG_LAT_M || dAlt_m > STICKY_OFFSET_LOG_ALT_M;
+    if (over && !state.loggedOver) {
+        state.loggedOver = true;
+        console.log(
+            `aprs: stream offset ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} dLat=${dLat_m.toFixed(0)}m dLng=${dLng_m.toFixed(0)}m dAlt=${dAlt_m.toFixed(0)}m (n=${state.count})`
+        );
+    } else if (!over && state.loggedOver) {
+        state.loggedOver = false;
+        console.log(`aprs: stream offset cleared ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} (n=${state.count})`);
+    }
+    if (state.untrusted) return;
+    if (state.count < STICKY_TRUST_MIN_SAMPLES) return;
+    const madLat_m = madOf(state.dLats) * METERS_PER_DEG_LAT;
+    const madLng_m = madOf(state.dLngs) * METERS_PER_DEG_LAT * cosLat;
+    const madAlt_m = madOf(state.dAlts);
+    if (madLat_m > STICKY_TRUST_REJECT_LAT_M || madLng_m > STICKY_TRUST_REJECT_LNG_M || madAlt_m > STICKY_TRUST_REJECT_ALT_M) {
+        state.untrusted = true;
+        recordUncorrelatedTracker(aircraft, primaryF, secF, madLat_m, madLng_m, madAlt_m, state.count);
+    }
+}
+
+// Emit one log line + a parent-thread message so bin/ogn.ts can record
+// the rejection in trackerhistory. We don't write to the DB from the
+// worker — it doesn't hold a mysql handle.
+function recordUncorrelatedTracker(aircraft: Aircraft, primaryF: StreamId, secF: StreamId, madLatM: number, madLngM: number, madAltM: number, sampleCount: number): void {
+    console.log(
+        `aprs: tracker uncorrelated ${aircraft.className}/${aircraft.compno} primary=${fidLabel(primaryF)} secondary=${fidLabel(secF)} madLat=${madLatM.toFixed(0)}m madLng=${madLngM.toFixed(0)}m madAlt=${madAltM.toFixed(0)}m (n=${sampleCount})`
+    );
+    if (parentPort) {
+        parentPort.postMessage({
+            type: 'uncorrelated',
+            compno: aircraft.compno,
+            className: aircraft.className,
+            datecode: aircraft.datecode,
+            primary: primaryF,
+            secondary: secF,
+            madLatM,
+            madLngM,
+            madAltM,
+            sampleCount
+        } satisfies UncorrelatedTrackerEvent);
+    }
+}
+
+// Within one flarmid's bucket, dedup receiver duplicates. Two stations
+// hearing the same FLARM transmission produce byte-identical records;
+// the speed sanity filter doesn't differentiate them. Pick deterministically
+// (prefer same `o` as lastSent for stability, else first by `o` sort).
+function pickWithinFlarmid(bucket: InterimPositionMessage[], lastSent: InterimPositionMessage | undefined): InterimPositionMessage | undefined {
+    if (bucket.length === 0) return undefined;
+    if (bucket.length === 1) return bucket[0];
+    const lastO = lastSent?.o;
+    if (lastO) {
+        const match = bucket.find((b) => b.o === lastO);
+        if (match) return match;
+    }
+    return bucket.slice().sort((a, b) => (a.o ?? '').localeCompare(b.o ?? ''))[0];
+}
+
+function pickStickyPrimary(
+    aircraft: Aircraft, //
+    duplicates: InterimPositionMessage[],
+    lastSent: InterimPositionMessage | undefined,
+    t: Epoch
+): InterimPositionMessage | undefined {
+    // Group by combined stream id. In the single-stream case the byFlarm
+    // map has one entry and we fall through to "pick from primary bucket"
+    // trivially. Different src prefixes for the same 6-hex are different
+    // streams here (different GPS chip, different bucket).
+    const byFlarm = new Map<StreamId, InterimPositionMessage[]>();
+    for (const p of duplicates) {
+        let g = byFlarm.get(p.f);
+        if (!g) {
+            g = [];
+            byFlarm.set(p.f, g);
+        }
+        g.push(p);
+    }
+
+    let primaryFlarmid: StreamId | undefined = aircraft.trackers[0];
+    // Configured trackers start with high byte 0 (we knew the 6-hex but
+    // not the src that would actually report). On first match, upgrade
+    // the placeholder to the actual combined value so subsequent equality
+    // tests against bucket keys are direct.
+    if (primaryFlarmid !== undefined && primaryFlarmid >>> 24 === 0) {
+        const fid24 = primaryFlarmid & 0xffffff;
+        for (const f of byFlarm.keys()) {
+            if ((f & 0xffffff) === fid24) {
+                primaryFlarmid = f;
+                aircraft.trackers[0] = f;
+                break;
+            }
+        }
+    }
+    const primaryBucket = primaryFlarmid !== undefined ? byFlarm.get(primaryFlarmid) : undefined;
+
+    // If primary is present in this bucket: pick from it, opportunistically
+    // collect offset samples from any secondaries co-occurring at the same t.
+    if (primaryBucket && primaryBucket.length > 0) {
+        const picked = pickWithinFlarmid(primaryBucket, lastSent);
+        if (!picked) return undefined;
+        if (lastSent && !speedSanityOk(picked, lastSent)) return undefined;
+        aircraft.lastPrimaryTime = t;
+        // Update per-secondary offset estimates: each secondary record at
+        // the same t against the just-picked primary record is one sample.
+        for (const [f, bucket] of byFlarm) {
+            if (f === primaryFlarmid) continue;
+            const sec = pickWithinFlarmid(bucket, lastSent);
+            if (!sec) continue;
+            const state = getOrInitOffset(aircraft, f);
+            pushOffsetSample(state, sec.lat - picked.lat, sec.lng - picked.lng, sec.a - picked.a);
+            checkSecondaryOffset(aircraft, f, state, primaryFlarmid!, picked.lat);
+        }
+        return picked;
+    }
+
+    // Primary absent from this bucket. Only emit a secondary if the
+    // primary has been silent long enough that we're really in a gap.
+    const sincePrimary = aircraft.lastPrimaryTime != null ? t - aircraft.lastPrimaryTime : Infinity;
+    if (sincePrimary <= STICKY_GAP_FILL_S) {
+        // Still inside the primary's coverage — don't pollute with secondary GPS noise.
+        // BUT if we have never seen primary at all (lastPrimaryTime undefined → Infinity
+        // → skip this branch), we DO fall through to picking a secondary so the session
+        // can bootstrap. That handles cases where the primary is silent for the day
+        // (operator switched to backup device).
+        return undefined;
+    }
+
+    // Gap-fill: pick the densest secondary bucket. Skip any stream whose
+    // MAD gate has latched it as untrusted (offset against primary isn't
+    // stationary — e.g. a Naviter device left at the airfield). Once
+    // latched, the stream stays out for the aircraft's session.
+    let bestF: StreamId | undefined;
+    let bestBucket: InterimPositionMessage[] | undefined;
+    for (const [f, bucket] of byFlarm) {
+        if (f === primaryFlarmid) continue; // primary already handled (absent here)
+        if (aircraft.flarmOffsets?.get(f)?.untrusted) continue;
+        if (!bestBucket || bucket.length > bestBucket.length) {
+            bestF = f;
+            bestBucket = bucket;
+        }
+    }
+    if (bestF === undefined || !bestBucket) return undefined;
+    const picked = pickWithinFlarmid(bestBucket, lastSent);
+    if (!picked) return undefined;
+    // Apply offset correction if we have enough samples for this secondary.
+    const offsetState = aircraft.flarmOffsets?.get(bestF);
+    let emitted = picked;
+    if (offsetState && offsetState.count >= STICKY_MIN_PAIRS) {
+        emitted = {
+            ...picked,
+            lat: picked.lat - medianOf(offsetState.dLats),
+            lng: picked.lng - medianOf(offsetState.dLngs),
+            a: picked.a - medianOf(offsetState.dAlts)
+        };
+    }
+    if (lastSent && !speedSanityOk(emitted, lastSent)) return undefined;
+    return emitted;
+}
 
 //
 // This iterates through the queue on a regular basis and deals with each point
@@ -1273,37 +1778,19 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         const duplicates = messages.slice(position, duplicatePosition);
         position = duplicatePosition;
 
-        // If we have many we need to reduce this to one
-        // we take smallest difference in position, or if the same the smallest vertical difference from
-        // previously selected point. If point is the same then don't prefer it.
-        const sortedPoint = !lastSent
-            ? null
-            : duplicates
-                  .map((point) => {
-                      const dH = distHaversine(point, lastSent!);
-                      const dV = point.a - lastSent!.a;
-                      const dG = point.g - lastSent!.g;
-                      const dT = point.t - lastSent!.t;
-                      return {
-                          ...point,
-                          dH: dH * 1000,
-                          dV,
-                          dG,
-                          dT,
-                          dSH: (3600 * dH) / dT, //km/s
-                          dSV: Math.abs(dV / dT) // m/s
-                      };
-                  })
-                  // Quickly remove faster than 300kph Horizontal or 30m/s Vertical
-                  // as they can't possible be correct (point.s is the flarm reported speed)
-                  .filter((point) => point.dSH < (point.s || 160) * 2.3 && point.dSV < 30)
-                  // Then sort them by amount of change
-                  .sort((a, b) => (Math.abs(a.dH - b.dH) > 1 ? a.dH - b.dH : a.dV != b.dV ? a.dV - b.dV : a.o == lastSent!.o ? -1 : 0))
-                  .at(0);
-
-        // Take the first one, if we don't have one then we can just do nothing for now
-        // don't bypass the filtering for jumps by assuming null sortedPoint means take first point
-        const point = lastSent ? sortedPoint : duplicates.at(0);
+        // stickyPrimary picker. For pilots with one flarmid this collapses
+        // to exact (f, t) dedup. For pilots with multiple flarmids it picks
+        // the canonical primary (aircraft.trackers[0]) when present and only
+        // falls back to a secondary when the primary has been silent for
+        // longer than STICKY_GAP_FILL_S. Secondaries are offset-corrected
+        // against the primary using a running per-flarmid median. Reference:
+        // lib/fusion/stickyPrimary.ts (batch variant, validated by the
+        // offline bake-off; this is the streaming-per-bucket equivalent).
+        //
+        // Speed sanity filter (>300 kph horizontal or >30 m/s vertical jump
+        // from lastSent) is retained — it catches GPS glitches independent
+        // of the dedup decision.
+        const point = pickStickyPrimary(aircraft, duplicates, lastSent, t as Epoch);
         if (!point) {
             continue;
         }
@@ -1321,7 +1808,9 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // path below can fire. Raw GPS altitude (a) jitters by a few metres even
         // when parked, so compare g (AGL, rounded to the metre) and allow a small
         // horizontal tolerance for GPS drift.
-        const noMovement = sortedPoint ? sortedPoint.dH < 5 && Math.abs(sortedPoint.dG) < 3 : false;
+        const pickedDH_m = distHaversine(point, lastSent) * 1000;
+        const pickedDG = point.g - lastSent.g;
+        const noMovement = pickedDH_m < 5 && Math.abs(pickedDG) < 3;
 
         // We haven't picked one because we have had no movement but we have had packets.
         // Note: aircraft.lastMoved starts at 0 and is only set once the glider actually
@@ -1329,7 +1818,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // value on the first stationary detection. That's intentional — it arms the
         // ground state immediately for gliders that were already parked when the
         // session started.
-        const stationaryTime = noMovement && sortedPoint ? sortedPoint.t - aircraft.lastMoved : 0;
+        const stationaryTime = noMovement ? point.t - aircraft.lastMoved : 0;
 
         if (stationaryTime > 60) {
             // If we had been stationary for a while and we are low enough to be on the ground
@@ -1382,7 +1871,34 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
         // point and then get reverted when the "live" final point lands. The heartbeat tick below
         // (always _:true) is what signals the replay/live boundary to iog.
         const live = start != 0 || (position < messages.length && messages[position].t >= to);
-        aircraft.channel!.postMessage({...point, aircraft: undefined, _: live});
+
+        // Feed the incremental flight-statistics unit (decoupled from scoring —
+        // it only needs raw fix geometry) and piggyback the result onto the
+        // position at a low cadence: when a segment closes/opens (count change)
+        // or the open thermal has grown past the interim interval. The same
+        // emitted position carries it to both main (the stats data plane) and
+        // the scoring worker (which welds PilotScore.wind).
+        let attachStats: ReturnType<FlightStatistics['getStats']> = undefined;
+        let attachWind: ReturnType<FlightStatistics['getWind']> = undefined;
+        if (aircraft.statsEnabled) {
+            const stats = (aircraft.flightStats ??= createFlightStatistics());
+            stats.addPosition(point);
+            const cur = stats.getStats();
+            if (cur) {
+                const count = cur.segments.length;
+                const open = cur.segments[count - 1];
+                const countChanged = count !== aircraft.statsLastCount;
+                const tailAdvanced = open?.state === 'thermal' && point.t - (aircraft.statsLastEmitT ?? 0) > STATS_INTERIM_INTERVAL;
+                if (countChanged || tailAdvanced) {
+                    attachStats = cur;
+                    attachWind = stats.getWind();
+                    aircraft.statsLastCount = count;
+                    aircraft.statsLastEmitT = point.t as Epoch;
+                }
+            }
+        }
+
+        aircraft.channel!.postMessage({...point, aircraft: undefined, _: live, stats: attachStats, wind: attachWind});
         log('sent->', point);
     }
     if (!aircraft.lastTick || realNow - aircraft.lastTick > 60) {

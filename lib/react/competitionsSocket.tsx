@@ -12,6 +12,7 @@ import {OnglideWebSocketMessage} from '../protobuf/onglide';
 import {unscaleFromWire} from '../protobuf/wireScaling';
 import {competitionsWebsocketUrl} from './fixupUrls';
 import {triggerVersionCheck} from './autoUpdate';
+import {WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../constants';
 
 // Server pushes a `ka` packet every 15s on /all. If we hear nothing for
 // longer than this we assume the connection has gone silent (NAT timeout,
@@ -89,7 +90,13 @@ export function CompetitionsSocket() {
                 // keepalive that carries no `competitions` payload.
                 armWatchdog(socket);
                 if (typeof ev.data === 'string') {
-                    // Server-sent 'reload' sentinel — only happens for unknown
+                    if (ev.data === WS_MOVE) {
+                        // Daemon shutting down gracefully — reconnect after a
+                        // random delay so /all listeners re-spread across the
+                        // incoming daemon. onclose drives scheduleReconnect.
+                        setTimeout(() => socket.close(), Math.random() * CLIENT_MOVE_WINDOW_MS);
+                    }
+                    // Otherwise a 'reload' sentinel — only happens for unknown
                     // channels; we don't expect it on /all but tolerate it.
                     return;
                 }

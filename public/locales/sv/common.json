@@ -151,8 +151,14 @@
         "label_duration": "Tid"
     },
     "options": {
+        "climb_show": "Visa stighastighet för cirklande segelflygplan",
+        "climb_hide": "Dölj stighastighet för cirklande segelflygplan",
         "click_to_measure": "Klicka för att mäta",
         "click_to_stop_measuring": "Klicka för att sluta mäta",
+        "measure_off": "Mätverktyg av — klicka för att mäta avstånd på kartan",
+        "measure_active": "Mätverktyg: klicka på två punkter på kartan. Klicka här för att stänga av",
+        "compare_off": "Jämförelse av segelflygplan av — klicka för att jämföra det valda segelflygplanet med ledaren (eller segelflygplanet under markören)",
+        "compare_active": "Jämför det valda segelflygplanet med ledaren (eller segelflygplanet under markören). Klicka här för att stänga av",
         "rain_radar_showing": "Justera regnradarens tid, visar nu {{value}}, klicka för att ändra eller stänga av",
         "rain_radar_enable": "Klicka för att aktivera regnradar",
         "rain_now": "nu",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Byt till metriska enheter",
         "switch_to_imperial": "Byt till imperiska enheter",
         "map_attribution": "Kartattribution",
-        "close": "Stäng"
+        "close": "Stäng",
+        "follow_suspended": "Följning pausad eftersom du flyttade kartan. Klicka för att återuppta, eller välj en pilot",
+        "orientation_suspended": "Orienteringslås pausat eftersom du flyttade kartan. Klicka för att återuppta, eller välj en pilot"
     },
     "drawer": {
         "class": "Klass",
@@ -214,6 +222,7 @@
         "leg_completed": "benet avslutat",
         "view_leg": "ben",
         "view_task": "uppgift",
+        "view_statistics": "Statistik",
         "view_actuals": "verkliga",
         "view_handicapped": "handicap",
         "view_task_or_leg": "uppgift eller ben",
@@ -229,9 +238,24 @@
         "shortest": "Kortaste",
         "recent_wind": "Aktuell vind"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termikar · {{pct}}% cirkling · bäst {{best}} · snitt {{avg}}",
+        "summary2": "snitt glidtal {{ld}} · {{flown}} · stigit {{gain}} · {{pctGap}}% ingen täckning",
+        "flown": "flugit {{dist}}",
+        "flown_with_extra": "flugit {{dist}} ({{extra}} uppgift)",
+        "col_time": "Tid",
+        "col_duration": "Varaktighet",
+        "col_wind": "Vind",
+        "state_thermal": "Termik",
+        "state_straight": "Glidflykt",
+        "state_gap": "Lucka",
+        "turns": "{{count}} varv",
+        "tracking_gap": "ingen signal"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} i {{seconds}} sekunder",
         "thermal_average": "medel: {{climb}}",
+        "gaggle_count": "Svärm på {{count}}",
         "straight_distance_speed": "distans: {{distance}} km i farten {{speed}} km/h",
         "straight_ld": "Glidtal {{ld}}",
         "wind": "vindhastighet: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "före",
+        "behind": "efter",
+        "above": "över",
+        "below": "under"
     },
     "units": {
         "km": "km",

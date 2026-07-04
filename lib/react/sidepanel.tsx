@@ -53,7 +53,7 @@ export function SidePanelHeader({comp}: {comp: any}) {
     ) : null;
     return (
         <div className="sidepanel-header">
-            <Link href={groupForHost(window.location.host) ? '/' : 'https://www.onglide.com/'} className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+            <Link href={groupForHost(window.location.host) !== null ? '/' : 'https://www.onglide.com/'} className="sidepanel-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                 <FontAwesomeIcon icon={faGlobe} />
             </Link>
             {logo}

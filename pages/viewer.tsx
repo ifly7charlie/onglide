@@ -31,7 +31,7 @@ import type {API_ClassName_Pilots, API_ClassName_Pilots_PilotDetail} from '../li
 import {parseIGC, type IGCData} from '../lib/view/igcParser';
 import {buildTask} from '../lib/view/taskBuilder';
 import {scoreIGCFlight} from '../lib/view/clientScoringPipeline';
-import {dispatchClass, dispatchTask, dispatchTrack, dispatchScores, dispatchTimeRange} from '../lib/view/populateStore';
+import {dispatchClass, dispatchTask, dispatchTrack, dispatchScores, dispatchPilotStats, dispatchTimeRange} from '../lib/view/populateStore';
 import {setReferenceDate} from '../lib/flightprocessing/referenceDate';
 
 import {PilotList, Details} from '../lib/react/pilotlist';
@@ -203,7 +203,6 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const [error, setError] = useState<string | null>(null);
     const [selectedCompno, setSelectedCompno] = useState<Compno | undefined>(undefined);
     const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
-    const [follow, setFollow] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
 
     // Handicaps stored in localStorage, keyed by compno
@@ -318,7 +317,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         taskRef.current.rules.handicapped = anyHandicapped;
                         taskRef.current.details.handicapped = anyHandicapped ? 'Y' : 'N';
 
-                        const allScores = await scoreIGCFlight(
+                        const {scores: allScores, stats} = await scoreIGCFlight(
                             taskRef.current,
                             igcData.fixes,
                             compno,
@@ -334,6 +333,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         if (allScores.length) {
                             dispatchScores(dispatch, allScores);
                         }
+                        dispatchPilotStats(dispatch, compno, stats);
 
                         // Use full fix range (not clipped) for the time slider
                         runningEarliest = Math.min(runningEarliest, igcData.fixes[0].t) as Epoch;
@@ -393,9 +393,10 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const setCompno = useCallback(
         (cn) => {
             setSelectedCompno(cn);
-            if (cn) setFollow(true);
+            // Selecting a pilot re-engages follow/orientation after a manual pan.
+            if (cn && options?.viewSuspended) setOptions({...options, viewSuspended: false});
         },
-        [setSelectedCompno]
+        [setSelectedCompno, options, setOptions]
     );
 
     const handleReset = useCallback(() => {
@@ -420,13 +421,14 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         try {
             for (const flight of flights) {
                 const h = handicapsRef.current[flight.compno] ?? 100;
-                const scores = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, h, 0 as Epoch);
+                const {scores, stats} = await scoreIGCFlight(taskRef.current, flight.igcData.fixes, flight.compno, h, 0 as Epoch);
                 const earliestStart = scores.reduce((min, s) => (s.utcStart && s.utcStart < min ? s.utcStart : min), Infinity) as Epoch;
                 const trackFixes = earliestStart < Infinity ? flight.igcData.fixes.filter((f) => f.t >= earliestStart - 30) : flight.igcData.fixes;
                 dispatchTrack(dispatch, flight.compno, flight.pilotName, trackFixes);
                 if (scores.length) {
                     dispatchScores(dispatch, scores);
                 }
+                dispatchPilotStats(dispatch, flight.compno, stats);
             }
         } catch (e) {
             setError(e instanceof Error ? e.message : t('viewer.error_rescoring'));
@@ -504,8 +506,6 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         <MApp
                             key="map"
                             vc={VC}
-                            follow={follow}
-                            setFollow={setFollow}
                             setSelectedCompno={setCompno}
                             options={viewOptions}
                             setOptions={setOptions}
@@ -528,7 +528,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             </div>
                         </div>
                         <div className="sidepanel-tools">
-                            <Options options={viewOptions} setOptions={setOptions} multipleClasses={false} />
+                            <Options options={viewOptions} setOptions={setOptions} multipleClasses={false} showRainRadar={false} />
                         </div>
                         <div className="sidepanel-fixed-head">
                             {error && (

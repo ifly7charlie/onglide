@@ -22,6 +22,8 @@ yarn ogn:dev            # tsc-watch + node --inspect (auto-restarts on rebuild)
 yarn ssscrape:dev       # same pattern for the scoring scraper
 yarn test               # vitest run (test/**/*.test.ts)
 yarn test:watch         # vitest watch
+yarn i18n:check         # report locale key gaps / format drift vs en (same audit the test enforces)
+yarn i18n:fill          # stub every missing key into each locale (en value as placeholder) + canonicalise
 ```
 
 Run a single test file:
@@ -32,6 +34,16 @@ yarn vitest run test/trackerScore.test.ts
 `yarn build:protobuf` regenerates `lib/protobuf/onglide.ts` from `onglide.proto` via `protoc` + `ts-proto`. You need `protoc` installed locally. If types in `OnglideWebSocketMessage` look stale, rerun this before debugging.
 
 Prettier: 4-space, **225-char print width**, single quotes, no bracket spacing, no trailing comma. Don't fight it on long lines — the config is wide on purpose.
+
+### Internationalisation (i18n)
+
+Translations live in `public/locales/<lang>/common.json`; **`en` is the reference**. Front-end strings are looked up with `useTranslation('common')` + `t('dotted.key')` (interpolation is `{{var}}`), and locale-specific formatting like distance units comes from the same files (e.g. `units.km`).
+
+**Parity is CI-enforced.** `test/locales.test.ts` (part of `yarn test`) fails if any non-`en` locale is missing a key `en` has, carries a key `en` lacks, or isn't canonical 4-space JSON with a trailing newline. So **adding a `t('…')` key means adding it to `en/common.json` and every other locale** — `yarn test` goes red otherwise. Workflow: add the key to `en`, run `yarn i18n:fill` to stub it into the other ~14 locales (placeholder = the `en` value, inserted in `en`'s key order), then translate the stubs. `yarn i18n:check` runs the audit on demand.
+
+**`i18n:fill` does not translate — it only stubs English placeholders, which makes the parity test pass while the strings are still English.** So any time `fill` reports new fills, those keys still need real translation. To translate, set each key's value in every `public/locales/<lang>/common.json`, matching that locale's existing terminology and register (formal vs informal "you") — compare against sibling keys like `options.north_up` / `options.follow_pilot`. Edit values in place (don't reorder keys) and keep files canonical: `JSON.stringify(obj, null, 4) + '\n'` (exactly what `canonical()` in `checktranslations.js` writes), or the format check fails. A quick script over the ~14 locale files is faster than per-file edits; `yarn i18n:check` then confirms parity + format.
+
+Both the CLI and the test share `bin/checktranslations.js` (ESM, dependency-free; the test imports its `audit()`). `--fill` is also the formatter — it rewrites any locale that has drifted from canonical 4-space JSON.
 
 ## Architecture
 
@@ -137,6 +149,22 @@ Vector basemap is a single self-hosted `.pmtiles` file served over HTTP range re
 - `.aprs` files at the repo root are recorded APRS logs used for replay/testing (large — `476.aprs` is ~230 MB).
 - The Next.js version pinned here **is not safe to expose directly** — always run behind Apache/Cloudflare (see `readme.md`).
 - `readme.md` (lowercase) is the operator's deployment guide. It documents env vars (`NEXT_PUBLIC_PMTILES_URL`, `MYSQL_PASSWORD`, `SOARINGSPOT_*`, `ROBOCONTROL_URL`, etc.), Planetiler invocations for pmtiles, and the docker-compose topology (`mysql`, `soaringspot`, `ogn`, `next`, `apache`).
+
+## Error handling
+
+Catch errors only to handle a *specific, expected* condition; report everything else loudly. The failure mode to avoid is a broad catch that swallows a real bug as if it were the expected case — it turns a crash into a silent no-op that wastes far more time to diagnose than the original error would have. These principles hold everywhere; **where an unexpected error goes differs by execution context** (below).
+
+- Make the catch predicate as narrow as the condition it handles. Example: a migration-not-applied skip should match a genuinely-absent table (`ER_NO_SUCH_TABLE`) **only** — *not* `Unknown column`, which means the table exists but is the wrong shape (a real bug). See `isMissingTable` in `bin/findtrackers.ts`; same shape as the `EADDRINUSE`-only catch in `bin/ogn.ts` (rethrows anything else).
+- An unexpected error must never be downgraded to a warning or quietly ignored — it either crashes (CLI) or aborts just its unit of work *with a logged reason* (daemon). Never both swallowed and unlogged.
+- A latched "feature unavailable" flag (e.g. `identityTablesUnavailable`, `priorEvidenceUnavailable`) must only ever be set by the narrow expected-condition branch. If it can also latch on an unexpected error, one swallowed failure silences the feature for the whole run.
+- When a code path legitimately does nothing, say so on stdout (counts, "skipped: <reason>"). A run that produces no output and no error must be indistinguishable from success only when it *was* success.
+
+**CLI / one-shot tools** (`bin/findtrackers.ts`, `bin/rst.ts`, `ssscrape --refetch`/arg-validation): an unexpected error should propagate to the top-level `main().catch` → `console.error` + **non-zero exit**, or `process.exit(1)` at the handling site. A failed one-shot must exit non-zero so the caller/cron sees it.
+
+**Long-running daemons** (`bin/ogn.ts` tick loop, `bin/ssscrape.ts` scheduler): a single bad unit of work must **not** crash the process. The catch boundary is the loop body — per-competition, per-packet, per-heartbeat — not the top level:
+- Wrap each unit and continue: `for (const comp of …) { try { await tickCompetition(comp) } catch (e) { console.error(\`tickCompetition(${comp.compid}) failed:\`, e) } }` (`bin/ogn.ts`). Always log with the identifying context (compid / datecode / flarmid) so the failing unit is identifiable.
+- Background/fire-and-forget work uses `.catch((e) => console.log('<name> failed', e))` (the sweeps, `runScheduler`, `notifyCompetitionDelta`) — log and keep serving.
+- Reserve `process.exit` for signal-driven graceful shutdown (`handleExit`) and unrecoverable startup failures — not for routine per-iteration errors.
 
 # IMPORTANT
 

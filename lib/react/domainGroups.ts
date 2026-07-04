@@ -13,8 +13,12 @@ export const domainGroups: Record<string, string> = {
 };
 
 // Resolve the group for a hostname (host may carry a :port suffix). Returns
-// null when the host is not configured for a group.
+// null when the host is not configured for a group. Localhost/dev hosts get
+// an empty string sentinel so callers can distinguish "stay local" from
+// "redirect to onglide.com".
 export function groupForHost(host: string | undefined): string | null {
     if (!host) return null;
-    return domainGroups[host.toLowerCase().split(':')[0]] ?? null;
+    const base = host.toLowerCase().split(':')[0];
+    if (base === 'localhost' || base === '127.0.0.1' || base === '0.0.0.0') return '';
+    return domainGroups[base] ?? null;
 }

@@ -20,16 +20,19 @@ import type {
 
 import {makeClassname_Compno} from '../types';
 import {getNow} from '../now';
+import {updateClassAction} from './actions';
 
 import type {ClassPositions} from '../protobuf/onglide';
 
 interface OtherPilotsSliceState {
+    competition: string;
     positions: OtherPilotData;
     latestUpdate: Epoch;
 }
 
 // Define the initial state using that type
 const initialState: OtherPilotsSliceState = {
+    competition: '',
     latestUpdate: 0 as Epoch,
     positions: {}
 };
@@ -64,6 +67,21 @@ export const otherPilotsSlice = createSlice({
     initialState,
     reducers: {
         updateOtherPilotsPositions: _updatePositions
+    },
+    extraReducers: (builder) => {
+        //
+        // New competition, the other-pilots feed is cross-class within one
+        // comp, so only wipe when the competition itself changes (not on a
+        // class switch within the same comp).
+        builder.addCase(updateClassAction, (state, {payload: {competition}}) => {
+            if (competition != state.competition) {
+                return {
+                    competition,
+                    latestUpdate: 0 as Epoch,
+                    positions: {}
+                };
+            }
+        });
     },
     selectors: {
         selectAllPositions: _selectAllPositions // memoized

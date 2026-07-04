@@ -85,6 +85,11 @@ export const enrichedPositionGenerator = async function* (
                                 log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance} (>2h gap)`);
                                 ps = PositionStatus.Landed;
                                 stationary = true;
+                            } else if (previousPoint.g < 10 && gapLength > 240) {
+                                // if they are really low and there is a gap override the terrain relief. 10m is too low even for ridges
+                                log(`epg: ${previousPoint.c} landed out rrd: ${ridgeRunningDistance} (240seconds && < 10m)`);
+                                ps = PositionStatus.Landed;
+                                stationary = true;
                             } else if (ridgeRunningDistance < 2.5) {
                                 // Too little tracked low-altitude movement to call it ridge-running.
                                 // Fall back to terrain: high local relief (~1.1km window) means

@@ -4,7 +4,7 @@ import {calculateTask} from '../lib/flightprocessing/taskhelper';
 
 import type {Aircraft, Airfield} from '../lib/webworkers/aprs';
 import {processMessageQueue} from '../lib/webworkers/aprs';
-import {loadPoints} from '../lib/webworkers/pointlog';
+import {fidFromFlarm, loadPoints, packFlarmId} from '../lib/webworkers/pointlog';
 
 import {fromDateCode, competitionStartForDatecode} from '../lib/datecode';
 
@@ -91,11 +91,12 @@ async function main() {
     // fall through to the broadcast fallback.
     const stubAirfield: Airfield = {compid: '', point: [0, 0] as any, elevation: 0 as any, officialDelay: 0 as any, getNow: () => 0 as any};
 
+    const configuredHexIds: string[] = pilots[0].trackerid.split(',').filter((s: string) => s);
     const glider: Aircraft = {
         compno,
         className,
         airfield: stubAirfield,
-        trackers: pilots[0].trackerid.split(',') as any[],
+        trackers: configuredHexIds.map((id) => packFlarmId(fidFromFlarm(id), 0)),
         datecode,
         tzoffset,
         stationary: 0,
@@ -107,7 +108,7 @@ async function main() {
         messages: []
     };
 
-    const trackerList = [...new Set(glider.trackers)];
+    const trackerList = [...new Set(configuredHexIds)];
     for (const id of trackerList) {
         for await (const msg of loadPoints({flarmId: id as FlarmID, since, until})) {
             const m = msg as any;

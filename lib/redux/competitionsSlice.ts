@@ -105,7 +105,8 @@ export function summaryToCompetition(s: CompetitionSummary): Competition {
                 displayStatus: c.displayStatus as CompetitionDisplayStatus,
                 taskDetails: c.taskDetails,
                 winner: c.winner,
-                nostartutc: c.taskRules?.nostartutc
+                nostartutc: c.taskRules?.nostartutc,
+                replayYesterday: c.replayYesterday
             })
         ),
         classStatusesDiffer: s.classStatusesDiffer,

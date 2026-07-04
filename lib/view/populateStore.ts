@@ -1,11 +1,11 @@
 import type {Epoch, ClassName, Datecode, Compno, PositionMessage} from '../types';
-import type {PilotScore, PilotTracks, Scores} from '../protobuf/onglide';
+import type {PilotScore, PilotTracks, Scores, Stats} from '../protobuf/onglide';
 import type {AppDispatch} from '../redux/store';
 
 import {updateClassAction} from '../redux/actions';
 import {updateTask} from '../redux/taskSlice';
 import {loadTracks} from '../redux/tracksSlice';
-import {updateScores} from '../redux/scoresSlice';
+import {updateScores, setPilotStats} from '../redux/scoresSlice';
 
 const SCORE_ID = 'igc-view';
 const CLASS_NAME = 'View' as ClassName;
@@ -118,6 +118,13 @@ export function dispatchScores(dispatch: AppDispatch, scores: PilotScore[]) {
         };
         dispatch(updateScores(payload));
     }
+}
+
+// Local IGC scorer produces the full segment list for the flight; replace the
+// pilot's accumulator outright (the stats websocket plane is daemon-only).
+export function dispatchPilotStats(dispatch: AppDispatch, compno: Compno, stats: Stats | undefined) {
+    if (!stats?.segments?.length) return;
+    dispatch(setPilotStats({compno, segments: stats.segments}));
 }
 
 export function dispatchTimeRange(dispatch: AppDispatch, earliestScore: Epoch, latestScore: Epoch) {

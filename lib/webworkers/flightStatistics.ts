@@ -4,20 +4,33 @@
  * estimates wind direction/speed from the in-thermal speed-vs-bearing fan.
  *
  * Logic ported and cleaned up from archive/igcstatistics.js, restructured so
- * it can run incrementally inside the scoring async-generator chain instead of
- * batch on a finished flight.
+ * it can run incrementally as positions arrive instead of batch on a finished
+ * flight.
  *
- * Wired into the chain via createFlightStatistics(): one factory call returns
- * two passthrough generators that share the same closure state.
- *   observer  — sits between epg and tpg, advances the state machine for each
- *               EnrichedPosition it sees
- *   attacher  — sits after taskScoresGenerator, decorates each PilotScore with
- *               the current Stats / Wind from that closure
+ * createFlightStatistics() returns an incremental push unit driven by whoever
+ * owns the position stream (the APRS worker per aircraft, or the client IGC
+ * scorer). It is deliberately decoupled from scoring — it reads only raw fix
+ * geometry (t / altitude / lng / lat / bearing / speed):
+ *   addPosition(fix) — advance the state machine for one forward fix
+ *   getStats()       — the current Stats (closed segments + the open one)
+ *   getWind()        — the most recently estimated wind
+ *   finish()         — close the flight (collapse the tail, ignore later fixes)
+ *   reset()          — drop all state (a new track / tracker change)
  */
 
-import {Compno, EnrichedPosition, EnrichedPositionGenerator, TaskScoresGenerator, isTick, Epoch} from '../types';
-import {Stats, StatSegment} from '../protobuf/onglide';
+import {Stats, StatSegment, Wind} from '../protobuf/onglide';
 import {distHaversineRaw} from '../flightprocessing/taskhelper';
+
+// Minimal per-fix shape the state machine needs — a subset of PositionMessage /
+// EnrichedPosition, so any forward position source can drive it.
+export interface StatsFix {
+    t: number;
+    a: number; // altitude AMSL
+    lng: number;
+    lat: number;
+    b?: number; // bearing (deg)
+    s?: number; // ground speed (kph)
+}
 
 // Soaring thresholds. The original walked three widening tolerance levels in
 // a batch coalesce loop; for incremental processing we pick a single fixed
@@ -29,6 +42,13 @@ const MIN_STRAIGHT_TIME_S = 22;
 // State machine entry/exit thresholds (per-second bearing change, degrees)
 const ENTER_THERMAL_DEG_PER_S = 6; // 360/60
 const EXIT_THERMAL_DEG_PER_S = 3.75; // 15/4
+
+// Below this fraction of straight-line progress (net displacement vs the path
+// the airspeed would have flown straight) the glider must have curved, so a
+// sparse fix's aliased bearing delta is unwrapped to the real rotation rather
+// than trusted as-is. At/above it the glider tracked straight enough to take
+// the bearing delta at face value (and so to exit a thermal normally).
+const STRAIGHT_PROGRESS_RATIO = 0.7;
 
 // Anything bigger than this is treated as a tracking gap, not a flown segment
 const MAX_GAP_S = 60;
@@ -54,7 +74,8 @@ interface Segment {
     endLat: number;
     startAlt: number;
     endAlt: number;
-    turncount: number; // signed sum of bearing changes
+    turncount: number; // signed sum of bearing changes (cancels toward 0 on a reversing/mixed thermal)
+    grossTurn: number; // sum of |bearing change| — total rotation, survives a direction reversal
     distance: number; // km
     heightgain: number;
     heightloss: number;
@@ -99,6 +120,7 @@ function makeSegment(state: Mode, startTime: number, startLng: number, startLat:
         startAlt,
         endAlt: startAlt,
         turncount: 0,
+        grossTurn: 0,
         distance: 0,
         heightgain: 0,
         heightloss: 0,
@@ -111,7 +133,7 @@ function makeSegment(state: Mode, startTime: number, startLng: number, startLat:
     };
 }
 
-export function createFlightStatistics(compno: Compno, log: Function) {
+export function createFlightStatistics() {
     // === closure state — the only place stats data lives ===
     let segments: Segment[] = [];
     let open: Segment | null = null;
@@ -124,6 +146,7 @@ export function createFlightStatistics(compno: Compno, log: Function) {
     let prevBearing = 0;
     let smoothedTurnRate = 0;
     let lastWind: {speed: number; direction: number} | undefined;
+    let finished = false;
 
     function reset(): void {
         segments = [];
@@ -137,21 +160,47 @@ export function createFlightStatistics(compno: Compno, log: Function) {
         prevBearing = 0;
         smoothedTurnRate = 0;
         lastWind = undefined;
+        finished = false;
     }
 
-    // Decide whether a just-closed segment should be merged into its
-    // immediate predecessor. Mirrors the original coalesceStack rules but
+    // Close the flight: fold the open segment into the closed list (applying the
+    // same roll-up a normal segment close does, so a stray tail collapses into
+    // its neighbour) and stop accepting positions. Used when the glider crosses
+    // the finish line and tracking stops — anything that arrives afterwards is
+    // post-task flying we don't want in the statistics. Idempotent.
+    function finish(): void {
+        if (finished) return;
+        finished = true;
+        pushOpen();
+    }
+
+    // Decide whether a just-closed segment (cur) should be merged into its
+    // immediate predecessor (prev). Mirrors the original coalesceStack rules but
     // applied once per close (no triple-tolerance retry loop).
+    //
+    // Only a *minor* segment is ever absorbed: a brief straight (the pilot
+    // recentering inside a thermal) or a weak, sub-threshold thermal (a course
+    // adjustment / single stray turn inside a glide). A substantial straight is
+    // real gliding flight and is NEVER collapsed — so a thermal that grows into
+    // a proper circle beside a long glide leaves that glide intact as its own
+    // segment rather than swallowing it.
     function shouldMerge(prev: Segment, cur: Segment): boolean {
         if (cur.state === 'gap' || prev.state === 'gap') return false;
         if (prev.state === cur.state) return true;
         if (cur.state === 'straight') {
+            // Absorb only short straights; a long glide is protected.
             const elapsed = cur.endTime - cur.startTime;
             const dist = distHaversineRaw([cur.startLng, cur.startLat], [cur.endLng, cur.endLat]);
-            if (elapsed < MIN_STRAIGHT_TIME_S && dist < MIN_STRAIGHT_DISTANCE_KM) return true;
+            return elapsed < MIN_STRAIGHT_TIME_S && dist < MIN_STRAIGHT_DISTANCE_KM;
         }
         if (cur.state === 'thermal') {
-            if (Math.abs(cur.turncount) < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6) return true;
+            // Absorb only weak thermals; a proper circle stays its own segment.
+            // Gate on *gross* rotation, not the signed turncount: a mixed thermal
+            // (the pilot turns one way, then reverses — two attempts in one core)
+            // cancels its signed sum toward 0 while still having flown a full
+            // circle or more, so the gross total is what separates a real climb
+            // from a stray course-correction.
+            return cur.grossTurn < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6;
         }
         return false;
     }
@@ -173,6 +222,7 @@ export function createFlightStatistics(compno: Compno, log: Function) {
             prev.turncount += cur.turncount;
         }
 
+        prev.grossTurn += cur.grossTurn;
         prev.direction += cur.direction;
         prev.packets += cur.packets;
         prev.maxDelay = Math.max(prev.maxDelay, cur.maxDelay);
@@ -184,10 +234,15 @@ export function createFlightStatistics(compno: Compno, log: Function) {
         }
         prev.circles.push(...cur.circles);
 
-        // If a thermal participated in the merge, the result is thermal-ish
-        // and wind needs a recalculation.
-        if (cur.state === 'thermal' || prev.state === 'thermal') {
-            prev.state = 'thermal';
+        // The merged segment keeps prev's classification: prev is the
+        // established/dominant phase and cur is the minor one being absorbed.
+        // shouldMerge only ever feeds a brief straight into a thermal (the pilot
+        // recentering) or a weak, sub-threshold thermal into a glide (a course
+        // adjustment or single stray turn) — so prev's state is already the
+        // correct one. Letting a weak thermal blip flip a long glide to
+        // 'thermal' is what folded whole legs of gliding into a phantom thermal.
+        // Recompute wind only when the result is actually a thermal.
+        if (prev.state === 'thermal') {
             computeWind(prev);
         }
     }
@@ -212,6 +267,14 @@ export function createFlightStatistics(compno: Compno, log: Function) {
         } else {
             segments.push(seg);
         }
+
+        // Defensive collapse along the tail: should a merge ever leave two
+        // adjacent same-state segments, fold them together so they never
+        // survive (the archive's iterative coalesceStack, done incrementally).
+        while (segments.length >= 2 && shouldMerge(segments[segments.length - 2], segments[segments.length - 1])) {
+            const last = segments.pop()!;
+            mergeInto(segments[segments.length - 1], last);
+        }
     }
 
     // Wind from circling drift: across each completed rotation the slowest
@@ -227,9 +290,14 @@ export function createFlightStatistics(compno: Compno, log: Function) {
         let sumY = 0;
         for (const circle of seg.circles) {
             if (circle.minSpeed === Infinity || circle.maxSpeed <= 0) continue;
+            // The slowest and fastest ground-speed bearings should sit roughly
+            // opposite (into-wind vs down-wind). Allow ±30° of slop so a clean
+            // circle is still accepted when discrete sampling — or, on the IGC
+            // path, a chord bearing derived from successive positions that lags
+            // the true heading — puts its min/max ~168° apart rather than 180°.
+            // The bisector below handles the non-exact split.
             const angleDiff = Math.abs(((circle.maxAngle - circle.minAngle + 180) % 360) - 180);
-            const quality = 5 - Math.abs(180 - angleDiff) / 8;
-            if (quality < 3.5 || quality > 5) continue;
+            if (Math.abs(180 - angleDiff) > 30) continue;
 
             const maxAngleInverted = (circle.maxAngle + 180) % 360;
             const absAngleDiff = Math.abs(maxAngleInverted - circle.minAngle);
@@ -258,13 +326,23 @@ export function createFlightStatistics(compno: Compno, log: Function) {
         const achieved = distHaversineRaw([s.startLng, s.startLat], [s.endLng, s.endLat]);
         // Map sign aggregator to proto direction: 0 = mixed/none, 1 = left, 2 = right
         const sgn = Math.sign(s.direction);
-        const dirProto = sgn === 0 ? 0 : sgn < 0 ? 1 : 2;
+        let dirProto = sgn === 0 ? 0 : sgn < 0 ? 1 : 2;
+        // A thermal whose gross rotation far exceeds its net turned substantially
+        // in both directions — a mixed thermal (the pilot reversed; two attempts
+        // in one core). Flag it mixed (0) rather than its slim dominant side.
+        if (s.state === 'thermal' && s.grossTurn - Math.abs(s.turncount) >= MIN_CIRCLE_DEGREES) {
+            dirProto = 0;
+        }
         return {
             start: s.startTime,
             end: s.endTime,
             state: s.state,
             wind: s.wind ? {speed: Math.round(s.wind.speed), direction: Math.round(s.wind.direction)} : undefined,
-            turncount: Math.floor(Math.abs(s.turncount)),
+            // Report the gross rotation a thermal flew, so a mixed thermal shows
+            // the full ~1300° it turned rather than its near-zero signed sum
+            // (the cancelling that the dirProto below surfaces as "mixed"). A
+            // straight keeps its signed sum, which a long glide holds near 0.
+            turncount: Math.floor(s.state === 'thermal' ? s.grossTurn : Math.abs(s.turncount)),
             distance: Math.round(s.distance * 10) / 10,
             achievedDistance: Math.round(achieved * 10) / 10,
             delta: Math.round(s.heightgain - s.heightloss),
@@ -283,176 +361,170 @@ export function createFlightStatistics(compno: Compno, log: Function) {
         return {segments: out};
     }
 
-    // === observer: state-machine body lives inline here, mutating closure state ===
-    async function* observer(input: EnrichedPositionGenerator): EnrichedPositionGenerator {
-        let nextArg: Epoch | void = void 0;
-        for (let cur = await input.next(); !cur.done; cur = await input.next(nextArg as Epoch | undefined)) {
-            const v = cur.value;
-            if (!v) {
-                continue;
-            }
+    // === addPosition: advance the state machine for one forward fix ===
+    // Caller must feed fixes in ascending time order (out-of-order/duplicate
+    // fixes are ignored) and call reset() when the track restarts.
+    function addPosition(point: StatsFix): void {
+        // After finish() the flight is closed — drop any post-task fixes.
+        if (finished) return;
 
-            // Upstream rewind — drop everything so a rescore doesn't double count
-            if (nextArg !== undefined) {
-                reset();
-            }
+        // First fix: just remember it, no segment yet
+        if (!havePrev) {
+            havePrev = true;
+            prevTime = point.t;
+            prevAlt = point.a;
+            prevLng = point.lng;
+            prevLat = point.lat;
+            prevBearing = point.b ?? 0;
+            return;
+        }
 
-            if (isTick(v)) {
-                nextArg = yield v;
-                continue;
-            }
+        const timedif = point.t - prevTime;
+        if (timedif <= 0) {
+            // out-of-order or duplicate timestamp
+            return;
+        }
 
-            const point = v as EnrichedPosition;
+        const distance = distHaversineRaw([prevLng, prevLat], [point.lng, point.lat]);
+        const bearing = ((point.b ?? bearingRaw(prevLng, prevLat, point.lng, point.lat)) + 360) % 360;
+        const speed = point.s ?? (timedif > 0 ? (3600 * distance) / timedif : 0);
 
-            // First fix: just remember it, no segment yet
-            if (!havePrev) {
-                havePrev = true;
-                prevTime = point.t;
-                prevAlt = point.a;
-                prevLng = point.lng;
-                prevLat = point.lat;
-                prevBearing = point.b ?? 0;
-                nextArg = yield v;
-                continue;
-            }
+        // Signed bearing change in (-180, 180] — preserves turn direction
+        // across the 0/360 boundary. The archive lost the sign here.
+        let bearingChange = bearing - prevBearing;
+        if (bearingChange > 180) bearingChange -= 360;
+        else if (bearingChange < -180) bearingChange += 360;
+        const rawBearingChange = bearingChange;
+        // Degrees of rotation credited to the segment for this fix. Equals the
+        // raw delta except on a sparse in-thermal fix, where it's replaced below
+        // with the alias-corrected (unwrapped) rotation.
+        let turnDelta = rawBearingChange;
+        // per-second turn rate (so sparse samples don't trigger thermal mode)
+        bearingChange = bearingChange / timedif;
 
-            const timedif = point.t - prevTime;
-            if (timedif <= 0) {
-                // out-of-order or duplicate timestamp
-                nextArg = yield v;
-                continue;
-            }
-
-            const distance = distHaversineRaw([prevLng, prevLat], [point.lng, point.lat]);
-            const bearing = ((point.b ?? bearingRaw(prevLng, prevLat, point.lng, point.lat)) + 360) % 360;
-            const speed = point.s ?? (timedif > 0 ? (3600 * distance) / timedif : 0);
-
-            // Signed bearing change in (-180, 180] — preserves turn direction
-            // across the 0/360 boundary. The archive lost the sign here.
-            let bearingChange = bearing - prevBearing;
-            if (bearingChange > 180) bearingChange -= 360;
-            else if (bearingChange < -180) bearingChange += 360;
-            const rawBearingChange = bearingChange;
-            // per-second turn rate (so sparse samples don't trigger thermal mode)
-            bearingChange = bearingChange / timedif;
-
-            // While in a thermal, smooth the turn rate. If extrapolation from
-            // the previous smoothed rate matches the observed bearing closely,
-            // trust the forecast — points were probably dropped.
-            if (mode === 'thermal') {
-                const forecast = (smoothedTurnRate * timedif + prevBearing) % 360;
-                let forecastErr = ((forecast - bearing + 540) % 360) - 180;
-                if (forecastErr < -180) forecastErr += 360;
-                if (timedif > 5 && timedif < 20 && Math.abs(forecastErr) < 10) {
-                    bearingChange = smoothedTurnRate;
-                } else {
-                    smoothedTurnRate = (smoothedTurnRate + bearingChange) / 2;
-                    bearingChange = smoothedTurnRate;
-                }
-            } else {
+        // While circling, a sparse fix can sweep more than 180° between samples,
+        // so the wrapped (-180,180] bearing delta loses its true magnitude and
+        // sign — a ~270° rotation reads as -90°, and blending that wrong-sign
+        // value into the smoothed rate cancels it toward zero, dropping us out
+        // of the thermal: a phantom "straight" through a climb. Bearing alone
+        // can't resolve the aliasing, but net displacement can: when the glider
+        // progressed far less than its airspeed would carry it straight, it must
+        // have turned, so unwrap the delta to the full rotation nearest what the
+        // established turn rate predicts. When it tracked straight, keep the raw
+        // delta so a genuine thermal exit still fires.
+        if (mode === 'thermal') {
+            const pathIfStraight = (speed * timedif) / 3600; // km the airspeed would cover
+            const progress = pathIfStraight > 0 ? distance / pathIfStraight : 1;
+            if (progress < STRAIGHT_PROGRESS_RATIO) {
+                const expectedRotation = smoothedTurnRate * timedif;
+                turnDelta = rawBearingChange + 360 * Math.round((expectedRotation - rawBearingChange) / 360);
+                bearingChange = turnDelta / timedif;
                 smoothedTurnRate = bearingChange;
+            } else {
+                smoothedTurnRate = (smoothedTurnRate + bearingChange) / 2;
+                bearingChange = smoothedTurnRate;
             }
+        } else {
+            smoothedTurnRate = bearingChange;
+        }
 
-            // Per-fix turn sign (for the segment direction aggregator)
-            const tdirection = bearingChange > 2 ? 1 : bearingChange < -2 ? -1 : 0;
+        // Per-fix turn sign (for the segment direction aggregator)
+        const tdirection = bearingChange > 2 ? 1 : bearingChange < -2 ? -1 : 0;
 
-            // Big tracking gap: emit a synthetic gap segment, then resume
-            // classification afresh from this point.
-            if (timedif > MAX_GAP_S) {
-                pushOpen();
-                const gapSeg = makeSegment('gap', prevTime, prevLng, prevLat, prevAlt);
-                gapSeg.endTime = point.t;
-                gapSeg.endLng = point.lng;
-                gapSeg.endLat = point.lat;
-                gapSeg.endAlt = point.a;
-                segments.push(gapSeg);
-                mode = 'start';
-                prevTime = point.t;
-                prevAlt = point.a;
-                prevLng = point.lng;
-                prevLat = point.lat;
-                prevBearing = bearing;
-                smoothedTurnRate = 0;
-                nextArg = yield v;
-                continue;
-            }
-
-            // Decide what mode this fix belongs to
-            let nextMode: Mode = mode;
-            if (mode === 'start') {
-                nextMode = Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S ? 'thermal' : 'straight';
-            } else if (mode === 'straight') {
-                if (Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S) nextMode = 'thermal';
-            } else if (mode === 'thermal') {
-                if (Math.abs(bearingChange) < EXIT_THERMAL_DEG_PER_S) nextMode = 'straight';
-            }
-
-            // Mode transition: close current segment and open a new one that
-            // begins where the previous fix was so segments abut cleanly.
-            if (nextMode !== mode || !open) {
-                pushOpen();
-                open = makeSegment(nextMode, prevTime, prevLng, prevLat, prevAlt);
-                mode = nextMode;
-            }
-
-            // Accumulate this fix into the open segment
-            open.distance += distance;
-            open.endTime = point.t;
-            open.endLng = point.lng;
-            open.endLat = point.lat;
-            open.endAlt = point.a;
-            if (point.a > prevAlt) open.heightgain += point.a - prevAlt;
-            else open.heightloss += prevAlt - point.a;
-            open.turncount += rawBearingChange;
-            open.direction += tdirection;
-            open.packets++;
-            if (timedif > open.maxDelay) open.maxDelay = timedif;
-
-            // Inside a thermal, sample speed-vs-bearing per rotation for wind
-            if (open.state === 'thermal') {
-                if (speed < open.ws.minSpeed) {
-                    open.ws.minSpeed = speed;
-                    open.ws.minAngle = bearing;
-                }
-                if (speed > open.ws.maxSpeed) {
-                    open.ws.maxSpeed = speed;
-                    open.ws.maxAngle = bearing;
-                }
-                open.ws.cumulative += rawBearingChange;
-                open.ws.packets++;
-                if (open.ws.cumulative < -361 || open.ws.cumulative > 361) {
-                    open.circles.push(open.ws);
-                    open.ws = makeEmptyCircle();
-                    computeWind(open);
-                }
-            }
-
+        // Big tracking gap: emit a synthetic gap segment, then resume
+        // classification afresh from this point.
+        if (timedif > MAX_GAP_S) {
+            pushOpen();
+            const gapSeg = makeSegment('gap', prevTime, prevLng, prevLat, prevAlt);
+            gapSeg.endTime = point.t;
+            gapSeg.endLng = point.lng;
+            gapSeg.endLat = point.lat;
+            gapSeg.endAlt = point.a;
+            segments.push(gapSeg);
+            mode = 'start';
             prevTime = point.t;
             prevAlt = point.a;
             prevLng = point.lng;
             prevLat = point.lat;
             prevBearing = bearing;
-
-            nextArg = yield v;
+            smoothedTurnRate = 0;
+            return;
         }
-        // Upstream done — finalize the in-progress segment
-        pushOpen();
-        log(`stats[${compno}]: ${segments.length} segments, wind=${lastWind ? `${lastWind.speed.toFixed(0)}kph @ ${lastWind.direction.toFixed(0)}°` : 'unknown'}`);
-    }
 
-    // === attacher: reads the same closure state at score time ===
-    async function* attacher(input: TaskScoresGenerator): TaskScoresGenerator {
-        for (let cur = await input.next(); !cur.done; cur = await input.next()) {
-            const score = cur.value;
-            if (!score) continue;
-            const stats = toStatsProto();
-            if (stats) score.stats = stats;
-            if (lastWind) {
-                score.wind = {speed: Math.round(lastWind.speed), direction: Math.round(lastWind.direction)};
+        // Decide what mode this fix belongs to
+        let nextMode: Mode = mode;
+        if (mode === 'start') {
+            nextMode = Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S ? 'thermal' : 'straight';
+        } else if (mode === 'straight') {
+            if (Math.abs(bearingChange) > ENTER_THERMAL_DEG_PER_S) nextMode = 'thermal';
+        } else if (mode === 'thermal') {
+            if (Math.abs(bearingChange) < EXIT_THERMAL_DEG_PER_S) nextMode = 'straight';
+        }
+
+        // Mode transition: close current segment and open a new one that
+        // begins where the previous fix was so segments abut cleanly.
+        if (nextMode !== mode || !open) {
+            pushOpen();
+            // If we're re-entering the state the last (now-coalesced) segment is
+            // already in — e.g. a brief straight between two thermals was just
+            // absorbed into the prior thermal — resume that segment as the open
+            // one rather than starting a fresh adjacent one. This keeps the
+            // in-progress view coalesced live, not only once the segment closes
+            // (when the pushOpen cascade would merge them anyway).
+            const last = segments[segments.length - 1];
+            if (last && last.state === nextMode) {
+                open = segments.pop()!;
+            } else {
+                open = makeSegment(nextMode, prevTime, prevLng, prevLat, prevAlt);
             }
-            yield score;
+            mode = nextMode;
         }
+
+        // Accumulate this fix into the open segment
+        open.distance += distance;
+        open.endTime = point.t;
+        open.endLng = point.lng;
+        open.endLat = point.lat;
+        open.endAlt = point.a;
+        if (point.a > prevAlt) open.heightgain += point.a - prevAlt;
+        else open.heightloss += prevAlt - point.a;
+        open.turncount += turnDelta;
+        open.grossTurn += Math.abs(turnDelta);
+        open.direction += tdirection;
+        open.packets++;
+        if (timedif > open.maxDelay) open.maxDelay = timedif;
+
+        // Inside a thermal, sample speed-vs-bearing per rotation for wind
+        if (open.state === 'thermal') {
+            if (speed < open.ws.minSpeed) {
+                open.ws.minSpeed = speed;
+                open.ws.minAngle = bearing;
+            }
+            if (speed > open.ws.maxSpeed) {
+                open.ws.maxSpeed = speed;
+                open.ws.maxAngle = bearing;
+            }
+            open.ws.cumulative += turnDelta;
+            open.ws.packets++;
+            if (open.ws.cumulative < -361 || open.ws.cumulative > 361) {
+                open.circles.push(open.ws);
+                open.ws = makeEmptyCircle();
+                computeWind(open);
+            }
+        }
+
+        prevTime = point.t;
+        prevAlt = point.a;
+        prevLng = point.lng;
+        prevLat = point.lat;
+        prevBearing = bearing;
     }
 
-    return {observer, attacher};
+    function getWind(): Wind | undefined {
+        return lastWind ? {speed: Math.round(lastWind.speed), direction: Math.round(lastWind.direction)} : undefined;
+    }
+
+    return {addPosition, getStats: toStatsProto, getWind, reset, finish};
 }
+
+export type FlightStatistics = ReturnType<typeof createFlightStatistics>;

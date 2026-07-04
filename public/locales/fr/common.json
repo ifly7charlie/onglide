@@ -151,8 +151,14 @@
         "label_duration": "Durée"
     },
     "options": {
+        "climb_show": "Afficher les taux de montée des planeurs en spirale",
+        "climb_hide": "Masquer les taux de montée des planeurs en spirale",
         "click_to_measure": "Cliquer pour mesurer",
         "click_to_stop_measuring": "Cliquer pour arrêter la mesure",
+        "measure_off": "Outil de mesure désactivé — cliquer pour mesurer des distances sur la carte",
+        "measure_active": "Outil de mesure : cliquer sur deux points de la carte. Cliquer ici pour désactiver",
+        "compare_off": "Comparaison de planeurs désactivée — cliquer pour comparer le planeur sélectionné au leader (ou au planeur sous le curseur)",
+        "compare_active": "Comparaison du planeur sélectionné au leader (ou au planeur sous le curseur). Cliquer ici pour désactiver",
         "rain_radar_showing": "Ajuster le timing du radar de pluie, actuellement {{value}}, cliquer pour changer ou désactiver",
         "rain_radar_enable": "Cliquer pour activer le radar de pluie",
         "rain_now": "actuel",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Passer en unités métriques",
         "switch_to_imperial": "Passer en unités impériales",
         "map_attribution": "Attribution de la carte",
-        "close": "Fermer"
+        "close": "Fermer",
+        "follow_suspended": "Suivi en pause car vous avez déplacé la carte. Cliquer pour reprendre, ou sélectionner un pilote",
+        "orientation_suspended": "Verrouillage de l'orientation en pause car vous avez déplacé la carte. Cliquer pour reprendre, ou sélectionner un pilote"
     },
     "drawer": {
         "class": "Classe",
@@ -214,6 +222,7 @@
         "leg_completed": "branche terminée",
         "view_leg": "branche",
         "view_task": "épreuve",
+        "view_statistics": "Stats",
         "view_actuals": "réels",
         "view_handicapped": "handicapés",
         "view_task_or_leg": "épreuve ou branche",
@@ -229,9 +238,24 @@
         "shortest": "Plus courte",
         "recent_wind": "Vent récent"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} pompes · {{pct}}% en spirale · max {{best}} · moy {{avg}}",
+        "summary2": "finesse moy {{ld}} · {{flown}} · gain {{gain}} · {{pctGap}}% sans couverture",
+        "flown": "parcouru {{dist}}",
+        "flown_with_extra": "parcouru {{dist}} ({{extra}} épreuve)",
+        "col_time": "Heure",
+        "col_duration": "Durée",
+        "col_wind": "Vent",
+        "state_thermal": "Ascendance",
+        "state_straight": "Transition",
+        "state_gap": "Trou",
+        "turns": "{{count}} tours",
+        "tracking_gap": "perte de signal"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} pendant {{seconds}} secondes",
         "thermal_average": "moyenne : {{climb}}",
+        "gaggle_count": "Grappe de {{count}}",
         "straight_distance_speed": "distance : {{distance}} km à une vitesse de {{speed}} km/h",
         "straight_ld": "finesse {{ld}}",
         "wind": "vitesse du vent : {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "devant",
+        "behind": "derrière",
+        "above": "au-dessus",
+        "below": "en dessous"
     },
     "units": {
         "km": "km",

@@ -151,8 +151,14 @@
         "label_duration": "Idő"
     },
     "options": {
+        "climb_show": "Köröző vitorlázógépek emelkedési értékének megjelenítése",
+        "climb_hide": "Köröző vitorlázógépek emelkedési értékének elrejtése",
         "click_to_measure": "Kattints a méréshez",
         "click_to_stop_measuring": "Kattints a mérés leállításához",
+        "measure_off": "Mérőeszköz kikapcsolva — kattints a térképen lévő távolságok méréséhez",
+        "measure_active": "Mérőeszköz: kattints két pontra a térképen. Kattints ide a kikapcsoláshoz",
+        "compare_off": "Vitorlázógép-összehasonlítás kikapcsolva — kattints a kiválasztott vitorlázógép összehasonlításához a vezetővel (vagy a kurzor alatti vitorlázógéppel)",
+        "compare_active": "A kiválasztott vitorlázógép összehasonlítása a vezetővel (vagy a kurzor alatti vitorlázógéppel). Kattints ide a kikapcsoláshoz",
         "rain_radar_showing": "Esőradár időzítésének beállítása, jelenleg {{value}}, kattints a változtatáshoz vagy kikapcsoláshoz",
         "rain_radar_enable": "Kattints az esőradár bekapcsolásához",
         "rain_now": "most",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Váltás metrikus mértékegységekre",
         "switch_to_imperial": "Váltás brit mértékegységekre",
         "map_attribution": "Térkép-hivatkozás",
-        "close": "Bezárás"
+        "close": "Bezárás",
+        "follow_suspended": "Követés szüneteltetve, mert elmozdítottad a térképet. Kattints a folytatáshoz, vagy válassz pilótát",
+        "orientation_suspended": "Tájolás zárolása szüneteltetve, mert elmozdítottad a térképet. Kattints a folytatáshoz, vagy válassz pilótát"
     },
     "drawer": {
         "class": "Osztály",
@@ -214,6 +222,7 @@
         "leg_completed": "szakasz teljesítve",
         "view_leg": "szakasz",
         "view_task": "feladat",
+        "view_statistics": "Statisztika",
         "view_actuals": "tényleges",
         "view_handicapped": "handicap",
         "view_task_or_leg": "feladat vagy szakasz",
@@ -229,9 +238,24 @@
         "shortest": "Legrövidebb",
         "recent_wind": "Aktuális szél"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termik · {{pct}}% körözés · max {{best}} · átl {{avg}}",
+        "summary2": "átl siklószám {{ld}} · {{flown}} · emelkedés {{gain}} · {{pctGap}}% nincs lefedettség",
+        "flown": "repült {{dist}}",
+        "flown_with_extra": "repült {{dist}} ({{extra}} feladat)",
+        "col_time": "Idő",
+        "col_duration": "Időtartam",
+        "col_wind": "Szél",
+        "state_thermal": "Termik",
+        "state_straight": "Siklás",
+        "state_gap": "Hézag",
+        "turns": "{{count}} kör",
+        "tracking_gap": "jelkimaradás"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} másodpercen át",
         "thermal_average": "átlag: {{climb}}",
+        "gaggle_count": "Raj: {{count}}",
         "straight_distance_speed": "távolság: {{distance}} km {{speed}} km/h sebességgel",
         "straight_ld": "Siklószám {{ld}}",
         "wind": "szélsebesség: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "ó",
         "minute_short": "p",
         "second_short": "mp"
+    },
+    "compare": {
+        "ahead": "előrébb",
+        "behind": "hátrébb",
+        "above": "feljebb",
+        "below": "lejjebb"
     },
     "units": {
         "km": "km",

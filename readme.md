@@ -121,6 +121,19 @@ Terrarium tiles):
 NEXT_PUBLIC_DEM_TILE_URL=https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png
 ```
 
+Optional: cross-competition tracker-identity evidence. `bin/findtrackers.ts`
+collects privacy-preserving fingerprints (keyed HMAC hashes of pilot name
+tokens and club — never the raw values) from confident matches and reuses them
+to recognise the same aircraft in later competitions. Set a long random secret
+to enable it; it is the HMAC key, so it **must stay stable and be backed up** —
+rotating it orphans all previously stored evidence (the hashes no longer line
+up). Leave it unset to disable the feature entirely (the scan still runs). The
+tables come from `conf/sql/migrations/20260601_flarm_aircraft.sql`.
+
+```
+IDENTITY_HMAC_SECRET=<long random string, kept stable>
+```
+
 Optional: a separate labels-only pmtiles file. When set, every label/symbol layer
 reads from this smaller source instead of the big base pmtiles — so in satellite
 mode (where all base fills/lines are hidden by the visibility toggle), MapLibre

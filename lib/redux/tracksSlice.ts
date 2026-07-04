@@ -34,9 +34,11 @@ import {oldTracksUrl} from '../react/fixupUrls';
 import type {PilotTracks, PilotTrack} from '../protobuf/onglide';
 
 import {mergePoint, calculateVario, calculateAverage, generateIndices, getEmptyDeck} from '../flightprocessing/incremental';
+import {buildSmoothedDeck, extendSmoothedDeck} from '../flightprocessing/spline';
 
 import {sortedIndexNumber} from '../util/binarySearch';
-import {mergeVHPoint, initaliseVH} from '../react/deckvh';
+import {initaliseVH} from '../react/deckvh';
+import {referenceDate} from '../flightprocessing/referenceDate';
 
 interface TracksSliceState {
     className: ClassName;
@@ -142,6 +144,45 @@ function findDisplayIndex(deck: DeckData, t: Epoch | undefined) {
     return deck.t[nextPoint] > t && nextPoint > 0 ? nextPoint - 1 : nextPoint;
 }
 
+// Position at fractional t, interpolated from the Hermite-smoothed sidecar
+// when present (so the marker follows the same curve as the trail), or
+// linearly between raw anchors otherwise. Snaps to the last vertex past
+// the end. Returns a fresh tuple suitable for an IconLayer getPosition.
+function interpolatedPositionAt(deck: DeckData, t: Epoch | undefined): [number, number, number] {
+    const smoothed = deck.smoothed;
+    if (smoothed && smoothed.posIndex > 1) {
+        const sLen = smoothed.posIndex;
+        // smoothed.t is Float32 fractional seconds-from-baseline
+        const tr = (t ?? Infinity) - referenceDate;
+        if (tr >= smoothed.t[sLen - 1]) {
+            const i = sLen - 1;
+            return [smoothed.positions[i * 3], smoothed.positions[i * 3 + 1], smoothed.positions[i * 3 + 2]];
+        }
+        const next = sortedIndexNumber(smoothed.t.subarray(0, sLen), tr);
+        const prev = next > 0 ? next - 1 : 0;
+        const dt = smoothed.t[next] - smoothed.t[prev];
+        const u = dt > 0 ? (tr - smoothed.t[prev]) / dt : 0;
+        return [
+            smoothed.positions[prev * 3] + u * (smoothed.positions[next * 3] - smoothed.positions[prev * 3]),
+            smoothed.positions[prev * 3 + 1] + u * (smoothed.positions[next * 3 + 1] - smoothed.positions[prev * 3 + 1]),
+            smoothed.positions[prev * 3 + 2] + u * (smoothed.positions[next * 3 + 2] - smoothed.positions[prev * 3 + 2])
+        ];
+    }
+    // Raw fallback — linear between integer-second anchors.
+    const idx = findDisplayIndex(deck, t);
+    const next = idx + 1;
+    if (next >= deck.posIndex || t === undefined) {
+        return [deck.positions[idx * 3], deck.positions[idx * 3 + 1], deck.positions[idx * 3 + 2]];
+    }
+    const dt = deck.t[next] - deck.t[idx];
+    const u = dt > 0 ? (t - deck.t[idx]) / dt : 0;
+    return [
+        deck.positions[idx * 3] + u * (deck.positions[next * 3] - deck.positions[idx * 3]),
+        deck.positions[idx * 3 + 1] + u * (deck.positions[next * 3 + 1] - deck.positions[idx * 3 + 1]),
+        deck.positions[idx * 3 + 2] + u * (deck.positions[next * 3 + 2] - deck.positions[idx * 3 + 2])
+    ];
+}
+
 // Data for vario display
 const _selectAllAverageClimb = createSelector(
     [
@@ -188,7 +229,7 @@ const _selectAllPositions = createSelector(
                 g: deck.agl[displayIndex],
                 a: deck.positions[displayIndex * 3 + 2],
                 t: deck.t[displayIndex],
-                position: [...deck.positions.subarray(displayIndex * 3, displayIndex * 3 + 3)]
+                position: interpolatedPositionAt(deck, t)
             };
         });
     }
@@ -382,10 +423,13 @@ function _updatePositions(state: TracksSliceState, action: PayloadAction<{positi
         // Merge into the deck objects
         const result = mergePoint(point, cp, false);
         if (result !== false) {
-            mergeVHPoint(point, cp, result.start);
-            if (result.start + 1 != result.end) {
-                mergeVHPoint(point, cp, result.start + 1);
-            }
+            // Extend the smoothed sidecar (discards and re-emits the bracket
+            // entering result.start). Then rebuild the per-vertex display
+            // sidecar (tr/climb/aheight) — it's small (a few KB per pilot)
+            // and rebuilding avoids tracking which smoothed vertices were
+            // re-emitted vs newly appended.
+            extendSmoothedDeck(cp.deck, result.start);
+            initaliseVH(cp);
         }
     });
     state.latestUpdate = Math.max(state.latestUpdate, action.payload?.t ?? 0) as Epoch;
@@ -453,6 +497,14 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
             const ts = track.posIndex > 0 ? new Uint32Array(track.t.slice().buffer) : [];
             const indexOfOverlap = existing ? sortedIndexNumber(ts, existing.t[existing.posIndex - 1]) : 0;
 
+            // Older servers don't send bearing/speed. Synthesise an
+            // "all-absent" pair so the rest of the pipeline can rely on
+            // the arrays existing without behavioural change (bearing=-1
+            // is the spline's "fall back to chord" sentinel).
+            const length = track.posIndex - indexOfOverlap;
+            const unpackedBearing = track.bearing && track.bearing.length ? new Int16Array(track.bearing.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer) : (() => { const a = new Int16Array(length); a.fill(-1); return a; })();
+            const unpackedSpeed = track.speed && track.speed.length ? new Uint16Array(track.speed.slice(indexOfOverlap * Uint16Array.BYTES_PER_ELEMENT).buffer) : new Uint16Array(length);
+
             let deck: DeckData =
                 track.posIndex > 0
                     ? {
@@ -461,7 +513,9 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
                           t: new Uint32Array(track.t.slice(indexOfOverlap * Uint32Array.BYTES_PER_ELEMENT).buffer),
                           climbRate: new Int8Array(track.climbRate.slice(indexOfOverlap * Int8Array.BYTES_PER_ELEMENT).buffer),
                           agl: new Int16Array(track.agl.slice(indexOfOverlap * Int16Array.BYTES_PER_ELEMENT).buffer),
-                          posIndex: track.posIndex - indexOfOverlap,
+                          bearing: unpackedBearing,
+                          speed: unpackedSpeed,
+                          posIndex: length,
                           trackVersion: track.trackVersion
                       }
                     : getEmptyDeck(compno, track.trackVersion);
@@ -473,12 +527,17 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
                 const existingPosition = existingOlder === false ? deck.posIndex : 0;
 
                 // Make the new structure it needs enough space for existing and new
+                const combinedLength = deck.positions.length / 3 + existing.positions.length / 3 || 0;
+                const combinedBearing = new Int16Array(combinedLength);
+                combinedBearing.fill(-1);
                 const combined: DeckData = {
                     compno: compno as Compno,
                     positions: new Float32Array(deck.positions.length + existing.positions.length || 0),
                     t: new Uint32Array(deck.t.length + existing.t.length || 0),
                     climbRate: new Int8Array(deck.climbRate.length + existing.climbRate.length || 0),
                     agl: new Int16Array(deck.agl.length + existing.agl.length || 0),
+                    bearing: combinedBearing,
+                    speed: new Uint16Array(combinedLength),
                     posIndex: deck.posIndex + existing.posIndex,
                     trackVersion: track.trackVersion
                 };
@@ -489,11 +548,15 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
                 combined.t.set(existing.t, existingPosition);
                 combined.climbRate.set(existing.climbRate, existingPosition);
                 combined.agl.set(existing.agl, existingPosition);
+                combined.bearing.set(existing.bearing, existingPosition);
+                combined.speed.set(existing.speed, existingPosition);
 
                 combined.positions.set(deck.positions, newPosition * 3);
                 combined.t.set(deck.t, newPosition);
                 combined.climbRate.set(deck.climbRate, newPosition);
                 combined.agl.set(deck.agl, newPosition);
+                combined.bearing.set(deck.bearing, newPosition);
+                combined.speed.set(deck.speed, newPosition);
 
                 deck = combined;
             }
@@ -501,6 +564,12 @@ function _updateTracks(state: TracksSliceState, action: PayloadAction<PilotTrack
             generateIndices(deck, state.tracks[compno]);
             // Save the version
             deck.trackVersion = track.trackVersion;
+
+            // Build the Hermite-smoothed display sidecar from the (possibly
+            // merged) anchor arrays. The renderer reads from `deck.smoothed`;
+            // scoring path is untouched. On `baseTime === 0` (full erase
+            // upstream) this is a from-scratch rebuild.
+            buildSmoothedDeck(deck);
 
             // Store away and update timestamps
             state.tracks[compno].deck = deck;

@@ -138,6 +138,20 @@ function summarise(m: OnglideWebSocketMessage): string {
         const total = classes.reduce((a, [, p]) => a + (p.positions?.length ?? 0), 0);
         parts.push(`positions n=${total} classes=${classes.length}`);
     }
+    if (m.stats) {
+        const classes = Object.entries(m.stats.class ?? {});
+        let pilots = 0;
+        let segs = 0;
+        const baseTimes = new Set<number>();
+        for (const [, u] of classes) {
+            baseTimes.add(u.baseTime);
+            for (const p of Object.values(u.pilots ?? {})) {
+                pilots++;
+                segs += p.segments?.length ?? 0;
+            }
+        }
+        parts.push(`stats classes=${classes.length} pilots=${pilots} segs=${segs} baseTime=${[...baseTimes].join(',')}`);
+    }
     if (m.tracks) {
         const pilots = Object.keys(m.tracks.pilots ?? {});
         parts.push(`tracks n=${pilots.length} baseTime=${m.tracks.baseTime}`);

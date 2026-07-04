@@ -151,8 +151,14 @@
         "label_duration": "Duration"
     },
     "options": {
+        "climb_show": "Show climb rates for circling gliders",
+        "climb_hide": "Hide climb rates for circling gliders",
         "click_to_measure": "Click to measure",
         "click_to_stop_measuring": "Click to stop measuring",
+        "measure_off": "Measuring tool off — click to measure distances on the map",
+        "measure_active": "Measuring tool: click two points on the map. Click here to turn off",
+        "compare_off": "Glider comparison off — click to compare the selected glider with the leader (or hovered glider)",
+        "compare_active": "Comparing selected glider with the leader (or hovered glider). Click here to turn off",
         "rain_radar_showing": "Adjust rain radar timings, currently showing {{value}}, click to change timing or disable",
         "rain_radar_enable": "Click to enable rain radar",
         "rain_now": "now",
@@ -171,6 +177,8 @@
         "manual_orientation": "Follow orientation is currently Manual (user controlled), Change to be always North Up",
         "follow_pilot": "Will follow selected pilot, Click to leave map alone when selecting a pilot",
         "follow_disabled": "Do not follow selected pilot, Click to follow",
+        "follow_suspended": "Following paused because you moved the map. Click to resume, or select a pilot",
+        "orientation_suspended": "Orientation lock paused because you moved the map. Click to resume, or select a pilot",
         "paths_recent": "Show recent paths for all pilots",
         "paths_selected_full": "Show full path for selected pilot",
         "paths_all_full": "Show full paths for all pilots",
@@ -214,6 +222,7 @@
         "leg_completed": "leg completed",
         "view_leg": "leg",
         "view_task": "task",
+        "view_statistics": "stats",
         "view_actuals": "actuals",
         "view_handicapped": "handicapped",
         "view_task_or_leg": "task or leg",
@@ -229,9 +238,24 @@
         "shortest": "Shortest",
         "recent_wind": "Recent Wind"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} thermals · {{pct}}% thermalling · best {{best}} · avg {{avg}}",
+        "summary2": "avg L/D {{ld}} · {{flown}} · climbed {{gain}} · {{pctGap}}% no coverage",
+        "flown": "flown {{dist}}",
+        "flown_with_extra": "flown {{dist}} ({{extra}} task)",
+        "col_time": "Time",
+        "col_duration": "Duration",
+        "col_wind": "Wind",
+        "state_thermal": "Thermal",
+        "state_straight": "Glide",
+        "state_gap": "Gap",
+        "turns": "{{count}} turns",
+        "tracking_gap": "tracking gap"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} for {{seconds}} seconds",
         "thermal_average": "average: {{climb}}",
+        "gaggle_count": "Gaggle of {{count}}",
         "straight_distance_speed": "distance: {{distance}} km at a speed of {{speed}} kph",
         "straight_ld": "L/D {{ld}}",
         "wind": "wind speed: {{speed}} kph @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "ahead",
+        "behind": "behind",
+        "above": "above",
+        "below": "below"
     },
     "units": {
         "km": "km",

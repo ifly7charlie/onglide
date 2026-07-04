@@ -3,7 +3,7 @@ import type {ClassName, Epoch, Datecode} from '../types';
 import {useSelector, useDispatch} from '../redux';
 import {updateTracks, updatePositions, selectTrackVersion, fetchOldTracks} from '../redux/tracksSlice';
 import {updateTask} from '../redux/taskSlice';
-import {updateScores} from '../redux/scoresSlice';
+import {updateScores, fetchOldStats} from '../redux/scoresSlice';
 import {updateOtherPilotsPositions} from '../redux/otherPilotsSlice';
 
 import {updateNow} from '../redux/nowSlice';
@@ -25,7 +25,7 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
                 console.log('unable to decode websocket message');
             }
 
-            if (decoded.identifiers) {
+            if (decoded.identifiers && decoded.identifiers.className === className) {
                 console.log('identifiers', decoded.identifiers, decoded.t);
                 dispatch(updateClassAction({...decoded.identifiers, t: decoded.t as Epoch}));
             }
@@ -57,6 +57,16 @@ export function useWebsocketDecoder({mergeWsStatus, className, datecode}: {merge
                     dispatch(updatePositions({positions: ownClass.positions, t: decoded.t as Epoch}));
                 }
                 dispatch(updateOtherPilotsPositions({positions: decoded.positions, t: decoded.t as Epoch}));
+            }
+
+            // Flight statistics (own class). Coexists with positions in one frame
+            // (not mutually exclusive like tracks). baseTime>0 => fetch the /stats
+            // snapshot first; 0 => merge the residual inline.
+            if (decoded.stats) {
+                const ownStats = decoded.stats.class[className];
+                if (ownStats) {
+                    dispatch(fetchOldStats({baseTime: ownStats.baseTime as Epoch, residual: ownStats, className, datecode}));
+                }
             }
 
             if (decoded.ka) {

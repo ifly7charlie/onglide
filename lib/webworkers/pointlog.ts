@@ -6,14 +6,14 @@
 //
 //   File header (16 bytes):
 //     0  4  magic       "ONG8"
-//     4  2  version     uint16 LE  (= 2)
+//     4  2  version     uint16 LE  (= 4; reader also accepts 2 and 3 as legacy)
 //     6  2  recSize     uint16 LE  (= 36)
 //     8  8  reserved    zeros
 //
 //   Record N at offset 16 + N * 36. Layout:
 //     0   4   writeTime  uint32 LE   (= t + d at append; monotonic; binary-search key)
 //     4   2   d          int16  LE   (signed delay; t = writeTime - d)
-//     6   4   f          uint32 LE   (= parseInt(msg.f, 16); also serves as fid filter key)
+//     6   4   f          uint32 LE   (low 24 bits = flarmid hex; high 8 bits = protocol enum)
 //    10  10   o          10 ASCII    (sender callsign, zero-padded; truncated if > 10 chars)
 //    20   4   lat        int32  LE   (= round(msg.lat * 1e7); 1.1 cm grid)
 //    24   4   lng        int32  LE
@@ -26,8 +26,26 @@
 // math, no decode on the probe path. The 2-byte d lets the scanner compute
 // t = writeTime - d for the per-record `since`/`until` filter before any
 // further decode. d is signed because backfill replays and receiver clock
-// skew can produce t > writeTime. The 4-byte f at offset 6 lets the scanner
-// reject non-matching flarm IDs without touching the rest of the record.
+// skew can produce t > writeTime.
+//
+// The 4-byte f at offset 6 carries TWO pieces of information packed: low
+// 24 bits = the 6-hex flarmid; high 8 bits = protocol enum (OGFLR=1,
+// OGNAVI=2, OGNTRK=3, …) — the destCallsign of the OGN APRS packet, which
+// identifies the uploader / processing pipeline the packet travelled
+// through. Two packets with the same 6-hex but different protocol arrived
+// via different paths (e.g. a Naviter Oudie relaying a FLARM via the
+// Naviter cloud appears as `FLRxxxxxx>OGNAVI`, while the same physical
+// FLARM heard directly by an OGN radio gateway appears as
+// `FLRxxxxxx>OGFLR` — same 6-hex device, very different latency and
+// processing pipeline), so the combined uint32 is carried through the
+// pipeline as the stream identifier. The 3-character SRC prefix
+// (`FLR`/`ICA`/`OGN`/…) is the device's *address-type namespace*, not
+// the protocol, and is deliberately NOT used here. Matchers that only
+// care about device identity mask with `& 0xFFFFFF`. v2 files
+// (pre-stream-byte) have the high byte at 0 and decode as "unknown
+// protocol"; v3 files (the byte carried address-type, not protocol) are
+// also accepted, with the high byte masked to 0 on read — there is no
+// way to recover the protocol that wasn't recorded.
 //
 // The file is monotonic in writeTime (each record is appended at writer-now)
 // but NOT in t — and for a given writeTime there is no guarantee that t is
@@ -44,19 +62,135 @@ import {createWriteStream, WriteStream, promises as fsp, openSync, closeSync, re
 import * as path from 'path';
 import * as os from 'os';
 
-import type {PositionMessage, FlarmID} from '../types';
+import type {PositionMessage, FlarmID, StreamId} from '../types';
 
-export type LoggedMessage = PositionMessage & {f: FlarmID; o: string; ad?: number; d?: number};
+// LoggedMessage.f is the combined StreamId: low 24 bits = flarmid hex,
+// high 8 bits = protocol enum (see protoCodeFor / CODE_TO_PROTO).
+export type LoggedMessage = Omit<PositionMessage, 'c'> & {f: StreamId; c?: PositionMessage['c']; o: string; ad?: number; d?: number};
 
 // ---------- format constants ----------
 
 const FILE_MAGIC = Buffer.from('ONG8', 'ascii');
-const FILE_FORMAT_VERSION = 2;
+const FILE_FORMAT_VERSION = 4;
+// v3 (high byte = address-type prefix) and v2 (no high byte) both read as
+// "unknown protocol" — the protocol info wasn't recorded under those
+// versions, so the high byte is masked to 0 on decode.
+const FILE_FORMAT_VERSION_LEGACY = new Set([2, 3]);
 export const FILE_HEADER_SIZE = 16;
 export const RECORD_SIZE = 36;
 const O_FIELD_LEN = 10;
 const D_MIN = -0x8000;
 const D_MAX = 0x7fff;
+
+// ---------- protocol enum ----------
+// The OGN APRS destination callsign identifies the uploader / processing
+// pipeline a packet travelled through (OGFLR = Flarm radio → OGN ground
+// station; OGNAVI = Naviter cloud relay; OGNTRK = OGN tracker hardware;
+// etc). Two packets sharing a 6-hex device id but arriving via different
+// protocols are different physical streams with different latency and
+// accuracy characteristics. Codes 1..N cover everything currently listed
+// under ogn-aprs-protocol/valid_messages/. Code 0 = unknown / legacy (no
+// protocol was recorded — v2/v3 file or a future packet with an empty
+// destCall). Code 255 = a non-empty destCall that isn't in the table —
+// future uploaders that show up before this table is extended.
+const PROTO_TO_CODE: Record<string, number> = {
+    OGFLR: 1, // Flarm radio
+    OGNAVI: 2, // Naviter
+    OGNTRK: 3, // OGN tracker hardware
+    OGNFNO: 4, // Flying Neurons
+    OGNFNT: 5, // FANET
+    OGPAW: 6, // PilotAware
+    OGADSB: 7, // ADS-B
+    OGADSL: 8, // ADS-L
+    OGSKYL: 9, // Skylines
+    OGSPID: 10, // Spider
+    OGSPOT: 11, // Spot
+    OGNINRE: 12, // InReach
+    OGLT24: 13, // LiveTrack24
+    OGCAPT: 14, // Capturs
+    OGNSKY: 15, // SafeSky
+    OGNWGL: 16, // WeGlide
+    OGAPIK: 17, // APIK device
+    OGFLYM: 18, // Flymaster
+    OGNMTK: 19, // Microtrack
+    OGEVARIO: 20, // evario
+    OGNPUR: 21, // PureGlide
+    OGNWMN: 22, // Wingman
+    OGNEMO: 23, // Nemo
+    FXCAPP: 24, // FlyXC
+    OGAIRM: 25, // Airmate
+    OGNSXR: 26, // OGNbase / OGNSXR
+    OGNMYC: 27, // OGNtracker MyC
+    OGNTTN: 28, // The Things Network
+    APRS: 29, // legacy (pre-0.2.6) — every uploader used dstcall APRS
+    // OGNDLY is synthetic — not a real destCallsign. The OGN-Delay
+    // pipeline buffers packets and re-emits them via DLY2APRS, keeping
+    // the original dstcall (e.g. OGNTRK) but stamping OGNDELAY* into the
+    // path. Same physical device, different upload pipeline (much higher
+    // latency, may be aggregated). aprs.ts detects the OGNDELAY* digi /
+    // DLY2APRS q-construct and overrides the protoCode to OGNDLY so
+    // delayed and direct streams land in separate stickyPrimary buckets.
+    OGNDLY: 30
+};
+const CODE_TO_PROTO: string[] = [];
+for (const [proto, code] of Object.entries(PROTO_TO_CODE)) CODE_TO_PROTO[code] = proto;
+
+// OGN destination callsigns carry an optional format-version suffix
+// (Naviter spec: `OGNAVI-<version>`; in the wild also seen without the
+// dash, e.g. `OGFLR7` for OGFLR format version 7). Try the literal
+// first — that keeps uploader names that legitimately end in digits
+// (OGLT24) intact — then fall back to stripping a trailing `-?\d+`.
+const PROTO_VERSION_SUFFIX = /-?\d+$/;
+export function protoCodeFor(destCallsign: string | undefined | null): number {
+    if (!destCallsign) return 0;
+    const literal = PROTO_TO_CODE[destCallsign];
+    if (literal != null) return literal;
+    const base = destCallsign.replace(PROTO_VERSION_SUFFIX, '');
+    if (base !== destCallsign) {
+        const stripped = PROTO_TO_CODE[base];
+        if (stripped != null) return stripped;
+    }
+    return 255;
+}
+
+// Pack a 24-bit flarmid + protocol code into the combined StreamId
+// carried in the `f` field. Both inputs are masked / truncated to their
+// slots so callers can pass raw values without pre-validation.
+export function packFlarmId(fid24: number, protoCode: number): StreamId {
+    return (((fid24 & 0xffffff) | ((protoCode & 0xff) << 24)) >>> 0) as StreamId;
+}
+
+// Human-readable "PROTO:HEX" / "HEX" for logs and CLI dumps. Code 0
+// (unknown / legacy) prints just the 6-hex; an unknown non-zero code
+// renders as "?:HEX" so unrecognised protocols are visible rather than
+// silently dropped.
+export function fidLabel(combined: StreamId | number): string {
+    const code = (combined >>> 24) & 0xff;
+    const hex = (combined & 0xffffff).toString(16).toUpperCase().padStart(6, '0');
+    if (code === 0) return hex;
+    const proto = CODE_TO_PROTO[code];
+    return proto ? `${proto}:${hex}` : `?:${hex}`;
+}
+
+// Decoded protocol string for a combined StreamId, or null if the high
+// byte is 0 (legacy / unknown). Distinct from `fidLabel` which returns
+// the full "PROTO:HEX" — this returns just the protocol part for
+// callers that want the two columns separately (e.g. trackerhistory's
+// flarmid / flarmtype split).
+export function protoOf(combined: StreamId | number): string | null {
+    const code = (combined >>> 24) & 0xff;
+    return code === 0 ? null : CODE_TO_PROTO[code] ?? null;
+}
+
+// 6-hex flarmid string for a combined StreamId (low 24 bits, uppercase,
+// zero-padded). Pair with `srcPrefixOf` when persisting the (fid, type)
+// pair into separate DB columns.
+export function fidHexOf(combined: StreamId | number): string {
+    return (combined & 0xffffff)
+        .toString(16)
+        .toUpperCase()
+        .padStart(6, '0');
+}
 
 // Chunk size for sequential scan reads. 4096 × 36 B = 144 KB per syscall —
 // amortises read cost; doesn't affect file layout (the file is exactly
@@ -217,7 +351,13 @@ export function parseFileHeader(buf: Buffer): {version: number; recSize: number}
     if (buf.compare(FILE_MAGIC, 0, 4, 0, 4) !== 0) throw new Error(`pointlog: bad magic (got ${buf.subarray(0, 4).toString('hex')})`);
     const version = buf.readUInt16LE(4);
     const recSize = buf.readUInt16LE(6);
-    if (version !== FILE_FORMAT_VERSION) throw new Error(`pointlog: unsupported version ${version}`);
+    // v4 puts the OGN destCallsign protocol enum in the high byte of f.
+    // v3 (address-type prefix) and v2 (no high byte) are binary-compatible
+    // and decode as proto=0 (unknown protocol) — the scanner masks the
+    // high byte to 0 on read for legacy versions.
+    if (version !== FILE_FORMAT_VERSION && !FILE_FORMAT_VERSION_LEGACY.has(version)) {
+        throw new Error(`pointlog: unsupported version ${version}`);
+    }
     if (recSize !== RECORD_SIZE) throw new Error(`pointlog: unexpected recSize ${recSize} (expected ${RECORD_SIZE})`);
     return {version, recSize};
 }
@@ -234,11 +374,13 @@ const OFF_G = 30;
 const OFF_B = 32;
 const OFF_S = 34;
 
-// Parse a 6-hex flarm ID to a uint32. Production flarmids are always 6-hex
-// (OGN protocol), so this round-trips cleanly. `| 0` coerces NaN to 0 in
-// the unexpected non-hex case.
+// Parse a 6-hex flarm ID to a 24-bit uint32. Production flarmids are
+// always 6-hex (OGN protocol), so this round-trips cleanly. `| 0` coerces
+// NaN to 0 in the unexpected non-hex case. The result fits in 24 bits;
+// callers that want the combined value pair it with a src code via
+// packFlarmId().
 export function fidFromFlarm(flarm: string): number {
-    return parseInt(flarm, 16) | 0;
+    return (parseInt(flarm, 16) | 0) & 0xffffff;
 }
 
 // Serialize one message into a 36-byte record. Throws only if d falls
@@ -246,13 +388,15 @@ export function fidFromFlarm(flarm: string): number {
 export function serializeRecord(msg: LoggedMessage): Buffer {
     const d = ((msg.d ?? 0) as number) | 0;
     if (d < D_MIN || d > D_MAX) {
-        throw new Error(`pointlog: d=${d} out of int16 range for flarm=${msg.f} t=${msg.t}`);
+        throw new Error(`pointlog: d=${d} out of int16 range for flarm=${fidLabel(msg.f)} t=${msg.t}`);
     }
     const writeTime = (msg.t + d) >>> 0;
     const rec = Buffer.alloc(RECORD_SIZE);
     rec.writeUInt32LE(writeTime, OFF_WRITE_TIME);
     rec.writeInt16LE(d, OFF_D);
-    rec.writeUInt32LE(fidFromFlarm(msg.f), OFF_F);
+    // `>>> 0` keeps the high-bit-set case (e.g. src code 0x80+) unsigned;
+    // a stray `& 0xffffffff` here would silently convert back to int32.
+    rec.writeUInt32LE(msg.f >>> 0, OFF_F);
     // 10-byte fixed ASCII slot for the sender. `write` truncates anything
     // longer than 10 chars and leaves zero padding after a short value
     // (Buffer.alloc above filled with zeros). The aprs.ts dedup tiebreaker
@@ -268,14 +412,18 @@ export function serializeRecord(msg: LoggedMessage): Buffer {
     return rec;
 }
 
-// Decode a record from the given offset into a LoggedMessage. Reconstructed
-// fields: t (= writeTime - d), f (uppercase hex), c (= f, for dumptracks),
-// l (always null, matches what the writer always stored).
-export function deserializeRecord(buf: Buffer, offset: number): LoggedMessage {
+// Decode a record from the given offset into a LoggedMessage. For v4
+// files the combined uint32 f is yielded as-is: low 24 bits = flarmid
+// hex, high 8 bits = protocol enum. For legacy (v2/v3) files the high
+// byte is masked to 0 — under v3 it carried address-type-prefix, not
+// protocol, and recovering the protocol after the fact isn't possible.
+// Consumers that want a human-readable form call fidLabel(); ones that
+// want device identity only mask with `& 0xFFFFFF`.
+export function deserializeRecord(buf: Buffer, offset: number, fileVersion: number = FILE_FORMAT_VERSION): LoggedMessage {
     const writeTime = buf.readUInt32LE(offset + OFF_WRITE_TIME);
     const d = buf.readInt16LE(offset + OFF_D);
-    const fid = buf.readUInt32LE(offset + OFF_F);
-    const f = fid.toString(16).toUpperCase().padStart(6, '0');
+    const fRaw = buf.readUInt32LE(offset + OFF_F);
+    const f = fileVersion < FILE_FORMAT_VERSION ? fRaw & 0xffffff : fRaw;
     // ASCII slot is zero-padded — strip the trailing zeros.
     let oEnd = offset + OFF_O + O_FIELD_LEN;
     while (oEnd > offset + OFF_O && buf[oEnd - 1] === 0) oEnd--;
@@ -290,7 +438,6 @@ export function deserializeRecord(buf: Buffer, offset: number): LoggedMessage {
         t: writeTime - d,
         d,
         f,
-        c: f, // dumptracks fallback; aprs.ts reload overwrites with target.compno
         o,
         lat,
         lng,
@@ -618,6 +765,7 @@ interface OpenFile {
     size: number;
     recSize: number;
     recordCount: number;
+    version: number;
 }
 
 function openRecordFile(fullPath: string): OpenFile | undefined {
@@ -631,10 +779,10 @@ function openRecordFile(fullPath: string): OpenFile | undefined {
             closeSync(fd);
             return undefined;
         }
-        const {recSize} = parseFileHeader(hdr);
+        const {recSize, version} = parseFileHeader(hdr);
         const body = size - FILE_HEADER_SIZE;
         const recordCount = Math.floor(body / recSize);
-        return {fd, size, recSize, recordCount};
+        return {fd, size, recSize, recordCount, version};
     } catch (e) {
         closeSync(fd);
         throw e;
@@ -670,7 +818,7 @@ export function binarySearchForTs(fd: number, recordCount: number, recSize: numb
 async function* scanFileRecords(fullPath: string, q: {since: number; until?: number; flarmId?: FlarmID; flarmIds?: Set<string>}): AsyncGenerator<LoggedMessage> {
     const opened = openRecordFile(fullPath);
     if (!opened) return;
-    const {fd, recSize, recordCount} = opened;
+    const {fd, recSize, recordCount, version} = opened;
     // Pre-compute uint32 fingerprints for the filter set so the hot loop
     // does a single Set.has(uint32) per record. Flarm IDs are always 6-hex
     // in production (the OGN protocol enforces it), so the fid uniquely
@@ -698,12 +846,15 @@ async function* scanFileRecords(fullPath: string, q: {since: number; until?: num
                 // `continue`, don't `return`, so the rest of the scan stands.
                 if (q.until != null && t > q.until) continue;
                 // Fast flarm-ID pre-filter — single uint32 read, no further
-                // decode for the ~97% of records that don't match.
+                // decode for the ~97% of records that don't match. The
+                // disk word packs (src << 24 | fid24); the filter is
+                // device-level (24-bit fid only), so mask off the src
+                // byte before the set lookup.
                 if (fidSet) {
-                    const fid = buf.readUInt32LE(recOff + OFF_F);
+                    const fid = buf.readUInt32LE(recOff + OFF_F) & 0xffffff;
                     if (!fidSet.has(fid)) continue;
                 }
-                yield deserializeRecord(buf, recOff);
+                yield deserializeRecord(buf, recOff, version);
             }
             i += recsRead;
             if (recsRead < recsThisChunk) break; // short read at EOF

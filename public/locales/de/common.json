@@ -151,8 +151,14 @@
         "label_duration": "Dauer"
     },
     "options": {
+        "climb_show": "Steigwerte kreisender Segelflugzeuge anzeigen",
+        "climb_hide": "Steigwerte kreisender Segelflugzeuge ausblenden",
         "click_to_measure": "Klicken zum Messen",
         "click_to_stop_measuring": "Klicken um Messung zu stoppen",
+        "measure_off": "Messwerkzeug aus — klicken um Entfernungen auf der Karte zu messen",
+        "measure_active": "Messwerkzeug: zwei Punkte auf der Karte anklicken. Hier klicken zum Ausschalten",
+        "compare_off": "Segelflugzeug-Vergleich aus — klicken um das gewählte Segelflugzeug mit dem Führenden (oder dem Segelflugzeug unter dem Mauszeiger) zu vergleichen",
+        "compare_active": "Vergleicht das gewählte Segelflugzeug mit dem Führenden (oder dem Segelflugzeug unter dem Mauszeiger). Hier klicken zum Ausschalten",
         "rain_radar_showing": "Regenradar-Zeitpunkt anpassen, derzeit {{value}}, klicken zum Ändern oder Deaktivieren",
         "rain_radar_enable": "Klicken um Regenradar zu aktivieren",
         "rain_now": "jetzt",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Auf metrisch umschalten",
         "switch_to_imperial": "Auf imperial umschalten",
         "map_attribution": "Kartenattribution",
-        "close": "Schließen"
+        "close": "Schließen",
+        "follow_suspended": "Folgen pausiert, weil die Karte verschoben wurde. Zum Fortsetzen klicken oder einen Piloten auswählen",
+        "orientation_suspended": "Ausrichtungssperre pausiert, weil die Karte verschoben wurde. Zum Fortsetzen klicken oder einen Piloten auswählen"
     },
     "drawer": {
         "class": "Klasse",
@@ -214,6 +222,7 @@
         "leg_completed": "Schenkel abgeschlossen",
         "view_leg": "Schenkel",
         "view_task": "Aufgabe",
+        "view_statistics": "Statistik",
         "view_actuals": "tatsächlich",
         "view_handicapped": "Index",
         "view_task_or_leg": "Aufgabe oder Schenkel",
@@ -229,9 +238,24 @@
         "shortest": "Kürzeste",
         "recent_wind": "Aktueller Wind"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} Bärte · {{pct}}% Kurbeln · max {{best}} · Ø {{avg}}",
+        "summary2": "Ø Gleitzahl {{ld}} · {{flown}} · gestiegen {{gain}} · {{pctGap}}% ohne Empfang",
+        "flown": "geflogen {{dist}}",
+        "flown_with_extra": "geflogen {{dist}} ({{extra}} Aufgabe)",
+        "col_time": "Zeit",
+        "col_duration": "Dauer",
+        "col_wind": "Wind",
+        "state_thermal": "Thermik",
+        "state_straight": "Gleiten",
+        "state_gap": "Lücke",
+        "turns": "{{count}} Kreise",
+        "tracking_gap": "Empfangslücke"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} seit {{seconds}} Sekunden",
         "thermal_average": "Mittel: {{climb}}",
+        "gaggle_count": "Pulk von {{count}}",
         "straight_distance_speed": "Strecke: {{distance}} km mit Geschwindigkeit {{speed}} km/h",
         "straight_ld": "Gleitzahl {{ld}}",
         "wind": "Windgeschwindigkeit: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "voraus",
+        "behind": "zurück",
+        "above": "höher",
+        "below": "tiefer"
     },
     "units": {
         "km": "km",

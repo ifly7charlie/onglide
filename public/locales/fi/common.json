@@ -151,8 +151,14 @@
         "label_duration": "Kesto"
     },
     "options": {
+        "climb_show": "Näytä kaartavien purjelentokoneiden nousunopeus",
+        "climb_hide": "Piilota kaartavien purjelentokoneiden nousunopeus",
         "click_to_measure": "Klikkaa mitataksesi",
         "click_to_stop_measuring": "Klikkaa lopettaaksesi mittauksen",
+        "measure_off": "Mittaustyökalu pois — klikkaa mitataksesi etäisyyksiä kartalla",
+        "measure_active": "Mittaustyökalu: klikkaa kahta pistettä kartalla. Klikkaa tästä kytkeäksesi pois",
+        "compare_off": "Purjelentokoneiden vertailu pois — klikkaa vertaillaksesi valittua purjelentokonetta johtajaan (tai kohdistimen alla olevaan purjelentokoneeseen)",
+        "compare_active": "Vertaillaan valittua purjelentokonetta johtajaan (tai kohdistimen alla olevaan purjelentokoneeseen). Klikkaa tästä kytkeäksesi pois",
         "rain_radar_showing": "Säädä sadetutkan ajoitusta, näytetään {{value}}, klikkaa muuttaaksesi tai poistaaksesi käytöstä",
         "rain_radar_enable": "Klikkaa ottaaksesi sadetutkan käyttöön",
         "rain_now": "nyt",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Vaihda metrisiin yksiköihin",
         "switch_to_imperial": "Vaihda brittiläisiin yksiköihin",
         "map_attribution": "Karttatiedot",
-        "close": "Sulje"
+        "close": "Sulje",
+        "follow_suspended": "Seuraaminen keskeytetty, koska siirsit karttaa. Klikkaa jatkaaksesi tai valitse lentäjä",
+        "orientation_suspended": "Suunnan lukitus keskeytetty, koska siirsit karttaa. Klikkaa jatkaaksesi tai valitse lentäjä"
     },
     "drawer": {
         "class": "Luokka",
@@ -214,6 +222,7 @@
         "leg_completed": "osuus suoritettu",
         "view_leg": "osuus",
         "view_task": "tehtävä",
+        "view_statistics": "Tilastot",
         "view_actuals": "todelliset",
         "view_handicapped": "tasoitettu",
         "view_task_or_leg": "tehtävä tai osuus",
@@ -229,9 +238,24 @@
         "shortest": "Lyhin",
         "recent_wind": "Tuore tuuli"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} nostoa · {{pct}}% kierrossa · paras {{best}} · ka {{avg}}",
+        "summary2": "ka liitosuhde {{ld}} · {{flown}} · nousua {{gain}} · {{pctGap}}% ei kuuluvuutta",
+        "flown": "lennetty {{dist}}",
+        "flown_with_extra": "lennetty {{dist}} ({{extra}} tehtävä)",
+        "col_time": "Aika",
+        "col_duration": "Kesto",
+        "col_wind": "Tuuli",
+        "state_thermal": "Nosto",
+        "state_straight": "Liito",
+        "state_gap": "Katko",
+        "turns": "{{count}} kierrosta",
+        "tracking_gap": "seurantakatko"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} {{seconds}} sekuntia",
         "thermal_average": "keskiarvo: {{climb}}",
+        "gaggle_count": "Parvi {{count}}",
         "straight_distance_speed": "matka: {{distance}} km nopeudella {{speed}} km/h",
         "straight_ld": "Liitosuhde {{ld}}",
         "wind": "tuulen nopeus: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "min",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "edellä",
+        "behind": "jäljessä",
+        "above": "ylempänä",
+        "below": "alempana"
     },
     "units": {
         "km": "km",

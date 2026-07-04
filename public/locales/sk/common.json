@@ -151,8 +151,14 @@
         "label_duration": "Trvanie"
     },
     "options": {
+        "climb_show": "Zobraziť rýchlosť stúpania krúžiacich klzákov",
+        "climb_hide": "Skryť rýchlosť stúpania krúžiacich klzákov",
         "click_to_measure": "Kliknite na meranie",
         "click_to_stop_measuring": "Kliknite na ukončenie merania",
+        "measure_off": "Merací nástroj vypnutý — kliknite na meranie vzdialeností na mape",
+        "measure_active": "Merací nástroj: kliknite na dva body na mape. Kliknite sem na vypnutie",
+        "compare_off": "Porovnávanie klzákov vypnuté — kliknite na porovnanie vybraného klzáka s vedúcim (alebo klzákom pod kurzorom)",
+        "compare_active": "Porovnáva vybraný klzák s vedúcim (alebo klzákom pod kurzorom). Kliknite sem na vypnutie",
         "rain_radar_showing": "Nastavte čas dažďového radaru, teraz {{value}}, kliknite na zmenu alebo vypnutie",
         "rain_radar_enable": "Kliknite na zapnutie dažďového radaru",
         "rain_now": "teraz",
@@ -179,7 +185,9 @@
         "switch_to_metric": "Prepnúť na metrické jednotky",
         "switch_to_imperial": "Prepnúť na imperiálne jednotky",
         "map_attribution": "Atribúcia mapy",
-        "close": "Zavrieť"
+        "close": "Zavrieť",
+        "follow_suspended": "Sledovanie pozastavené, pretože ste posunuli mapu. Kliknite na obnovenie alebo vyberte pilota",
+        "orientation_suspended": "Uzamknutie orientácie pozastavené, pretože ste posunuli mapu. Kliknite na obnovenie alebo vyberte pilota"
     },
     "drawer": {
         "class": "Trieda",
@@ -214,6 +222,7 @@
         "leg_completed": "úsek dokončený",
         "view_leg": "úsek",
         "view_task": "úloha",
+        "view_statistics": "Štatistika",
         "view_actuals": "skutočné",
         "view_handicapped": "s handicapom",
         "view_task_or_leg": "úloha alebo úsek",
@@ -229,9 +238,24 @@
         "shortest": "Najkratšia",
         "recent_wind": "Aktuálny vietor"
     },
+    "flight_stats": {
+        "summary": "{{thermals}} termiky · {{pct}}% krúženia · max {{best}} · priem {{avg}}",
+        "summary2": "priem klzavosť {{ld}} · {{flown}} · nastúpané {{gain}} · {{pctGap}}% bez pokrytia",
+        "flown": "nalietané {{dist}}",
+        "flown_with_extra": "nalietané {{dist}} ({{extra}} trate)",
+        "col_time": "Čas",
+        "col_duration": "Trvanie",
+        "col_wind": "Vietor",
+        "state_thermal": "Termika",
+        "state_straight": "Preskok",
+        "state_gap": "Medzera",
+        "turns": "{{count}} okruhov",
+        "tracking_gap": "bez signálu"
+    },
     "tooltip": {
         "thermal_for_seconds": "{{state}} počas {{seconds}} sekúnd",
         "thermal_average": "priemer: {{climb}}",
+        "gaggle_count": "Kŕdeľ {{count}}",
         "straight_distance_speed": "vzdialenosť: {{distance}} km rýchlosťou {{speed}} km/h",
         "straight_ld": "Klzavosť {{ld}}",
         "wind": "rýchlosť vetra: {{speed}} km/h @ {{direction}}°",
@@ -264,6 +288,12 @@
         "hour_short": "h",
         "minute_short": "m",
         "second_short": "s"
+    },
+    "compare": {
+        "ahead": "vpredu",
+        "behind": "vzadu",
+        "above": "vyššie",
+        "below": "nižšie"
     },
     "units": {
         "km": "km",

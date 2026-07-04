@@ -61,6 +61,7 @@ CREATE TABLE `competition` (
   `trackingconsent` char(1) DEFAULT 'N' COMMENT 'Y = comp has obtained explicit livetracking consent from pilots; bypass DDB tracked=N block',
   `delayseconds` int(11) DEFAULT NULL COMMENT 'official tracking delay in seconds; NULL = inherit NEXT_PUBLIC_COMPETITION_DELAY env (default 10)',
   `pushnotifications` char(1) DEFAULT 'N' COMMENT 'Y = Web Push status notifications enabled for this competition',
+  `disable` char(1) DEFAULT 'N' COMMENT 'Y = competition is hidden: not displayed or loaded by ogn.ts',
   PRIMARY KEY (`compid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Main settings for the competition';
 
@@ -380,18 +381,103 @@ CREATE TABLE `trackerhistory` (
   `compno` char(4) DEFAULT NULL,
   `changed` datetime DEFAULT NULL,
   `flarmid` text DEFAULT NULL,
+  `flarmtype` char(3) DEFAULT NULL,
   `greg` char(12) DEFAULT NULL,
   `launchtime` time DEFAULT NULL,
-  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch','evidence','startmatch-swap') DEFAULT 'none',
+  `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch','evidence','startmatch-swap','uncorrelated','sgp','displaced') DEFAULT 'none',
   `class` char(15) DEFAULT NULL,
   `datecode` char(3) DEFAULT NULL,
   `delta_start` smallint DEFAULT NULL,
   `delta_finish` smallint DEFAULT NULL,
-  `pair_score` float DEFAULT NULL,
-  `margin` float DEFAULT NULL,
-  `ddb_link` enum('none','cn','glider','both') NOT NULL DEFAULT 'none',
+  `dist_at_start` float DEFAULT NULL,
+  `gap_around_start` float DEFAULT NULL,
+  `dist_at_finish` float DEFAULT NULL,
+  `gap_around_finish` float DEFAULT NULL,
+  `pair_score` float DEFAULT NULL COMMENT 'evidence magnitude; for method=uncorrelated, -max(MAD lat, MAD lng) in metres (negative = worse, per the evidence sign convention)',
+  `margin` float DEFAULT NULL COMMENT 'for method=uncorrelated, altitude MAD in metres',
   KEY `idx_class_datecode_method` (`class`, `datecode`, `method`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Table structure for table `trackerhistory_paths`
+--
+-- Path-similarity evidence: the result of comparing two FlarmID tracks for the
+-- same pilot to decide whether they are the same physical flight (one aircraft,
+-- two trackers) or different flights. Keyed on canonical pair order
+-- (flarmid_a < flarmid_b by ASCII) so (A,B) and (B,A) map to one row; the
+-- UNIQUE KEY lets findtrackers upsert on every re-run. See
+-- lib/scoring/shared/pathSimilarity.ts.
+--
+
+DROP TABLE IF EXISTS `trackerhistory_paths`;
+CREATE TABLE `trackerhistory_paths` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `compno` char(4) NOT NULL,
+  `class` char(15) NOT NULL,
+  `datecode` char(3) NOT NULL,
+  `flarmid_a` char(6) NOT NULL COMMENT 'canonical lower of the pair (ASCII)',
+  `flarmid_b` char(6) NOT NULL COMMENT 'canonical higher of the pair',
+  `kind` enum('same_flight','different_flight','insufficient_data') NOT NULL,
+  `classification` varchar(30) DEFAULT NULL COMMENT 'ShapeReport classification kind',
+  `p95_pos_km` float DEFAULT NULL COMMENT 'deltaPosP95Km from ShapeReport',
+  `alt_bias_m` float DEFAULT NULL COMMENT 'altBiasM from ShapeReport',
+  `lag_sec` smallint DEFAULT NULL COMMENT 'estimated lag between the two streams',
+  `overlap_sec` int(11) DEFAULT NULL COMMENT 'seconds of mutual sample overlap',
+  `aborted_after_quick` tinyint(1) NOT NULL DEFAULT 0,
+  `changed` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_path` (`compno`, `class`, `datecode`, `flarmid_a`, `flarmid_b`),
+  KEY `idx_class_datecode` (`class`, `datecode`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+--
+-- Cross-competition identity evidence. Unlike `tracker`/`trackerhistory`
+-- (keyed on the transient classid and cleaned up at comp end), these tables
+-- persist across competitions: the FLARM id is the aircraft, accumulated from
+-- confident findtrackers matches only, never for DDB-blocked devices. No raw
+-- pilot names or club names are stored — only keyed HMAC hashes. See
+-- lib/scoring/shared/identity.ts.
+--
+
+DROP TABLE IF EXISTS `flarm_aircraft`;
+CREATE TABLE `flarm_aircraft` (
+  `flarmid` char(6) NOT NULL COMMENT 'uppercase 6-hex device id (the aircraft)',
+  `compid` varchar(40) NOT NULL COMMENT 'source competition — lets scoring exclude the current comp',
+  `glider_key` varchar(48) DEFAULT NULL COMMENT 'gliderEquivalent key() of glider type (not sensitive; digitless names key to the full string)',
+  `greg` char(12) DEFAULT NULL COMMENT 'normalised registration when pilot.greg present (public)',
+  `country` char(2) DEFAULT NULL COMMENT 'resolved 2-letter country',
+  `compno` char(4) DEFAULT NULL COMMENT 'comp number in this comp (weak — usually consistent, not unique)',
+  `is_icao_id` char(1) DEFAULT 'N' COMMENT 'Y when the flarmid is the aircraft permanent ICAO 24-bit address',
+  `match_score` float DEFAULT NULL COMMENT 'best physical-track match confidence (nats) this comp produced for this aircraft',
+  `observations` int(11) NOT NULL DEFAULT '1',
+  `first_seen` datetime DEFAULT NULL,
+  `last_seen` datetime DEFAULT NULL,
+  PRIMARY KEY (`flarmid`,`compid`),
+  KEY `idx_greg` (`greg`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp flarmid->aircraft evidence, per source comp; no raw names/clubs';
+
+DROP TABLE IF EXISTS `flarm_pilot`;
+CREATE TABLE `flarm_pilot` (
+  `flarmid` char(6) NOT NULL,
+  `pilot_key` char(32) NOT NULL COMMENT 'HMAC over (sorted name token hashes + fai hash + country); dedupes one crew',
+  `compid` varchar(40) NOT NULL COMMENT 'source competition — lets scoring exclude the current comp',
+  `club_hash` char(32) DEFAULT NULL COMMENT 'HMAC of normalised home club; never the raw club',
+  `fai_hash` char(32) DEFAULT NULL COMMENT 'HMAC of a real FAI id (>0 and <300000); never the raw number',
+  `match_score` float DEFAULT NULL COMMENT 'best physical-track match confidence (nats) this comp produced for this pilot+aircraft',
+  `observations` int(11) NOT NULL DEFAULT '1',
+  `first_seen` datetime DEFAULT NULL,
+  `last_seen` datetime DEFAULT NULL,
+  PRIMARY KEY (`flarmid`,`pilot_key`,`compid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Cross-comp pilot clues per flarmid, per source comp (a club glider yields many)';
+
+DROP TABLE IF EXISTS `flarm_pilot_nametoken`;
+CREATE TABLE `flarm_pilot_nametoken` (
+  `flarmid` char(6) NOT NULL,
+  `pilot_key` char(32) NOT NULL,
+  `token_hash` char(32) NOT NULL COMMENT 'HMAC of one normalised name token; partial overlap = partial match',
+  PRIMARY KEY (`flarmid`,`pilot_key`,`token_hash`),
+  KEY `idx_token` (`token_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Per-clue HMAC name tokens; idx_token serves part-2 reverse lookup';
 
 
 DROP TABLE IF EXISTS `movements`;

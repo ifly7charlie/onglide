@@ -35,6 +35,7 @@ import Sponsors from './sponsors';
 import {groupForHost} from './domainGroups';
 
 import {SidePanel, SidePanelClassTabs, compShortName} from './sidepanel';
+import {useElementSize} from './useElementSize';
 import {SubscribeBellMenuItem} from './subscribeBell';
 import {LanguageSwitcher} from './language-switcher';
 import {faGlobe} from '@fortawesome/free-solid-svg-icons';
@@ -53,6 +54,8 @@ function useIsMobile() {
 }
 
 import {proposedUrl} from './fixupUrls';
+
+import {WS_RELOAD, WS_MOVE, CLIENT_MOVE_WINDOW_MS} from '../constants';
 
 import {useWebsocketDecoder} from './useWebsocketDecoder';
 import {triggerVersionCheck} from './autoUpdate';
@@ -120,7 +123,7 @@ export const OgnFeed = memo(
         //        const [socketUrl, setSocketUrl] = useState(proposedUrl(vc, datecode)); //url for the socket
         const [wsStatus, setWsStatus] = useState<WsStatus>({listeners: 1, airborne: 0, timeStamp: 0, at: 0 as Epoch, state: 'connecting'});
         const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
-        const [follow, setFollow] = useState(false);
+        const [hoveredCompno, setHoveredCompno] = useState<Compno | null>(null);
         const router = useRouter();
 
         const mergeWsStatus = useCallback(
@@ -144,7 +147,7 @@ export const OgnFeed = memo(
         const socketUrl = useMemo(() => proposedUrl(vc, datecode), [vc, datecode]);
 
         // We are using a webSocket to update our data here
-        const {sendMessage} = useWebSocket(socketUrl, {
+        const {sendMessage, getWebSocket} = useWebSocket(socketUrl, {
             reconnectAttempts: 40,
             reconnectInterval: (lastAttemptNumber: number) => {
                 mergeWsStatus({retry: lastAttemptNumber + 1});
@@ -160,7 +163,7 @@ export const OgnFeed = memo(
             },
             filter: (_message) => false, // never pass a message to react, decode webSocket will do it if required
             onMessage: (lastMessage) => {
-                if (lastMessage.data === 'reload') {
+                if (lastMessage.data === WS_RELOAD) {
                     // Force a page reload
                     const currentReloadCount = parseInt((router.query?.reloaded as string) ?? '0');
                     if (currentReloadCount == 0) {
@@ -169,6 +172,12 @@ export const OgnFeed = memo(
                         };
                         setTimeout(() => router.replace(newParams), 30000 * Math.random());
                     }
+                } else if (lastMessage.data === WS_MOVE) {
+                    // Daemon is shutting down gracefully — reconnect after a random
+                    // delay so the field re-spreads across the incoming daemon
+                    // instead of stampeding. Closing the socket triggers this
+                    // hook's shouldReconnect path back to the same URL.
+                    setTimeout(() => getWebSocket()?.close(), Math.random() * CLIENT_MOVE_WINDOW_MS);
                 } else {
                     decoder(lastMessage.data);
                 }
@@ -221,11 +230,23 @@ export const OgnFeed = memo(
             (cn) => {
                 setSelectedCompno(cn);
                 if (cn && pilots && pilots[cn]) {
-                    setFollow(true);
+                    // Selecting a pilot re-engages follow/orientation if the user had
+                    // panned the map away (viewSuspended) — see deckgl onDragStart.
+                    if (options?.viewSuspended) setOptions({...options, viewSuspended: false});
                 }
             },
-            [setSelectedCompno, pilots]
+            [setSelectedCompno, pilots, options, setOptions]
         );
+
+        // A manual map reposition (options.viewSuspended, set by deckgl's onDragStart)
+        // is tied to the class/comp the map is currently showing. Switching class or
+        // competition swaps in a fresh view the user never touched, so drop the suspend
+        // here — otherwise follow/orientation stays paused on the new map. Mirrors the
+        // reset-on-load in useOptions (_app.tsx); the flag is in-memory only.
+        useEffect(() => {
+            if (options?.viewSuspended) setOptions({...options, viewSuspended: false});
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [vc, compid]);
 
         // Cache the calculated times and only refresh every 60 seconds
         const status = useMemo(() => {
@@ -266,6 +287,14 @@ export const OgnFeed = memo(
         const isMobile = useIsMobile();
         const [drawerOpen, setDrawerOpen] = useState(false);
 
+        // The mobile drawer hangs directly below the fixed top strip. The strip's
+        // height varies with its contents (the startline-open notice and the
+        // taller two-line "Tap for Official Scores" banner both grow it past its
+        // min-height), so we measure it rather than pinning the drawer to a
+        // hardcoded offset — otherwise the overflowed strip covers the drawer's
+        // first item (the class selector).
+        const [stripRef, stripSize] = useElementSize<HTMLDivElement>();
+
         const sortOrder = getValidSortOrder(options.sortKey ?? 'auto', handicapped);
         const setSort = useCallback(
             (key: any) => {
@@ -293,8 +322,6 @@ export const OgnFeed = memo(
                     key="map"
                     comp={comp}
                     vc={vc}
-                    follow={follow}
-                    setFollow={setFollow}
                     setSelectedCompno={setCompno}
                     options={options}
                     setOptions={setOptions}
@@ -304,6 +331,8 @@ export const OgnFeed = memo(
                     viewport={viewport}
                     setViewport={setViewport}
                     selectedCompno={effectiveSelectedCompno}
+                    hoveredCompno={hoveredCompno}
+                    setHoveredCompno={setHoveredCompno}
                     selectedHandicap={effectiveSelectedCompno ? pilots?.[effectiveSelectedCompno]?.handicap : undefined}
                     status={status}
                 />
@@ -328,9 +357,9 @@ export const OgnFeed = memo(
             return (
                 <>
                     {map}
-                    <div className="mobile-top-strip">
+                    <div className="mobile-top-strip" ref={stripRef}>
                         <div className="mobile-strip-header">
-                            <Link href={groupForHost(window.location.host) ? '/' : 'https://www.onglide.com/'} className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
+                            <Link href={groupForHost(window.location.host) !== null ? '/' : 'https://www.onglide.com/'} className="mobile-back" title={t('app.back_to_globe')} aria-label={t('app.back_to_globe')}>
                                 <FontAwesomeIcon icon={faGlobe} />
                             </Link>
                             <div className="mobile-comp-name">{compShortName(comp)}</div>
@@ -347,6 +376,7 @@ export const OgnFeed = memo(
                                     pilots={pilots}
                                     selectedPilot={effectiveSelectedCompno}
                                     setSelectedCompno={setCompno}
+                                    setHoveredCompno={setHoveredCompno}
                                     now={replayTime}
                                     live={live}
                                     tz={tz}
@@ -360,7 +390,7 @@ export const OgnFeed = memo(
                         )}
                     </div>
                     {drawerOpen ? (
-                        <div className="mobile-drawer">
+                        <div className="mobile-drawer" style={{top: stripSize.height || 128}}>
                             {(comp?.classes?.length ?? 0) > 1 ? (
                                 <div className="drawer-group">
                                     <div className="drawer-label">{t('drawer.class')}</div>
@@ -448,6 +478,7 @@ export const OgnFeed = memo(
                                 pilots={pilots}
                                 selectedPilot={effectiveSelectedCompno}
                                 setSelectedCompno={setCompno}
+                                setHoveredCompno={setHoveredCompno}
                                 now={replayTime}
                                 live={live}
                                 tz={tz}
