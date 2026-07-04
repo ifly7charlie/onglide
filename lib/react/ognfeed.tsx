@@ -238,6 +238,16 @@ export const OgnFeed = memo(
             [setSelectedCompno, pilots, options, setOptions]
         );
 
+        // A manual map reposition (options.viewSuspended, set by deckgl's onDragStart)
+        // is tied to the class/comp the map is currently showing. Switching class or
+        // competition swaps in a fresh view the user never touched, so drop the suspend
+        // here — otherwise follow/orientation stays paused on the new map. Mirrors the
+        // reset-on-load in useOptions (_app.tsx); the flag is in-memory only.
+        useEffect(() => {
+            if (options?.viewSuspended) setOptions({...options, viewSuspended: false});
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [vc, compid]);
+
         // Cache the calculated times and only refresh every 60 seconds
         const status = useMemo(() => {
             return (
