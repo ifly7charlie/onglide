@@ -1,18 +1,17 @@
 //
-// "Compare" mode for the distance toolbar control. Draws a connecting line and a
-// label between the selected glider and a target glider, where the target is:
+// "Compare" mode for the options toolbar. Compares the selected glider (A) with a
+// target glider (B), where B is:
 //   1. the hovered glider (map icon or pilot list), when one is hovered, or
 //   2. (Sailplane Grand Prix only) the leaderboard leader (auto sort) — or, when
 //      the selection IS the leader, the glider directly behind it.
 //
-// The "distance" shown is task-aware: the difference in remaining task distance
-// (how far apart the two gliders are along the course), falling back to a
-// straight-line geographic distance when remaining isn't available. The height
-// difference is the AMSL delta. Rendered as deck.gl layers using the gliders'
-// 3D positions so it connects them at altitude and tracks the RAF cursor in 3D.
-// The connector is routed along the course — from the glider that's behind,
-// through the turnpoint(s) it still has to round, to the one ahead — rather than
-// drawn straight across.
+// The comparison is about *scored* progress, not raw GPS separation, so each
+// glider is drawn as an arc of equal progress rather than connected by a straight
+// line, and the two arcs are joined by a measurement line whose length is the
+// scored gap with the label on it. In 3D each arc is drawn at its glider's
+// altitude, so the vertical offset shows the height difference and the measurement
+// line carries both gaps. Nothing is drawn until both gliders have started. The
+// arc geometry itself lives in comparePilotsGeometry.ts (pure / unit-tested).
 //
 
 import {PathLayer, TextLayer} from '@deck.gl/layers';
@@ -21,24 +20,21 @@ import {PathStyleExtension} from '@deck.gl/extensions';
 import type {Compno, Epoch, Units} from '../types';
 import type {RootState} from '../redux/store';
 
-// Only the turnpoint centres are needed to route the connector along the task;
-// keep the param structural so a redux WritableDraft<Task> is accepted as-is.
-export interface CompareTask {
-    legs?: {nlng: number; nlat: number}[];
-}
-
 import {selectAllPositions} from '../redux/tracksSlice';
 import {selectAllScores} from '../redux/scoresSlice';
 import {selectAuto} from '../redux/selectPilotResult';
 
 import {displayHeight} from './displayunits';
 import {distHaversineRaw} from '../flightprocessing/taskhelper';
+import {remaining, buildArc, buildMeasure, pathMidpoint, buildArcSpec, buildVias, type CompareScore, type LngLat, type LngLatAlt, type CompareTask} from './comparePilotsGeometry';
+
+export type {CompareTask} from './comparePilotsGeometry';
 
 // Match the rest of the UI (see gaggleLayer) — already loaded via @font-face so
 // deck.gl's TextLayer can rasterise it into its glyph atlas.
 const UI_FONT = "'Atkinson Hyperlegible Next', sans-serif";
 
-// Thick orange indicator; dark label background for contrast against it.
+// Orange indicator; dark label background for contrast against it.
 const LINE_COLOR: [number, number, number, number] = [255, 140, 0, 240];
 const LABEL_BG: [number, number, number, number] = [20, 20, 20, 215];
 
@@ -46,25 +42,19 @@ const LABEL_BG: [number, number, number, number] = [20, 20, 20, 215];
 const SEP = '≈';
 const TIME_ICON = '⏱';
 
-type LngLat = [number, number];
-type LngLatAlt = [number, number, number];
-
-// Build the connector geometry. `vias` are the turnpoint centres the *behind*
-// glider still has to round to reach the one ahead, so the horizontal leg traces
-// the task course (behind → turnpoints → ahead) rather than cutting straight
-// across. The whole horizontal run sits at the *lower* glider's altitude and a
-// single vertical riser climbs to the *higher* glider — decomposing the gap into
-// along-task distance + height gain, which reads cleanly when pitched into 3D.
-// 2D drops the altitude axis to the bare routed polyline.
-function buildPaths(behind: LngLatAlt, ahead: LngLatAlt, vias: LngLat[]): {path3d: LngLatAlt[]; path2d: LngLat[]} {
-    const lowAlt = Math.min(behind[2], ahead[2]);
-    const flat: LngLatAlt[] = [[behind[0], behind[1], lowAlt], ...vias.map((v): LngLatAlt => [v[0], v[1], lowAlt]), [ahead[0], ahead[1], lowAlt]];
-    const path3d: LngLatAlt[] = [];
-    if (behind[2] > lowAlt) path3d.push([behind[0], behind[1], behind[2]]); // riser down from the (higher) behind glider
-    path3d.push(...flat);
-    if (ahead[2] > lowAlt) path3d.push([ahead[0], ahead[1], ahead[2]]); // riser up to the (higher) ahead glider
-    const path2d: LngLat[] = [[behind[0], behind[1]], ...vias, [ahead[0], ahead[1]]];
-    return {path3d, path2d};
+export interface CompareResult {
+    selCompno: Compno;
+    tgtCompno: Compno;
+    source: [number, number, number]; // [lng, lat, amsl]
+    target: [number, number, number];
+    label: string;
+    labelPos: [number, number, number];
+    arcSel2d: LngLat[];
+    arcSel3d: LngLatAlt[];
+    arcTgt2d: LngLat[];
+    arcTgt3d: LngLatAlt[];
+    measure2d: LngLat[];
+    measure3d: LngLatAlt[];
 }
 
 // Localized unit labels, resolved by the caller (so this module stays free of
@@ -79,21 +69,6 @@ export interface CompareLabels {
     above: string;
     below: string;
 }
-
-export interface CompareResult {
-    selCompno: Compno;
-    tgtCompno: Compno;
-    source: [number, number, number]; // [lng, lat, amsl]
-    target: [number, number, number];
-    mid: [number, number, number];
-    path3d: [number, number, number][]; // routed connector (3D L-shape via turnpoints)
-    path2d: [number, number][]; // routed connector (flat, for 2D)
-    label: string;
-}
-
-// distanceRemaining (racing) or minPossible (AAT) — same precedence the
-// leaderboard's "remaining" column uses (selectPilotResult).
-const remaining = (a: {distanceRemaining?: number; minPossible?: number} | undefined): number => (a ? a.distanceRemaining || a.minPossible || 0 : 0);
 
 // Single-unit short duration using the localized time.*_short labels:
 // "24s" under a minute, "2m" under an hour, "2h" beyond.
@@ -168,12 +143,16 @@ export function computeCompare(
 
     const source = sel.position as [number, number, number];
     const target = tgt.position as [number, number, number];
-    const mid: [number, number, number] = [(source[0] + target[0]) / 2, (source[1] + target[1]) / 2, (source[2] + target[2]) / 2];
+
+    const scores = selectAllScores(state, scoreT) ?? {};
+    const selScore = scores[selectedCompno] as CompareScore | undefined;
+    const tgtScore = scores[tgtCompno] as CompareScore | undefined;
+
+    // Before both gliders have started the comparison is meaningless (and the
+    // arcs have no leg to sit on) — draw nothing.
+    if (!selScore?.utcStart || !tgtScore?.utcStart) return null;
 
     // Task-aware separation: difference in remaining task distance, else great-circle.
-    const scores = selectAllScores(state, scoreT) ?? {};
-    const selScore = scores[selectedCompno];
-    const tgtScore = scores[tgtCompno];
     const selRem = remaining(selScore?.actual);
     const tgtRem = remaining(tgtScore?.actual);
     // Everything below describes the TARGET (B) relative to the selected glider
@@ -212,28 +191,48 @@ export function computeCompare(
 
     const label = [distLine, heightLine, totalLine].filter(Boolean).join('\n');
 
-    // Route the connector along the task: from the glider that's behind (more
-    // remaining), through the turnpoint centres it still has to round to reach the
-    // one ahead, then on to that glider. `currentLeg` indexes the next turnpoint a
-    // pilot is heading to (racing scores the turn to legs[currentLeg]'s centre), so
-    // the behind glider must round legs[behindLeg..aheadLeg-1]. No task / same leg /
-    // unknown remaining → no via points, i.e. a direct connector.
+    // Build the scored-position arcs. behind = larger remaining; the measurement
+    // line runs behind → ahead.
+    const aat = !!task?.rules?.aat;
+    const selSpec = buildArcSpec(aat, task?.legs, selScore, source);
+    const tgtSpec = buildArcSpec(aat, task?.legs, tgtScore, target);
+
     const selBehind = selRem >= tgtRem;
-    const behindPos = selBehind ? source : target;
-    const aheadPos = selBehind ? target : source;
+    const behindSpec = selBehind ? selSpec : tgtSpec;
+    const aheadSpec = selBehind ? tgtSpec : selSpec;
+    const behindScore = selBehind ? selScore : tgtScore;
     const behindLeg = (selBehind ? selScore : tgtScore)?.currentLeg ?? 0;
     const aheadLeg = (selBehind ? tgtScore : selScore)?.currentLeg ?? 0;
-    let vias: [number, number][] = [];
-    if (haveRem && task?.legs && behindLeg >= 1 && aheadLeg > behindLeg) {
-        vias = task.legs.slice(behindLeg, Math.min(aheadLeg, task.legs.length)).map((l): [number, number] => [l.nlng, l.nlat]);
-    }
-    const {path3d, path2d} = buildPaths(behindPos, aheadPos, vias);
 
-    return {selCompno: selectedCompno, tgtCompno, source, target, mid, path3d, path2d, label};
+    let arcSel2d: LngLat[] = [];
+    let arcSel3d: LngLatAlt[] = [];
+    let arcTgt2d: LngLat[] = [];
+    let arcTgt3d: LngLatAlt[] = [];
+    let measure2d: LngLat[];
+    let measure3d: LngLatAlt[];
+
+    if (behindSpec && aheadSpec && selSpec && tgtSpec) {
+        ({arc2d: arcSel2d, arc3d: arcSel3d} = buildArc(selSpec));
+        ({arc2d: arcTgt2d, arc3d: arcTgt3d} = buildArc(tgtSpec));
+        const vias = buildVias(aat, task?.legs, behindScore, behindLeg, aheadLeg);
+        const behindAnchor: LngLatAlt = [behindSpec.anchor[0], behindSpec.anchor[1], behindSpec.alt];
+        const aheadAnchor: LngLatAlt = [aheadSpec.anchor[0], aheadSpec.anchor[1], aheadSpec.alt];
+        ({measure2d, measure3d} = buildMeasure(behindAnchor, aheadAnchor, vias));
+    } else {
+        // No task geometry (e.g. task not loaded, or no scored point yet) — fall
+        // back to a direct connector between the gliders so the label still shows.
+        ({measure2d, measure3d} = buildMeasure(source, target, []));
+    }
+
+    const labelPos = pathMidpoint(measure3d) as [number, number, number];
+
+    return {selCompno: selectedCompno, tgtCompno, source, target, label, labelPos, arcSel2d, arcSel3d, arcTgt2d, arcTgt3d, measure2d, measure3d};
 }
 
 // useSelector equality — only re-render when something visible changes, so the
 // React layer is stable between the per-second data ticks the RAF loop smooths.
+// The arc geometry derives deterministically from the endpoints + (stable) task,
+// so comparing the endpoints and label is sufficient.
 export function compareEqual(a: CompareResult | null, b: CompareResult | null): boolean {
     if (a === b) return true;
     if (!a || !b) return false;
@@ -250,43 +249,51 @@ export function compareEqual(a: CompareResult | null, b: CompareResult | null): 
     );
 }
 
+// The path rows the `compare-line` PathLayer draws: the measurement line plus the
+// two arcs. Shared by `compareLayers` and the RAF clone in deckgl.tsx so both
+// produce identical geometry. Each row carries 2D and 3D paths; the layer's
+// getPath closure picks per map mode. Degenerate (single-point) paths are dropped.
+export function compareLineRows(d: CompareResult): {path2d: LngLat[]; path3d: LngLatAlt[]; role: 'measure' | 'arc'}[] {
+    const rows: {path2d: LngLat[]; path3d: LngLatAlt[]; role: 'measure' | 'arc'}[] = [
+        {path2d: d.measure2d, path3d: d.measure3d, role: 'measure'},
+        {path2d: d.arcSel2d, path3d: d.arcSel3d, role: 'arc'},
+        {path2d: d.arcTgt2d, path3d: d.arcTgt3d, role: 'arc'}
+    ];
+    return rows.filter((r) => r.path2d.length > 1);
+}
+
 //
-// Build the deck.gl layers for a comparison (thick orange path + billboard
-// label). Returns empty-data layers when there's nothing to draw (so the RAF
-// loop can still find and clone them). depth compare is forced 'always' so the
-// path/label aren't occluded by terrain in 3D. The path follows the task course
-// (behind glider → intervening turnpoints → ahead glider): flat in 2D, an L-shape
-// at altitude in 3D (horizontal at the lower glider, vertical up to the higher).
-// The layer ids are matched by the RAF loop in deckgl.tsx to clone fresh
-// positions each frame without a React render.
+// Build the deck.gl layers for a comparison (dotted orange arcs + measurement line
+// + billboard label). Returns empty-data layers when there's nothing to draw (so
+// the RAF loop can still find and clone them). depth compare is forced 'always' so
+// they aren't occluded by terrain in 3D; billboard off in 2D (doesn't render on
+// some devices). The layer ids are matched by the RAF loop in deckgl.tsx to clone
+// fresh geometry each frame without a React render.
 export function compareLayers(result: CompareResult | null, map2d: boolean): any[] {
-    const line = new PathLayer<CompareResult>({
+    type Row = {path2d: LngLat[]; path3d: LngLatAlt[]; role: 'measure' | 'arc'};
+    const line = new PathLayer<Row>({
         id: 'compare-line',
-        data: result ? [result] : [],
+        data: result ? compareLineRows(result) : [],
         getPath: (d) => (map2d ? d.path2d : d.path3d),
         getColor: LINE_COLOR,
-        // Very fine dotted line: 1px dots with a 4px gap (dash array is in the same
-        // pixel units as the width). dashJustified evens the run out per segment.
-        getWidth: 3,
+        // Measurement line reads heavier than the arcs.
+        getWidth: (d) => (d.role === 'measure' ? 3 : 2),
         widthUnits: 'pixels',
-        widthMinPixels: 3,
+        widthMinPixels: 2,
         extensions: [new PathStyleExtension({dash: true})],
         // getDashArray/dashJustified are contributed by PathStyleExtension and
         // aren't on PathLayer's base prop type — cast just these two.
         ...({getDashArray: [3, 5], dashJustified: true} as object),
         jointRounded: true,
         capRounded: true,
-        // Screen-space width in 3D — otherwise the vertical leg (zero horizontal
-        // extent) collapses under ground-plane extrusion. Match the track layer:
-        // billboard off in 2D (doesn't render on some devices).
         billboard: !map2d,
         parameters: {depthCompare: 'always', depthWriteEnabled: false},
-        updateTriggers: {getPath: [map2d, result?.path3d, result?.path2d]}
+        updateTriggers: {getPath: [map2d, result?.measure3d, result?.arcSel3d, result?.arcTgt3d]}
     });
     const label = new TextLayer<CompareResult>({
         id: 'compare-label',
         data: result ? [result] : [],
-        getPosition: (d) => d.mid,
+        getPosition: (d) => d.labelPos,
         getText: (d) => d.label,
         getColor: [255, 255, 255, 255],
         getSize: 14,
@@ -298,7 +305,7 @@ export function compareLayers(result: CompareResult | null, map2d: boolean): any
         billboard: true,
         getPixelOffset: [0, -12],
         parameters: {depthCompare: 'always', depthWriteEnabled: false},
-        updateTriggers: {getText: result?.label}
+        updateTriggers: {getText: result?.label, getPosition: result?.labelPos}
     });
     return [line, label];
 }

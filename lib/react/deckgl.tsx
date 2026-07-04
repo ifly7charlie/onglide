@@ -81,7 +81,7 @@ import {gaggleLayer, computeGaggles} from './gaggleLayer';
 import {pilotsTrackLayer, computeTripsFiltering} from './pilotstracklayer';
 import {OgnTripsLayer} from './ogntripslayer';
 import {homeLocationLayer} from './homeLocationLayer';
-import {computeCompare, compareLayers, compareEqual, type CompareResult, type CompareLabels, type CompareTask} from './comparePilotsLayer';
+import {computeCompare, compareLayers, compareLineRows, compareEqual, type CompareResult, type CompareLabels, type CompareTask} from './comparePilotsLayer';
 
 import {DISPLAY_CURSOR_LAG_S, DISPLAY_CURSOR_TICK_HZ, DISPLAY_CURSOR_MAX_CATCHUP_S} from '../constants';
 
@@ -126,7 +126,11 @@ function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow:
             if (!positionsForLabels) positionsForLabels = selectAllPositions(state, liveNow);
             return layer.clone({data: positionsForLabels});
         }
-        if (layer.id === 'compare-line' || layer.id === 'compare-label') {
+        if (layer.id === 'compare-line') {
+            const r = getCompare();
+            return layer.clone({data: r ? compareLineRows(r) : []});
+        }
+        if (layer.id === 'compare-label') {
             const r = getCompare();
             return layer.clone({data: r ? [r] : []});
         }

@@ -794,7 +794,7 @@ function applyFilter(filter: string) {
 //
 // Connect to the APRS Server
 function startAprsListener(config: AprsListenerConfig) {
-    if (replay())
+    if (replay()) {
         return;
     }
 
