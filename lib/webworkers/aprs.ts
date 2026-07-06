@@ -86,10 +86,10 @@ let restarting = false;
 
 import {BroadcastChannel, Worker, parentPort, isMainThread, workerData, SHARE_ENV} from 'node:worker_threads';
 
-import {trackMetric, initialiseInsights} from '../insights';
+import {trackMetric} from '../insights';
 //import {pathToFileURL} from 'node:url';
 
-import {sortedLastIndexBy} from '../util/binarySearch';
+import {sortedLastIndexBy, sortedIndexBy} from '../util/binarySearch';
 
 export enum AprsCommandEnum {
     none,
@@ -1755,7 +1755,7 @@ export async function processMessageQueue(aircraft: Aircraft, log?: Function) {
     // next call here. makeGetNow honours replay mode.
     const realNow = aircraft.airfield.getNow();
     const to: Epoch = (realNow - aprsAdditionalDelay) as Epoch;
-    let position = sortedLastIndexBy(messages, {t: start} as any, messageSortKey);
+    let position = sortedIndexBy(messages, {t: start} as any, messageSortKey);
 
     if (!log) {
         log = aircraft.log;
