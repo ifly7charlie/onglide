@@ -50,6 +50,10 @@ export interface AATTaskOptions {
     startTime: Epoch;
     /** Start geometry. Default: line, r1 = 5 km. */
     startRadius?: number;
+    /** Start type. Default 'line'; 'cylinder' builds a full-circle sector start. */
+    startType?: 'line' | 'cylinder';
+    /** IGC cylinder (PEV) start — sets rules.pevStart and skips the start-ring length adjustment. */
+    pevStart?: boolean;
     /** Finish geometry. Default: line, r1 = 3 km. */
     finishRadius?: number;
     /** Finish location (defaults to start location). */
@@ -150,15 +154,16 @@ export function makeAATTask(opts: AATTaskOptions): Task {
     // Build legs array: start + sectors + finish
     const legs: TaskLeg[] = [];
 
-    // Leg 0 — start (line type by default)
+    // Leg 0 — start (line type by default, or a full-circle cylinder)
+    const cylinderStart = opts.startType === 'cylinder';
     legs.push(
         makeLeg(0, {
             lat: opts.startLat,
             lng: opts.startLng,
-            type: 'line',
+            type: cylinderStart ? 'sector' : 'line',
             r1: startR,
-            a1: 90,
-            direction: 'np',
+            a1: cylinderStart ? 180 : 90,
+            direction: cylinderStart ? 'symmetrical' : 'np',
             altitude: opts.startAltitude
         })
     );
@@ -198,13 +203,14 @@ export function makeAATTask(opts: AATTaskOptions): Task {
     }
 
     // Apply start/finish ring adjustments and sum task length
-    const taskDistance = calculateTaskLength(legs);
+    const taskDistance = calculateTaskLength(legs, opts.pevStart);
 
     const task: Task = {
         rules: {
             grandprixstart: false,
             nostartutc: opts.startTime,
             aat: true,
+            pevStart: opts.pevStart,
             handicapped: opts.handicapped ?? false,
             dm: 0,
             maxHandicap: 100

@@ -17,6 +17,7 @@ export interface IGCData {
     date: {epochBase: Epoch; day: number; month: number; year: number};
     tzOffset: number; // timezone offset in hours (e.g. 2 for UTC+2)
     fixes: PositionMessage[];
+    pevTimes: Epoch[]; // pilot-event (PEV) button presses from E records
     taskDeclaration: {lat: number; lng: number; name: string}[] | null;
     ozParams: Map<number, OZParams>;
     taskParams: {noStartUTC: string | null; taskTimeSecs: number | null};
@@ -24,6 +25,9 @@ export interface IGCData {
 
 // B record regex - matches the standard IGC fix format
 const bRecordRegex = /^B(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{3})([NS])(\d{3})(\d{2})(\d{3})([EW])A([\d-]{5})(\d{5})/;
+
+// E record with the PEV (pilot event) code - the button press a cylinder start is taken from
+const pevRecordRegex = /^E(\d{2})(\d{2})(\d{2})PEV/;
 
 // C record regex for turnpoints (not the header or takeoff/landing lines)
 const cRecordRegex = /^C(\d{2})(\d{2})(\d{3})([NS])(\d{3})(\d{2})(\d{3})([EW])(.*)/;
@@ -83,6 +87,8 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
         year = 0;
 
     const fixes: PositionMessage[] = [];
+    const pevTimes: Epoch[] = [];
+    let pendingPev = false; // E records are interleaved in time order: flag the next fix
     const cRecords: {lat: number; lng: number; name: string}[] = [];
     const lcuCRecords: {lat: number; lng: number; name: string}[] = []; // SeeYou LCU:: task override
     const ozParams = new Map<number, OZParams>();
@@ -129,8 +135,21 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
                 a: alt,
                 g: 0 as AltitudeAgl, // will be estimated later
                 c: compno,
-                _: false
+                _: false,
+                ...(pendingPev ? {pev: true} : {})
             });
+            pendingPev = false;
+            continue;
+        }
+
+        // E record - pilot event; only PEV presses are of interest. The press
+        // is credited to the next fix (recorders log one at the event second).
+        if (first === 'E') {
+            const m = pevRecordRegex.exec(line);
+            if (m) {
+                pevTimes.push((epochBase + parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3])) as Epoch);
+                pendingPev = true;
+            }
             continue;
         }
 
@@ -392,6 +411,7 @@ export function parseIGC(text: string, defaultCompno?: Compno): IGCData {
         tzOffset,
         date: {epochBase, day, month, year},
         fixes,
+        pevTimes,
         taskDeclaration: finalCRecords.length > 0 ? finalCRecords : null,
         ozParams: finalOZParams,
         taskParams: finalTaskParams

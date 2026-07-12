@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} lentoa ladattu",
         "no_fixes": "Tiedostosta {{file}} ei löytynyt pisteitä",
         "error_processing": "Virhe tiedoston käsittelyssä",
-        "error_rescoring": "Virhe uudelleenlaskennassa"
+        "error_rescoring": "Virhe uudelleenlaskennassa",
+        "cylinder_start": "Sylinterilähtö (PEV)",
+        "cylinder_start_hint": "Laske uudelleen IGC-sylinterilähdöllä (PEV): lähtö arvioidaan viimeisestä noususta ennen suuntaamista ensimmäiselle käännepisteelle"
     },
     "errors": {
         "boundary_title": "Hupsis, tapahtui virhe!",

@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} vluchten geladen",
         "no_fixes": "Geen punten gevonden in {{file}}",
         "error_processing": "Fout bij verwerken van bestand",
-        "error_rescoring": "Fout bij herscoren"
+        "error_rescoring": "Fout bij herscoren",
+        "cylinder_start": "Cilinderstart (PEV)",
+        "cylinder_start_hint": "Herbereken met een IGC-cilinderstart (PEV): de start wordt geschat op basis van de laatste klim voor het vertrek naar het eerste keerpunt"
     },
     "errors": {
         "boundary_title": "Oeps, er is een fout opgetreden!",

@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} flights loaded",
         "no_fixes": "No fixes found in {{file}}",
         "error_processing": "Error processing file",
-        "error_rescoring": "Error rescoring"
+        "error_rescoring": "Error rescoring",
+        "cylinder_start": "Cylinder (PEV) start",
+        "cylinder_start_hint": "Rescore with an IGC cylinder (PEV) start: the start is estimated from the last climb before heading for the first turnpoint"
     },
     "errors": {
         "boundary_title": "Oops, there is an error!",

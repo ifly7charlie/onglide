@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} Flüge geladen",
         "no_fixes": "Keine Punkte in {{file}} gefunden",
         "error_processing": "Fehler beim Verarbeiten der Datei",
-        "error_rescoring": "Fehler bei der Neuauswertung"
+        "error_rescoring": "Fehler bei der Neuauswertung",
+        "cylinder_start": "Zylinderstart (PEV)",
+        "cylinder_start_hint": "Neu auswerten mit IGC-Zylinderstart (PEV): der Start wird aus dem letzten Steigen vor dem Abflug zum ersten Wendepunkt geschätzt"
     },
     "errors": {
         "boundary_title": "Hoppla, ein Fehler ist aufgetreten!",

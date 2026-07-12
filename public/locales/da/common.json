@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} flyvninger indlæst",
         "no_fixes": "Ingen punkter fundet i {{file}}",
         "error_processing": "Fejl ved behandling af fil",
-        "error_rescoring": "Fejl ved genberegning"
+        "error_rescoring": "Fejl ved genberegning",
+        "cylinder_start": "Cylinderstart (PEV)",
+        "cylinder_start_hint": "Genberegn med IGC-cylinderstart (PEV): starten estimeres ud fra den sidste stigning, før kursen sættes mod første vendepunkt"
     },
     "errors": {
         "boundary_title": "Hovsa, der opstod en fejl!",

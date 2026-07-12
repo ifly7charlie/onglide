@@ -6,6 +6,41 @@ import {createFlightStatistics, StatsFix, FlightStatistics} from '../lib/webwork
 // neighbour. A weak thermal blip merged into a glide must leave the glide a
 // glide (not flip it to 'thermal'), and a long glide must survive intact even
 // when a proper thermal forms right beside it.
+// Integrate a synthetic track from a list of phases. Each phase is a run of
+// fixes flown at a constant ground speed and climb rate with a fixed per-fix
+// bearing change (0 = straight glide, large = circling). Positions advance
+// along the current heading so the haversine distance/bearing the state
+// machine recomputes stay self-consistent with the supplied bearing/speed.
+interface Phase {
+    steps: number;
+    turnPerStep: number; // degrees of heading change per fix
+    speed: number; // kph
+    climb: number; // m/s
+}
+const buildTrack = (phases: Phase[], dt = 4): StatsFix[] => {
+    const KM_PER_DEG = 111.32;
+    const fixes: StatsFix[] = [];
+    let t = 1000;
+    let a = 1500; // m AMSL
+    let lat = 47.0;
+    let lng = 19.0;
+    let bearing = 90; // heading east
+    fixes.push({t, a, lng, lat, b: bearing, s: phases[0].speed});
+    for (const ph of phases) {
+        for (let i = 0; i < ph.steps; i++) {
+            t += dt;
+            bearing = (bearing + ph.turnPerStep + 360) % 360;
+            const distKm = (ph.speed / 3600) * dt;
+            const rad = (bearing * Math.PI) / 180;
+            lat += (distKm * Math.cos(rad)) / KM_PER_DEG;
+            lng += (distKm * Math.sin(rad)) / (KM_PER_DEG * Math.cos((lat * Math.PI) / 180));
+            a += ph.climb * dt;
+            fixes.push({t, a, lng, lat, b: bearing, s: ph.speed});
+        }
+    }
+    return fixes;
+};
+
 describe('flightStatistics coalescing', () => {
     const dur = (s: {start?: number; end?: number}) => (s.end ?? 0) - (s.start ?? 0);
 
@@ -13,41 +48,6 @@ describe('flightStatistics coalescing', () => {
         for (let i = 1; i < segs.length; i++) {
             expect(segs[i].state === segs[i - 1].state && segs[i].state !== 'gap', `adjacent ${segs[i].state} at index ${i} (${segs[i - 1].start}-${segs[i - 1].end} then ${segs[i].start}-${segs[i].end})`).toBe(false);
         }
-    };
-
-    // Integrate a synthetic track from a list of phases. Each phase is a run of
-    // fixes flown at a constant ground speed and climb rate with a fixed per-fix
-    // bearing change (0 = straight glide, large = circling). Positions advance
-    // along the current heading so the haversine distance/bearing the state
-    // machine recomputes stay self-consistent with the supplied bearing/speed.
-    interface Phase {
-        steps: number;
-        turnPerStep: number; // degrees of heading change per fix
-        speed: number; // kph
-        climb: number; // m/s
-    }
-    const buildTrack = (phases: Phase[], dt = 4): StatsFix[] => {
-        const KM_PER_DEG = 111.32;
-        const fixes: StatsFix[] = [];
-        let t = 1000;
-        let a = 1500; // m AMSL
-        let lat = 47.0;
-        let lng = 19.0;
-        let bearing = 90; // heading east
-        fixes.push({t, a, lng, lat, b: bearing, s: phases[0].speed});
-        for (const ph of phases) {
-            for (let i = 0; i < ph.steps; i++) {
-                t += dt;
-                bearing = (bearing + ph.turnPerStep + 360) % 360;
-                const distKm = (ph.speed / 3600) * dt;
-                const rad = (bearing * Math.PI) / 180;
-                lat += (distKm * Math.cos(rad)) / KM_PER_DEG;
-                lng += (distKm * Math.sin(rad)) / (KM_PER_DEG * Math.cos((lat * Math.PI) / 180));
-                a += ph.climb * dt;
-                fixes.push({t, a, lng, lat, b: bearing, s: ph.speed});
-            }
-        }
-        return fixes;
     };
     const runTrack = (phases: Phase[]) => {
         const fs = createFlightStatistics();
@@ -483,5 +483,66 @@ describe('flightStatistics gaps, wind, and stream hygiene', () => {
         const straightTime = segs.filter((s) => s.state === 'straight').reduce((acc, s) => acc + (s.end - s.start), 0);
         expect(segs.filter((s) => s.state === 'thermal').length).toBeGreaterThanOrEqual(1);
         expect(thermalTime).toBeGreaterThan(straightTime);
+    });
+});
+
+// The raw accessors expose the internal (unrounded) segment objects for the
+// PEV start estimator: closed segments plus the open one, with full start/end
+// fix geometry. They must mirror exactly what getStats() lifts, at every point
+// of the stream — including through blip absorption and open-segment resume,
+// where a closed segment is popped back to open.
+describe('flightStatistics raw segment accessors', () => {
+    const collectRaw = (fs: FlightStatistics) => {
+        const raw = [...fs.getSegmentsRaw()];
+        const open = fs.getOpenSegmentRaw();
+        if (open) raw.push(open);
+        return raw;
+    };
+
+    test('raw views mirror getStats at every fix through coalescing', () => {
+        const fs = createFlightStatistics();
+        for (const f of buildTrack([
+            {steps: 45, turnPerStep: 40, speed: 80, climb: 2}, // thermal
+            {steps: 50, turnPerStep: 0, speed: 120, climb: -1.5}, // glide
+            {steps: 4, turnPerStep: 40, speed: 100, climb: 0}, // blip — absorbed, resumes the glide
+            {steps: 50, turnPerStep: 0, speed: 120, climb: -1.5}, // glide continues
+            {steps: 45, turnPerStep: 40, speed: 80, climb: 2} // thermal
+        ])) {
+            fs.addPosition(f);
+            const lifted = fs.getStats()?.segments ?? [];
+            const raw = collectRaw(fs);
+            expect(raw.map((s) => s.state)).toEqual(lifted.map((s) => s.state));
+            expect(raw.map((s) => s.startTime)).toEqual(lifted.map((s) => s.start));
+            expect(raw.map((s) => s.endTime)).toEqual(lifted.map((s) => s.end));
+        }
+    });
+
+    test('a raw straight segment starts at the top-of-climb fix with full geometry', () => {
+        const fs = createFlightStatistics();
+        const fixes = buildTrack([
+            {steps: 45, turnPerStep: 40, speed: 80, climb: 2}, // thermal
+            {steps: 50, turnPerStep: 0, speed: 120, climb: -1.5} // glide (open at the end)
+        ]);
+        for (const f of fixes) fs.addPosition(f);
+        const open = fs.getOpenSegmentRaw();
+        expect(open?.state).toBe('straight');
+        // Segments abut: the glide begins where the previous fix was, so its
+        // start geometry is an actual track fix — the top of the climb.
+        const at = fixes.find((f) => f.t === open!.startTime);
+        expect(at).toBeDefined();
+        expect(open!.startLat).toBeCloseTo(at!.lat, 9);
+        expect(open!.startLng).toBeCloseTo(at!.lng, 9);
+        expect(open!.startAlt).toBeCloseTo(at!.a, 9);
+    });
+
+    test('raw accessors are empty before any segment and after reset', () => {
+        const fs = createFlightStatistics();
+        expect(fs.getOpenSegmentRaw()).toBeNull();
+        expect(fs.getSegmentsRaw()).toHaveLength(0);
+        for (const f of buildTrack([{steps: 30, turnPerStep: 40, speed: 80, climb: 2}])) fs.addPosition(f);
+        expect(collectRaw(fs).length).toBeGreaterThan(0);
+        fs.reset();
+        expect(fs.getOpenSegmentRaw()).toBeNull();
+        expect(fs.getSegmentsRaw()).toHaveLength(0);
     });
 });

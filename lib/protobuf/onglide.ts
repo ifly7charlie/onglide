@@ -142,6 +142,8 @@ export interface TaskRules {
     | undefined;
   /** ×10; highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps */
   maxHandicap: number;
+  /** IGC cylinder (PEV) start - start estimated from track behaviour inside the cylinder */
+  pevStart?: boolean | undefined;
 }
 
 export interface TaskDetails {
@@ -1732,6 +1734,7 @@ function createBaseTaskRules(): TaskRules {
     handicapped: undefined,
     dm: undefined,
     maxHandicap: 0,
+    pevStart: undefined,
   };
 }
 
@@ -1757,6 +1760,9 @@ export const TaskRules: MessageFns<TaskRules> = {
     }
     if (message.maxHandicap !== 0) {
       writer.uint32(56).uint32(message.maxHandicap);
+    }
+    if (message.pevStart !== undefined) {
+      writer.uint32(64).bool(message.pevStart);
     }
     return writer;
   },
@@ -1824,6 +1830,14 @@ export const TaskRules: MessageFns<TaskRules> = {
           message.maxHandicap = reader.uint32();
           continue;
         }
+        case 8: {
+          if (tag !== 64) {
+            break;
+          }
+
+          message.pevStart = reader.bool();
+          continue;
+        }
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -1842,6 +1856,7 @@ export const TaskRules: MessageFns<TaskRules> = {
       handicapped: isSet(object.handicapped) ? globalThis.Boolean(object.handicapped) : undefined,
       dm: isSet(object.dm) ? globalThis.Number(object.dm) : undefined,
       maxHandicap: isSet(object.maxHandicap) ? globalThis.Number(object.maxHandicap) : 0,
+      pevStart: isSet(object.pevStart) ? globalThis.Boolean(object.pevStart) : undefined,
     };
   },
 
@@ -1868,6 +1883,9 @@ export const TaskRules: MessageFns<TaskRules> = {
     if (message.maxHandicap !== 0) {
       obj.maxHandicap = Math.round(message.maxHandicap);
     }
+    if (message.pevStart !== undefined) {
+      obj.pevStart = message.pevStart;
+    }
     return obj;
   },
 
@@ -1883,6 +1901,7 @@ export const TaskRules: MessageFns<TaskRules> = {
     message.handicapped = object.handicapped ?? undefined;
     message.dm = object.dm ?? undefined;
     message.maxHandicap = object.maxHandicap ?? 0;
+    message.pevStart = object.pevStart ?? undefined;
     return message;
   },
 };

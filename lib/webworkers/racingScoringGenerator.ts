@@ -42,6 +42,13 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
         );
     });
 
+    // PEV (cylinder) start: the credited start point is the recorded fix inside
+    // the cylinder (or the exit crossing on the no-PEV fallback), so leg 1 is
+    // measured from that fix rather than the precomputed centre-to-centre length.
+    // calculateTask clears the flag when the start leg isn't a cylinder.
+    const pevMode = !!task.rules.pevStart;
+    const tp1Centre: BasePositionMessage = task.legs.length > 1 ? ({lat: task.legs[1].nlat, lng: task.legs[1].nlng, t: 0 as Epoch, a: 0} as BasePositionMessage) : null;
+
     let flightStatus: PositionStatus | undefined = undefined;
 
     for await (const current of taskStatusGenerator) {
@@ -87,12 +94,21 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
 
             // Where is the scoring from
             const previousLeg = taskStatus.legs[0];
-            previousLeg.point = {
-                t: taskStatus.utcStart,
-                lat: task.legs[0].nlat,
-                lng: task.legs[0].nlng,
-                a: previousLeg?.points?.[0]?.a ?? 0
-            };
+            const creditedStart = pevMode ? taskStatus.legs[0]?.points?.[0] : undefined;
+            previousLeg.point = creditedStart
+                ? {...creditedStart}
+                : {
+                      t: taskStatus.utcStart,
+                      lat: task.legs[0].nlat,
+                      lng: task.legs[0].nlng,
+                      a: previousLeg?.points?.[0]?.a ?? 0
+                  };
+
+            // Leg 1 measured from the credited start fix for PEV starts. Every
+            // leg-length read below must come through legLength or it silently
+            // reverts to the centre-to-centre length for PEV starts.
+            const leg1Length = creditedStart ? PreparedTurnpoint.geodesicDistance(creditedStart, tp1Centre) : task.legs[1]?.length;
+            const legLength = (legno: number): DistanceKM => (legno == 1 ? leg1Length : task.legs[legno].length);
 
             delete previousLeg.minPossible;
 
@@ -102,7 +118,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                 // If we have entered the sector then count the length of the leg
                 const leg = taskStatus.legs[legno];
                 if (leg.entryTimeStamp || leg.penaltyTimeStamp) {
-                    leg.distance = (Math.round(task.legs[legno].length * 10) / 10) as DistanceKM; // already adjusted for start/finish rings
+                    leg.distance = (Math.round(legLength(legno) * 10) / 10) as DistanceKM; // already adjusted for start/finish rings
                     taskStatus.distance = (Math.round((taskStatus.distance + leg.distance) * 10) / 10) as DistanceKM;
                     leg.point = {
                         t: (leg.entryTimeStamp || leg.penaltyTimeStamp) ?? (0 as Epoch), //
@@ -123,18 +139,18 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
                     // FAI landout: "length of that leg less the distance between the Outlanding Position
                     // and the next Turn Point" — Turn Point is the center coordinate, not the OZ boundary.
                     // Outlanding position is the most favourable fix (closest to TP center).
-                    currentLeg.distance = (Math.round(Math.max(task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToTPCenter, 0) * 10) / 10) as DistanceKM;
+                    currentLeg.distance = (Math.round(Math.max(legLength(taskStatus.currentLeg) - taskStatus.closestDistanceToTPCenter, 0) * 10) / 10) as DistanceKM;
                     if (currentLeg.distance > 0) {
                         currentLeg.point = taskStatus.closestToTPCenterPoint;
                     }
                     taskStatus.scoringClosestPoint = taskStatus.closestToTPCenterPoint;
                 } else {
                     // In-progress: use boundary distance for live display (more meaningful to viewers)
-                    currentLeg.distance = (Math.round((task.legs[taskStatus.currentLeg].length - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
+                    currentLeg.distance = (Math.round((legLength(taskStatus.currentLeg) - taskStatus.closestDistanceToNext) * 10) / 10) as DistanceKM;
                     if (currentLeg.distance > 0) {
                         const leg = task.legs[taskStatus.currentLeg];
                         currentLeg.point = preparedLegs[taskStatus.currentLeg].scoredPointRemaining(
-                            Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (leg.legDistanceAdjust || 0), leg.length + (leg.legDistanceAdjust || 0)) as DistanceKM
+                            Math.min(Math.max(taskStatus.closestDistanceToNext, 0) + (leg.legDistanceAdjust || 0), legLength(taskStatus.currentLeg) + (leg.legDistanceAdjust || 0)) as DistanceKM
                         );
                     }
                     taskStatus.scoringClosestPoint = taskStatus.closestToNextSectorPoint;
@@ -149,7 +165,7 @@ export const racingScoringGenerator = async function* (task: Task, taskStatusGen
             if (taskStatus.utcFinish) {
                 delete taskStatus.scoringClosestPoint;
                 const leg = taskStatus.legs[taskStatus.currentLeg];
-                leg.distance = (Math.round(task.legs[leg.legno].length * 10) / 10) as DistanceKM; // already adjusted for start/finish rings
+                leg.distance = (Math.round(legLength(leg.legno) * 10) / 10) as DistanceKM; // already adjusted for start/finish rings
                 taskStatus.distance = (Math.round((taskStatus.distance + leg.distance) * 10) / 10) as DistanceKM;
                 leg.point = {
                     t: taskStatus.utcFinish,

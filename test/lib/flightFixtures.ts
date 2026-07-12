@@ -239,6 +239,17 @@ export function addPreStart(
 }
 
 /**
+ * Flag the first fix at or after t as a PEV press — the same next-fix
+ * crediting the IGC parser applies to interleaved E records.
+ */
+export function markPevAt(points: PositionMessage[], t: number): void {
+    const fix = points.find((p) => p.t >= t);
+    if (fix) {
+        fix.pev = true;
+    }
+}
+
+/**
  * Helper: point offset from a center at a given bearing and distance.
  * Useful for placing waypoints inside/outside sectors.
  */
@@ -249,4 +260,109 @@ export function pointAtBearingDistance(
 ): {lat: number; lng: number} {
     const d = G.Direct(center.lat, center.lng, bearingDeg, distanceKm * 1000);
     return {lat: d.lat2!, lng: d.lon2!};
+}
+
+// ── soaring flights (glides + thermal circles) ────────────────────────────
+
+export type SoaringAction =
+    | {
+          /** Glide straight to this point (optionally to a target altitude). */
+          glideTo: Waypoint;
+          /** Ground speed for this glide (kph). Default 110. */
+          speedKph?: number;
+          /** Fly it without emitting fixes (a tracking outage while moving). */
+          silent?: boolean;
+      }
+    | {
+          /** Circle at the current position for this many seconds. */
+          thermalSecs: number;
+          /** Climb rate while circling (m/s). Default 2. */
+          climbRate?: number;
+      }
+    | {
+          /** Tracking outage: no fixes for this many seconds (position holds). */
+          gapSecs: number;
+      };
+
+/**
+ * Generate a soaring flight: alternating straight glides and climbing thermal
+ * circles, dense enough (4 s fixes, ~15°/s turn) for the flightStatistics
+ * classifier to segment reliably. Fixes carry tangent bearing + ground speed
+ * like OGN data does.
+ */
+export function makeSoaringFlight(start: Waypoint, actions: SoaringAction[], startTime: Epoch, opts: FlightOptions = {}): PositionMessage[] {
+    const interval = opts.interval ?? 4;
+    const compno = (opts.compno ?? 'AA') as Compno;
+    const agl = opts.agl ?? 500;
+
+    const points: PositionMessage[] = [];
+    let t = startTime as number;
+    let lat = start.lat;
+    let lng = start.lng;
+    let alt = start.altitude ?? 1000;
+
+    const push = (b?: number, s?: number) =>
+        points.push({
+            t: Math.round(t) as Epoch,
+            lat,
+            lng,
+            a: Math.round(alt) as AltitudeAMSL,
+            g: agl as any,
+            c: compno,
+            ...(b !== undefined ? {b: Math.round(b) as Bearing} : {}),
+            ...(s !== undefined ? {s: Math.round(s) as Speed} : {}),
+            _: false
+        });
+
+    push();
+
+    for (const action of actions) {
+        if ('glideTo' in action) {
+            const speed = action.speedKph ?? 110;
+            const from = {lat, lng};
+            const inv = G.Inverse(from.lat, from.lng, action.glideTo.lat, action.glideTo.lng);
+            const durationSecs = inv.s12! / 1000 / (speed / 3600);
+            const targetAlt = action.glideTo.altitude ?? alt - durationSecs * 0.7; // gentle descent by default
+            if (action.silent) {
+                lat = action.glideTo.lat;
+                lng = action.glideTo.lng;
+                alt = targetAlt;
+                t += durationSecs;
+                continue;
+            }
+            const steps = Math.max(Math.ceil(durationSecs / interval), 1);
+            const fromAlt = alt;
+            for (let i = 1; i <= steps; i++) {
+                const frac = i / steps;
+                const pos = interpGeodesic(from, action.glideTo, frac);
+                lat = pos.lat;
+                lng = pos.lng;
+                alt = fromAlt + frac * (targetAlt - fromAlt);
+                t += durationSecs / steps;
+                push(inv.azi1! < 0 ? inv.azi1! + 360 : inv.azi1!, speed);
+            }
+        } else if ('thermalSecs' in action) {
+            const climb = action.climbRate ?? 2;
+            const radiusKm = 0.15;
+            const periodSecs = 24; // ~15°/s — comfortably above the thermal-entry threshold
+            const centre = {lat, lng};
+            const steps = Math.max(Math.ceil(action.thermalSecs / interval), 1);
+            for (let i = 1; i <= steps; i++) {
+                const ang = ((i * interval) / periodSecs) * 360;
+                const pos = pointAtBearingDistance(centre, ang % 360, radiusKm);
+                lat = pos.lat;
+                lng = pos.lng;
+                alt += climb * interval;
+                t += interval;
+                push((ang + 90) % 360, (2 * Math.PI * radiusKm * 3600) / periodSecs);
+            }
+        } else {
+            t += action.gapSecs;
+        }
+    }
+
+    if (points.length) {
+        points[points.length - 1]._ = true;
+    }
+    return points;
 }

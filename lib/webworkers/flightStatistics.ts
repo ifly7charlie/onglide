@@ -64,7 +64,7 @@ interface Circle {
     packets: number;
 }
 
-interface Segment {
+export interface Segment {
     state: Mode;
     startTime: number;
     endTime: number;
@@ -524,7 +524,20 @@ export function createFlightStatistics() {
         return lastWind ? {speed: Math.round(lastWind.speed), direction: Math.round(lastWind.direction)} : undefined;
     }
 
-    return {addPosition, getStats: toStatsProto, getWind, reset, finish};
+    // Zero-copy views of the live state for consumers that need segment
+    // geometry (eg PEV start estimation) rather than the rounded proto shape.
+    // The returned objects are the internal ones — do not mutate, and do not
+    // hold references across addPosition() calls: coalescing can pop a closed
+    // segment back to open or fold it into its predecessor.
+    function getOpenSegmentRaw(): Readonly<Segment> | null {
+        return open;
+    }
+
+    function getSegmentsRaw(): ReadonlyArray<Readonly<Segment>> {
+        return segments;
+    }
+
+    return {addPosition, getStats: toStatsProto, getWind, getOpenSegmentRaw, getSegmentsRaw, reset, finish};
 }
 
 export type FlightStatistics = ReturnType<typeof createFlightStatistics>;

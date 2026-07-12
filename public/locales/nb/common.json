@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} flyvninger lastet",
         "no_fixes": "Ingen punkter funnet i {{file}}",
         "error_processing": "Feil ved behandling av fil",
-        "error_rescoring": "Feil ved omberegning"
+        "error_rescoring": "Feil ved omberegning",
+        "cylinder_start": "Sylinderstart (PEV)",
+        "cylinder_start_hint": "Beregn på nytt med IGC-sylinderstart (PEV): starten estimeres fra siste stigning før kursen settes mot første vendepunkt"
     },
     "errors": {
         "boundary_title": "Oi, en feil oppsto!",

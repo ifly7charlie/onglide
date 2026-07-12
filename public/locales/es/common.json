@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} vuelos cargados",
         "no_fixes": "No se encontraron puntos en {{file}}",
         "error_processing": "Error al procesar el archivo",
-        "error_rescoring": "Error al recalcular"
+        "error_rescoring": "Error al recalcular",
+        "cylinder_start": "Salida de cilindro (PEV)",
+        "cylinder_start_hint": "Recalcular con salida de cilindro (PEV) de la IGC: la salida se estima a partir de la última ascendencia antes de dirigirse al primer punto de viraje"
     },
     "errors": {
         "boundary_title": "¡Vaya, ha ocurrido un error!",

@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} lotów załadowanych",
         "no_fixes": "Brak punktów w {{file}}",
         "error_processing": "Błąd podczas przetwarzania pliku",
-        "error_rescoring": "Błąd podczas przeliczania"
+        "error_rescoring": "Błąd podczas przeliczania",
+        "cylinder_start": "Start z cylindra (PEV)",
+        "cylinder_start_hint": "Przelicz ponownie ze startem z cylindra (PEV) wg IGC: start jest szacowany na podstawie ostatniego noszenia przed odlotem na pierwszy punkt zwrotny"
     },
     "errors": {
         "boundary_title": "Ups, wystąpił błąd!",

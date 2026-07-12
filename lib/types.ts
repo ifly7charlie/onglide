@@ -109,6 +109,7 @@ export interface PositionMessage extends BasePositionMessage {
     s?: Speed; // speed
     l?: boolean | null; // picked
     _?: boolean; // live
+    pev?: boolean; // pilot pressed PEV at this fix (IGC E record; viewer/IGC path only — OGN carries no pilot events)
     // Flight-statistics piggyback (APRS worker -> main + scoring, low cadence).
     // Attached only when the segment set materially changes; structured-clone
     // over the BroadcastChannel, never serialised to the wire here.
@@ -195,6 +196,7 @@ export interface Task {
         nostartutc: Epoch;
         aat?: boolean; // capture points
         dh?: boolean; // distance handicap
+        pevStart?: boolean; // IGC cylinder (PEV) start — start estimated inside the cylinder
 
         handicapped?: boolean;
         dm?: number;
@@ -211,7 +213,8 @@ export enum EstimatedTurnType {
     none = 'none',
     dogleg = 'dogleg',
     crossing = 'crossing',
-    penalty = 'penalty'
+    penalty = 'penalty',
+    pev = 'pev'
 }
 
 export interface TaskLegStatus {
@@ -453,6 +456,7 @@ export interface TasksTableRow {
     //    distance: DistanceKM;
     duration: Duration;
     nostart: StartTime;
+    pevstart?: 'Y' | 'N'; // Y = IGC cylinder (PEV) start; manually set, no upstream feed carries it
     hash: string;
 }
 

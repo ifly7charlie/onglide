@@ -349,6 +349,7 @@ CREATE TABLE `tasks` (
 
   `duration` time DEFAULT NULL COMMENT 'AAT time',
   `nostart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
+  `pevstart` enum('Y','N') DEFAULT 'N' COMMENT 'Y = IGC cylinder (PEV) start: estimate start from track behaviour inside the start cylinder',
 
   `hash` TEXT COMMENT 'hash of value from soaring spot to prevent redownloading',
   

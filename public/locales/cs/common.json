@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} letů načteno",
         "no_fixes": "V souboru {{file}} nebyly nalezeny žádné body",
         "error_processing": "Chyba při zpracování souboru",
-        "error_rescoring": "Chyba při přepočtu"
+        "error_rescoring": "Chyba při přepočtu",
+        "cylinder_start": "Start z válce (PEV)",
+        "cylinder_start_hint": "Přepočítat se startem z válce (PEV) podle IGC: start se odhaduje z posledního stoupání před odletem na první otočný bod"
     },
     "errors": {
         "boundary_title": "Jejda, došlo k chybě!",

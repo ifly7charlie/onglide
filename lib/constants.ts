@@ -133,6 +133,23 @@ export const PENDING_LOAD_DEBOUNCE_MS = 250;
 // How far beyond the finite extent of a start line a near-miss is accepted (metres)
 export const RELAXED_START_TOLERANCE_M = 1500;
 
+// PEV (cylinder) start estimation — IGC SC3 Annex A 7.4.4. OGN tracking cannot
+// see PEV button presses, so the start is estimated as the beginning of the
+// latest committed glide toward TP1 that starts inside the start cylinder.
+//
+// Net displacement (km) a straight segment must cover before it counts as a
+// committed start glide. Kept above flightStatistics' MIN_STRAIGHT_DISTANCE_KM
+// (1.5) so the segment has always been classified before it can qualify.
+export const PEV_MIN_COMMIT_KM = 2.0;
+// Fraction of that displacement that must be progress toward TP1 (0.6 accepts
+// glides within roughly 53° of the direct TP1 bearing).
+export const PEV_ONTRACK_RATIO = 0.6;
+// Minimum net displacement over path flown for a segment to count as a glide.
+// Straight segments can hide a reversal (an out-and-return without circling
+// coalesces into one straight), and a real glide is nearly direct — genuine
+// cruising stays above ~0.85 even when weaving between energy lines.
+export const PEV_MIN_GLIDE_EFFICIENCY = 0.75;
+
 // Grid resolution for AAT optimal direction heatmap (cells per axis)
 export const OPTIMAL_GRID_SIZE = 25;
 

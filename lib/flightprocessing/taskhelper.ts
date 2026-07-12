@@ -53,7 +53,15 @@ export function calculateTask(task: Task) {
         leg.coordinates = deduped;
     }
 
-    task.details.distance = calculateTaskLength(task.legs);
+    // A PEV (cylinder) start needs a cylinder start leg (post-normalisation:
+    // sector with a1=180) and a TP1 to glide toward. Clear the flag here —
+    // the single validation point — so every consumer (task position, racing
+    // and AAT scoring, the browser via the rules passthrough) can trust it.
+    if (task.rules?.pevStart && !(task.legs[0].type === 'sector' && task.legs[0].a1 === 180 && task.legs.length > 1)) {
+        task.rules.pevStart = false;
+    }
+
+    task.details.distance = calculateTaskLength(task.legs, task.rules?.pevStart);
 }
 
 export function taskGeoJSON(task: Task) {
@@ -100,9 +108,11 @@ export function taskGeoJSON(task: Task) {
 }
 
 // Between LEGS, less finish/start rings!
-export function calculateTaskLength(legs: TaskLeg[]): DistanceKM {
+// A PEV (cylinder) start is measured from the credited start point inside the
+// cylinder, not the ring edge, so the start-ring radius is not subtracted.
+export function calculateTaskLength(legs: TaskLeg[], pevStart?: boolean): DistanceKM {
     const first = legs[0];
-    if (first.type == 'sector' && first.a1 == 180) {
+    if (first.type == 'sector' && first.a1 == 180 && !pevStart) {
         first.legDistanceAdjust = first.r1;
         first.length = (first.length - first.legDistanceAdjust) as DistanceKM;
     }

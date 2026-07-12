@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} letov naloženih",
         "no_fixes": "V datoteki {{file}} ni bilo najdenih točk",
         "error_processing": "Napaka pri obdelavi datoteke",
-        "error_rescoring": "Napaka pri ponovnem ocenjevanju"
+        "error_rescoring": "Napaka pri ponovnem ocenjevanju",
+        "cylinder_start": "Start iz cilindra (PEV)",
+        "cylinder_start_hint": "Ponovno oceni s startom iz cilindra (PEV) po IGC: start se oceni iz zadnjega dviganja pred odhodom proti prvi vmesni točki"
     },
     "errors": {
         "boundary_title": "Ojej, prišlo je do napake!",

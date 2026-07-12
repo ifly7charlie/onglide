@@ -7,9 +7,11 @@
 
 import {Compno, Epoch, DistanceKM, BasePositionMessage, PositionMessage, TaskStatus, EstimatedTurnType, Task, PositionStatus, EnrichedPositionGenerator, EnrichedPosition, isEnrichedTick} from '../types';
 
-import {stripPoints} from '../flightprocessing/taskhelper';
+import {stripPoints, distHaversine} from '../flightprocessing/taskhelper';
 import {PreparedTurnpoint} from '../flightprocessing/preparedTurnpoint';
 import {GliderLog, noopGliderLog} from './gliderLog';
+import {createFlightStatistics} from './flightStatistics';
+import {qualifiesAsPevGlide, eligibleStartFix, pickRetroStart, pathAfter, PevGeometry} from '../flightprocessing/pevStartEstimator';
 
 import {RELAXED_START_TOLERANCE_M} from '../constants';
 
@@ -83,6 +85,35 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
     // Shortcut to the startline/finishline which is expected to always be the first/last points
     var startLine = legs[0];
     const finishLeg = task.legs.length - 1;
+
+    // PEV (cylinder) start — IGC SC3 Annex A 7.4.4. The start is estimated as
+    // the beginning of the latest committed glide toward TP1 inside the
+    // cylinder (see pevStartEstimator.ts); exiting the cylinder without one is
+    // the rule's own no-PEV fallback and keeps today's exit-crossing start.
+    // calculateTask clears the flag when the start leg isn't a cylinder.
+    const pevMode = !!task.rules.pevStart;
+    let pevStats = pevMode ? createFlightStatistics() : null;
+    // haversine (not geodesic) so distToTP1 uses the same metric as
+    // Segment.distance and qualifiesAsPevGlide's displacement — the
+    // estimator's ratios must not mix ellipsoid and sphere metres
+    const pevTP1Centre: BasePositionMessage | null = pevMode ? {t: 0 as Epoch, lat: task.legs[1].nlat, lng: task.legs[1].nlng, a: 0} : null;
+    const pevGeometry: PevGeometry | null = pevMode
+        ? {
+              insideStart: (p) => startLine.fromSector(p) === undefined,
+              distToTP1: (p) => distHaversine(p, pevTP1Centre)
+          }
+        : null;
+    // 'pevActual' = a recorded press (IGC E record on the position stream);
+    // 'pev' = estimated start applied. A recorded press beats the estimate.
+    // Either kind of pev start is kept if the pilot leaves and re-enters the
+    // cylinder; the exit-crossing fallback start resets on re-entry.
+    let pevStartSource: 'none' | 'pev' | 'pevActual' = 'none';
+    let appliedPevSegmentStartT = 0; // startTime of the glide segment already applied
+    let lastActualPevT = 0; // last accepted recorded press (a press within 30s of it is debounced as a duplicate)
+    let firstInsideAfterGate: BasePositionMessage | null = null; // clamp fix for glides underway at gate-open
+    // eligibleStartFix verdict is constant per (open segment, clamp fix) —
+    // cached so a non-qualifying segment costs one comparison per fix
+    let pevEligible: {segStartT: number; clampT: number; from: BasePositionMessage | null} | null = null;
 
     let previousPoint: EnrichedPosition | null = null;
     let point: EnrichedPosition | null = null;
@@ -177,7 +208,26 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
             if (landedBack) {
                 landedBack = false;
                 resetStart();
+                if (pevMode) {
+                    pevStats = createFlightStatistics(); // freed when the previous start confirmed
+                    pevStartSource = 'none';
+                    appliedPevSegmentStartT = 0;
+                    lastActualPevT = 0;
+                    firstInsideAfterGate = null;
+                    pevEligible = null;
+                }
                 log(`New flight found for ${status.compno} after landback - t:${status.t}`);
+            }
+
+            // Feed the segment classifier every flying fix while the start can
+            // still change — including before the gate opens, so the climb
+            // history leading into the first post-gate glide is classified.
+            // (addPosition ignores out-of-order fixes, so rewinds are safe.)
+            if (pevMode && !status.startConfirmed) {
+                pevStats.addPosition(point);
+                if (!firstInsideAfterGate && point.t >= task.rules.nostartutc && pevGeometry.insideStart(point)) {
+                    firstInsideAfterGate = simplifyPoint(point);
+                }
             }
 
             // Can't score with only one point
@@ -248,22 +298,33 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
 
                     if ((hc.distanceKm ?? Infinity) < 0.2 || hc.everInside) log('startline:', hc.everInside, 'crossings:', hc.crossings.length, 'dist:', hc.distanceKm?.toFixed(3));
                     if (hc.everInside) {
-                        if (!hc.finalInside) {
-                            // for starts it's always the last crossing that matters
-                            resetStart();
-                            status.legs[0].points = [simplifyPoint(hc.crossings.at(-1)?.at!)];
-                            status.startFound = true;
-                            status.currentLeg = 1;
-                            status.utcStart = status.legs[0].exitTimeStamp = status.legs[0].points[0].t;
-                            relaxedStartCandidate = null; // strict takes priority
-                            if (point._) {
-                                yield status;
+                        // A pev start (recorded press or estimate) stands across
+                        // cylinder excursions — neither the exit crossing nor the
+                        // entry reset may replace it
+                        if (pevStartSource !== 'pev' && pevStartSource !== 'pevActual') {
+                            if (!hc.finalInside) {
+                                // for starts it's always the last crossing that matters
+                                // (in pev mode this exit crossing is the no-PEV fallback start)
+                                resetStart();
+                                status.legs[0].points = [simplifyPoint(hc.crossings.at(-1)?.at!)];
+                                status.startFound = true;
+                                status.currentLeg = 1;
+                                status.utcStart = status.legs[0].exitTimeStamp = status.legs[0].points[0].t;
+                                relaxedStartCandidate = null; // strict takes priority
+                                if (point._) {
+                                    yield status;
+                                }
+                            } else {
+                                // if we are entering then we can reset - this only works for sectors not lines
+                                // lines can never have finalInside set
+                                resetStart();
+                                if (!pevMode) {
+                                    continue;
+                                }
+                                // in pev mode keep evaluating the presses/open glide
+                                // below — a pev start happens while still inside,
+                                // not on exit
                             }
-                        } else {
-                            // if we are entering then we can reset - this only works for sectors not lines
-                            // lines can never have finalInside set
-                            resetStart();
-                            continue;
                         }
                     }
                     // Relaxed start line detection: near-miss crossing beyond finite extent
@@ -304,6 +365,67 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                             relaxedStartCandidate = null;
                         }
                     }
+
+                    // A recorded PEV press riding on the position stream (IGC
+                    // E record — viewer path) needs no estimation: the latest
+                    // press inside the cylinder after the gate is the start, at
+                    // that fix's time/place/altitude. Presses outside the
+                    // cylinder or before the gate are ignored (the skip above
+                    // still admits points up to 10s pre-gate, so the gate is
+                    // checked here too), and a press within 30s of the last
+                    // accepted one is debounced as a duplicate (first wins).
+                    if (pevMode && point.pev && point.t >= task.rules.nostartutc && pevGeometry.insideStart(point) && point.t - lastActualPevT >= 30) {
+                        resetStart();
+                        status.legs[0].points = [simplifyPoint(point)];
+                        status.startFound = true;
+                        status.currentLeg = 1;
+                        status.utcStart = status.legs[0].exitTimeStamp = point.t;
+                        pevStartSource = 'pevActual';
+                        lastActualPevT = point.t;
+                        log(`PEV start from recorded press at ${new Date(point.t * 1000).toISOString()}`);
+                        if (point._) {
+                            yield status;
+                        }
+                    }
+
+                    // PEV start estimation: the open straight segment is a glide
+                    // in progress; once it started inside the cylinder (after the
+                    // gate) and has committed toward TP1, its start — the top of
+                    // the preceding climb — becomes the estimated start. The
+                    // latest qualifying glide always wins, mirroring the rule's
+                    // latest-PEV-wins (a pilot who climbs again inside the
+                    // cylinder and re-commits is assumed to have re-PEVed; the
+                    // 10-minute minimum PEV interval is not modelled, OGN can't
+                    // resolve it). Runs after crossing handling so an exit
+                    // fallback applied this fix can be superseded immediately.
+                    // A recorded press outranks it and switches estimation off.
+                    // open.endTime tracks the newest classified fix; an older
+                    // point is a rewound replay — never judge the current
+                    // segment against stale evidence.
+                    if (pevMode && pevStartSource !== 'pevActual') {
+                        const open = pevStats.getOpenSegmentRaw();
+                        if (open && open.endTime <= point.t && open.startTime !== appliedPevSegmentStartT) {
+                            const clampT = firstInsideAfterGate?.t ?? 0;
+                            if (!pevEligible || pevEligible.segStartT !== open.startTime || pevEligible.clampT !== clampT) {
+                                pevEligible = {segStartT: open.startTime, clampT, from: eligibleStartFix(open, task.rules.nostartutc, pevGeometry.insideStart, firstInsideAfterGate)};
+                            }
+                            const from = pevEligible.from;
+                            if (from && qualifiesAsPevGlide(from, point, pevGeometry.distToTP1, pathAfter(open, from))) {
+                                resetStart();
+                                status.legs[0].points = [from];
+                                status.legs[0].estimatedTurn = EstimatedTurnType.pev;
+                                status.startFound = true;
+                                status.currentLeg = 1;
+                                status.utcStart = status.legs[0].exitTimeStamp = from.t;
+                                pevStartSource = 'pev';
+                                appliedPevSegmentStartT = open.startTime;
+                                log(`PEV start estimated at ${new Date(from.t * 1000).toISOString()} (glide committed toward TP1 at ${new Date(point.t * 1000).toISOString()})`);
+                                if (point._) {
+                                    yield status;
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // We don't need to do anything else until we have a start candidate
@@ -318,6 +440,37 @@ export const taskPositionGenerator = async function* (task: Task, officialStart:
                 // We keep looking for new starts (this whole block of code)
                 // until we are on the second leg, that locks the start in
                 if (status.currentLeg > 1) {
+                    // PEV retro pass: with the whole start-to-TP1 track classified,
+                    // re-pick the latest committed glide on closed segment geometry.
+                    // This recovers glides split by tracking gaps and glides that
+                    // only became on-track after the top of the climb — cases the
+                    // live check above can't credit. The chosen fix is always
+                    // earlier than the TP1 contact (entry, or penalty contact when
+                    // the sector was never properly entered), so recorded leg-1
+                    // data stays valid.
+                    if (pevMode) {
+                        const history = [...pevStats.getSegmentsRaw()];
+                        const open = pevStats.getOpenSegmentRaw();
+                        if (open) {
+                            history.push(open);
+                        }
+                        const windowEnd = (status.legs[1].entryTimeStamp ?? status.legs[1].penaltyTimeStamp ?? status.t) as Epoch;
+                        const retro = pickRetroStart(history, task.rules.nostartutc, windowEnd, pevGeometry, firstInsideAfterGate);
+                        if (pevStartSource === 'pevActual') {
+                            // A recorded press is authoritative — the estimator's
+                            // answer is logged only, to tune it against reality
+                            log(`PEV estimator comparison: estimated ${retro?.t ?? 'none'} vs recorded ${status.utcStart}${retro ? ` (delta ${retro.t - status.utcStart}s)` : ''}`);
+                        } else if (retro && retro.t !== status.utcStart) {
+                            log(`PEV retro start correction: ${status.utcStart} -> ${retro.t} (${new Date(retro.t * 1000).toISOString()})`);
+                            status.legs[0].points = [retro];
+                            status.legs[0].estimatedTurn = EstimatedTurnType.pev;
+                            status.utcStart = status.legs[0].exitTimeStamp = retro.t;
+                        }
+                        // The start is locked: release the classifier and its
+                        // segment history (recreated on a landback restart)
+                        pevStats = null;
+                        pevEligible = null;
+                    }
                     status.startConfirmed = true;
                 }
             }

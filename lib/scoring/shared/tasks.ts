@@ -232,7 +232,8 @@ export async function upsertTaskAndLegs(
     const dbhashrow = await db.query(escape`
         SELECT
             hash,
-            nostart
+            nostart,
+            pevstart
         FROM
             tasks
         WHERE
@@ -246,6 +247,9 @@ export async function upsertTaskAndLegs(
     // applies the same fallback to a fresh row.
     const upstreamNoStart = !day.no_start ? null : convertToMysqlTime(day.no_start);
     const existingNoStart = dbhashrow?.[0]?.nostart ? String(dbhashrow[0].nostart) : null;
+    // No upstream feed carries the IGC cylinder (PEV) start flag — it is set
+    // manually in the DB, so re-imports always preserve the existing value
+    const existingPevStart = dbhashrow?.[0]?.pevstart == 'Y' ? 'Y' : 'N';
 
     if (dbhashrow && dbhashrow.length > 0 && hash == dbhashrow[0].hash) {
         const sync = await syncPilotResultRows(db, classid, dateCode);
@@ -302,6 +306,7 @@ export async function upsertTaskAndLegs(
                     type,
                     task,
                     nostart,
+                    pevstart,
                     hash
                 )
             VALUES
@@ -314,6 +319,7 @@ export async function upsertTaskAndLegs(
                     ${tasktype},
                     'B',
                     COALESCE(${upstreamNoStart}, ${existingNoStart}, '00:00:00'),
+                    ${existingPevStart},
                     ${hash}
                 )
         `)

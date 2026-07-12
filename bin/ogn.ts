@@ -1598,6 +1598,10 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     }
 }
 
+// getTask runs per channel on every tick — latch the pevstart misconfiguration
+// warning so it logs once per channel, re-arming if the task is fixed
+const pevStartWarned = new Set<string>();
+
 async function updateTasks(competition: CompetitionContext): Promise<void> {
     // Get the details for the task
     const getTask = async (channel: Channel, maxHandicap: number) => {
@@ -1666,6 +1670,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
                 aat: taskdetails.type == 'A',
                 dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
                 dm: taskdetails.Dm ?? undefined,
+                pevStart: taskdetails.pevstart == 'Y',
                 handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
                 maxHandicap
             },
@@ -1673,6 +1678,15 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
             legs: tasklegs
         };
         calculateTask(task);
+        // calculateTask clears rules.pevStart when the start leg isn't a cylinder
+        if (taskdetails.pevstart == 'Y' && !task.rules.pevStart) {
+            if (!pevStartWarned.has(`${className}${datecode}`)) {
+                pevStartWarned.add(`${className}${datecode}`);
+                console.log(`${className}: tasks.pevstart is set but the start leg is not a cylinder (type=${task.legs[0].type}, a1=${task.legs[0].a1}) - normal start detection will be used`);
+            }
+        } else {
+            pevStartWarned.delete(`${className}${datecode}`);
+        }
         return task;
     };
 

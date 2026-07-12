@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} voli caricati",
         "no_fixes": "Nessun punto trovato in {{file}}",
         "error_processing": "Errore durante l'elaborazione del file",
-        "error_rescoring": "Errore durante il ricalcolo"
+        "error_rescoring": "Errore durante il ricalcolo",
+        "cylinder_start": "Partenza a cilindro (PEV)",
+        "cylinder_start_hint": "Ricalcola con partenza a cilindro (PEV) IGC: la partenza è stimata dall'ultima ascendenza prima di dirigersi al primo punto di virata"
     },
     "errors": {
         "boundary_title": "Ops, si è verificato un errore!",

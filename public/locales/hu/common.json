@@ -277,7 +277,9 @@
         "flights_loaded_other": "{{count}} repülés betöltve",
         "no_fixes": "Nincsenek pontok a {{file}} fájlban",
         "error_processing": "Hiba a fájl feldolgozása közben",
-        "error_rescoring": "Hiba az újraértékelés közben"
+        "error_rescoring": "Hiba az újraértékelés közben",
+        "cylinder_start": "Henger start (PEV)",
+        "cylinder_start_hint": "Pontozás újrafutása IGC henger starttal (PEV): a start az első fordulópont felé indulás előtti utolsó emelésből kerül becslésre"
     },
     "errors": {
         "boundary_title": "Hoppá, hiba történt!",
