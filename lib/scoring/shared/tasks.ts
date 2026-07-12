@@ -18,6 +18,7 @@ import type {ClassId} from '../source';
 import {findTimezoneFromLocation, getTzOffset} from './timezone';
 import {cascadeDeleteClass} from './classes';
 import {CompStatus, LAUNCHED_STATES} from '../../types';
+import {CYLINDER_START_MIN_RADIUS_KM} from '../../constants';
 
 import {point, Coord} from '@turf/helpers';
 import distance from '@turf/distance';
@@ -66,6 +67,79 @@ function extractTrigraph(rawName: string | undefined | null): {trigraph: string;
 //
 export function hashDayPayload(day: any): string {
     return createHash('sha256').update(JSON.stringify(day)).digest('base64');
+}
+
+//
+// Cylinder (PEV) start resolution — only for competitions that opt in via
+// competition.cylinderstarts='Y'. Such a competition can run either a line
+// start or a cylinder start on any given day, so the decision is gated purely
+// on the start observation-zone geometry.
+//
+
+export interface CylinderStartDecision {
+    // Value to write into tasks.pevstart ('Y' turns on the IGC cylinder start).
+    pevstart: 'Y' | 'N';
+    // When true the start OZ is a sub-threshold full cylinder that should be
+    // rewritten as a start line at insert time.
+    convertStartToLine: boolean;
+}
+
+//
+// classifyStartForCylinderStart — pure decision for a competition that supports
+// cylinder starts, given the START task_point (angles in radians, radii in
+// metres, as every ScoringSource hands to upsertTaskAndLegs).
+//
+//   * full start cylinder, radius >= minRadiusKm -> enable pevstart
+//   * full start cylinder, radius <  minRadiusKm -> misconfigured: convert to line
+//   * start line or partial sector               -> unchanged, no cylinder start
+//
+// A "full start cylinder" is a full-circle sector: apex angle 0 (the zero-angle
+// cylinder marker that preprocessSector normalises to a1=180) or a1>=180, with a
+// departure radius and no second radius.
+//
+export function classifyStartForCylinderStart(startTp: any, minRadiusKm: number): CylinderStartDecision {
+    const ozLine = !!startTp?.oz_line;
+    const r1km = (Number(startTp?.oz_radius1) || 0) / 1000;
+    const r2km = (Number(startTp?.oz_radius2) || 0) / 1000;
+    const a1deg = ozLine ? 90 : toDeg(Number(startTp?.oz_angle1) || 0);
+
+    const isFullCylinder = !ozLine && r1km > 0 && !(r2km > 0) && (a1deg <= 1e-6 || a1deg >= 180 - 1e-6);
+    if (!isFullCylinder) {
+        return {pevstart: 'N', convertStartToLine: false};
+    }
+    if (r1km >= minRadiusKm) {
+        return {pevstart: 'Y', convertStartToLine: false};
+    }
+    return {pevstart: 'N', convertStartToLine: true};
+}
+
+//
+// resolveCylinderStart — when the competition opts into cylinder starts
+// (competition.cylinderstarts, mirrored onto SourceCtx and passed in here),
+// classify the day's start geometry. Returns null when the competition does not
+// opt in, so the caller falls back to the manually-set, preserved tasks.pevstart.
+//
+function resolveCylinderStart(
+    log: (msg: string, ...args: unknown[]) => void,
+    classid: ClassId,
+    day: any,
+    cylinderStarts: boolean
+): CylinderStartDecision | null {
+    if (!cylinderStarts) return null;
+
+    const start = (Array.isArray(day.task_points) ? [...day.task_points] : []) //
+        .filter((tp: any) => tp.multiple_start == 0)
+        .sort((a: any, b: any) => a.point_index - b.point_index)[0];
+    if (!start) return null;
+
+    const decision = classifyStartForCylinderStart(start, CYLINDER_START_MIN_RADIUS_KM);
+    const r1km = (Number(start.oz_radius1) || 0) / 1000;
+    if (decision.convertStartToLine) {
+        log(`${classid}: cylinderstarts ERROR — full start cylinder radius ${r1km.toFixed(1)}km < ${CYLINDER_START_MIN_RADIUS_KM}km minimum; converting start to a line`);
+    } else if (decision.pevstart === 'Y') {
+        log(`${classid}: cylinderstarts — ${r1km.toFixed(1)}km full start cylinder → IGC cylinder (PEV) start enabled`);
+    }
+    return decision;
 }
 
 //
@@ -118,7 +192,8 @@ export async function upsertTaskAndLegs(
     log: (msg: string, ...args: unknown[]) => void,
     classid: ClassId,
     classname: string,
-    day: any
+    day: any,
+    cylinderStarts: boolean = false
 ): Promise<boolean> {
     const date: string = day.task_date;
     const dateCode = toDateCode(date);
@@ -260,6 +335,18 @@ export async function upsertTaskAndLegs(
         }
         return false;
     }
+
+    // Competition-level cylinder (PEV) start resolution. When the competition
+    // opts in (competition.cylinderstarts='Y'), the start GEOMETRY decides
+    // pevstart per task — a >=10km full start cylinder enables it, a smaller
+    // full cylinder is rewritten as a line in the taskleg loop below, and a
+    // line / partial sector keeps existing handling. Otherwise the manually-set
+    // pevstart is preserved. Resolved here (after the hash short-circuit) so
+    // toggling the flag takes effect on the next real task install.
+    const cylinderStart = resolveCylinderStart(log, classid, day, cylinderStarts);
+    const pevStartFinal = cylinderStart ? cylinderStart.pevstart : existingPevStart;
+    const convertStartToLine = !!cylinderStart?.convertStartToLine;
+
     // Summary of the task we're about to install — useful for spotting
     // a `nostart` rewrite (the L→S start-time update the scheduler's
     // tasks cadence is built around) or a brand-new task landing.
@@ -319,7 +406,7 @@ export async function upsertTaskAndLegs(
                     ${tasktype},
                     'B',
                     COALESCE(${upstreamNoStart}, ${existingNoStart}, '00:00:00'),
-                    ${existingPevStart},
+                    ${pevStartFinal},
                     ${hash}
                 )
         `)
@@ -335,11 +422,16 @@ export async function upsertTaskAndLegs(
 
             let previousPoint: Coord | null = null;
             let currentPoint: Coord | null = null;
+            // The first non-alternate-start point (lowest point_index) is the start leg.
+            let startSeen = false;
 
             for (const tp of day.task_points.sort((a: any, b: any) => a.point_index - b.point_index)) {
                 if (tp.multiple_start != 0) {
                     continue;
                 }
+
+                const isStartLeg = !startSeen;
+                startSeen = true;
 
                 const {trigraph, name: tpname} = extractTrigraph(tp.name);
 
@@ -377,6 +469,21 @@ export async function upsertTaskAndLegs(
                     a2 = 0;
                 }
 
+                let legType: 'line' | 'sector' = ozLine ? 'line' : 'sector';
+                let legDirection = oz_types[tp.oz_type];
+
+                // cylinderstarts comp with a sub-threshold full start cylinder:
+                // rewrite the start OZ as a start line perpendicular to the first
+                // leg (direction 'np', a1=90), preserving its radius as the line
+                // half-length. See resolveCylinderStart.
+                if (isStartLeg && convertStartToLine) {
+                    legType = 'line';
+                    legDirection = 'np';
+                    a1 = 90;
+                    r2 = 0;
+                    a2 = 0;
+                }
+
                 query += '( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,? ),';
 
                 values = values.concat([
@@ -391,8 +498,8 @@ export async function upsertTaskAndLegs(
                     hi,
                     trigraph,
                     tpname,
-                    ozLine ? 'line' : 'sector',
-                    oz_types[tp.oz_type],
+                    legType,
+                    legDirection,
                     r1,
                     a1,
                     r2,

@@ -76,6 +76,35 @@ function deriveCompIdFromUrl(urlString: string): string | null {
     }
 }
 
+//
+// Both CLI one-shot paths (filter/scrape and refetch) build a SourceCtx and
+// then mirror the same competition fields onto it. Keep the skeleton and the
+// tz/countrycode/cylinderstarts query in one place each so they can't drift.
+//
+function makeSourceCtx(db: any, compid: string, url: string, raw: Record<string, any>): SourceCtx {
+    return {
+        compid,
+        url,
+        tz: 'Europe/London', // overridden by applyCompFields / ensureMetadata
+        countrycode: null,
+        cylinderstarts: false,
+        db,
+        log: (msg, ...a) => console.log(`[${compid}] ${msg}`, ...a),
+        raw
+    };
+}
+
+async function readCompFields(db: any, compid: string): Promise<{tz: string | null; countrycode: string | null; cylinderstarts: boolean}> {
+    const row = (await db.query(escape`SELECT tz, countrycode, cylinderstarts FROM competition WHERE compid = ${compid}`))?.[0];
+    return {tz: row?.tz ?? null, countrycode: row?.countrycode ?? null, cylinderstarts: row?.cylinderstarts == 'Y'};
+}
+
+function applyCompFields(ctx: SourceCtx, f: {tz: string | null; countrycode: string | null; cylinderstarts: boolean}): void {
+    if (f.tz) ctx.tz = f.tz; // keep the ctx default when the row has no tz yet
+    ctx.countrycode = f.countrycode ?? ctx.countrycode;
+    ctx.cylinderstarts = f.cylinderstarts;
+}
+
 async function main(): Promise<void> {
     if (dotenv.config({path: '.env.local'}).error) {
         console.log('New install: no configuration found, or script not being run in the root directory');
@@ -170,28 +199,16 @@ async function main(): Promise<void> {
 
         try {
             const adapter = new SoaringSpotScrapeSource();
-            const ctx: SourceCtx = {
-                compid,
-                url: url!,
-                tz: 'Europe/London', // overridden below from the competition row (filter mode) or by ensureMetadata
-                countrycode: null,
-                db: mysql_db,
-                log: (msg, ...a) => console.log(`[${compid}] ${msg}`, ...a),
-                raw: {compid, url, type: 'soaringspotscrape'}
-            };
+            // tz / countrycode / cylinderstarts are filled below from the
+            // competition row (filter mode) or by ensureMetadata (else branch).
+            const ctx = makeSourceCtx(mysql_db, compid, url!, {compid, url, type: 'soaringspotscrape'});
 
             if (filterMode) {
                 // Skip ensureMetadata — the contest row already exists and
                 // hitting /pilots+/results+/ on SoaringSpot adds latency
-                // we don't need here. Pull tz / countrycode straight from
-                // the DB.
-                const refreshed = (
-                    await mysql_db.query(escape`
-                        SELECT tz, countrycode FROM competition WHERE compid = ${compid}
-                    `)
-                )[0];
-                if (refreshed?.tz) ctx.tz = refreshed.tz;
-                ctx.countrycode = refreshed?.countrycode ?? null;
+                // we don't need here. Pull tz / countrycode / cylinderstarts
+                // straight from the DB.
+                applyCompFields(ctx, await readCompFields(mysql_db, compid));
 
                 // Resolve the class arg — either a 15-hex classid or the
                 // display name from `classes.classname`.
@@ -214,13 +231,7 @@ async function main(): Promise<void> {
                 await adapter.fetchResultsAndTasks(ctx, filterSkipDay, {forceResults: true});
             } else {
                 await adapter.ensureMetadata(ctx);
-                const refreshed = (
-                    await mysql_db.query(escape`
-                        SELECT tz, countrycode FROM competition WHERE compid = ${compid}
-                    `)
-                )[0];
-                if (refreshed?.tz) ctx.tz = refreshed.tz;
-                ctx.countrycode = refreshed?.countrycode ?? null;
+                applyCompFields(ctx, await readCompFields(mysql_db, compid));
                 await adapter.fetchPilots(ctx);
                 await adapter.fetchResultsAndTasks(ctx, () => false);
             }
@@ -297,27 +308,15 @@ async function runOneShotRefetch(compid: string, registry: SourceRegistry, db: a
     }
 
     const adapter: ScoringSource = registry.get(src.type)!;
-    const refreshed = (
-        await db.query(escape`SELECT tz, countrycode FROM competition WHERE compid = ${compid}`)
-    )[0];
-    const ctx: SourceCtx = {
-        compid,
-        url: src.url ?? '',
-        tz: refreshed?.tz ?? 'Europe/London',
-        countrycode: refreshed?.countrycode ?? null,
-        db,
-        log: (msg, ...a) => console.log(`[${compid}] ${msg}`, ...a),
-        raw: src
-    };
+    const ctx = makeSourceCtx(db, compid, src.url ?? '', src);
 
+    // ensureMetadata creates/refreshes the competition row (and its tz /
+    // countrycode); read the fields onto ctx afterwards. No adapter's
+    // ensureMetadata reads these ctx fields, so there's no need to pre-read.
     console.log(`one-shot refetch: compid=${compid} type=${src.type}`);
     try {
         await adapter.ensureMetadata(ctx);
-        const post = (
-            await db.query(escape`SELECT tz, countrycode FROM competition WHERE compid = ${compid}`)
-        )[0];
-        if (post?.tz) ctx.tz = post.tz;
-        ctx.countrycode = post?.countrycode ?? ctx.countrycode;
+        applyCompFields(ctx, await readCompFields(db, compid));
         await adapter.fetchPilots(ctx);
         await adapter.fetchResultsAndTasks(ctx, () => false, {forceResults: true});
         console.log(`refetch complete for compid=${compid}`);

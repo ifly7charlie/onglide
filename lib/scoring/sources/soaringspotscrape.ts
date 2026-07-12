@@ -746,7 +746,7 @@ export class SoaringSpotScrapeSource implements ScoringSource {
                                         taskJSON.notes = taskJSON.notes ? `${taskJSON.notes}\n${notesText}` : notesText;
                                     }
                                 }
-                                await upsertTaskAndLegs(ctx.db, ctx.log, classid, className, taskJSON);
+                                await upsertTaskAndLegs(ctx.db, ctx.log, classid, className, taskJSON, ctx.cylinderstarts);
                             }
                         } catch (e) {
                             ctx.log(`task fetch failed for ${classid} ${date}:`, e);

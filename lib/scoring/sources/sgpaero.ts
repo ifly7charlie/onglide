@@ -263,7 +263,7 @@ async function installAeroTask(ctx: SourceCtx, classid: ClassId, day: any): Prom
         task_points: taskPoints
     };
 
-    const installed = await upsertTaskAndLegs(ctx.db, ctx.log, classid, SGP_CLASS_LABEL, dayRecord);
+    const installed = await upsertTaskAndLegs(ctx.db, ctx.log, classid, SGP_CLASS_LABEL, dayRecord, ctx.cylinderstarts);
     if (!installed) return false;
 
     // The helper leaves contestday.script empty; restore the SGP label so

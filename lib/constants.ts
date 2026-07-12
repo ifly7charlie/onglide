@@ -133,6 +133,13 @@ export const PENDING_LOAD_DEBOUNCE_MS = 250;
 // How far beyond the finite extent of a start line a near-miss is accepted (metres)
 export const RELAXED_START_TOLERANCE_M = 1500;
 
+// Minimum radius (km) of a full start cylinder for a competition that supports
+// cylinder starts (competition.cylinderstarts='Y') to treat the task as an IGC
+// cylinder (PEV) start. A full start cylinder smaller than this in such a
+// competition is a misconfiguration and is rewritten as a start line at
+// task-install time (lib/scoring/shared/tasks.ts).
+export const CYLINDER_START_MIN_RADIUS_KM = 10;
+
 // PEV (cylinder) start estimation — IGC SC3 Annex A 7.4.4. OGN tracking cannot
 // see PEV button presses, so the start is estimated as the beginning of the
 // latest committed glide toward TP1 that starts inside the start cylinder.
