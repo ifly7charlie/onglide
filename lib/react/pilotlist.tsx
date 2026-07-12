@@ -846,6 +846,6 @@ export const PilotList = memo(function PilotList({
         return null;
     }
 
-    const listClass = horizontal ? 'pilots pilots-horizontal' : vertical ? 'pilots pilots-vertical' : 'pilots';
+    const listClass = horizontal ? 'pilots pilots-horizontal' : 'pilots pilots-vertical';
     return <ul className={listClass}>{pilotComponents}</ul>;
 });

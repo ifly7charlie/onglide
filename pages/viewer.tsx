@@ -37,6 +37,7 @@ import {dispatchClass, dispatchTask, dispatchTrack, dispatchScores, dispatchPilo
 import {setReferenceDate} from '../lib/flightprocessing/referenceDate';
 
 import {PilotList, Details} from '../lib/react/pilotlist';
+import {Sorting} from '../lib/react/sorting';
 import {getValidSortOrder} from '../lib/react/pilot-sorting';
 
 import * as React from 'react';
@@ -567,8 +568,19 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         }
     }, [options, setOptions]);
 
+    const setSort = useCallback(
+        (key: any) => {
+            setOptions({...options, sortKey: key});
+        },
+        [options, setOptions]
+    );
+
     const hasFlights = flights.length > 0;
     const hasPilots = Object.keys(pilots).length > 0;
+    // Handicapping is implicit in the viewer: it's on as soon as the user
+    // assigns any non-100 handicap, which also selects the handicapped sort keys.
+    const handicapped = Object.keys(handicaps).length > 0;
+    const sortOrder = getValidSortOrder(viewOptions?.sortKey ?? 'auto', handicapped);
 
     if (!options) {
         return (
@@ -685,6 +697,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         <div className="sidepanel-body">
                             {hasPilots && (
                                 <div className="sidepanel-section">
+                                    <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped} />
                                     <PilotList
                                         key="pilotList"
                                         pilots={pilots}
@@ -694,7 +707,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                         live={false}
                                         tz={TZ_DEFAULT}
                                         options={viewOptions}
-                                        sortOrder={getValidSortOrder(viewOptions.sortKey ?? 'auto', Object.keys(handicaps).length > 0)}
+                                        sortOrder={sortOrder}
+                                        vertical
                                     />
                                 </div>
                             )}
