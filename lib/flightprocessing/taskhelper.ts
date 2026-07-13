@@ -10,7 +10,7 @@ import {coordReduce} from '@turf/meta';
 import {} from '@turf/helpers';
 
 import type {FeatureCollection} from 'geojson';
-import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage, NearestSectorPoint, EnrichedPosition} from '../types';
+import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage, NearestSectorPoint, EnrichedPosition, Epoch, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow} from '../types';
 
 import {PreparedTurnpoint} from './preparedTurnpoint';
 
@@ -127,6 +127,31 @@ export function calculateTaskLength(legs: TaskLeg[], pevStart?: boolean): Distan
 
     // Return the length of the task
     return (Math.round(legs.reduce((s, l) => s + (l.length ?? 0), 0) * 10) / 10) as DistanceKM;
+}
+
+// Row shape produced by the tasks×classes×contestday×competition query — the
+// SQL lives in both bin/ogn.ts (updateTasks/getTask) and
+// pages/api/[className]/task.ts and must stay in step.
+export type TaskDetailsRow = TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow;
+
+// Assemble the in-memory Task from the DB row shapes. Callers run
+// calculateTask() themselves — it mutates leg lengths destructively so it must
+// run exactly once per task object.
+export function assembleTask(taskdetails: TaskDetailsRow, tasklegs: TaskLegsTableRow[], maxHandicap: number): Task {
+    return {
+        rules: {
+            grandprixstart: taskdetails.grandprixstart == 'Y',
+            nostartutc: taskdetails.nostartutc,
+            aat: taskdetails.type == 'A',
+            dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+            dm: taskdetails.Dm ?? undefined,
+            pevStart: taskdetails.pevstart == 'Y',
+            handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+            maxHandicap
+        },
+        details: taskdetails,
+        legs: tasklegs
+    };
 }
 
 export function preprocessSector(tp: TaskLeg) {

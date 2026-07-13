@@ -57,7 +57,8 @@
         "leg_length": "Dĺžka úseku",
         "tp_radius": "Polomer",
         "leg": "Úsek {{n}}",
-        "previous_day_note": "Pred 10:00 sa zobrazuje sledovanie z predchádzajúceho dňa"
+        "previous_day_note": "Pred 10:00 sa zobrazuje sledovanie z predchádzajúceho dňa",
+        "open_in_viewer": "Vyhodnoťte vlastné súbory IGC podľa tejto úlohy"
     },
     "task_status": {
         "task_set": "Úloha nastavená",
@@ -279,7 +280,12 @@
         "error_processing": "Chyba pri spracovaní súboru",
         "error_rescoring": "Chyba pri prepočte",
         "cylinder_start": "Štart z valca (PEV)",
-        "cylinder_start_hint": "Prepočítať so štartom z valca (PEV) podľa IGC: štart sa odhaduje z posledného stúpania pred odletom na prvý otočný bod"
+        "cylinder_start_hint": "Prepočítať so štartom z valca (PEV) podľa IGC: štart sa odhaduje z posledného stúpania pred odletom na prvý otočný bod",
+        "task_loading": "Načítava sa súťažná úloha…",
+        "task_loaded": "Vyhodnotenie podľa úlohy triedy {{classname}} ({{distance}} km) — nahrané súbory IGC sa vyhodnotia podľa nej",
+        "task_none": "Pre triedu {{classname}} dnes nie je k dispozícii žiadna úloha",
+        "task_fetch_failed": "Úlohu pre triedu {{classname}} sa nepodarilo načítať — súbory sa vyhodnotia podľa vlastných deklarácií",
+        "task_from_live": "Úloha triedy {{classname}} — deklarácie úloh v súboroch IGC sa ignorujú"
     },
     "errors": {
         "boundary_title": "Jaj, došlo k chybe!",

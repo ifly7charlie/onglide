@@ -57,7 +57,8 @@
         "leg_length": "Etappelengde",
         "tp_radius": "Radius",
         "leg": "Etappe {{n}}",
-        "previous_day_note": "Før kl. 10:00 vises sporingen fra dagen før"
+        "previous_day_note": "Før kl. 10:00 vises sporingen fra dagen før",
+        "open_in_viewer": "Beregn dine egne IGC-filer mot denne oppgaven"
     },
     "task_status": {
         "task_set": "Oppgave satt",
@@ -279,7 +280,12 @@
         "error_processing": "Feil ved behandling av fil",
         "error_rescoring": "Feil ved omberegning",
         "cylinder_start": "Sylinderstart (PEV)",
-        "cylinder_start_hint": "Beregn på nytt med IGC-sylinderstart (PEV): starten estimeres fra siste stigning før kursen settes mot første vendepunkt"
+        "cylinder_start_hint": "Beregn på nytt med IGC-sylinderstart (PEV): starten estimeres fra siste stigning før kursen settes mot første vendepunkt",
+        "task_loading": "Laster konkurranseoppgave…",
+        "task_loaded": "Beregner mot {{classname}}-oppgaven ({{distance}} km) — IGC-filer du laster inn beregnes på den",
+        "task_none": "Ingen oppgave tilgjengelig i dag for {{classname}}",
+        "task_fetch_failed": "Kunne ikke laste oppgaven for {{classname}} — filene beregnes ut fra sine egne deklarasjoner",
+        "task_from_live": "Oppgave fra {{classname}} — oppgavedeklarasjoner i IGC-filene ignoreres"
     },
     "errors": {
         "boundary_title": "Oi, en feil oppsto!",

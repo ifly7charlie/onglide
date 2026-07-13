@@ -295,41 +295,41 @@ describe('flightStatistics coalescing', () => {
     });
 
     // Field case from a live competition trace, confirmed against the
-    // pilot's own logger (coordinates offset to sit near 0,0; course/speed
-    // reconstructed from the position chords, the dropout-fix values
-    // estimated at plausible reports): the glider arcs gently left for ~4 s
+    // pilot's own logger (real fixes with reported course/speed; coordinates
+    // offset to sit near 0,0): the glider arcs gently left for ~4 s
     // (entering thermal mode) and tracking then drops out for 41 s - under
     // MAX_GAP_S, so the dropout interval is classified as flown. It really
     // was a thermal: coverage loss is often caused by the aircraft banking
-    // away from the receiver, and the dropout's net displacement falls far
-    // enough short of what the reported speed would cover that the progress
-    // test fires. The sparse unwrap must extrapolate the established rate
-    // across the dropout and recover about one circle - the on-map track
-    // (splined through the gap) shows no turn, but the classification is
-    // the true one.
+    // away from the receiver. The reported course is 271 both entering and
+    // leaving the dropout - bearing carries no rotation information at all -
+    // so the recovery rests entirely on the displacement deficit: 610 m made
+    // good against the ~1.9 km the reported 170 kph would cover. The sparse
+    // unwrap must extrapolate the established rate across the dropout and
+    // recover the circle (exactly -360 here) - the on-map track (splined
+    // through the gap) shows no turn, but the classification is the true one.
     test('a dropout while circling away from coverage keeps the thermal (field trace)', () => {
         // [t, alt, lat, lng, course, speed]
         const fixes: [number, number, number, number, number, number][] = [
-            [51934, 1049, 0.017383, 0.080867, 273, 87],
-            [51988, 1026, 0.018, 0.061933, 273, 87],
-            [52002, 996, 0.02025, 0.054367, 296, 148],
-            [52010, 987, 0.02155, 0.050067, 296, 148],
-            [52013, 984, 0.02205, 0.048467, 297, 148],
-            [52016, 986, 0.022567, 0.046917, 298, 145],
-            [52019, 987, 0.023133, 0.0454, 301, 146],
-            [52025, 988, 0.024367, 0.042517, 305, 144],
-            [52027, 993, 0.024833, 0.041667, 312, 141],
-            [52028, 997, 0.025083, 0.041283, 316, 138],
-            [52030, 1001, 0.025567, 0.040533, 314, 134],
-            [52031, 1003, 0.0258, 0.040167, 316, 130],
-            [52033, 1004, 0.026267, 0.0394, 315, 133],
-            [52037, 1020, 0.0271, 0.037783, 310, 130],
-            [52038, 1028, 0.027283, 0.03735, 304, 130],
-            [52039, 1037, 0.027417, 0.0369, 296, 124],
-            [52041, 1046, 0.027533, 0.035917, 281, 124],
-            [52082, 1029, 0.025367, 0.027767, 250, 125], // 41 s dropout ends here
-            [52086, 1006, 0.025467, 0.024917, 273, 176],
-            [52093, 987, 0.025667, 0.019683, 273, 185]
+            [51934, 1049, 0.017383, 0.080867, 45, 101.9],
+            [51988, 1026, 0.018, 0.061933, 295, 138.9],
+            [52002, 996, 0.02025, 0.054367, 295, 150],
+            [52010, 987, 0.02155, 0.050067, 296, 148.2],
+            [52013, 984, 0.02205, 0.048467, 298, 146.3],
+            [52016, 986, 0.022567, 0.046917, 300, 144.5],
+            [52019, 987, 0.023133, 0.0454, 301, 144.5],
+            [52025, 988, 0.024367, 0.042517, 310, 140.8],
+            [52027, 993, 0.024833, 0.041667, 314, 138.9],
+            [52028, 997, 0.025083, 0.041283, 316, 135.2],
+            [52030, 1001, 0.025567, 0.040533, 316, 131.5],
+            [52031, 1003, 0.0258, 0.040167, 315, 131.5],
+            [52033, 1004, 0.026267, 0.0394, 313, 131.5],
+            [52037, 1020, 0.0271, 0.037783, 306, 127.8],
+            [52038, 1028, 0.027283, 0.03735, 299, 124.1],
+            [52039, 1037, 0.027417, 0.0369, 290, 124.1],
+            [52041, 1046, 0.027533, 0.035917, 271, 125.9],
+            [52082, 1029, 0.025367, 0.027767, 271, 170.4], // 41 s dropout ends here
+            [52086, 1006, 0.025467, 0.024917, 273, 181.5],
+            [52093, 987, 0.025667, 0.019683, 273, 187.1]
         ];
         const fs = createFlightStatistics();
         for (const [t, a, lat, lng, b, s] of fixes) {

@@ -30,6 +30,8 @@ import type {API_ClassName_Pilots, API_ClassName_Pilots_PilotDetail} from '../li
 
 import {parseIGC, type IGCData} from '../lib/view/igcParser';
 import {buildTask} from '../lib/view/taskBuilder';
+import {rebaseTaskStart, type PreparedTask} from '../lib/view/apiTask';
+import {useApiTask} from '../lib/react/useApiTask';
 import {scoreIGCFlight} from '../lib/view/clientScoringPipeline';
 import {distHaversine} from '../lib/flightprocessing/taskhelper';
 import type {PilotScore} from '../lib/protobuf/onglide';
@@ -268,6 +270,18 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const [cylinderStart, setCylinderStart] = useState(false);
     const cylinderStartRef = useRef(cylinderStart);
 
+    // Task carried over from the live page (/viewer?className=X): fetched by
+    // the hook and seeded into taskRef below, so it is used instead of the
+    // IGC files' declared tasks
+    const apiTask = useApiTask();
+    const [taskSource, setTaskSource] = useState<'api' | 'igc' | null>(null);
+    const taskSourceRef = useRef(taskSource);
+    // geoJSON of the seeded API task — re-dispatched after the start-gate rebase
+    const apiTaskGeoJSONRef = useRef<PreparedTask['geoJSON'] | null>(null);
+    // epochBase of the first file processed (0 = none yet) — anchors the deck.gl
+    // time baseline and is the day a carried-over task's start gate is rebased to
+    const referenceEpochBaseRef = useRef<Epoch>(0 as Epoch);
+
     // Handicaps stored in localStorage, keyed by compno
     const [handicaps, setHandicaps] = useState<Record<string, number>>(() => {
         try {
@@ -299,6 +313,39 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const task = useSelector((state) => selectTask(state, VC));
 
     const taskRef = useRef<any>(null);
+
+    // Seed the carried-over task once fetched. Pre-seeding taskRef makes
+    // processFiles skip the C-record task build, so every loaded file scores
+    // against this task. Skipped if a dropped file built one while the fetch
+    // was in flight.
+    useEffect(() => {
+        if (!apiTask.seed || taskRef.current) {
+            return;
+        }
+        const {task, geoJSON} = apiTask.seed();
+        // Files dropped before the fetch resolved already anchored the
+        // reference date — bring the gate onto their day now
+        if (referenceEpochBaseRef.current) {
+            rebaseTaskStart(task, referenceEpochBaseRef.current);
+        }
+        apiTaskGeoJSONRef.current = geoJSON;
+        taskRef.current = task;
+        setTaskBuilt(true);
+        setTaskSource('api');
+        taskSourceRef.current = 'api';
+
+        dispatchClass(dispatch, Infinity as Epoch, 0 as Epoch);
+        dispatchTask(dispatch, task, geoJSON);
+
+        setViewport((v) => ({
+            ...v,
+            latitude: task.legs[0].nlat,
+            longitude: task.legs[0].nlng
+        }));
+        if (setOptions && options) {
+            setOptions({...options, zoomTask: true});
+        }
+    }, [apiTask.seed, dispatch, options, setOptions]);
 
     // Build synthetic pilots data for PilotList
     const pilots: API_ClassName_Pilots = useMemo(() => {
@@ -357,11 +404,25 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         console.log(`${compno} (${file.name}): no PEV events in IGC file`);
                     }
 
+                    // Anchor deck.gl's Float32 time baseline to the first file
+                    // regardless of where the task came from, and move a
+                    // carried-over task's start gate onto that file's day —
+                    // both must happen before this file is scored/dispatched
+                    if (!referenceEpochBaseRef.current) {
+                        referenceEpochBaseRef.current = igcData.date.epochBase;
+                        setReferenceDate(igcData.date.epochBase);
+                        if (taskSourceRef.current === 'api' && taskRef.current) {
+                            rebaseTaskStart(taskRef.current, igcData.date.epochBase);
+                            dispatchTask(dispatch, taskRef.current, apiTaskGeoJSONRef.current);
+                        }
+                    }
+
                     if (!taskBuilt && !taskRef.current && igcData.taskDeclaration) {
                         const result = buildTask(igcData, {forceCylinderStart: cylinderStartRef.current});
                         if (result) {
                             taskRef.current = result.task;
-                            setReferenceDate(igcData.date.epochBase);
+                            setTaskSource('igc');
+                            taskSourceRef.current = 'igc';
 
                             const earliest = igcData.fixes[0].t;
                             const latest = igcData.fixes[igcData.fixes.length - 1].t;
@@ -479,8 +540,19 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         setSelectedCompno(undefined);
         setReplayTime(undefined);
         setError(null);
+        referenceEpochBaseRef.current = 0 as Epoch;
         dispatchClass(dispatch, Infinity as Epoch, 0 as Epoch, true);
-    }, [dispatch]);
+        // A carried-over task survives reset — the URL means "viewer for this
+        // class's task". seed() prepares a fresh copy from the pristine raw
+        // JSON; the old working copy was mutated by the rebase and (re)scoring.
+        if (apiTask.seed) {
+            const {task, geoJSON} = apiTask.seed();
+            apiTaskGeoJSONRef.current = geoJSON;
+            taskRef.current = task;
+            setTaskBuilt(true);
+            dispatchTask(dispatch, task, geoJSON);
+        }
+    }, [dispatch, apiTask.seed]);
 
     const handleRescore = useCallback(async () => {
         if (!taskRef.current || flights.length === 0) return;
@@ -604,6 +676,10 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                 >
                     <FontAwesomeIcon icon={faFileArrowUp} size="3x" style={{opacity: 0.3, marginBottom: 16}} />
                     <p style={{fontSize: '1.2rem', opacity: 0.6}}>{t('viewer.drop_or_browse')}</p>
+                    {apiTask.state === 'loading' ? <p style={{opacity: 0.6}}>{t('viewer.task_loading')}</p> : null}
+                    {apiTask.state === 'loaded' && task ? <p style={{opacity: 0.8}}>{t('viewer.task_loaded', {classname: task.details.classname, distance: task.details.distance})}</p> : null}
+                    {apiTask.state === 'none' ? <p style={{opacity: 0.6}}>{t('viewer.task_none', {classname: apiTask.className})}</p> : null}
+                    {apiTask.state === 'error' ? <p style={{color: 'red'}}>{t('viewer.task_fetch_failed', {classname: apiTask.className})}</p> : null}
                     {processing && <p>{t('viewer.processing')}</p>}
                     {error && <p style={{color: 'red'}}>{error}</p>}
                 </div>
@@ -661,6 +737,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                             <FontAwesomeIcon icon={taskOpen ? faCaretUp : faCaretDown} />
                                         </button>
                                     </h5>
+                                    {taskSource === 'api' ? <p style={{fontSize: '0.8em', opacity: 0.7, margin: '0.25em 0'}}>{t('viewer.task_from_live', {classname: task.details.classname})}</p> : null}
                                     {taskOpen ? (
                                         <div id="view-task-collapse">
                                             <table className="legs-mini" style={{marginBottom: 0}}>
@@ -686,9 +763,11 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                                     ))}
                                                 </tbody>
                                             </table>
-                                            <label style={{display: 'block', marginTop: '0.5em'}} title={t('viewer.cylinder_start_hint')}>
-                                                <input type="checkbox" checked={cylinderStart} onChange={(e) => handleCylinderStartToggle(e.target.checked)} /> {t('viewer.cylinder_start')}
-                                            </label>
+                                            {taskSource !== 'api' ? (
+                                                <label style={{display: 'block', marginTop: '0.5em'}} title={t('viewer.cylinder_start_hint')}>
+                                                    <input type="checkbox" checked={cylinderStart} onChange={(e) => handleCylinderStartToggle(e.target.checked)} /> {t('viewer.cylinder_start')}
+                                                </label>
+                                            ) : null}
                                         </div>
                                     ) : null}
                                 </div>

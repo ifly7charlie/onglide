@@ -34,7 +34,7 @@ import mysql from 'serverless-mysql';
 import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
-import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
+import {calculateTask, taskGeoJSON, assembleTask, TaskDetailsRow} from '../lib/flightprocessing/taskhelper';
 import {taskBbox, unionBboxes, expandBbox, accumulateCompBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
@@ -55,7 +55,7 @@ const COMPETITIONS_CHANNEL = 'all';
 import {loadMergedDDB, isBlocked, blockedMethod, gliderEquivalent, DDBEntry as SharedDDBEntry} from '../lib/ddb';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM, FLEW_STATES, CompStatus} from '../lib/types';
+import {PositionMessage, TaskLegsTableRow, FLEW_STATES, CompStatus} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
 console.log('dev mode', dev);
 
@@ -1607,7 +1607,8 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
     const getTask = async (channel: Channel, maxHandicap: number) => {
         const className = channel.className;
         const datecode = channel.datecode;
-        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow)[]>(escape`
+        // This SQL is mirrored in pages/api/[className]/task.ts — keep them in step
+        const taskdetails = ((await db.query<TaskDetailsRow[]>(escape`
             SELECT
                 tasks.*,
                 time_to_sec (tasks.duration) durationsecs,
@@ -1663,20 +1664,7 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
             return null;
         }
 
-        let task: Task = {
-            rules: {
-                grandprixstart: taskdetails.grandprixstart == 'Y',
-                nostartutc: taskdetails.nostartutc,
-                aat: taskdetails.type == 'A',
-                dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
-                dm: taskdetails.Dm ?? undefined,
-                pevStart: taskdetails.pevstart == 'Y',
-                handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
-                maxHandicap
-            },
-            details: taskdetails,
-            legs: tasklegs
-        };
+        let task: Task = assembleTask(taskdetails, tasklegs, maxHandicap);
         calculateTask(task);
         // calculateTask clears rules.pevStart when the start leg isn't a cylinder
         if (taskdetails.pevstart == 'Y' && !task.rules.pevStart) {

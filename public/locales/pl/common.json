@@ -57,7 +57,8 @@
         "leg_length": "Długość odcinka",
         "tp_radius": "Promień",
         "leg": "Odcinek {{n}}",
-        "previous_day_note": "Przed 10:00 wyświetlane jest śledzenie z poprzedniego dnia"
+        "previous_day_note": "Przed 10:00 wyświetlane jest śledzenie z poprzedniego dnia",
+        "open_in_viewer": "Przelicz własne pliki IGC według tej konkurencji"
     },
     "task_status": {
         "task_set": "Konkurencja ustawiona",
@@ -279,7 +280,12 @@
         "error_processing": "Błąd podczas przetwarzania pliku",
         "error_rescoring": "Błąd podczas przeliczania",
         "cylinder_start": "Start z cylindra (PEV)",
-        "cylinder_start_hint": "Przelicz ponownie ze startem z cylindra (PEV) wg IGC: start jest szacowany na podstawie ostatniego noszenia przed odlotem na pierwszy punkt zwrotny"
+        "cylinder_start_hint": "Przelicz ponownie ze startem z cylindra (PEV) wg IGC: start jest szacowany na podstawie ostatniego noszenia przed odlotem na pierwszy punkt zwrotny",
+        "task_loading": "Wczytywanie konkurencji…",
+        "task_loaded": "Przeliczanie według konkurencji klasy {{classname}} ({{distance}} km) — wczytane pliki IGC są przeliczane według niej",
+        "task_none": "Brak konkurencji na dziś dla klasy {{classname}}",
+        "task_fetch_failed": "Nie udało się wczytać konkurencji dla klasy {{classname}} — pliki zostaną przeliczone według własnych deklaracji",
+        "task_from_live": "Konkurencja klasy {{classname}} — deklaracje w plikach IGC są ignorowane"
     },
     "errors": {
         "boundary_title": "Ups, wystąpił błąd!",

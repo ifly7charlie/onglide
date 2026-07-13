@@ -57,7 +57,8 @@
         "leg_length": "Benlängd",
         "tp_radius": "Radie",
         "leg": "Ben {{n}}",
-        "previous_day_note": "Före kl. 10:00 visas spårningen från föregående dag"
+        "previous_day_note": "Före kl. 10:00 visas spårningen från föregående dag",
+        "open_in_viewer": "Beräkna dina egna IGC-filer mot denna uppgift"
     },
     "task_status": {
         "task_set": "Uppgift satt",
@@ -279,7 +280,12 @@
         "error_processing": "Fel vid bearbetning av filen",
         "error_rescoring": "Fel vid omräkning",
         "cylinder_start": "Cylinderstart (PEV)",
-        "cylinder_start_hint": "Räkna om med IGC-cylinderstart (PEV): starten uppskattas från den sista stigningen innan kursen sätts mot första vändpunkten"
+        "cylinder_start_hint": "Räkna om med IGC-cylinderstart (PEV): starten uppskattas från den sista stigningen innan kursen sätts mot första vändpunkten",
+        "task_loading": "Läser in tävlingsuppgift…",
+        "task_loaded": "Beräknar mot {{classname}}-uppgiften ({{distance}} km) — IGC-filer du läser in beräknas på den",
+        "task_none": "Ingen uppgift tillgänglig i dag för {{classname}}",
+        "task_fetch_failed": "Kunde inte läsa in uppgiften för {{classname}} — filerna beräknas utifrån sina egna deklarationer",
+        "task_from_live": "Uppgift från {{classname}} — uppgiftsdeklarationer i IGC-filerna ignoreras"
     },
     "errors": {
         "boundary_title": "Hoppsan, något gick fel!",

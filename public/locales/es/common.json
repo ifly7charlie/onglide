@@ -57,7 +57,8 @@
         "leg_length": "Longitud del tramo",
         "tp_radius": "Radio",
         "leg": "Tramo {{n}}",
-        "previous_day_note": "Antes de las 10:00 se mostrará el seguimiento del día anterior"
+        "previous_day_note": "Antes de las 10:00 se mostrará el seguimiento del día anterior",
+        "open_in_viewer": "Puntúa tus propios archivos IGC con esta prueba"
     },
     "task_status": {
         "task_set": "Prueba definida",
@@ -279,7 +280,12 @@
         "error_processing": "Error al procesar el archivo",
         "error_rescoring": "Error al recalcular",
         "cylinder_start": "Salida de cilindro (PEV)",
-        "cylinder_start_hint": "Recalcular con salida de cilindro (PEV) de la IGC: la salida se estima a partir de la última ascendencia antes de dirigirse al primer punto de viraje"
+        "cylinder_start_hint": "Recalcular con salida de cilindro (PEV) de la IGC: la salida se estima a partir de la última ascendencia antes de dirigirse al primer punto de viraje",
+        "task_loading": "Cargando la prueba de la competición…",
+        "task_loaded": "Puntuando con la prueba de {{classname}} ({{distance}} km) — los archivos IGC que cargues se puntúan con ella",
+        "task_none": "No hay prueba disponible hoy para {{classname}}",
+        "task_fetch_failed": "No se pudo cargar la prueba de {{classname}} — los archivos se puntuarán según sus propias declaraciones",
+        "task_from_live": "Prueba de {{classname}} — se ignoran las declaraciones de prueba de los archivos IGC"
     },
     "errors": {
         "boundary_title": "¡Vaya, ha ocurrido un error!",

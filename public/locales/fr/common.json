@@ -57,7 +57,8 @@
         "leg_length": "Longueur de la branche",
         "tp_radius": "Rayon",
         "leg": "Branche {{n}}",
-        "previous_day_note": "Avant 10h00, le suivi de la veille est affiché"
+        "previous_day_note": "Avant 10h00, le suivi de la veille est affiché",
+        "open_in_viewer": "Évaluer vos propres fichiers IGC sur cette épreuve"
     },
     "task_status": {
         "task_set": "Épreuve définie",
@@ -279,7 +280,12 @@
         "error_processing": "Erreur lors du traitement du fichier",
         "error_rescoring": "Erreur lors du recalcul",
         "cylinder_start": "Départ cylindre (PEV)",
-        "cylinder_start_hint": "Recalculer avec un départ cylindre (PEV) IGC : le départ est estimé à partir de la dernière ascendance avant de partir vers le premier point de virage"
+        "cylinder_start_hint": "Recalculer avec un départ cylindre (PEV) IGC : le départ est estimé à partir de la dernière ascendance avant de partir vers le premier point de virage",
+        "task_loading": "Chargement de l'épreuve de la compétition…",
+        "task_loaded": "Évaluation sur l'épreuve de {{classname}} ({{distance}} km) — les fichiers IGC chargés y sont évalués",
+        "task_none": "Aucune épreuve disponible aujourd'hui pour {{classname}}",
+        "task_fetch_failed": "Impossible de charger l'épreuve de {{classname}} — les fichiers seront évalués selon leurs propres déclarations",
+        "task_from_live": "Épreuve de {{classname}} — les déclarations d'épreuve des fichiers IGC sont ignorées"
     },
     "errors": {
         "boundary_title": "Oups, une erreur s'est produite !",

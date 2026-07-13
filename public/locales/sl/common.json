@@ -57,7 +57,8 @@
         "leg_length": "Dolžina kraka",
         "tp_radius": "Polmer",
         "leg": "Krak {{n}}",
-        "previous_day_note": "Pred 10.00 je prikazano sledenje prejšnjega dne"
+        "previous_day_note": "Pred 10.00 je prikazano sledenje prejšnjega dne",
+        "open_in_viewer": "Oceni svoje datoteke IGC po tej nalogi"
     },
     "task_status": {
         "task_set": "Naloga postavljena",
@@ -279,7 +280,12 @@
         "error_processing": "Napaka pri obdelavi datoteke",
         "error_rescoring": "Napaka pri ponovnem ocenjevanju",
         "cylinder_start": "Start iz cilindra (PEV)",
-        "cylinder_start_hint": "Ponovno oceni s startom iz cilindra (PEV) po IGC: start se oceni iz zadnjega dviganja pred odhodom proti prvi vmesni točki"
+        "cylinder_start_hint": "Ponovno oceni s startom iz cilindra (PEV) po IGC: start se oceni iz zadnjega dviganja pred odhodom proti prvi vmesni točki",
+        "task_loading": "Nalaganje tekmovalne naloge…",
+        "task_loaded": "Ocenjevanje po nalogi razreda {{classname}} ({{distance}} km) — naložene datoteke IGC se ocenijo po njej",
+        "task_none": "Za razred {{classname}} danes ni naloge",
+        "task_fetch_failed": "Naloge za razred {{classname}} ni bilo mogoče naložiti — datoteke bodo ocenjene po lastnih deklaracijah",
+        "task_from_live": "Naloga razreda {{classname}} — deklaracije nalog v datotekah IGC se ne upoštevajo"
     },
     "errors": {
         "boundary_title": "Ojej, prišlo je do napake!",

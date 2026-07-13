@@ -50,6 +50,7 @@
         "start_opens_at": "Start Opens at {{time}}",
         "start_open": "Start open {{time}}",
         "zoom_to_task": "Zoom to task",
+        "open_in_viewer": "Score your own IGC files against this task",
         "show_details": "Show Task Details",
         "hide_details": "Hide Task Details",
         "turnpoint": "Turnpoint",
@@ -279,7 +280,12 @@
         "error_processing": "Error processing file",
         "error_rescoring": "Error rescoring",
         "cylinder_start": "Cylinder (PEV) start",
-        "cylinder_start_hint": "Rescore with an IGC cylinder (PEV) start: the start is estimated from the last climb before heading for the first turnpoint"
+        "cylinder_start_hint": "Rescore with an IGC cylinder (PEV) start: the start is estimated from the last climb before heading for the first turnpoint",
+        "task_loading": "Loading competition task…",
+        "task_loaded": "Scoring against the {{classname}} task ({{distance}} km) — IGC files you load are scored on it",
+        "task_none": "No task available today for {{classname}}",
+        "task_fetch_failed": "Couldn't load the task for {{classname}} — files will be scored on their own declarations",
+        "task_from_live": "Task from {{classname}} — task declarations inside the IGC files are ignored"
     },
     "errors": {
         "boundary_title": "Oops, there is an error!",

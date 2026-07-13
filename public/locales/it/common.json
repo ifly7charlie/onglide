@@ -57,7 +57,8 @@
         "leg_length": "Lunghezza tratta",
         "tp_radius": "Raggio",
         "leg": "Tratta {{n}}",
-        "previous_day_note": "Prima delle 10:00 viene mostrato il tracciamento del giorno precedente"
+        "previous_day_note": "Prima delle 10:00 viene mostrato il tracciamento del giorno precedente",
+        "open_in_viewer": "Valuta i tuoi file IGC su questa prova"
     },
     "task_status": {
         "task_set": "Prova impostata",
@@ -279,7 +280,12 @@
         "error_processing": "Errore durante l'elaborazione del file",
         "error_rescoring": "Errore durante il ricalcolo",
         "cylinder_start": "Partenza a cilindro (PEV)",
-        "cylinder_start_hint": "Ricalcola con partenza a cilindro (PEV) IGC: la partenza è stimata dall'ultima ascendenza prima di dirigersi al primo punto di virata"
+        "cylinder_start_hint": "Ricalcola con partenza a cilindro (PEV) IGC: la partenza è stimata dall'ultima ascendenza prima di dirigersi al primo punto di virata",
+        "task_loading": "Caricamento della prova della competizione…",
+        "task_loaded": "Valutazione sulla prova di {{classname}} ({{distance}} km) — i file IGC caricati vengono valutati su di essa",
+        "task_none": "Nessuna prova disponibile oggi per {{classname}}",
+        "task_fetch_failed": "Impossibile caricare la prova di {{classname}} — i file verranno valutati secondo le proprie dichiarazioni",
+        "task_from_live": "Prova di {{classname}} — le dichiarazioni di prova nei file IGC vengono ignorate"
     },
     "errors": {
         "boundary_title": "Ops, si è verificato un errore!",

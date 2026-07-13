@@ -57,7 +57,8 @@
         "leg_length": "Benlængde",
         "tp_radius": "Radius",
         "leg": "Ben {{n}}",
-        "previous_day_note": "Før kl. 10:00 vises sporing fra dagen før"
+        "previous_day_note": "Før kl. 10:00 vises sporing fra dagen før",
+        "open_in_viewer": "Beregn dine egne IGC-filer mod denne opgave"
     },
     "task_status": {
         "task_set": "Opgave sat",
@@ -279,7 +280,12 @@
         "error_processing": "Fejl ved behandling af fil",
         "error_rescoring": "Fejl ved genberegning",
         "cylinder_start": "Cylinderstart (PEV)",
-        "cylinder_start_hint": "Genberegn med IGC-cylinderstart (PEV): starten estimeres ud fra den sidste stigning, før kursen sættes mod første vendepunkt"
+        "cylinder_start_hint": "Genberegn med IGC-cylinderstart (PEV): starten estimeres ud fra den sidste stigning, før kursen sættes mod første vendepunkt",
+        "task_loading": "Indlæser konkurrenceopgave…",
+        "task_loaded": "Beregner mod {{classname}}-opgaven ({{distance}} km) — IGC-filer du indlæser beregnes på den",
+        "task_none": "Ingen opgave tilgængelig i dag for {{classname}}",
+        "task_fetch_failed": "Kunne ikke indlæse opgaven for {{classname}} — filerne beregnes ud fra deres egne deklarationer",
+        "task_from_live": "Opgave fra {{classname}} — opgavedeklarationer i IGC-filerne ignoreres"
     },
     "errors": {
         "boundary_title": "Hovsa, der opstod en fejl!",

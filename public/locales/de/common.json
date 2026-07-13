@@ -57,7 +57,8 @@
         "leg_length": "Schenkellänge",
         "tp_radius": "Radius",
         "leg": "Schenkel {{n}}",
-        "previous_day_note": "Vor 10:00 Uhr wird die Aufzeichnung des Vortags angezeigt"
+        "previous_day_note": "Vor 10:00 Uhr wird die Aufzeichnung des Vortags angezeigt",
+        "open_in_viewer": "Eigene IGC-Dateien gegen diese Aufgabe auswerten"
     },
     "task_status": {
         "task_set": "Aufgabe gesetzt",
@@ -279,7 +280,12 @@
         "error_processing": "Fehler beim Verarbeiten der Datei",
         "error_rescoring": "Fehler bei der Neuauswertung",
         "cylinder_start": "Zylinderstart (PEV)",
-        "cylinder_start_hint": "Neu auswerten mit IGC-Zylinderstart (PEV): der Start wird aus dem letzten Steigen vor dem Abflug zum ersten Wendepunkt geschätzt"
+        "cylinder_start_hint": "Neu auswerten mit IGC-Zylinderstart (PEV): der Start wird aus dem letzten Steigen vor dem Abflug zum ersten Wendepunkt geschätzt",
+        "task_loading": "Wettbewerbsaufgabe wird geladen…",
+        "task_loaded": "Auswertung nach der Aufgabe der Klasse {{classname}} ({{distance}} km) — geladene IGC-Dateien werden danach ausgewertet",
+        "task_none": "Heute keine Aufgabe für {{classname}} verfügbar",
+        "task_fetch_failed": "Aufgabe für {{classname}} konnte nicht geladen werden — Dateien werden nach ihren eigenen Deklarationen ausgewertet",
+        "task_from_live": "Aufgabe von {{classname}} — Aufgabendeklarationen in den IGC-Dateien werden ignoriert"
     },
     "errors": {
         "boundary_title": "Hoppla, ein Fehler ist aufgetreten!",

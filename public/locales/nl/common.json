@@ -57,7 +57,8 @@
         "leg_length": "Beenlengte",
         "tp_radius": "Radius",
         "leg": "Been {{n}}",
-        "previous_day_note": "Vóór 10:00 wordt de tracking van de vorige dag getoond"
+        "previous_day_note": "Vóór 10:00 wordt de tracking van de vorige dag getoond",
+        "open_in_viewer": "Beoordeel je eigen IGC-bestanden op deze opdracht"
     },
     "task_status": {
         "task_set": "Opdracht ingesteld",
@@ -279,7 +280,12 @@
         "error_processing": "Fout bij verwerken van bestand",
         "error_rescoring": "Fout bij herscoren",
         "cylinder_start": "Cilinderstart (PEV)",
-        "cylinder_start_hint": "Herbereken met een IGC-cilinderstart (PEV): de start wordt geschat op basis van de laatste klim voor het vertrek naar het eerste keerpunt"
+        "cylinder_start_hint": "Herbereken met een IGC-cilinderstart (PEV): de start wordt geschat op basis van de laatste klim voor het vertrek naar het eerste keerpunt",
+        "task_loading": "Wedstrijdopdracht wordt geladen…",
+        "task_loaded": "Beoordeling op de opdracht van {{classname}} ({{distance}} km) — geladen IGC-bestanden worden hierop beoordeeld",
+        "task_none": "Geen opdracht beschikbaar vandaag voor {{classname}}",
+        "task_fetch_failed": "Kon de opdracht voor {{classname}} niet laden — bestanden worden beoordeeld volgens hun eigen declaraties",
+        "task_from_live": "Opdracht van {{classname}} — opdrachtdeclaraties in de IGC-bestanden worden genegeerd"
     },
     "errors": {
         "boundary_title": "Oeps, er is een fout opgetreden!",

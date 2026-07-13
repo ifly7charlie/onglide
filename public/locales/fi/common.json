@@ -57,7 +57,8 @@
         "leg_length": "Osuuden pituus",
         "tp_radius": "Säde",
         "leg": "Osuus {{n}}",
-        "previous_day_note": "Ennen klo 10.00 näytetään edellisen päivän seuranta"
+        "previous_day_note": "Ennen klo 10.00 näytetään edellisen päivän seuranta",
+        "open_in_viewer": "Pisteytä omat IGC-tiedostosi tätä tehtävää vasten"
     },
     "task_status": {
         "task_set": "Tehtävä asetettu",
@@ -279,7 +280,12 @@
         "error_processing": "Virhe tiedoston käsittelyssä",
         "error_rescoring": "Virhe uudelleenlaskennassa",
         "cylinder_start": "Sylinterilähtö (PEV)",
-        "cylinder_start_hint": "Laske uudelleen IGC-sylinterilähdöllä (PEV): lähtö arvioidaan viimeisestä noususta ennen suuntaamista ensimmäiselle käännepisteelle"
+        "cylinder_start_hint": "Laske uudelleen IGC-sylinterilähdöllä (PEV): lähtö arvioidaan viimeisestä noususta ennen suuntaamista ensimmäiselle käännepisteelle",
+        "task_loading": "Ladataan kilpailutehtävää…",
+        "task_loaded": "Pisteytys {{classname}}-luokan tehtävän mukaan ({{distance}} km) — lataamasi IGC-tiedostot pisteytetään sen mukaan",
+        "task_none": "Luokalle {{classname}} ei ole tehtävää tänään",
+        "task_fetch_failed": "Luokan {{classname}} tehtävän lataus epäonnistui — tiedostot pisteytetään omien määritystensä mukaan",
+        "task_from_live": "Tehtävä luokasta {{classname}} — IGC-tiedostojen tehtävämääritykset ohitetaan"
     },
     "errors": {
         "boundary_title": "Hupsis, tapahtui virhe!",

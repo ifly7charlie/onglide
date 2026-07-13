@@ -57,7 +57,8 @@
         "leg_length": "Szakasz hossza",
         "tp_radius": "Sugár",
         "leg": "{{n}}. szakasz",
-        "previous_day_note": "10:00 előtt az előző napi követés látható"
+        "previous_day_note": "10:00 előtt az előző napi követés látható",
+        "open_in_viewer": "Pontozd a saját IGC-fájljaidat ezzel a feladattal"
     },
     "task_status": {
         "task_set": "Feladat beállítva",
@@ -279,7 +280,12 @@
         "error_processing": "Hiba a fájl feldolgozása közben",
         "error_rescoring": "Hiba az újraértékelés közben",
         "cylinder_start": "Henger start (PEV)",
-        "cylinder_start_hint": "Pontozás újrafutása IGC henger starttal (PEV): a start az első fordulópont felé indulás előtti utolsó emelésből kerül becslésre"
+        "cylinder_start_hint": "Pontozás újrafutása IGC henger starttal (PEV): a start az első fordulópont felé indulás előtti utolsó emelésből kerül becslésre",
+        "task_loading": "Versenyfeladat betöltése…",
+        "task_loaded": "Pontozás a(z) {{classname}} feladata alapján ({{distance}} km) — a betöltött IGC-fájlok ez alapján kerülnek pontozásra",
+        "task_none": "Ma nincs elérhető feladat a(z) {{classname}} osztályhoz",
+        "task_fetch_failed": "Nem sikerült betölteni a(z) {{classname}} feladatát — a fájlok a saját deklarációik alapján kerülnek pontozásra",
+        "task_from_live": "Feladat: {{classname}} — az IGC-fájlokban lévő feladatdeklarációk figyelmen kívül maradnak"
     },
     "errors": {
         "boundary_title": "Hoppá, hiba történt!",
