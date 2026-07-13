@@ -9,8 +9,9 @@ import {createHash} from 'crypto';
 //
 // Callers must agree on which string they hash so the same class always
 // produces the same id. Today:
-//   - SoaringSpot OAuth (bin/soaringspot.ts) and RST (bin/rst.ts) pass the
-//     raw upstream name (their upstream keys are stable).
+//   - SoaringSpot OAuth (bin/soaringspot.ts) and RST
+//     (lib/scoring/sources/rst.ts) pass the raw upstream name (their
+//     upstream keys are stable).
 //   - The SoaringSpot HTML scrape (lib/scoring/sources/soaringspotscrape.ts)
 //     passes normalizeClassName(rawName) because pilot rosters and class
 //     listings come from different pages and sometimes disagree on casing

@@ -16,8 +16,7 @@ yarn build              # protobuf + tsc for daemons (run before bin/* scripts)
 yarn build:protobuf     # only the .proto -> ts regen
 yarn dev                # next dev (webpack mode)
 yarn ogn                # OGN/APRS daemon (frontends connect via its websocket)
-yarn ssscrape           # data sync daemon: drives SoaringSpot OAuth API, HTML scrape, and SGP sources
-yarn rst                # RST Online sync
+yarn ssscrape           # data sync daemon: drives SoaringSpot OAuth API, HTML scrape, SGP, and RST sources
 yarn ogn:dev            # tsc-watch + node --inspect (auto-restarts on rebuild)
 yarn ssscrape:dev       # same pattern for the scoring scraper
 yarn test               # vitest run (test/**/*.test.ts)
@@ -50,7 +49,7 @@ Both the CLI and the test share `bin/checktranslations.js` (ESM, dependency-free
 This is a soaring-competition tracking platform. The repo runs as **two cooperating processes** that share a MySQL DB:
 
 1. **`bin/ogn.ts`** — long-running daemon that subscribes to the OGN APRS feed, scores every pilot in real time, and exposes a websocket (`ws://…:8080`) to browsers. Owns all scoring state in-process.
-2. **`bin/ssscrape.ts`** — the scoring scraper daemon. Runs the scheduler in `lib/scoring/scheduler.ts`, which drives every registered `ScoringSource` adapter: SoaringSpot OAuth API, SoaringSpot HTML scrape, SGP, and robocontrol (tracker-only). The choice of primary upstream is per-competition via a row in `scoringsource`; robocontrol rows are orthogonal and coexist with the primary. **`bin/rst.ts`** is the legacy RST sync (still its own daemon — not a `ScoringSource`).
+2. **`bin/ssscrape.ts`** — the scoring scraper daemon. Runs the scheduler in `lib/scoring/scheduler.ts`, which drives every registered `ScoringSource` adapter: SoaringSpot OAuth API, SoaringSpot HTML scrape, SGP, RST (rst-online.se HTML scrape), and robocontrol (tracker-only). The choice of primary upstream is per-competition via a row in `scoringsource`; robocontrol rows are orthogonal and coexist with the primary.
 3. **Next.js (`pages/`)** — front-end. Reads competition metadata via `getServerSideProps` (direct DB), then connects to the OGN daemon's websocket for live tracks + scores. Almost no API routes; live state flows over the websocket, not REST.
 
 ### Front-end → daemon channel
@@ -109,7 +108,7 @@ Generators in `lib/webworkers/` receive a `log` parameter; **use it, not `consol
 
 ### Scoring sources (data-sync adapters)
 
-`lib/scoring/scheduler.ts` runs a 60-second heartbeat in competition-local time and decides what's due to fetch. Each upstream — SoaringSpot OAuth, SoaringSpot scrape, SGP, and robocontrol — implements the `ScoringSource` interface in `lib/scoring/source.ts` and hands parsed records to the shared helpers in `lib/scoring/shared/` (pilots, tasks, classes, airfield, trackers). The adapter knows nothing about timing; the scheduler knows nothing about HTTP. RST is *not* a `ScoringSource` yet — it runs as the standalone `bin/rst.ts` daemon. Adding a new upstream = new file under `lib/scoring/sources/` registered in `bin/ssscrape.ts`.
+`lib/scoring/scheduler.ts` runs a 60-second heartbeat in competition-local time and decides what's due to fetch. Each upstream — SoaringSpot OAuth, SoaringSpot scrape, SGP, RST, and robocontrol — implements the `ScoringSource` interface in `lib/scoring/source.ts` and hands parsed records to the shared helpers in `lib/scoring/shared/` (pilots, tasks, classes, airfield, trackers). The adapter knows nothing about timing; the scheduler knows nothing about HTTP. RST (`lib/scoring/sources/rst.ts`) is a full pilots+tasks+results adapter with no live tracker feed; it configures via a `scoringsource` row of `type='rst'` with `url` + `contest_name` (the contest_name is a case-insensitive regex selecting the page's tabbed panel, its first capture group naming the class). Adding a new upstream = new file under `lib/scoring/sources/` registered in `bin/ssscrape.ts`.
 
 **Four independent streams per heartbeat.** The scheduler dispatches pilots, tasks, results, and trackers separately, each on its own cadence and gate:
 
@@ -159,7 +158,7 @@ Catch errors only to handle a *specific, expected* condition; report everything 
 - A latched "feature unavailable" flag (e.g. `identityTablesUnavailable`, `priorEvidenceUnavailable`) must only ever be set by the narrow expected-condition branch. If it can also latch on an unexpected error, one swallowed failure silences the feature for the whole run.
 - When a code path legitimately does nothing, say so on stdout (counts, "skipped: <reason>"). A run that produces no output and no error must be indistinguishable from success only when it *was* success.
 
-**CLI / one-shot tools** (`bin/findtrackers.ts`, `bin/rst.ts`, `ssscrape --refetch`/arg-validation): an unexpected error should propagate to the top-level `main().catch` → `console.error` + **non-zero exit**, or `process.exit(1)` at the handling site. A failed one-shot must exit non-zero so the caller/cron sees it.
+**CLI / one-shot tools** (`bin/findtrackers.ts`, `ssscrape --refetch`/arg-validation): an unexpected error should propagate to the top-level `main().catch` → `console.error` + **non-zero exit**, or `process.exit(1)` at the handling site. A failed one-shot must exit non-zero so the caller/cron sees it.
 
 **Long-running daemons** (`bin/ogn.ts` tick loop, `bin/ssscrape.ts` scheduler): a single bad unit of work must **not** crash the process. The catch boundary is the loop body — per-competition, per-packet, per-heartbeat — not the top level:
 - Wrap each unit and continue: `for (const comp of …) { try { await tickCompetition(comp) } catch (e) { console.error(\`tickCompetition(${comp.compid}) failed:\`, e) } }` (`bin/ogn.ts`). Always log with the identifying context (compid / datecode / flarmid) so the failing unit is identifiable.
