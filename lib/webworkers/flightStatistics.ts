@@ -43,6 +43,14 @@ const MIN_STRAIGHT_TIME_S = 22;
 const ENTER_THERMAL_DEG_PER_S = 6; // 360/60
 const EXIT_THERMAL_DEG_PER_S = 3.75; // 15/4
 
+// Time constant for the exponential moving average of the in-thermal turn rate
+// (alpha = 1 - exp(-dt/tau)), giving the same wall-clock smoothing window at
+// any fix cadence: a 1 Hz stream is smoothed hard (where per-fix bearing
+// jitter lives) while a sparse fix, whose rate is already an average over its
+// whole interval, is trusted almost outright. Drives the thermal-exit test and
+// the grossTurn accumulation.
+const TURN_RATE_TAU_S = 4;
+
 // Below this fraction of straight-line progress (net displacement vs the path
 // the airspeed would have flown straight) the glider must have curved, so a
 // sparse fix's aliased bearing delta is unwrapped to the real rotation rather
@@ -76,6 +84,7 @@ export interface Segment {
     endAlt: number;
     turncount: number; // signed sum of bearing changes (cancels toward 0 on a reversing/mixed thermal)
     grossTurn: number; // sum of |bearing change| — total rotation, survives a direction reversal
+    peakNetRotation: number; // max |running signed rotation| reached - circling sustains this in one direction, an S-bend unwinds itself and never does
     distance: number; // km
     heightgain: number;
     heightloss: number;
@@ -121,6 +130,7 @@ function makeSegment(state: Mode, startTime: number, startLng: number, startLat:
         endAlt: startAlt,
         turncount: 0,
         grossTurn: 0,
+        peakNetRotation: 0,
         distance: 0,
         heightgain: 0,
         heightloss: 0,
@@ -194,13 +204,15 @@ export function createFlightStatistics() {
             return elapsed < MIN_STRAIGHT_TIME_S && dist < MIN_STRAIGHT_DISTANCE_KM;
         }
         if (cur.state === 'thermal') {
-            // Absorb only weak thermals; a proper circle stays its own segment.
-            // Gate on *gross* rotation, not the signed turncount: a mixed thermal
-            // (the pilot turns one way, then reverses — two attempts in one core)
-            // cancels its signed sum toward 0 while still having flown a full
-            // circle or more, so the gross total is what separates a real climb
-            // from a stray course-correction.
-            return cur.grossTurn < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6;
+            // Absorb any thermal that never committed to a circle. A real
+            // climb - even one attempt of a mixed/reversing thermal - sustains
+            // most of a full rotation in ONE direction before it stops or
+            // reverses, so the gate is the peak running signed rotation.
+            // Neither aggregate works here: the signed sum cancels toward 0
+            // across a reversal, and the gross sum can't tell circling from an
+            // S-shaped course correction (its two real opposite bends rectify
+            // into the total).
+            return cur.peakNetRotation < MIN_CIRCLE_DEGREES || cur.endTime - cur.startTime < 6;
         }
         return false;
     }
@@ -223,6 +235,10 @@ export function createFlightStatistics() {
         }
 
         prev.grossTurn += cur.grossTurn;
+        // Approximate the running-max of the concatenated signal: exact would
+        // need cur's running values offset by prev's end sum, but for the gate
+        // the larger of the two peaks (or the combined end value) is enough.
+        prev.peakNetRotation = Math.max(prev.peakNetRotation, cur.peakNetRotation, Math.abs(prev.turncount));
         prev.direction += cur.direction;
         prev.packets += cur.packets;
         prev.maxDelay = Math.max(prev.maxDelay, cur.maxDelay);
@@ -412,6 +428,11 @@ export function createFlightStatistics() {
         // have turned, so unwrap the delta to the full rotation nearest what the
         // established turn rate predicts. When it tracked straight, keep the raw
         // delta so a genuine thermal exit still fires.
+        // Degrees of rotation credited to grossTurn for this fix. |turnDelta|
+        // except on a dense in-thermal fix, where the smoothed rate is used so
+        // zero-mean bearing jitter cancels in the average before rectification
+        // instead of every wobble rectifying into phantom rotation.
+        let grossDelta = Math.abs(turnDelta);
         if (mode === 'thermal') {
             const pathIfStraight = (speed * timedif) / 3600; // km the airspeed would cover
             const progress = pathIfStraight > 0 ? distance / pathIfStraight : 1;
@@ -419,10 +440,15 @@ export function createFlightStatistics() {
                 const expectedRotation = smoothedTurnRate * timedif;
                 turnDelta = rawBearingChange + 360 * Math.round((expectedRotation - rawBearingChange) / 360);
                 bearingChange = turnDelta / timedif;
+                // A sparse fix's rate is already averaged over its whole
+                // interval - adopt it outright (alpha -> 1 in the EMA below).
                 smoothedTurnRate = bearingChange;
+                grossDelta = Math.abs(turnDelta);
             } else {
-                smoothedTurnRate = (smoothedTurnRate + bearingChange) / 2;
+                const alpha = 1 - Math.exp(-timedif / TURN_RATE_TAU_S);
+                smoothedTurnRate += alpha * (bearingChange - smoothedTurnRate);
                 bearingChange = smoothedTurnRate;
+                grossDelta = Math.abs(smoothedTurnRate) * timedif;
             }
         } else {
             smoothedTurnRate = bearingChange;
@@ -489,7 +515,8 @@ export function createFlightStatistics() {
         if (point.a > prevAlt) open.heightgain += point.a - prevAlt;
         else open.heightloss += prevAlt - point.a;
         open.turncount += turnDelta;
-        open.grossTurn += Math.abs(turnDelta);
+        if (Math.abs(open.turncount) > open.peakNetRotation) open.peakNetRotation = Math.abs(open.turncount);
+        open.grossTurn += grossDelta;
         open.direction += tdirection;
         open.packets++;
         if (timedif > open.maxDelay) open.maxDelay = timedif;

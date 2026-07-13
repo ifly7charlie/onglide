@@ -132,16 +132,16 @@ describe('PEV cylinder start — racing chain', () => {
         expect(final.legs[1].estimatedStart).toBeFalsy();
     });
 
-    test('exit + re-enter + re-climb replaces the start; excursions alone do not', async () => {
+    test('exit + re-enter + re-climb replaces the start', async () => {
         const task = cylRacingTask();
-        // Part 1: pev start from climb A, then the pilot leaves, comes back,
-        // climbs again inside and goes — climb B wins.
+        // pev start from climb A, then the pilot leaves, comes back, climbs
+        // again inside and goes - climb B wins.
         const withReclimb = fly(
             {...W(5), altitude: 1200},
             [
                 {thermalSecs: 240, climbRate: 2}, // climb A (pev start applied on the glide out)
                 {glideTo: E(12, 1400)}, // exits the cylinder — ignored, pev stands
-                {glideTo: E(6, 1300)}, // re-enters
+                {glideTo: E(6, 1300)}, // re-enters - estimate dropped, re-arms
                 {thermalSecs: 240, climbRate: 2}, // climb B inside
                 {glideTo: {...TP1, altitude: 900}},
                 {glideTo: {...C, altitude: 600}}
@@ -154,24 +154,59 @@ describe('PEV cylinder start — racing chain', () => {
         expect(finalReclimb.utcStart).toBeGreaterThan(topOfB - 60);
         expect(finalReclimb.utcStart).toBeLessThan(topOfB + 60);
         expect(finalReclimb.legs[1].estimatedStart).toBe(true);
+    });
 
-        // Part 2: same excursion but NO re-climb — the original pev start stands.
+    test('re-entry without a re-climb moves the start to the re-exit crossing', async () => {
+        // The pilot is assumed to re-PEV before exiting again: wandering
+        // back into the cylinder drops the estimate from climb A, and with
+        // no qualifying glide after the re-entry the next exit crossing is
+        // the start - not the stale climb-A estimate.
+        const task = cylRacingTask();
         const withoutReclimb = fly(
             {...W(5), altitude: 1500},
             [
                 {thermalSecs: 240, climbRate: 2}, // climb A, top ≈ GATE+140
-                {glideTo: E(12, 1700)},
-                {glideTo: E(8, 1650)}, // wanders back in without climbing
-                {glideTo: {...TP1, altitude: 900}},
+                {glideTo: E(12, 1700)}, // exits at E10 - pev start from climb A stands
+                {glideTo: E(8, 1650)}, // wanders back in without climbing - estimate dropped
+                {glideTo: {...TP1, altitude: 900}}, // back out at E10: that exit is the start
                 {glideTo: {...C, altitude: 600}}
             ],
             (GATE - 100) as Epoch
         );
-        const topOfA = GATE + 140;
+        // climb A tops ~ GATE+140; W5->E12 ~ 556s; E12->E8 ~ 131s; E8->ring ~ 65s
+        const reExit = GATE + 140 + 556 + 131 + 65;
         const {final: finalExcursion} = await runScoringChain(task, withoutReclimb);
-        expect(finalExcursion.utcStart).toBeGreaterThan(topOfA - 45);
-        expect(finalExcursion.utcStart).toBeLessThan(topOfA + 45);
-        expect(finalExcursion.legs[1].estimatedStart).toBe(true);
+        expect(finalExcursion.utcStart).toBeGreaterThan(reExit - 60);
+        expect(finalExcursion.utcStart).toBeLessThan(reExit + 60);
+        expect(finalExcursion.legs[1].estimatedStart).toBeFalsy();
+    });
+
+    test('dip start: re-entry pointing away from TP1, doubling back out to tag TP1', async () => {
+        // Likely tactic when the last climb sits outside the cylinder: the
+        // pilot nips back in (heading straight away from TP1), doubles back
+        // and exits on track. Nothing after the re-entry can qualify as a
+        // glide - the anchor (top of the outside climb) is outside the
+        // cylinder - so the start must be the final exit crossing, not the
+        // stale estimate from the earlier committed glide.
+        const task = cylRacingTask();
+        const flight = fly(
+            {...W(5), altitude: 1200},
+            [
+                {thermalSecs: 240, climbRate: 2}, // climb A, top ~ GATE+140 - estimate applied on the glide out
+                {glideTo: E(12, 1500)}, // qualifying glide, carries on out of the cylinder
+                {thermalSecs: 300, climbRate: 2}, // climbs OUTSIDE the cylinder
+                {glideTo: E(9, 2000)}, // dips back in, pointing directly away from TP1
+                {glideTo: {...TP1, altitude: 900}}, // doubles back out - this exit is the start - and tags TP1
+                {glideTo: {...C, altitude: 600}}
+            ],
+            (GATE - 100) as Epoch
+        );
+        // climb A ~ 240s; W5->E12 ~ 556s; climb ~ 300s; E12->E9 ~ 98s; E9->ring ~ 33s
+        const finalExit = GATE + 140 + 556 + 300 + 98 + 33;
+        const {final} = await runScoringChain(task, flight);
+        expect(final.utcStart).toBeGreaterThan(finalExit - 60);
+        expect(final.utcStart).toBeLessThan(finalExit + 60);
+        expect(final.legs[1].estimatedStart).toBeFalsy();
     });
 
     test('landout inside the cylinder keeps the provisional start without confirming', async () => {

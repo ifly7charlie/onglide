@@ -61,7 +61,12 @@ export function qualifiesAsPevGlide(from: BasePositionMessage, to: BasePositionM
 // The clamp fix must fall within the segment: a clamp captured after the
 // segment ended belongs to a later part of the flight, and substituting it
 // would evaluate a backwards (from.t > to.t) glide.
-export function eligibleStartFix(seg: Readonly<Segment>, nostartutc: Epoch, insideStart: PevGeometry['insideStart'], firstInsideAfterGate?: BasePositionMessage | null): BasePositionMessage | null {
+//
+// lastEntryT confines candidates to the current in-cylinder session: a pilot
+// who re-enters the cylinder is assumed to re-PEV before the next exit, so a
+// fix predating the latest entry can no longer be the start (0 = the pilot
+// never re-entered after the gate).
+export function eligibleStartFix(seg: Readonly<Segment>, nostartutc: Epoch, insideStart: PevGeometry['insideStart'], firstInsideAfterGate?: BasePositionMessage | null, lastEntryT: Epoch = 0 as Epoch): BasePositionMessage | null {
     if (seg.state !== 'straight') {
         return null;
     }
@@ -71,6 +76,9 @@ export function eligibleStartFix(seg: Readonly<Segment>, nostartutc: Epoch, insi
             return null;
         }
         fix = firstInsideAfterGate;
+    }
+    if (fix.t < lastEntryT) {
+        return null;
     }
     return insideStart(fix) ? fix : null;
 }
@@ -99,13 +107,23 @@ export function pathAfter(seg: Readonly<Segment>, from: BasePositionMessage): nu
 //  - late-committing glides: a glide that left the top of the climb off-track
 //    and curved onto track never passes the live from-segment-start ratio,
 //    but its closed start→end geometry can.
-export function pickRetroStart(segments: ReadonlyArray<Readonly<Segment>>, nostartutc: Epoch, windowEnd: Epoch, geometry: PevGeometry, firstInsideAfterGate?: BasePositionMessage | null): BasePositionMessage | null {
+//
+// lastEntryT (the pilot's latest entry into the cylinder) bounds the walk:
+// glides from before a re-entry are superseded by the assumed re-PEV, so when
+// nothing after the last entry qualifies the answer is null and the caller's
+// exit-crossing start stands - never a resurrected pre-excursion glide.
+export function pickRetroStart(segments: ReadonlyArray<Readonly<Segment>>, nostartutc: Epoch, windowEnd: Epoch, geometry: PevGeometry, firstInsideAfterGate?: BasePositionMessage | null, lastEntryT: Epoch = 0 as Epoch): BasePositionMessage | null {
     for (let i = segments.length - 1; i >= 0; i--) {
         const seg = segments[i];
         if (seg.startTime > windowEnd) {
             continue;
         }
-        const from = eligibleStartFix(seg, nostartutc, geometry.insideStart, firstInsideAfterGate);
+        if (seg.endTime < lastEntryT) {
+            // every candidate fix in this and all earlier segments predates
+            // the last entry into the cylinder
+            break;
+        }
+        const from = eligibleStartFix(seg, nostartutc, geometry.insideStart, firstInsideAfterGate, lastEntryT);
         if (!from) {
             continue;
         }

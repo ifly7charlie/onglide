@@ -234,6 +234,192 @@ describe('flightStatistics coalescing', () => {
         expect(straights.length).toBeGreaterThanOrEqual(2);
     });
 
+    // An S-shaped course correction (bend one way, then back) rectifies both
+    // real bends into ~400 deg of GROSS rotation - enough to pass a
+    // gross-rotation gate - while never committing to a circle: the running
+    // signed rotation peaks at ~200 deg and unwinds. It must be absorbed into
+    // the glide, not kept as a phantom "thermal" the panel shows with
+    // "1 turns" and a net sink.
+    test('an S-shaped course correction is not kept as a thermal', () => {
+        const segs = runTrack([
+            {steps: 50, turnPerStep: 0, speed: 120, climb: -1}, // glide in
+            {steps: 5, turnPerStep: 40, speed: 100, climb: -1}, // bend right (~200 deg)
+            {steps: 5, turnPerStep: -40, speed: 100, climb: -1}, // bend back left (~200 deg)
+            {steps: 50, turnPerStep: 0, speed: 120, climb: -1} // glide out
+        ]);
+        expect(segs.filter((s) => s.state === 'thermal')).toHaveLength(0);
+        expect(segs.filter((s) => s.state === 'straight')).toHaveLength(1);
+    });
+
+    // A multi-bend course correction - roughly 45 deg right, 90 deg left,
+    // 80 deg right - with jittery straight-ish pauses between the bends. The
+    // bends plus the pauses' rectified jitter sum well past a full circle of
+    // gross rotation, but the running signed rotation never gets past ~50
+    // deg: every bend is mostly unwound by the next. It must collapse into
+    // the surrounding glide.
+    test('a right-left-right wiggle with jittery pauses collapses into the glide', () => {
+        const KM_PER_DEG = 111.32;
+        const fs = createFlightStatistics();
+        let t = 1000;
+        let alt = 1400;
+        let lat = 47;
+        let lng = 19;
+        let heading = 270; // tracking west
+        let jitterSign = 1;
+        const speed = 95;
+        const push = (turn: number) => {
+            jitterSign = -jitterSign;
+            heading = (heading + turn + jitterSign * 3 + 360) % 360;
+            const distKm = speed / 3600; // dt = 1 s
+            const rad = (heading * Math.PI) / 180;
+            lat += (distKm * Math.cos(rad)) / KM_PER_DEG;
+            lng += (distKm * Math.sin(rad)) / (KM_PER_DEG * Math.cos((lat * Math.PI) / 180));
+            t += 1;
+            alt -= 0.4; // gentle net sink throughout, as observed
+            fs.addPosition({t, a: alt, lat, lng, b: heading, s: speed});
+        };
+        const run = (fixes: number, turnPerFix: number) => {
+            for (let i = 0; i < fixes; i++) push(turnPerFix);
+        };
+        run(60, 0); // glide in
+        run(5, 9); // ~45 deg right
+        run(4, 0); // jittery pause
+        run(10, -9); // ~90 deg left
+        run(4, 0); // jittery pause
+        run(8, 10); // ~80 deg right
+        run(60, 0); // glide out
+        fs.finish();
+        const segs = fs.getStats()?.segments ?? [];
+        expect(segs.filter((s) => s.state === 'thermal')).toHaveLength(0);
+        expect(segs.filter((s) => s.state === 'straight')).toHaveLength(1);
+    });
+
+    // Field case from a live competition trace, confirmed against the
+    // pilot's own logger (coordinates offset to sit near 0,0; course/speed
+    // reconstructed from the position chords, the dropout-fix values
+    // estimated at plausible reports): the glider arcs gently left for ~4 s
+    // (entering thermal mode) and tracking then drops out for 41 s - under
+    // MAX_GAP_S, so the dropout interval is classified as flown. It really
+    // was a thermal: coverage loss is often caused by the aircraft banking
+    // away from the receiver, and the dropout's net displacement falls far
+    // enough short of what the reported speed would cover that the progress
+    // test fires. The sparse unwrap must extrapolate the established rate
+    // across the dropout and recover about one circle - the on-map track
+    // (splined through the gap) shows no turn, but the classification is
+    // the true one.
+    test('a dropout while circling away from coverage keeps the thermal (field trace)', () => {
+        // [t, alt, lat, lng, course, speed]
+        const fixes: [number, number, number, number, number, number][] = [
+            [51934, 1049, 0.017383, 0.080867, 273, 87],
+            [51988, 1026, 0.018, 0.061933, 273, 87],
+            [52002, 996, 0.02025, 0.054367, 296, 148],
+            [52010, 987, 0.02155, 0.050067, 296, 148],
+            [52013, 984, 0.02205, 0.048467, 297, 148],
+            [52016, 986, 0.022567, 0.046917, 298, 145],
+            [52019, 987, 0.023133, 0.0454, 301, 146],
+            [52025, 988, 0.024367, 0.042517, 305, 144],
+            [52027, 993, 0.024833, 0.041667, 312, 141],
+            [52028, 997, 0.025083, 0.041283, 316, 138],
+            [52030, 1001, 0.025567, 0.040533, 314, 134],
+            [52031, 1003, 0.0258, 0.040167, 316, 130],
+            [52033, 1004, 0.026267, 0.0394, 315, 133],
+            [52037, 1020, 0.0271, 0.037783, 310, 130],
+            [52038, 1028, 0.027283, 0.03735, 304, 130],
+            [52039, 1037, 0.027417, 0.0369, 296, 124],
+            [52041, 1046, 0.027533, 0.035917, 281, 124],
+            [52082, 1029, 0.025367, 0.027767, 250, 125], // 41 s dropout ends here
+            [52086, 1006, 0.025467, 0.024917, 273, 176],
+            [52093, 987, 0.025667, 0.019683, 273, 185]
+        ];
+        const fs = createFlightStatistics();
+        for (const [t, a, lat, lng, b, s] of fixes) {
+            fs.addPosition({t, a, lat, lng, b, s});
+        }
+        fs.finish();
+        const segs = fs.getStats()?.segments ?? [];
+        const thermals = segs.filter((s) => s.state === 'thermal');
+        expect(thermals).toHaveLength(1);
+        // The thermal spans the dropout and is credited about one circle
+        // (the panel shows "1 turns"), left-handed, not flagged mixed.
+        expect(thermals[0].start).toBeLessThanOrEqual(52041);
+        expect(thermals[0].end).toBeGreaterThanOrEqual(52082);
+        expect(Math.round(thermals[0].turncount / 360)).toBe(1);
+        expect(thermals[0].direction).toBe(1);
+        // The glide in survives as its own straight segment.
+        expect(segs[0].state).toBe('straight');
+        expect(segs[0].end).toBeLessThanOrEqual(52041);
+    });
+
+    // At 1 Hz the smoothed turn rate must ride through a single jittered
+    // bearing delta: one wrong-sign fix inside a steady circle may not drag the
+    // rate under the exit threshold (a phantom straight splitting the climb),
+    // and the credited rotation stays close to what was actually flown.
+    test('a single jittered fix at 1 Hz does not split a thermal', () => {
+        const KM_PER_DEG = 111.32;
+        const R = 0.025 / (2 * Math.sin((7.5 * Math.PI) / 180)) / KM_PER_DEG; // chord per 15 deg step = the 25 m a 90 kph fix covers in 1 s
+        const fs = createFlightStatistics();
+        let t = 1000;
+        let alt = 1000;
+        let bearing = 0;
+        const seen = new Set<string>();
+        const push = (delta: number) => {
+            bearing = (bearing + delta + 360) % 360;
+            t += 1;
+            alt += 2;
+            const ang = (bearing * Math.PI) / 180;
+            fs.addPosition({t, a: alt, lat: 51 + R * Math.cos(ang), lng: -1 + R * Math.sin(ang), b: bearing, s: 90});
+            for (const s of fs.getStats()?.segments ?? []) seen.add(s.state);
+        };
+        for (let i = 0; i < 20; i++) push(15);
+        push(-12); // one jittered fix mid-circle
+        for (let i = 0; i < 20; i++) push(15);
+        expect(seen.has('straight')).toBe(false); // never even transiently split
+        const thermals = (fs.getStats()?.segments ?? []).filter((s) => s.state === 'thermal');
+        expect(thermals).toHaveLength(1);
+        expect(thermals[0].turncount).toBeGreaterThan(500); // ~612 deg flown; smoothing must not eat real rotation
+    });
+
+    // A single circle flown in poor coverage: a few dense fixes enter the
+    // thermal, one ~26 s fix carries most of the rotation (aliased, recovered
+    // by the unwrap), then the glider leaves on a long glide. The
+    // reconstructed signed rotation must keep the climb a thermal - sparse
+    // sampling may not downgrade a real circle into the surrounding straight.
+    test('a single circle in poor coverage survives as a thermal', () => {
+        const KM_PER_DEG = 111.32;
+        const R = 0.0015; // ~167 m circle radius (degrees)
+        const speed = 100;
+        const period = ((2 * Math.PI * R * KM_PER_DEG) / speed) * 3600;
+        const fs = createFlightStatistics();
+        let t = 1000;
+        let a = 1200;
+        let ang = 0;
+        const emit = () => {
+            const rad = (ang * Math.PI) / 180;
+            fs.addPosition({t, a, lat: 47 + R * Math.cos(rad), lng: 19 + (R * Math.sin(rad)) / Math.cos((47 * Math.PI) / 180), b: (90 + ang) % 360, s: speed});
+        };
+        emit();
+        const step = (deg: number) => {
+            ang = (ang + deg) % 360;
+            t += Math.round((deg / 360) * period);
+            a += 12;
+            emit();
+        };
+        for (let i = 0; i < 6; i++) step(30); // dense entry (~3 s fixes)
+        step(250); // one sparse fix completes the circle (~26 s, aliases)
+        // long glide out at a 4 s cadence
+        let lat = 47 + R * Math.cos((ang * Math.PI) / 180);
+        for (let i = 0; i < 50; i++) {
+            t += 4;
+            a -= 4;
+            lat += (120 / 3600) * 4 * (1 / KM_PER_DEG);
+            fs.addPosition({t, a, lat, lng: 19, b: 0, s: 120});
+        }
+        const segs = fs.getStats()?.segments ?? [];
+        noAdjacentSameState(segs);
+        expect(segs.filter((s) => s.state === 'thermal')).toHaveLength(1);
+        expect(segs.filter((s) => s.state === 'straight')).toHaveLength(1);
+    });
+
     // The flip side of the mixed-thermal case: when the two opposite circles are
     // separated by a *substantial* straight (the pilot left the first core, glided,
     // and worked a second one), that straight is real gliding flight and must not

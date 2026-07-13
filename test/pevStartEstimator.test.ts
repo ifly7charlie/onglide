@@ -36,6 +36,7 @@ const seg = (state: Segment['state'], from: BasePositionMessage, to: BasePositio
     endAlt: to.a,
     turncount: 0,
     grossTurn: 0,
+    peakNetRotation: 0,
     distance: pathKm ?? distHaversine(from, to),
     heightgain: 0,
     heightloss: 0,
@@ -103,6 +104,15 @@ describe('eligibleStartFix', () => {
         // would evaluate a glide whose start postdates its end.
         const s = seg('straight', pt(-9, 0, 500), pt(-7, 0, 1200));
         expect(eligibleStartFix(s, GATE, geometry.insideStart, pt(-6, 0, 1500))).toBeNull();
+    });
+    test('a candidate from before the last cylinder entry is rejected (session bound)', () => {
+        const s = seg('straight', pt(-5, 0, 1200), pt(0, 0, 1400));
+        expect(eligibleStartFix(s, GATE, geometry.insideStart, undefined, 1300 as Epoch)).toBeNull();
+        expect(eligibleStartFix(s, GATE, geometry.insideStart, undefined, 1100 as Epoch)).toMatchObject({t: 1200});
+    });
+    test('a gate-clamped fix from before the last entry is rejected too', () => {
+        const s = seg('straight', pt(-8, 0, 500), pt(0, 0, 1400));
+        expect(eligibleStartFix(s, GATE, geometry.insideStart, pt(-6, 0, 1005), 1200 as Epoch)).toBeNull();
     });
 });
 
@@ -199,6 +209,33 @@ describe('pickRetroStart', () => {
         // fail the efficiency ratio (0.5 < 0.75) for a dead-straight glide.
         const segments = [seg('straight', pt(-8, 0, 500), pt(2, 0, 1500))];
         expect(pickRetroStart(segments, GATE, 2500 as Epoch, geometry, pt(-3, 0, 1000))?.t).toBe(1000);
+    });
+
+    test('candidates are bounded to the latest in-cylinder session', () => {
+        // Qualifying glide, exit, climb OUTSIDE the cylinder, then a dip
+        // back in (pointing away from TP1) that doubles straight back out to
+        // TP1. The dip glide's anchor is outside the cylinder, so nothing
+        // after the re-entry qualifies - the retro pass must return null
+        // (the caller's exit-crossing start stands), not resurrect the
+        // pre-excursion glide.
+        const segments = [
+            seg('straight', pt(-4, 0, 1100), pt(12, 0, 1700)), // qualifying glide, carries on out of the cylinder
+            seg('thermal', pt(12, 0, 1700), pt(12, 0.3, 2000)), // climb OUTSIDE
+            seg('straight', pt(12, 0.3, 2000), pt(35, 0, 2800), 29) // dip to 8km-east and back out to TP1, coalesced
+        ];
+        // re-entry at the eastern ring (~t=2100), heading away from TP1
+        expect(pickRetroStart(segments, GATE, 2800 as Epoch, geometry, undefined, 2100 as Epoch)).toBeNull();
+        // without the bound the stale pre-excursion glide wins - the exact
+        // failure the bound exists to prevent
+        expect(pickRetroStart(segments, GATE, 2800 as Epoch, geometry)?.t).toBe(1100);
+    });
+
+    test('a qualifying glide after the last entry still wins under the bound', () => {
+        const segments = [
+            seg('straight', pt(-8, 0, 1100), pt(-4, 0, 1300)), // pre-excursion glide
+            seg('straight', pt(-5, 0, 2000), pt(3, 0, 2400)) // post-re-entry glide, anchored inside
+        ];
+        expect(pickRetroStart(segments, GATE, 2500 as Epoch, geometry, undefined, 1900 as Epoch)?.t).toBe(2000);
     });
 
     test('segmentStartFix carries full fix geometry', () => {

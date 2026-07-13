@@ -23,6 +23,7 @@ interface OgnTripsData {
     startIndices: Uint32Array;
     v: Uint8Array;
     g: Int16Array;
+    anchorIndex?: Uint32Array;
 }
 
 type _OgnTripsLayerProps<DataT = unknown> = {
@@ -101,12 +102,21 @@ discard;
             // lib/react/deckvh.ts); add referenceDate to recover epoch-seconds
             // for the tooltip.
             const tr = props.data.attributes.getTimestamps.value[pickParams.info.index];
+            // A smoothed vertex is a real fix (anchor) iff it's the last vertex
+            // in its anchorIndex run — the Hermite inner vertices emitted ahead
+            // of an anchor share that anchor's index (see spline.ts). So a match
+            // with the next vertex's anchorIndex means this one is interpolated.
+            // No anchorIndex => raw fallback, every vertex is a real fix.
+            const idx = pickParams.info.index;
+            const anchorIndex = props.data.anchorIndex;
+            const interpolated = !!anchorIndex && idx + 1 < props.data.numberOfPoints && anchorIndex[idx] === anchorIndex[idx + 1];
             info.object = {
                 compno: props.compno, //
                 a: Math.floor(coordinate[2]),
                 g: props.data?.g[pickParams.info.index],
                 v: props.data?.v[pickParams.info.index] || undefined,
-                t: Math.round(tr + referenceDate)
+                t: Math.round(tr + referenceDate),
+                interpolated
             };
         }
         return info;
