@@ -194,7 +194,15 @@ async function loadCompetition(ctx: SourceCtx): Promise<RstCompetition> {
         if (!identity) {
             continue;
         }
-        const className = identity[1] || contestName;
+        // contest_name is a *filter* selecting which of the page's tabs
+        // belong to this competition; each matching tab is its own class.
+        // Name it from the tab heading so distinct tabs become distinct
+        // classes (distinct makeClassId). An explicit first capture group
+        // still wins — operators use it to pull just the class suffix out
+        // of the heading. Falling back to contest_name (the regex source)
+        // would give every matched tab the same name and hence the same
+        // classid, collapsing them into one class.
+        const className = (identity[1] || heading).trim() || contestName;
         const classid = makeClassId(ctx.compid, className) as ClassId;
 
         // Strip the nested <select> widgets so Tabletojson doesn't choke.
