@@ -39,6 +39,7 @@ import {SgpSource} from '../lib/scoring/sources/sgp';
 import {SgpaeroSource} from '../lib/scoring/sources/sgpaero';
 import {SoaringSpotApiSource} from '../lib/scoring/sources/soaringspot';
 import {RobocontrolSource} from '../lib/scoring/sources/robocontrol';
+import {RstSource} from '../lib/scoring/sources/rst';
 import type {ScoringSource, SourceCtx} from '../lib/scoring/source';
 import {regeocodeMissingCompetitions} from '../lib/scoring/shared/contestLocation';
 
@@ -132,7 +133,7 @@ async function main(): Promise<void> {
     registry.register(new SgpaeroSource());
     registry.register(new SoaringSpotApiSource());
     registry.register(new RobocontrolSource());
-    // Future: registry.register(new RstSource());
+    registry.register(new RstSource());
 
     const args = yargs(hideBin(process.argv))
         .scriptName('ssscrape')

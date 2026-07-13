@@ -12,7 +12,6 @@
         "build:protobuf": "protoc --plugin=node_modules/ts-proto/protoc-gen-ts_proto --ts_proto_out=. ./lib/protobuf/onglide.proto",
         "build:docker": "docker compose build",
         "ssscrape": "node dist/bin/ssscrape.js",
-        "rst": "node dist/bin/rst.js",
         "wsclient": "node dist/bin/wsclient.js",
         "pushtest": "node dist/bin/pushTest.js",
         "setup": "bin/install.js",
