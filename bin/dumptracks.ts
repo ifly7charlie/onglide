@@ -55,7 +55,10 @@ async function run() {
         .option('until', {type: 'number', description: 'epoch seconds upper bound (optional)'})
         .option('summary', {type: 'boolean', description: 'one row per flarm id: oldest, newest, count, rate'})
         .option('delay-stats', {type: 'boolean', description: 'distribution of receive-delay d (writeTime - t) and per-setting late count'})
-        .option('burst-stats', {type: 'boolean', description: 'shape of PMQ-induced drops per flarm: cursor jumps (a fresh packet bumps lastTime past late ones), drop victims per jump, longest emit-gap vs raw-gap (visual dead zones)'})
+        .option('burst-stats', {
+            type: 'boolean',
+            description: 'shape of PMQ-induced drops per flarm: cursor jumps (a fresh packet bumps lastTime past late ones), drop victims per jump, longest emit-gap vs raw-gap (visual dead zones)'
+        })
         .option('comp-delay', {type: 'number', description: 'override competition.delayseconds / env compDelay (seconds). Sets the simulation cushion (eligibleAt = max(arrival, t + compDelay))'})
         .help()
         .alias('help', 'h').argv;
@@ -85,10 +88,7 @@ async function run() {
         console.error(`comp delay: overridden via --comp-delay=${args['comp-delay']}`);
     }
 
-    const makeIter = () =>
-        flarmIds.size > 0
-            ? loadPointsForIds({flarmIds: flarmIds as Set<string>, since: args.since, until: args.until})
-            : scanAll({since: args.since, until: args.until});
+    const makeIter = () => (flarmIds.size > 0 ? loadPointsForIds({flarmIds: flarmIds as Set<string>, since: args.since, until: args.until}) : scanAll({since: args.since, until: args.until}));
 
     if (args['delay-stats']) {
         await delayStats(makeIter(), effectiveCompDelay);
@@ -98,7 +98,9 @@ async function run() {
         await summary(makeIter());
     } else {
         for await (const m of makeIter() as AsyncGenerator<any>) {
-            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.g}m  ${m.c ?? '??????'} (${fidLabel(m.f ?? 0)})  ${m.lat},${m.lng}`);
+            // b (bearing°) and s (speed kph) are undefined when the record had
+            // none (stored as -1); show '-' rather than 'undefined'.
+            console.log(`${d(m.t)}+${m.d ?? 0}: ${m.o} ${m.a}m/${m.g}mAGL ${m.b ?? '-'}° ${m.s ?? '-'}kph  ${m.c ?? '??????'} (${fidLabel(m.f ?? 0)})  ${m.lat},${m.lng}`);
         }
     }
 
