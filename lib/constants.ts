@@ -243,6 +243,53 @@ export const SCORE_PROPOSE_NATS = 2.0;
 // group): a matching time is weaker evidence when it matches several pilots.
 export const AMBIGUOUS_DELTA_FACTOR = 0.8;
 
+// ---- OGN-daemon score cross-check (findtrackers "ogn check" signal) ------
+// The ogn daemon scores each pilot live using the flarmid(s) configured in
+// tracker.trackerid; pilotresult start/finish/distance come exclusively from
+// the official scoring upstream (OGN-side code only writes igcavailable).
+// Agreement between the daemon's scored utcStart/utcFinish/taskDistance and
+// the official result is therefore non-circular evidence about which pilot's
+// flight the configured tracker actually flew.
+//
+// The time knee is much wider than DEFAULT_TOLERANCE_SEC: the replay
+// tolerance compares crossings computed from the same APRS data, while
+// daemon-vs-official crosses data sources (APRS sampling and daemon start
+// determination vs the official scorer), where tens-of-seconds deltas are
+// routine for the correct tracker.
+export const OGN_CHECK_TIME_TOLERANCE_SEC = 30; // full positive credit at 0, zero at 30s
+
+// Negative path guard (assigned pairs only; time deltas only - never
+// distance). Scoring-algorithm differences can legitimately move times, so
+// there is a dead zone between the positive knee and this onset; beyond it
+// the negative support ramps and saturates at (1 + OGN_CHECK_NEG_SCALE) x onset.
+export const OGN_CHECK_NEG_ONSET_SEC = 300; // below 5 min delta, never negative
+export const OGN_CHECK_NEG_SCALE = 1; // saturates to -1 at 10 min
+
+// Distance agreement (positive-only): |daemon taskDistance - official
+// distance| under a knee of max(abs floor, rel x official). Daemon and
+// official optimisers can legitimately disagree by a few percent; the
+// absolute floor keeps short landout flights from an unusably tight knee.
+export const OGN_CHECK_DIST_ABS_KM = 5;
+export const OGN_CHECK_DIST_REL = 0.05;
+
+// Cross-pair scaling: the daemon triple for channel-pilot A is evidence about
+// A's configured flarmid(s); when it matches ANOTHER pilot B's official
+// result it credits the cross pair (B, A's-flarmid) - that is how a swap is
+// surfaced. Cross positives are scaled below assigned-pair confirmation and
+// divided by k = how many pilots' official results the triple matches (a
+// triple matching a whole gaggle's start says little about any one of them).
+export const OGN_CHECK_CROSS_FACTOR = 0.6;
+export const OGN_CHECK_CROSS_MATCH_FLOOR = 0.5; // raw combined support >= this counts toward k
+
+// Whole-track coverage factor applied to every ogn-check support (both
+// signs). The replay's crossing signals are modulated by the point-local
+// gap at the line; the daemon triple is a whole-flight product, so it is
+// weighted by mean in-bbox packet interval instead: poor coverage biases
+// the daemon's scored values away from the official ones even for the
+// correct tracker. Values provisional pending real-flight validation.
+export const OGN_CHECK_COVERAGE_GOOD_GAP_SEC = 10; // covFactor 1 at or below
+export const OGN_CHECK_COVERAGE_BAD_GAP_SEC = 120; // covFactor 0 at or above (linear between); null avgGap -> 0
+
 // Per-signal nat weights. Sum of available signals × saturating function
 // produces pair_score; auto-apply compares pair_scores via the margin gates
 // above. Tuneable as a single object so flag overrides hit one place.
@@ -256,6 +303,17 @@ export const TRACKER_SCORE_WEIGHTS = {
     ddbCn: 1.5,
     ddbGlider: 0.3, // weak — many pilots in a comp share a glider type, so this just rules out wildly mismatched gliders
     baseline: 1.0, // flarmid in current tracker.trackerid for (class, compno); suppressed when the assignment was auto-sourced from ognddb (double-counts ddbCn)
+
+    // OGN-daemon score cross-check (see the OGN_CHECK_* block above). Per-side
+    // time weight is signed on assigned pairs (positive within the wide knee,
+    // negative beyond the onset) and positive-only cross-scaled on cross pairs;
+    // both sides suppressed when a within-tolerance replay crossing already
+    // carries the evidence. Assigned max = 2x ognTime + ognDist = 1.6 nats
+    // (comparable to one clean crossing plus change), min = -1.2 (drags a
+    // baseline-only wrong assignment below SCORE_PROPOSE_NATS without
+    // single-handedly sinking real crossing evidence). All x coverage factor.
+    ognTime: 0.6,
+    ognDist: 0.4, // daemon actual.taskDistance vs pilotresult.distance - positive only (optimiser/penalty differences must not fire negatives)
 
     // Negative evidence: wrong-time crossing (tracker seen crossing at the wrong pilot's time)
     // or confirmed positional absence (tracker far from line with good coverage). Both strands

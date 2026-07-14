@@ -20,7 +20,16 @@ import {
     MAX_PRIOR_PER_DAY_NATS,
     MAX_TOTAL_PRIOR_NATS,
     PRIOR_PROTECT_NATS,
-    TRACKER_SCORE_WEIGHTS
+    TRACKER_SCORE_WEIGHTS,
+    OGN_CHECK_TIME_TOLERANCE_SEC,
+    OGN_CHECK_NEG_ONSET_SEC,
+    OGN_CHECK_NEG_SCALE,
+    OGN_CHECK_DIST_ABS_KM,
+    OGN_CHECK_DIST_REL,
+    OGN_CHECK_CROSS_FACTOR,
+    OGN_CHECK_CROSS_MATCH_FLOOR,
+    OGN_CHECK_COVERAGE_GOOD_GAP_SEC,
+    OGN_CHECK_COVERAGE_BAD_GAP_SEC
 } from '../../constants';
 
 export interface ScoreKnees {
@@ -72,6 +81,27 @@ export interface Signals {
     ddbGliderMatch: boolean;
     /** This flarmid is currently in the operator-set tracker.trackerid for the pilot. */
     baselineMatch: boolean;
+
+    // ---- OGN-daemon score cross-check --------------------------------------
+    // The daemon scored the flarmid's owning channel-pilot live; these fields
+    // compare that scored triple (utcStart/utcFinish/actual.taskDistance)
+    // against THIS pair's pilot's official result. All four are null when the
+    // daemon was unreachable, had no score, or the flarmid has no daemon-scored
+    // owner. Built by `ognSignalsFrom`.
+    /** Signed seconds, daemon utcStart - official startUtc. null when grandprix common start (non-discriminating) or either side unset. KEPT on pev cylinder-start days, where it is the only per-pilot start evidence. */
+    ognDeltaStart: number | null;
+    /** Signed seconds, daemon utcFinish - official finishUtc. null unless BOTH sides have a finish (daemon may be mid-flight; official landouts have none). */
+    ognDeltaFinish: number | null;
+    /** Daemon actual.taskDistance, km (the /scores JSON route serves real units). */
+    ognTaskDistKm: number | null;
+    /** Official scored distance, km (pilotresult.distance). null when absent or <= 0. */
+    officialDistKm: number | null;
+    /** Mean in-bbox packet interval for this flarmid (TrackerDiag.avgGapSec) - whole-track coverage input for the ogn-check supports. null (no measurable track) -> coverage factor 0. */
+    ognAvgGapSec: number | null;
+    /** Pair is (B, F) where F's owning channel-pilot != B: cross-check evidence is positive-only and scaled by OGN_CHECK_CROSS_FACTOR / ognMatchCount. */
+    ognIsCross?: boolean;
+    /** k: how many pilots' official results the owning pilot's daemon triple matches (>= 1). Dilutes cross-pair positives; ignored on assigned pairs. */
+    ognMatchCount?: number;
     /** Sum of per-day start/finish crossing scores for this (compno, flarmid) within the same comp, capped at ±MAX_TOTAL_PRIOR_NATS. Each day capped at ±MAX_PRIOR_PER_DAY_NATS; no decay applied. Carries no ddb/identity-derived evidence. */
     priorNats: number;
 
@@ -107,6 +137,12 @@ export interface ScoreBreakdown {
     ddbCn: number;
     ddbGlider: number;
     baseline: number;
+    /** Signed: weights.ognTime x daemon-vs-official start-time support. Positive within the wide knee; negative beyond the onset (assigned pairs only); 0 when suppressed by a within-tolerance replay crossing or zero coverage. */
+    ognStart: number;
+    /** Signed: same for the finish side. */
+    ognFinish: number;
+    /** >=0: weights.ognDist x daemon-vs-official task-distance agreement (never negative - optimiser/penalty differences must not demote). */
+    ognDist: number;
     prior: number;
     xc: number; // weights.xc × xcNats — cross-comp identity, single value
     total: number;
@@ -187,6 +223,36 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         ? -Math.max(wrongTimeFinishFactor, notHereFinishFactor) * gapMod(s.gapAroundFinishSec ?? Infinity, T_gap)
         : 0;
 
+    // OGN-daemon cross-check. Per side: positive support inside the wide knee,
+    // dead zone, then a wrongTime-style negative beyond the onset (assigned
+    // pairs only - for a cross pair, absence of a match is not evidence against
+    // a hypothesis nobody made). When the replay already found a
+    // within-tolerance crossing on a side, the daemon signal is zeroed in BOTH
+    // directions: the crossing is direct evidence from the same APRS data
+    // (agreement would double-count; assigned-pair disagreement can then only
+    // be a scoring-algorithm difference, which must not fire the negative).
+    // Everything is scaled by the whole-track coverage factor - poor coverage
+    // biases the daemon's scored values away from the official ones even for
+    // the correct tracker.
+    const ognCross = s.ognIsCross ?? false;
+    const ognCov = ognCoverageFactor(s.ognAvgGapSec);
+    const ognScale = (ognCross ? OGN_CHECK_CROSS_FACTOR / Math.max(1, s.ognMatchCount ?? 1) : 1) * ognCov;
+    const ognTimeSupport = (delta: number | null, replayWithinTol: boolean): number => {
+        if (delta === null || replayWithinTol || ognCov === 0) return 0;
+        const a = Math.abs(delta);
+        const pos = linKnee(a, OGN_CHECK_TIME_TOLERANCE_SEC);
+        if (pos > 0) return pos * ognScale;
+        if (ognCross) return 0;
+        const negFactor = sat((a - OGN_CHECK_NEG_ONSET_SEC) / (OGN_CHECK_NEG_SCALE * OGN_CHECK_NEG_ONSET_SEC));
+        return negFactor > 0 ? -negFactor * ognCov : 0;
+    };
+    const sOgnStart = ognTimeSupport(s.ognDeltaStart, startCrossingWithinTol);
+    const sOgnFinish = ognTimeSupport(s.ognDeltaFinish, finishCrossingWithinTol);
+    const sOgnDist =
+        s.ognTaskDistKm === null || s.officialDistKm === null //
+            ? 0
+            : linKnee(Math.abs(s.ognTaskDistKm - s.officialDistKm), Math.max(OGN_CHECK_DIST_ABS_KM, OGN_CHECK_DIST_REL * s.officialDistKm)) * ognScale;
+
     // Presence: count saturates at N_full and is multiplied by the in/out
     // ratio so a flarmid that mostly flew elsewhere doesn't get credit.
     const ratio = inBboxRatio(s);
@@ -215,6 +281,9 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         ddbCn: weights.ddbCn * sDdbCn,
         ddbGlider: weights.ddbGlider * sDdbGlider,
         baseline: weights.baseline * sBaseline,
+        ognStart: weights.ognTime * sOgnStart,
+        ognFinish: weights.ognTime * sOgnFinish,
+        ognDist: weights.ognDist * sOgnDist,
         prior: weights.prior * s.priorNats,
         // Cross-comp identity already collapsed to a single nats value by
         // xcEvidenceScore (confidence-scaled, age-decayed, best prior comp).
@@ -233,16 +302,93 @@ export function scoreSignals(s: Signals, weights: ScoreWeights = DEFAULT_WEIGHTS
         breakdown.ddbCn +
         breakdown.ddbGlider +
         breakdown.baseline +
+        breakdown.ognStart +
+        breakdown.ognFinish +
+        breakdown.ognDist +
         breakdown.prior +
         breakdown.xc;
     return breakdown;
 }
 
+// ---- OGN-daemon score cross-check helpers ---------------------------------
+
+/** One channel-pilot's scored triple from the daemon's /scores JSON. All fields null when the daemon payload had them unset (0/absent in the protobuf shape). */
+export interface OgnDaemonPilot {
+    utcStart: number | null; // epoch seconds
+    utcFinish: number | null;
+    taskDistanceKm: number | null; // actual.taskDistance, real km on the JSON route
+}
+
+export type OgnSignalFields = Pick<Signals, 'ognDeltaStart' | 'ognDeltaFinish' | 'ognTaskDistKm' | 'officialDistKm'>;
+
+export const OGN_SIGNALS_NONE: OgnSignalFields = {ognDeltaStart: null, ognDeltaFinish: null, ognTaskDistKm: null, officialDistKm: null};
+
+/**
+ * Map one pilot's daemon triple + one official result to the ogn* Signals
+ * fields. All-null (a scoring no-op) when either side is missing.
+ * `commonStart` (grandprix single common start) nulls the start delta - a
+ * shared start time carries no per-pilot information; a pev cylinder start
+ * does NOT (the daemon start is per-pilot and is the only start evidence
+ * on those days). A missing finish on EITHER side yields null - landout
+ * agreement is carried by the distance signal, and a daemon still
+ * mid-flight must not fire anything on the finish side.
+ */
+export function ognSignalsFrom(daemon: OgnDaemonPilot | null | undefined, official: {startUtc: number; finishUtc: number | null; distanceKm: number | null} | undefined, commonStart: boolean): OgnSignalFields {
+    if (!daemon || !official) return OGN_SIGNALS_NONE;
+    return {
+        ognDeltaStart: commonStart || daemon.utcStart === null ? null : daemon.utcStart - official.startUtc,
+        ognDeltaFinish: daemon.utcFinish === null || official.finishUtc === null ? null : daemon.utcFinish - official.finishUtc,
+        ognTaskDistKm: daemon.taskDistanceKm,
+        officialDistKm: official.distanceKm !== null && official.distanceKm > 0 ? official.distanceKm : null
+    };
+}
+
+/**
+ * Raw combined support in [0,3] for a daemon triple vs one official result -
+ * the sum of the three unweighted component supports (same knees as
+ * `scoreSignals`, no suppression/coverage/weights). Shared by the
+ * ambiguity-divisor computation so k uses identical match math.
+ */
+export function ognRawSupport(f: OgnSignalFields): number {
+    const sStart = f.ognDeltaStart === null ? 0 : linKnee(Math.abs(f.ognDeltaStart), OGN_CHECK_TIME_TOLERANCE_SEC);
+    const sFinish = f.ognDeltaFinish === null ? 0 : linKnee(Math.abs(f.ognDeltaFinish), OGN_CHECK_TIME_TOLERANCE_SEC);
+    const sDist = f.ognTaskDistKm === null || f.officialDistKm === null ? 0 : linKnee(Math.abs(f.ognTaskDistKm - f.officialDistKm), Math.max(OGN_CHECK_DIST_ABS_KM, OGN_CHECK_DIST_REL * f.officialDistKm));
+    return sStart + sFinish + sDist;
+}
+
+/**
+ * k: how many pilots' official results this daemon triple matches (raw
+ * combined support >= OGN_CHECK_CROSS_MATCH_FLOOR), min 1. Divides
+ * cross-pair positives - a triple matching a whole gaggle's start says
+ * little about any one of them, while a unique match keeps full credit.
+ */
+export function ognMatchCount(daemon: OgnDaemonPilot, officials: {startUtc: number; finishUtc: number | null; distanceKm: number | null}[], commonStart: boolean): number {
+    let k = 0;
+    for (const o of officials) {
+        if (ognRawSupport(ognSignalsFrom(daemon, o, commonStart)) >= OGN_CHECK_CROSS_MATCH_FLOOR) k++;
+    }
+    return Math.max(1, k);
+}
+
+/**
+ * Whole-track coverage factor for the ogn-check supports: 1 at or below
+ * OGN_CHECK_COVERAGE_GOOD_GAP_SEC mean packet interval, 0 at or above
+ * OGN_CHECK_COVERAGE_BAD_GAP_SEC, linear between; 0 when there is no
+ * measurable track (null).
+ */
+export function ognCoverageFactor(avgGapSec: number | null): number {
+    if (avgGapSec === null) return 0;
+    return sat((OGN_CHECK_COVERAGE_BAD_GAP_SEC - avgGapSec) / (OGN_CHECK_COVERAGE_BAD_GAP_SEC - OGN_CHECK_COVERAGE_GOOD_GAP_SEC));
+}
+
 /**
  * Physical-track confidence of a match, in nats — the parts of the breakdown
  * that measure the actual tracked flight (Δstart/Δfinish, distance-at-time,
- * in-area presence, pre-launch). Deliberately EXCLUDES prior, baseline, ddb*
- * and xc so this value can be stored as cross-comp evidence confidence without
+ * in-area presence, pre-launch). Deliberately EXCLUDES prior, baseline, ddb*,
+ * xc and the ogn* cross-check (the ogn check exists only for pairs with a
+ * daemon-scored owner and derives from official results, so including it
+ * would bias cross-comp identity collection toward existing assignments)
+ * so this value can be stored as cross-comp evidence confidence without
  * feeding back on itself across competitions.
  */
 export function physicalMatchScore(b: ScoreBreakdown): number {

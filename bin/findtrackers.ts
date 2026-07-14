@@ -15,7 +15,23 @@ import type {Compno, ClassName, Datecode, Epoch, FlarmID, Task} from '../lib/typ
 import {calculateTask} from '../lib/flightprocessing/taskhelper';
 import {fromDateCode} from '../lib/datecode';
 import {findTrackerMatches, type OfficialResult, type TrackerMatch, type TrackerDiag} from '../lib/scoring/shared/findtrackers';
-import {scoreSignals, computeMargins, summarisePrior, crossingScore, negCrossScore, applyContentionPenalties, physicalMatchScore, type Signals, type ScoreBreakdown, type Margins} from '../lib/scoring/shared/trackerScore';
+import {
+    scoreSignals,
+    computeMargins,
+    summarisePrior,
+    crossingScore,
+    negCrossScore,
+    applyContentionPenalties,
+    physicalMatchScore,
+    ognSignalsFrom,
+    ognMatchCount,
+    OGN_SIGNALS_NONE,
+    type Signals,
+    type ScoreBreakdown,
+    type Margins,
+    type OgnDaemonPilot,
+    type OgnSignalFields
+} from '../lib/scoring/shared/trackerScore';
 import {computeProposals, applyPathSimilarityToProposals, liftSameFlightDemotions, scoreKey, parseCurrentIds, crossClassHitsFor, type Proposal, type ScoreMap, type CrossClassMap} from '../lib/scoring/shared/proposals';
 import {runPathComparison, resolveSameFlight, formatPathSimilarity, pathPriorKey, type PathSimilarityResult, type PathPriorMap} from '../lib/scoring/shared/pathSimilarity';
 import {loadMergedDDB, gliderEquivalent, isBlocked, type DDBEntry} from '../lib/ddb';
@@ -55,6 +71,8 @@ const argv = yargs(hideBin(process.argv))
     .option('tolerance', {type: 'number', default: 5, describe: 'max |Δstart| and |Δfinish| in seconds'})
     .option('max-gap', {type: 'number', describe: 'override max-gap (s) between consecutive points; pairs wider than this are skipped (default 60)'})
     .option('reorder-window', {type: 'number', describe: 'override per-flarmid reorder-buffer / stale-drop window (s) (default 20)'})
+    .option('ogn-url', {type: 'string', default: process.env.OGN_SCORES_URL || `http://localhost:${process.env.WEBSOCKET_PORT || 8080}`, describe: 'base URL of the ogn daemon HTTP API for the score cross-check'})
+    .option('ogn-check', {type: 'boolean', default: true, describe: 'cross-check trackers against the ogn daemon scored results (--no-ogn-check to disable)'})
     .option('debug-flarmid', {type: 'string', array: true, default: [], describe: 'trace one or more flarmids through the scan (repeatable)'})
     .option('debug-compno', {type: 'string', array: true, default: [], describe: 'trace the assigned trackerid(s) of one or more compnos (repeatable)'})
     .option('dry-run', {type: 'boolean', default: false, describe: 'report only — never prompt or write to the DB'})
@@ -105,7 +123,18 @@ interface ClassMatches {
     job: Job;
     results: OfficialResult[];
     matches: TrackerMatch[];
-    excludeStart: boolean;
+    // Grandprix single common start: the start time is shared by every pilot,
+    // so BOTH the replay start crossings and the daemon start delta carry no
+    // per-pilot information.
+    commonStart: boolean;
+    // commonStart OR pev cylinder start: replay start-crossing signals (live
+    // and prior-day) are excluded from scoring. On pev days the daemon
+    // scored start (ogn cross-check) remains - it is per-pilot and is the
+    // only start evidence available.
+    excludeReplayStart: boolean;
+    // Per-compno daemon scored triples for the ogn cross-check; null when the
+    // daemon was unreachable, the channel inactive, or --no-ogn-check.
+    daemonScores: DaemonScoreMap | null;
     priorMap: PriorMap;
     priorAircraft: PriorAircraftMap;
     // Per-pilot cross-comp identity fingerprint (empty when identity disabled).
@@ -267,12 +296,20 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         }
         if (debugFlarmids.size) console.log(`  debug flarmids for this scan: ${Array.from(debugFlarmids).join(', ')}`);
 
+        // pev cylinder start: the scored start is credited inside the
+        // cylinder, so ring-edge crossings carry no start information - the
+        // scan matches on finish only and the daemon scored start (ogn
+        // cross-check below) becomes the start evidence.
+        const pevStart = !!task.rules?.pevStart;
+        if (pevStart) console.log(`  pev cylinder start day - start-line crossings excluded from scoring; daemon scored start is the start evidence`);
+
         const matches = await findTrackerMatches({
             task,
             results,
             toleranceSec: tolerance,
             maxGapSec: argv['max-gap'] != null ? Number(argv['max-gap']) : undefined,
             reorderWindowSec: argv['reorder-window'] != null ? Number(argv['reorder-window']) : undefined,
+            excludeStartCrossings: pevStart,
             log: (m) => console.log(`  ${m}`),
             debugFlarmids: debugFlarmids.size ? debugFlarmids : undefined
         });
@@ -283,13 +320,20 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         // pilots apart. Exclude the start signal (live and in the prior) from
         // scoring; the finish crossing still discriminates.
         const sameStartForAll = new Set(results.map((r) => r.startUtc)).size === 1;
-        const excludeStart = results[0].grandprixstart && sameStartForAll;
-        if (excludeStart) console.log(`  grandprix start with a single common start time — excluding start-line crossing from scoring`);
+        const commonStart = results[0].grandprixstart && sameStartForAll;
+        if (commonStart) console.log(`  grandprix start with a single common start time — excluding start-line crossing from scoring`);
+        const excludeReplayStart = commonStart || pevStart;
+
+        // OGN daemon cross-check: the daemon's scored triple per pilot,
+        // produced with the configured tracker.trackerid - compared against
+        // official results in computeScoreMap (pass 1c).
+        const daemonScores = argv['ogn-check'] ? await fetchDaemonScores(String(argv['ogn-url']), className, datecode) : null;
+        if (daemonScores) console.log(`  loaded ogn daemon scores for ${daemonScores.size} pilot${daemonScores.size === 1 ? '' : 's'}`);
 
         // Prior evidence and cross-comp identity load here in pass 1a;
         // scoring waits for pass 1c so it can include the group-level
         // twin-pilot evidence built in pass 1b.
-        const priorMap = await loadPriorEvidence(datecode, className, excludeStart);
+        const priorMap = await loadPriorEvidence(datecode, className, excludeReplayStart);
         if (priorMap.size) console.log(`  loaded ${priorMap.size} prior crossing-score${priorMap.size === 1 ? '' : 's'} from earlier task days`);
 
         const assignmentMethodMap = await loadAssignmentMethods(className);
@@ -304,7 +348,22 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         );
         if (priorAircraft.size) console.log(`  loaded cross-comp identity for ${priorAircraft.size} flarmid${priorAircraft.size === 1 ? '' : 's'}`);
 
-        classMatches.push({job, results, matches, excludeStart, priorMap, priorAircraft, candidateFacets, assignmentMethodMap, scoreMap: new Map(), sameFlightMap: new Map(), pathPriorMap: new Map(), twinWarnings: []});
+        classMatches.push({
+            job,
+            results,
+            matches,
+            commonStart,
+            excludeReplayStart,
+            daemonScores,
+            priorMap,
+            priorAircraft,
+            candidateFacets,
+            assignmentMethodMap,
+            scoreMap: new Map(),
+            sameFlightMap: new Map(),
+            pathPriorMap: new Map(),
+            twinWarnings: []
+        });
     }
 
     // Pass 1b — group-level maps.
@@ -371,7 +430,7 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
     // Pass 1c — score each class independently (no twin signal — the
     // identification decision is shared in pass 3, not pre-empted here).
     for (const cm of classMatches) {
-        cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeStart, cm.assignmentMethodMap);
+        cm.scoreMap = computeScoreMap(cm.matches, cm.results, ddb, cm.priorMap, cm.candidateFacets, cm.priorAircraft, cm.excludeReplayStart, cm.assignmentMethodMap, cm.commonStart, cm.daemonScores);
     }
 
     // Pass 1d — path similarity for ambiguous same-pilot pairs.
@@ -524,9 +583,12 @@ async function processGroup(group: JobGroup, debugFlarmidsArg: Set<string>, debu
         const proposals = proposalsByClass.get(className) ?? [];
         summary.proposed += proposals.length;
 
+        const compLabel = job.compName ? `${job.compName} [${job.compid}]` : job.compid;
+        const classLabel = job.classDisplay ? `${job.classDisplay} [${className}]` : className;
+        const contextLabel = `${compLabel} / ${classLabel} / ${datecode}`;
         const accepted = proposals.length //
             ? interactive
-                ? await reviewProposals(proposals, matches, results, tolerance, scoreMap, crossClass, className)
+                ? await reviewProposals(proposals, matches, results, tolerance, scoreMap, crossClass, className, contextLabel)
                 : proposals
             : [];
 
@@ -622,6 +684,7 @@ async function getTask(className: ClassName, datecode: Datecode): Promise<Task |
         rules: {
             grandprixstart: taskdetails.grandprixstart == 'Y',
             nostartutc: taskdetails.nostartutc,
+            pevStart: taskdetails.pevstart == 'Y',
             aat: taskdetails.type == 'A',
             dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
             dm: taskdetails.Dm ?? undefined,
@@ -656,6 +719,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
             lastname: string;
             startUtc: number;
             finishUtc: number | null;
+            distance: number | null;
             trackerid: string;
             glidertype: string;
             homeclub: string;
@@ -672,6 +736,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
                CASE WHEN pr.finish IS NULL OR pr.finish = '00:00:00' THEN NULL
                     ELSE UNIX_TIMESTAMP(CONCAT(${date}, ' ', pr.finish)) - c.tzoffset
                END                                                          AS finishUtc,
+               pr.distance                                                  AS distance,
                COALESCE(t.trackerid, '')                                    AS trackerid,
                COALESCE(p.glidertype, '')                                   AS glidertype,
                COALESCE(p.homeclub, '')                                     AS homeclub,
@@ -695,6 +760,7 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
         trackerid: r.trackerid,
         startUtc: Number(r.startUtc) as Epoch,
         finishUtc: r.finishUtc === null ? null : (Number(r.finishUtc) as Epoch),
+        distanceKm: r.distance !== null && Number(r.distance) > 0 ? Number(r.distance) : null,
         glidertype: r.glidertype,
         homeclub: r.homeclub,
         country: r.country,
@@ -702,6 +768,59 @@ async function loadOfficialResults(className: ClassName, datecode: Datecode): Pr
         greg: r.greg,
         grandprixstart: r.grandprixstart === 'Y'
     }));
+}
+
+// Per-compno daemon scored triples for the ogn cross-check, keyed by
+// trim+uppercased compno (char(4) padding/casing must not break the join).
+type DaemonScoreMap = Map<string, OgnDaemonPilot>;
+
+const normCompno = (compno: Compno | string): string => String(compno).trim().toUpperCase();
+
+const OGN_FETCH_TIMEOUT_MS = 5000;
+
+// Fetch the ogn daemon's live scores for one channel. The daemon scored each
+// pilot with the flarmid(s) configured in tracker.trackerid, so its
+// utcStart/utcFinish/actual.taskDistance triple is evidence about which
+// pilot's flight those devices actually flew. Fail-soft: a missing/refusing
+// daemon must never fail the run, but must say why the check was skipped
+// (silence must not be indistinguishable from success). Returns null on any
+// failure.
+async function fetchDaemonScores(baseUrl: string, className: ClassName, datecode: Datecode): Promise<DaemonScoreMap | null> {
+    const channel = `${className}${datecode}`.toUpperCase();
+    const url = `${baseUrl.replace(/\/+$/, '')}/scores/${channel}.json`;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), OGN_FETCH_TIMEOUT_MS);
+    let payload: any;
+    try {
+        const r = await fetch(url, {signal: ac.signal});
+        if (!r.ok) {
+            console.log(`  (ogn daemon check skipped: GET ${url} -> ${r.status}${r.status === 404 ? ' - channel not active on the daemon' : ''})`);
+            return null;
+        }
+        payload = await r.json();
+    } catch (e: any) {
+        const reason = e?.name === 'AbortError' ? `timeout after ${OGN_FETCH_TIMEOUT_MS}ms` : (e?.cause?.code ?? e?.message ?? String(e));
+        console.log(`  (ogn daemon check skipped: GET ${url} failed - ${reason})`);
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+    const pilots = payload?.scores?.pilots;
+    if (!pilots || typeof pilots !== 'object') {
+        console.log(`  (ogn daemon check skipped: ${url} returned no scores.pilots)`);
+        return null;
+    }
+    const out: DaemonScoreMap = new Map();
+    for (const [compno, p] of Object.entries<any>(pilots)) {
+        out.set(normCompno(compno), {
+            // 0 means unset in the protobuf-generated shape; the JSON route
+            // serves real km (the x10 wire scaling is protobuf-only).
+            utcStart: p?.utcStart ? Number(p.utcStart) : null,
+            utcFinish: p?.utcFinish ? Number(p.utcFinish) : null,
+            taskDistanceKm: p?.actual?.taskDistance ? Number(p.actual.taskDistance) : null
+        });
+    }
+    return out;
 }
 
 // Load prior evidence for one (class, datecode), keyed by
@@ -1319,13 +1438,37 @@ function computeScoreMap(
     priorMap: PriorMap,
     candidateFacets: Map<Compno, IdentityFacets> = new Map(),
     priorAircraft: PriorAircraftMap = new Map(),
-    excludeStart = false,
-    assignmentMethodMap: Map<string, string> = new Map()
+    excludeReplayStart = false,
+    assignmentMethodMap: Map<string, string> = new Map(),
+    commonStart = false,
+    daemonScores: DaemonScoreMap | null = null
 ): ScoreMap {
     if (!matches.length) return new Map();
     const earliestPilotStartUtc = results.reduce((m, r) => Math.min(m, r.startUtc), Number.POSITIVE_INFINITY);
     const resultByCompno = new Map<Compno, OfficialResult>();
     for (const r of results) resultByCompno.set(r.compno, r);
+
+    // OGN cross-check maps. flarmOwner: configured flarmid -> the daemon
+    // triple of the pilot it is configured for (the daemon scored that pilot
+    // with this device, so the triple is evidence about the device's flight).
+    // An id configured under more than one pilot has an ill-defined owner and
+    // is dropped from cross-matching (the assigned-pair path still works via
+    // the per-compno lookup). matchCountByCompno: k per daemon-scored pilot -
+    // how many pilots' official results that triple matches - dilutes
+    // cross-pair credit for non-discriminating (gaggle) matches.
+    const flarmOwner = new Map<string, {compno: Compno; daemon: OgnDaemonPilot} | null>();
+    const matchCountByCompno = new Map<string, number>();
+    if (daemonScores) {
+        for (const r of results) {
+            const daemon = daemonScores.get(normCompno(r.compno));
+            if (!daemon) continue;
+            matchCountByCompno.set(normCompno(r.compno), ognMatchCount(daemon, results, commonStart));
+            for (const id of parseCurrentIds(r.trackerid)) {
+                const key = String(id).toUpperCase();
+                flarmOwner.set(key, flarmOwner.has(key) ? null : {compno: r.compno, daemon});
+            }
+        }
+    }
 
     const breakdownByKey = new Map<string, ScoreBreakdown>();
     const xcFacetsByKey = new Map<string, string[]>();
@@ -1346,7 +1489,16 @@ function computeScoreMap(
         // For external assignments (robocontrol, soaringspotscrape, sgp, startmatch),
         // baseline is independent evidence and is kept.
         const baselineMatch = m.assigned && assignmentMethodMap.get(scoreKey(m.compno, m.flarmid)) !== 'ognddb';
-        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeStart, baselineMatch);
+        // OGN cross-check: assigned pair -> signed check of the pilot's own
+        // daemon triple vs their official result; cross pair (flarmid owned by
+        // a DIFFERENT daemon-scored pilot) -> positive-only credit when that
+        // owner's triple matches THIS pilot's official result, 1/k-diluted.
+        const owner = flarmOwner.get(String(m.flarmid).toUpperCase());
+        const own = m.assigned ? daemonScores?.get(normCompno(m.compno)) : undefined;
+        const ognCross = !own && !!owner && normCompno(owner.compno) !== normCompno(m.compno);
+        const ogn = own ? ognSignalsFrom(own, r, commonStart) : ognCross ? ognSignalsFrom(owner!.daemon, r, commonStart) : OGN_SIGNALS_NONE;
+        const ognK = ognCross ? (matchCountByCompno.get(normCompno(owner!.compno)) ?? 1) : 1;
+        const sig = signalsFromMatch(m, earliestPilotStartUtc, link, priorNats, xc, excludeReplayStart, baselineMatch, ogn, ognCross, ognK);
         const breakdown = scoreSignals(sig);
         breakdownByKey.set(scoreKey(m.compno, m.flarmid), breakdown);
         xcFacetsByKey.set(scoreKey(m.compno, m.flarmid), xc.facets);
@@ -1445,19 +1597,33 @@ function ddbLinkFor(ddb: DDBEntry | undefined, compno: Compno, glidertype: strin
     return {cn, glider, tag: cn && glider ? 'both' : cn ? 'cn' : glider ? 'glider' : 'none'};
 }
 
-function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: DdbLink, priorNats: number, xc: XcEvidence, excludeStart = false, baselineMatch = m.assigned): Signals {
+function signalsFromMatch(
+    m: TrackerMatch,
+    earliestPilotStartUtc: number,
+    link: DdbLink,
+    priorNats: number,
+    xc: XcEvidence,
+    excludeReplayStart = false,
+    baselineMatch = m.assigned,
+    ogn: OgnSignalFields = OGN_SIGNALS_NONE,
+    ognIsCross = false,
+    ognMatchCount = 1
+): Signals {
     const d = m.diag;
-    // Grandprix common-start: the start crossing is identical for every pilot,
-    // so drop it (and its distance) to null — scoreSignals then contributes 0
-    // for both, leaving the finish crossing to do the discriminating.
-    // Note: gapAroundStartSec and distAtStartKm are also nulled so the
-    // negStart signal (confirmed-positional-absence) does not fire either —
-    // there's no useful per-pilot start-line evidence in this mode.
+    // Grandprix common-start / pev cylinder start: the replay start crossing
+    // carries no per-pilot information (identical for everyone, resp. not the
+    // scored start), so drop it (and its distance) to null — scoreSignals then
+    // contributes 0 for both, leaving the finish crossing to do the
+    // discriminating. Note: gapAroundStartSec and distAtStartKm are also
+    // nulled so the negStart signal (confirmed-positional-absence) does not
+    // fire either — there's no useful per-pilot start-line evidence in these
+    // modes. The ogn* daemon deltas were nulled per-mode in ognSignalsFrom
+    // (grandprix drops the daemon start too; pev keeps it).
     return {
-        deltaStart: excludeStart ? null : m.deltaStart,
+        deltaStart: excludeReplayStart ? null : m.deltaStart,
         deltaFinish: m.deltaFinish,
-        distAtStartKm: excludeStart ? null : (d?.distAtStartKm ?? null),
-        gapAroundStartSec: excludeStart ? null : (d?.gapAroundStartSec ?? null),
+        distAtStartKm: excludeReplayStart ? null : (d?.distAtStartKm ?? null),
+        gapAroundStartSec: excludeReplayStart ? null : (d?.gapAroundStartSec ?? null),
         distAtFinishKm: d?.distAtFinishKm ?? null,
         gapAroundFinishSec: d?.gapAroundFinishSec ?? null,
         inBboxPackets: d?.inBboxPackets ?? 0,
@@ -1467,6 +1633,10 @@ function signalsFromMatch(m: TrackerMatch, earliestPilotStartUtc: number, link: 
         ddbCnMatch: link.cn,
         ddbGliderMatch: link.glider,
         baselineMatch,
+        ...ogn,
+        ognAvgGapSec: d?.avgGapSec ?? null,
+        ognIsCross,
+        ognMatchCount,
         priorNats,
         xcNats: xc.nats,
         ambiguous: m.ambiguous
@@ -1619,6 +1789,10 @@ function fmtScore(score: ScoreBreakdown, margins: Margins, pilotContested: boole
     if (score.distAtFinish > 0) contribs.push(`distF=${score.distAtFinish.toFixed(2)}`);
     if (score.negStart < 0) contribs.push(`negS=${score.negStart.toFixed(2)}`);
     if (score.negFinish < 0) contribs.push(`negF=${score.negFinish.toFixed(2)}`);
+    // ogn daemon cross-check contributions; the time sides are signed.
+    if (score.ognStart !== 0) contribs.push(`ognS=${score.ognStart.toFixed(2)}`);
+    if (score.ognFinish !== 0) contribs.push(`ognF=${score.ognFinish.toFixed(2)}`);
+    if (score.ognDist > 0) contribs.push(`ognD=${score.ognDist.toFixed(2)}`);
     if (score.inBbox > 0) contribs.push(`presence=${score.inBbox.toFixed(2)}`);
     if (score.preLaunch > 0) contribs.push(`pre=${score.preLaunch.toFixed(2)}`);
     if (score.ddbCn > 0) contribs.push(`ddbCN=${score.ddbCn.toFixed(2)}`);
@@ -1659,9 +1833,18 @@ function summariseProposal(p: Proposal): string {
     return parts.join('  |  ');
 }
 
-async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], results: OfficialResult[], tolerance: number, scoreMap: ScoreMap, crossClass: CrossClassMap, thisClass: ClassName): Promise<Proposal[]> {
+async function reviewProposals(
+    proposals: Proposal[],
+    matches: TrackerMatch[],
+    results: OfficialResult[],
+    tolerance: number,
+    scoreMap: ScoreMap,
+    crossClass: CrossClassMap,
+    thisClass: ClassName,
+    contextLabel: string
+): Promise<Proposal[]> {
     if (!proposals.length) return [];
-    console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
+    console.log(`\n  ${proposals.length} proposed change${proposals.length === 1 ? '' : 's'} for ${contextLabel} (y=apply, n=skip, a=accept-all-remaining, q=quit review):`);
 
     // Built from the full match set so the per-proposal view (which filters
     // to one pilot) can still annotate same-class contenders for a flarmid.
@@ -1676,7 +1859,7 @@ async function reviewProposals(proposals: Proposal[], matches: TrackerMatch[], r
     let acceptAll = false;
     for (let i = 0; i < proposals.length; i++) {
         const p = proposals[i];
-        console.log(`\n  [${i + 1}/${proposals.length}] ${summariseProposal(p)}`);
+        console.log(`\n  [${i + 1}/${proposals.length}] ${contextLabel}: ${summariseProposal(p)}`);
         printPilotMatches(
             p.compno,
             matches.filter((m) => m.compno === p.compno),

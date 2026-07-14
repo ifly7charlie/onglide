@@ -262,6 +262,8 @@ double-count and go stale.
 | DDB CN match | `ddb.cn == pilot.compno` (case-insensitive) | indicator | 1.5 |
 | DDB glider match | `gliderEquivalent(ddb.aircraft_model, pilot.glidertype)` | indicator | 0.3 (weak) |
 | operator baseline | flarmid in current `tracker.trackerid` | indicator | 1.0 |
+| ogn daemon time (per side) | daemon `/scores` `utcStart`/`utcFinish` vs official, via the flarmid's owning channel-pilot | signed: `max(0, 1 − \|Δ\|/30s)` positive; negative ramp beyond 300 s (assigned pairs only); zeroed when a within-tolerance replay crossing exists on that side; × coverage factor; cross pairs × 0.6/k | 0.6 |
+| ogn daemon distance | daemon `actual.taskDistance` vs `pilotresult.distance` | `max(0, 1 − \|Δkm\|/max(5, 0.05·official))`, positive only; × coverage factor; cross pairs × 0.6/k | 0.4 |
 | twin pilot | same compno + same pilot name (`samePilotName` token-set match) in another class of this comp | `twinPilotSupport`: max over classes of `min(1, 0.5·assignedThere + crossingScore(rawΔs, rawΔf))` | 1.0 |
 | prior | persisted prior days' start/finish crossings, capped ≤1/day, decayed | `Σ crossingScore · exp(−daysAgo/τ)` | 1.0 (already in nats) |
 
@@ -321,6 +323,74 @@ crossing (plus presence, DDB, prior, xc) to do the discriminating. The report
 prints `grandprix start with a single common start time — excluding
 start-line crossing from scoring`. Both conditions are required: if the
 start times actually differ they remain informative and are kept.
+
+### OGN daemon cross-check
+
+The ogn daemon (`bin/ogn.ts`) scores every pilot live using the flarmid(s)
+configured in `tracker.trackerid`, and serves the result at
+`GET /scores/{CLASS}{DATECODE}.json` (real km, no wire ×10 scaling on the
+JSON route). `pilotresult.start/finish/distance` come exclusively from the
+official scoring upstream (OGN-side code only writes `igcavailable`), so
+daemon-vs-official agreement is **non-circular** evidence about which
+pilot's flight the configured tracker actually flew. `fetchDaemonScores`
+in `bin/findtrackers.ts` pulls the channel per class in pass 1a
+(fail-soft: daemon down / channel inactive → logged skip, no evidence);
+`computeScoreMap` injects the comparison via `ognSignalsFrom` /
+`scoreSignals` (`lib/scoring/shared/trackerScore.ts`).
+
+The daemon triple (`utcStart`, `utcFinish`, `actual.taskDistance`) for
+channel-pilot A is evidence about *A's configured flarmid(s)*, not about A,
+so it is compared against **every** pilot's official result:
+
+- **Assigned pair** (owner == the pair's pilot): signed check. Agreement
+  inside the wide knee (30 s; daemon-vs-official crosses data sources, so
+  it is much wider than the 5 s replay tolerance) earns positive nats;
+  start/finish time deltas beyond 300 s ramp negative (saturating at
+  600 s). Distance is positive-only — optimiser/penalty differences must
+  never demote. Dead zone in between absorbs scoring-algorithm quirks.
+- **Cross pair** (owner is a *different* daemon-scored pilot): positive-only
+  credit ×`OGN_CHECK_CROSS_FACTOR` (0.6), further divided by k = how many
+  pilots' official results that triple matches (`ognMatchCount`; a triple
+  matching a whole gaggle's start says little about any one pilot). In a
+  clean tracker swap this yields the symmetric signature — negative on both
+  assigned pairs, positive on both cross pairs — and the existing
+  contention/margin/proposal machinery surfaces the swap. An id configured
+  under more than one pilot has an ill-defined owner and is skipped for
+  cross-matching.
+
+Both sides are **zeroed when a within-tolerance replay crossing exists on
+that side** (same anti-double-count gate as distAtStart: the crossing is
+direct evidence from the same APRS data, and an assigned-pair disagreement
+past a good crossing can only be algorithmic). Every ogn support is scaled
+by a whole-track **coverage factor** from `TrackerDiag.avgGapSec` (1 at
+≤10 s mean packet interval, 0 at ≥120 s, 0 with no measurable track) —
+poor coverage biases the daemon's scored values away from the official
+ones even for the correct tracker, so it must weaken positives and
+negatives alike. The replay's own crossing signals keep their point-local
+gap modulation instead. The ogn fields are excluded from
+`physicalMatchScore` (they exist only for pairs with a daemon-scored owner
+and derive from official results — including them would bias cross-comp
+identity collection) and are never persisted into the prior.
+
+**pev cylinder start days** (`tasks.pevstart='Y'`, validated by
+`calculateTask`): the scored start is credited inside the cylinder, so
+ring-edge crossings carry no start information. `findTrackerMatches` runs
+with `excludeStartCrossings` — start crossings are dropped from candidate
+generation and classification (finish-anchored phase-1.5 rows become the
+withinTolerance candidate set; concurrency needs finish proximity only) —
+and the replay start signals are nulled like the grandprix case. The daemon
+scored start is **kept** (unlike grandprix, it is per-pilot) and becomes
+the primary start evidence. On grandprix common-start days the daemon
+start delta is nulled too — the shared time is non-discriminating.
+
+Tunables (`lib/constants.ts`, `OGN_CHECK_*`): time knee 30 s, negative
+onset 300 s / scale 1, distance knee max(5 km, 5%), cross factor 0.6,
+cross match floor 0.5, coverage good/bad gap 10 s / 120 s (coverage values
+provisional pending real-flight validation). Weights `ognTime = 0.6` per
+side, `ognDist = 0.4`: assigned max +1.6 nats / min −1.2, cross max
++0.96/k. CLI: `--ogn-url` (default `OGN_SCORES_URL` env or
+`http://localhost:$WEBSOCKET_PORT`), `--no-ogn-check` to disable. Report
+lines: `ognS=` / `ognF=` (signed) / `ognD=` in the score breakdown.
 
 ### Margins
 
@@ -595,6 +665,8 @@ findtrackers [--compid <id> | --all]
              [--tolerance <sec>]       # default 5
              [--max-gap <sec>]         # default 60
              [--reorder-window <sec>]  # default 20
+             [--ogn-url <url>]         # daemon base URL for the ogn cross-check
+             [--no-ogn-check]          # disable the ogn daemon cross-check
              [--debug-flarmid <id>]    # repeatable
              [--debug-compno <cn>]     # repeatable
              [--dry-run | --yes]
