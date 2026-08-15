@@ -327,6 +327,48 @@ To enable SSL add ONGLIDE_SSL to the .env file
 ONGLIDE_SSL=yes
 ```
 
+### Built-in Let's Encrypt certificates (standalone deployments)
+
+When the OGN daemon serves TLS itself (from `keys/<host>.key.pem` +
+`keys/<host>.cert.pem` on `WEBSOCKET_PORT + 1000`), it can also obtain and
+renew that certificate automatically via ACME. Renewed certificates are
+hot-swapped into the running listener — no restart, connected clients are
+untouched. With no certificate on disk yet, the daemon orders one at startup
+and brings the TLS listener up as soon as it is issued.
+
+This is for standalone (non-docker) deployments only: the docker topologies
+already terminate TLS in Traefik or Apache mod_md with their own ACME — leave
+`ACME_ENABLED` unset there.
+
+```
+ACME_ENABLED=1                     # opt-in; only NEXT_PUBLIC_WEBSOCKET_HOST is managed
+ACME_EMAIL=you@example.com         # account contact; falls back to SERVER_ADMIN
+ACME_STAGING=1                     # use the Let's Encrypt staging CA while testing
+#ACME_DIRECTORY=https://...        # full directory URL override (wins over ACME_STAGING)
+#ACME_RENEW_DAYS=30                # renew when fewer than this many days remain
+#ACME_PORT80=0                     # skip the temporary :80 challenge listener
+```
+
+Setting `ACME_ENABLED` implies agreement to the CA's Terms of Service
+(`termsOfServiceAgreed` in the ACME account registration). The account key is
+created on first use at `keys/acme/account.key.pem` — staging and production
+accounts are separate, so delete it (and the staging cert) when switching
+`ACME_STAGING` off.
+
+Validation is http-01, so port 80 of the websocket host must reach this
+daemon: either leave `ACME_PORT80` at its default so the daemon binds :80
+itself for the seconds the challenge lasts (needs the privilege to do so), or
+forward `/.well-known/acme-challenge/` from whatever owns port 80 to the
+daemon's `WEBSOCKET_PORT`. If neither is in place the renewal fails loudly and
+retries with backoff — the daemon itself keeps running. Keep the clock
+NTP-synced; certificate lifetimes and ACME signatures both depend on it.
+
+Renewal is checked twice a day and `ACME_RENEW_DAYS` before expiry. To force a
+check immediately (e.g. after fixing a forward): `kill -USR2 <pid>`. Current
+state — days remaining, last error, next check — is in the `acme` object of
+`/status/overview`. External certificate-expiry monitoring is still a good
+idea; the daemon can only complain to its own log.
+
 ### Per-competition official tracking delay
 
 Each row in the `competition` table has a `delayseconds` column controlling how

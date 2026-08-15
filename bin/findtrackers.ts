@@ -1859,7 +1859,8 @@ async function reviewProposals(
     let acceptAll = false;
     for (let i = 0; i < proposals.length; i++) {
         const p = proposals[i];
-        console.log(`\n  [${i + 1}/${proposals.length}] ${contextLabel}: ${summariseProposal(p)}`);
+        console.log(`\n  [${i + 1}/${proposals.length}] ${contextLabel}:`);
+        console.log(`    ${summariseProposal(p)}`);
         printPilotMatches(
             p.compno,
             matches.filter((m) => m.compno === p.compno),

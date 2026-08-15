@@ -38,6 +38,7 @@
         "@turf/line-to-polygon": "^6.5.0",
         "@turf/turf": ">=5.1.6",
         "@types/web-push": "^3.6.4",
+        "acme-client": "^5.4.0",
         "country-iso-2-to-3": "=1.1.0",
         "country-iso-3-to-2": "=1.1.1",
         "deck.gl": "=9.2.11",

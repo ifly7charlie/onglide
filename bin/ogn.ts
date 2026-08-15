@@ -46,6 +46,9 @@ import {classDisplayStatus, type CompetitionDisplayStatus} from '../lib/competit
 // Web Push notifications for competition status changes (daemon-only module).
 import {initPushNotifications, notifyCompetitionDelta, sweepDeferredStarts, sweepExpiredSubscriptions} from './lib/pushNotifications';
 
+// Built-in ACME certificate management for the websocket TLS listener (daemon-only module).
+import {acmeConfigFromEnv, startAcmeManager, getAcmeChallengeResponse, type AcmeManager} from './lib/acme';
+
 // Reserved channel name for the global "all competitions" feed used by the
 // landing page. Lowercase so it cannot collide with a real `{className}{datecode}`
 // channel (those are upper-cased alphanumeric — see channelName()).
@@ -308,6 +311,10 @@ let shuttingDown = false;
 // freshly-started daemon (sharing the port via SO_REUSEPORT) becomes the sole
 // listener before we hand the live client sockets over.
 const httpServers: (http.Server | https.Server)[] = [];
+
+// ACME certificate renewal loop, when ACME_ENABLED is set. Renewed certs are
+// hot-swapped into the running TLS listener - no restart, no client drops.
+let acmeManager: AcmeManager | null = null;
 
 // Maintained set of current per-comp CompetitionSummary objects, keyed by
 // compid. broadcastCompetitionsDelta rebuilds an entry whenever a comp
@@ -612,32 +619,52 @@ async function main() {
         console.log('PM2/DOCKER: starting http(s) listener');
     }
 
-    const hasSSL = (
-        await Promise.all(
-            [process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].map(async (host) => {
-                if (!host) return false;
-                let options;
-                try {
-                    options = {
-                        key: readFileSync(`keys/${host}.key.pem`),
-                        cert: readFileSync(`keys/${host}.cert.pem`)
-                    };
-                } catch (e) {
-                    console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
-                    return false;
-                }
-                if (!options.key || !options.cert) return false;
-                console.log('initialising SSL');
-                const sslPort = parseInt(process.env.WEBSOCKET_PORT!) + 1000;
-                const server = https.createServer(options, setupOgnWebServer);
-                await listenWithRetry(server, sslPort, `SSL ${host}`);
-                httpServers.push(server);
-                setupWebSocketServer(server);
-                console.log(`listening on [SSL] ${sslPort} ssh key for ${host}`);
-                return true;
-            })
-        )
-    ).some(Boolean);
+    // Resolved before the listeners so the block below can tell a missing cert
+    // in manual mode (an error) from the pre-first-issuance state under ACME
+    // (expected). The manager itself starts after the plain HTTP listener is
+    // bound - its challenge route must be live before the first order.
+    const acmeConfig = acmeConfigFromEnv(process.env);
+
+    const sslPort = parseInt(process.env.WEBSOCKET_PORT || '8080') + 1000;
+    const startTlsServer = async (host: string, options: {key: Buffer; cert: Buffer}): Promise<https.Server> => {
+        const server = https.createServer(options, setupOgnWebServer);
+        await listenWithRetry(server, sslPort, `SSL ${host}`);
+        httpServers.push(server);
+        setupWebSocketServer(server);
+        console.log(`listening on [SSL] ${sslPort} ssl key for ${host}`);
+        return server;
+    };
+
+    // The websocket host's server is retained so an ACME-renewed certificate
+    // can be hot-swapped into it (setSecureContext) without dropping clients.
+    let websocketTlsServer: https.Server | null = null;
+    let hasSSL = false;
+
+    // Set() dedupes SITEURL == WEBSOCKET_HOST so the pair shares one listener
+    // instead of opening two on the same port.
+    for (const host of new Set([process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL])) {
+        if (!host) continue;
+        let options;
+        try {
+            options = {
+                key: readFileSync(`keys/${host}.key.pem`),
+                cert: readFileSync(`keys/${host}.cert.pem`)
+            };
+        } catch (e) {
+            if (acmeConfig && host == acmeConfig.host) {
+                console.log(`No certificate for ${host} yet - ACME is enabled, TLS listener will start after first issuance`);
+            } else {
+                console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
+            }
+            continue;
+        }
+        console.log('initialising SSL');
+        const server = await startTlsServer(host, options);
+        hasSSL = true;
+        if (host == process.env.NEXT_PUBLIC_WEBSOCKET_HOST) {
+            websocketTlsServer = server;
+        }
+    }
 
     if (!hasSSL) {
         console.log(`SSL not initialised`);
@@ -653,6 +680,23 @@ async function main() {
     httpServers.push(server);
     setupWebSocketServer(server);
     console.log(`Onglide startup ${gitVersion()} listening on ${port}`);
+
+    // ACME renewal loop - started only now that the HTTP listener above is
+    // serving the http-01 challenge route. A renewed cert is applied to the
+    // running TLS listener in place; the first-ever cert starts it.
+    if (acmeConfig) {
+        acmeManager = startAcmeManager({
+            ...acmeConfig,
+            onCertificate: async (key, cert) => {
+                if (websocketTlsServer) {
+                    websocketTlsServer.setSecureContext({key, cert});
+                    console.log(`acme: new certificate applied to the running TLS listener for ${acmeConfig.host}`);
+                } else {
+                    websocketTlsServer = await startTlsServer(acmeConfig.host, {key, cert});
+                }
+            }
+        });
+    }
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
@@ -896,6 +940,17 @@ process.on('SIGHUP', handleExit);
 process.on('SIGQUIT', handleExit);
 process.on('SIGTERM', handleExit);
 
+// Force an immediate ACME certificate check - handy for testing a renewal
+// without waiting for the timer. (SIGUSR1 is left alone: it is Node's
+// debugger-activation signal, and ssscrape uses it for its state dump.)
+process.on('SIGUSR2', () => {
+    if (acmeManager) {
+        acmeManager.forceCheck('SIGUSR2');
+    } else {
+        console.log('SIGUSR2: ACME certificate management not enabled');
+    }
+});
+
 // Tell every connected client to reconnect — they land on the incoming daemon
 // (the sole listener once handleExit has closed our servers). The signal is the
 // bare WS_MOVE sentinel; each client picks its own random delay < CLIENT_MOVE_
@@ -938,6 +993,14 @@ async function handleExit(signal: string) {
         } catch (e) {
             console.error('server.close during exit:', e);
         }
+    }
+
+    // Stop the renewal timer; its setTimeouts are unref()ed so this is about
+    // not starting a fresh order mid-shutdown, not about hanging the exit.
+    try {
+        acmeManager?.stop();
+    } catch (e) {
+        console.error('acme stop during exit:', e);
     }
 
     // Ask every live client to migrate, then give them the full move window to
@@ -3943,6 +4006,17 @@ function setupOgnWebServer(req, res) {
         return;
     }
 
+    // ACME http-01 challenge responses. Also reachable through an operator's
+    // forward of the prefix to this port when the daemon cannot bind :80
+    // itself. Deliberately not the default headers - challenges are one-shot
+    // and must never be cached. Unknown tokens fall through to the 404 below.
+    const acmeResponse = getAcmeChallengeResponse(req?.url);
+    if (acmeResponse !== null) {
+        res.writeHead(200, {'Content-Type': 'text/plain', 'Cache-Control': 'no-store'});
+        res.end(acmeResponse);
+        return;
+    }
+
     // Health check stays unauthenticated so upstream probes (load
     // balancers, container orchestration, monitoring) don't need
     // credentials. Every *other* /status* route is gated.
@@ -4000,7 +4074,7 @@ function setupOgnWebServer(req, res) {
         };
 
         const unknownTrackers = Object.values(contexts).reduce((acc, c) => Object.assign(acc, c.unknownTrackers), {} as Record<string, UnknownTracker>);
-        res.end(JSON.stringify({channels: channels, gliders, unknownTrackers}, replacer));
+        res.end(JSON.stringify({channels: channels, gliders, unknownTrackers, acme: acmeManager?.status()}, replacer));
         return;
     }
 
