@@ -352,8 +352,14 @@ ACME_STAGING=1                     # use the Let's Encrypt staging CA while test
 Setting `ACME_ENABLED` implies agreement to the CA's Terms of Service
 (`termsOfServiceAgreed` in the ACME account registration). The account key is
 created on first use at `keys/acme/account.key.pem` — staging and production
-accounts are separate, so delete it (and the staging cert) when switching
-`ACME_STAGING` off.
+accounts are separate, so delete it when switching `ACME_STAGING` off.
+
+The certificate itself is reissued automatically on that switch: the directory
+that issued it is recorded in `keys/<host>.directory`, and a certificate from
+any other directory (or one from a staging CA when the configured directory is
+not staging) counts as due however much validity is left on it. So changing
+`ACME_STAGING` or `ACME_DIRECTORY` takes effect at the next check — `kill -USR2
+<pid>` for it to happen now — rather than when the old certificate expires.
 
 Validation is http-01, so port 80 of the websocket host must reach this
 daemon: either leave `ACME_PORT80` at its default so the daemon binds :80

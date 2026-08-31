@@ -2,8 +2,8 @@ import {describe, it, expect, afterEach} from 'vitest';
 
 import * as acme from 'acme-client';
 
-import {acmeConfigFromEnv, certificateDaysRemaining, isRenewalDue, nextRetryDelayMs, nextRoutineCheckDelayMs, registerChallenge, unregisterChallenge, clearChallenges, getAcmeChallengeResponse} from '../bin/lib/acme';
-import {FIXTURE_CERT_PEM, FIXTURE_CERT_NOT_AFTER_MS} from './lib/acmeFixtures';
+import {acmeConfigFromEnv, certificateDaysRemaining, isRenewalDue, certificateIssuerMismatch, issuerRecordPath, nextRetryDelayMs, nextRoutineCheckDelayMs, registerChallenge, unregisterChallenge, clearChallenges, getAcmeChallengeResponse} from '../bin/lib/acme';
+import {FIXTURE_CERT_PEM, FIXTURE_CERT_NOT_AFTER_MS, FIXTURE_STAGING_CERT_PEM} from './lib/acmeFixtures';
 
 const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -34,6 +34,42 @@ describe('isRenewalDue', () => {
         expect(isRenewalDue(FIXTURE_CERT_PEM, 30, FIXTURE_CERT_NOT_AFTER_MS + DAY_MS)).toBe(true);
         expect(isRenewalDue(null, 30)).toBe(true);
         expect(isRenewalDue('not a certificate', 30)).toBe(true);
+    });
+});
+
+describe('certificateIssuerMismatch', () => {
+    const production = acme.directory.letsencrypt.production;
+    const staging = acme.directory.letsencrypt.staging;
+
+    it('accepts a certificate issued from the configured directory', () => {
+        expect(certificateIssuerMismatch(FIXTURE_CERT_PEM, production, production)).toBeNull();
+        expect(certificateIssuerMismatch(FIXTURE_STAGING_CERT_PEM, staging, staging)).toBeNull();
+    });
+
+    it('reports a recorded directory that is no longer the configured one', () => {
+        expect(certificateIssuerMismatch(FIXTURE_CERT_PEM, staging, production)).toContain(staging);
+        expect(certificateIssuerMismatch(FIXTURE_CERT_PEM, 'https://ca.internal/dir', production)).toContain('ca.internal');
+    });
+
+    it('spots a staging certificate with no record - the pre-upgrade case', () => {
+        expect(certificateIssuerMismatch(FIXTURE_STAGING_CERT_PEM, null, production)).toContain('staging');
+        expect(certificateIssuerMismatch(FIXTURE_STAGING_CERT_PEM, null, staging)).toBeNull();
+    });
+
+    it('spots a staging certificate whose record says production', () => {
+        // A crash between writing the record and writing the pem pair.
+        expect(certificateIssuerMismatch(FIXTURE_STAGING_CERT_PEM, production, production)).toContain('staging');
+    });
+
+    it('leaves an unrecorded non-staging certificate alone', () => {
+        expect(certificateIssuerMismatch(FIXTURE_CERT_PEM, null, production)).toBeNull();
+        expect(certificateIssuerMismatch('not a certificate', null, production)).toBeNull();
+    });
+});
+
+describe('issuerRecordPath', () => {
+    it('sits beside the certificate it describes', () => {
+        expect(issuerRecordPath('keys', 'gliding.example.com')).toBe('keys/gliding.example.com.directory');
     });
 });
 

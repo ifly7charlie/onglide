@@ -109,6 +109,44 @@ export function isRenewalDue(certPem: string | Buffer | null, renewDays: number,
     return days === null || days < renewDays;
 }
 
+//
+// Where the issuing directory URL is recorded, next to the certificate it
+// issued. Without it a certificate is judged on expiry alone, so turning
+// ACME_STAGING off (or repointing ACME_DIRECTORY) would leave the old CA's
+// certificate in service until it expired.
+export function issuerRecordPath(keysDir: string, host: string): string {
+    return `${keysDir}/${host}.directory`;
+}
+
+// Let's Encrypt marks every staging intermediate in the issuer name -
+// "(STAGING) ..." now, "Fake LE ..." on the older ones. Only a fallback, for
+// certificates issued before the record file existed.
+function isStagingCertificate(certPem: string | Buffer): boolean {
+    try {
+        return /\(STAGING\)|Fake LE/i.test(new X509Certificate(certPem).issuer);
+    } catch (e) {
+        return false; // unparseable is renewal-due on its own account
+    }
+}
+
+//
+// Reason the certificate on disk did not come from the configured CA, or null
+// when it did (or when there is no evidence either way). Any reason makes the
+// certificate renewal-due however much validity is left on it.
+//
+// The staging check runs even when the record agrees, so a crash between
+// writing the record and writing the certificate cannot leave a staging
+// certificate in service against a production directory.
+export function certificateIssuerMismatch(certPem: string | Buffer, recordedDirectory: string | null, configuredDirectory: string): string | null {
+    if (recordedDirectory !== null && recordedDirectory !== configuredDirectory) {
+        return `certificate was issued from ${recordedDirectory}, configured directory is now ${configuredDirectory}`;
+    }
+    if (isStagingCertificate(certPem) && configuredDirectory !== acme.directory.letsencrypt.staging) {
+        return `certificate was issued by a staging CA, configured directory is ${configuredDirectory}`;
+    }
+    return null;
+}
+
 // Backoff after a failed order: 1h, 2h, 4h ... capped at 24h, +-10% jitter so a
 // fleet of restarts does not synchronise against the CA.
 export function nextRetryDelayMs(consecutiveFailures: number, rand: () => number = Math.random): number {
@@ -173,6 +211,7 @@ export function startAcmeManager(config: AcmeConfig & {onCertificate: (key: Buff
     const keyPath = `${config.keysDir}/${config.host}.key.pem`;
     const certPath = `${config.keysDir}/${config.host}.cert.pem`;
     const accountKeyPath = `${config.keysDir}/acme/account.key.pem`;
+    const directoryPath = issuerRecordPath(config.keysDir, config.host);
 
     let stopped = false;
     let inFlight = false;
@@ -275,6 +314,11 @@ export function startAcmeManager(config: AcmeConfig & {onCertificate: (key: Buff
             renameSync(`${keyPath}.tmp`, keyPath);
             renameSync(`${certPath}.tmp`, certPath);
 
+            // Record which CA issued this pair so that pointing the daemon at
+            // a different directory reissues rather than waiting for expiry.
+            writeFileSync(`${directoryPath}.tmp`, config.directoryUrl);
+            renameSync(`${directoryPath}.tmp`, directoryPath);
+
             certDaysRemaining = certificateDaysRemaining(cert);
             console.log(`acme: obtained certificate for ${config.host}, ${certDaysRemaining === null ? 'unknown' : Math.floor(certDaysRemaining)} days validity`);
 
@@ -317,6 +361,15 @@ export function startAcmeManager(config: AcmeConfig & {onCertificate: (key: Buff
                 haveKey = false;
             }
 
+            let recordedDirectory: string | null = null;
+            try {
+                recordedDirectory = readFileSync(directoryPath, 'utf8').trim() || null;
+            } catch (e) {
+                if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+                    throw e;
+                }
+            }
+
             certDaysRemaining = certPem ? certificateDaysRemaining(certPem) : null;
             if (certPem && certDaysRemaining === null) {
                 console.error(`acme: existing certificate at ${certPath} is unparseable - reissuing`);
@@ -324,8 +377,12 @@ export function startAcmeManager(config: AcmeConfig & {onCertificate: (key: Buff
             if (certPem && !haveKey) {
                 console.error(`acme: certificate exists but ${keyPath} is missing - reissuing`);
             }
+            const issuerMismatch = certPem ? certificateIssuerMismatch(certPem, recordedDirectory, config.directoryUrl) : null;
+            if (issuerMismatch) {
+                console.log(`acme: ${issuerMismatch} - reissuing`);
+            }
 
-            if (haveKey && !isRenewalDue(certPem, config.renewDays)) {
+            if (haveKey && !issuerMismatch && !isRenewalDue(certPem, config.renewDays)) {
                 console.log(`acme: certificate for ${config.host} has ${Math.floor(certDaysRemaining!)} days remaining (check: ${reason}), renews at <${config.renewDays}`);
                 lastError = null;
                 consecutiveFailures = 0;
