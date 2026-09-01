@@ -193,7 +193,7 @@ interface Statistics {
     listenerCycles: number; // trackpoint sent cycles
     statsCycles: number; // statistics reported cycles
     visibleListeners: number; // how many have page visible in browser
-    interactingListeners: number; // how many have update options
+    interactingListeners: number; // how many have changed options/pilot and are still visible
     activeListeners: number; // how many have received points
     peakListeners: number;
     connects: number; // websockets subscribed to this channel in the period
@@ -820,9 +820,20 @@ async function main() {
         //
         // We need to purge unused channels
         const now = getNow();
+
+        // sendKeepalive (below) clears activeGliders, so the aggregate loop
+        // that follows can't read it — snapshot the count per channel here.
+        const activeGliderCounts: Record<string, number> = {};
+
         for (const channelName in channels) {
             const channel = channels[channelName];
 
+            activeGliderCounts[channelName] = channel.activeGliders.size;
+
+            // Sampled once per reporting cycle, immediately before sendKeepalive
+            // clears isVisible — so this is "how many were interacting/visible
+            // during the last cycle", and statsCycles (reset with them) is the
+            // matching divisor.
             channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
 
@@ -869,12 +880,16 @@ async function main() {
             const channel = channels[channelName as ChannelName];
 
             channel.statistics.statsCycles++;
-            channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, channel.statistics.activeListeners / channel.statistics.listenerCycles);
+            // listenerCycles is 0 for a channel created between a position tick
+            // and this report; 0/0 would be NaN, and Math.max would latch that
+            // into peakListeners permanently (it isn't reset per period).
+            const avgListeners = channel.statistics.listenerCycles ? channel.statistics.activeListeners / channel.statistics.listenerCycles : 0;
+            channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, avgListeners);
 
             // We need to accumulate how much time we have had
             const viewTime = channel.clients.reduce((total, client) => total + (now - client.connectedAt), 0);
 
-            const activeGliderCount = channel.activeGliders.size;
+            const activeGliderCount = activeGliderCounts[channelName] ?? 0;
             const hasPackets = channel.statistics.totalPackets > 0;
             const hasListenerActivity =
                 channel.statistics.activeListeners > 0 ||
@@ -891,7 +906,7 @@ async function main() {
                 }
                 if (hasListenerActivity) {
                     parts.push(
-                        `${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
+                        `${avgListeners.toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
                             channel.statistics.interactingListeners / channel.statistics.statsCycles
                         ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, +${channel.statistics.connects}/-${channel.statistics.closed}/-${
                             channel.statistics.notAlive
@@ -903,7 +918,7 @@ async function main() {
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
-            trackAggregatedMetric(channel.className, 'activeListeners', channel.statistics.activeListeners / channel.statistics.listenerCycles, channel.statistics.listenerCycles);
+            trackAggregatedMetric(channel.className, 'activeListeners', avgListeners, channel.statistics.listenerCycles);
             trackAggregatedMetric(channel.className, 'listeners.connects', channel.statistics.connects);
             trackAggregatedMetric(channel.className, 'listeners.closed', channel.statistics.closed);
             trackAggregatedMetric(channel.className, 'listeners.notAlive', channel.statistics.notAlive);
@@ -920,6 +935,8 @@ async function main() {
                 channel.statistics.notAlive =
                 channel.statistics.activeListeners =
                 channel.statistics.interactingListeners =
+                channel.statistics.visibleListeners =
+                channel.statistics.statsCycles =
                 channel.statistics.listenerCycles =
                 channel.statistics.outOfOrderPackets =
                 channel.statistics.insertedPackets =
@@ -3406,7 +3423,12 @@ async function sendKeepalive(channel: Channel) {
             client.send(channel.lastKeepAliveMsg, {binary: true});
         }
         client.isAlive = false;
-        client.isInteracting = false;
+        // isVisible is re-asserted by the client's own 10s heartbeat so it can
+        // be sampled per cycle. isInteracting is NOT cleared here — the client
+        // only sends a compno message when the user actually changes something,
+        // so clearing it per cycle would turn it into an event rate. It latches
+        // for the life of the connection, cleared only when the client reports
+        // itself hidden (see the message handler).
         client.isVisible = false;
         client.ping(function () {});
     });
@@ -3963,6 +3985,11 @@ function setupWebSocketServer(server) {
                 const msg = JSON.parse(cx.toString());
                 if ('v' in msg) {
                     ws.isVisible = !!msg.v;
+                    // Backgrounding the tab ends the interaction; it latches
+                    // again the next time they touch the controls.
+                    if (!ws.isVisible) {
+                        ws.isInteracting = false;
+                    }
                 } else if ('compno' in msg) {
                     ws.isInteracting = true;
                     userLogStream?.write(new Date().toISOString() + ':' + channelName + ':' + cx.toString() + '\n');
