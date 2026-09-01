@@ -196,6 +196,9 @@ interface Statistics {
     interactingListeners: number; // how many have update options
     activeListeners: number; // how many have received points
     peakListeners: number;
+    connects: number; // websockets subscribed to this channel in the period
+    closed: number; // removed after a close frame from the client
+    notAlive: number; // removed because they stopped answering the keepalive ping
 
     totalViewingTime: number;
 }
@@ -837,6 +840,12 @@ async function main() {
                 return client.isAlive === false;
             });
 
+            // Each client is caught by exactly one filter above (closed runs
+            // before notAlive, and a closed socket sets both flags) so a clean
+            // close is never also counted as a keepalive timeout.
+            channel.statistics.closed += closed.length;
+            channel.statistics.notAlive += notAlive.length;
+
             if (notAlive.length || notValid.length) {
                 let viewTime = 0;
                 [...notAlive, ...closed].forEach((client: OgnWebSocket) => {
@@ -867,7 +876,14 @@ async function main() {
 
             const activeGliderCount = channel.activeGliders.size;
             const hasPackets = channel.statistics.totalPackets > 0;
-            const hasListenerActivity = channel.statistics.activeListeners > 0 || channel.statistics.peakListeners > 0 || channel.statistics.totalViewingTime > 0 || viewTime > 0;
+            const hasListenerActivity =
+                channel.statistics.activeListeners > 0 ||
+                channel.statistics.peakListeners > 0 ||
+                channel.statistics.totalViewingTime > 0 ||
+                viewTime > 0 ||
+                channel.statistics.connects > 0 ||
+                channel.statistics.closed > 0 ||
+                channel.statistics.notAlive > 0;
             if (activeGliderCount > 0 || hasPackets || hasListenerActivity) {
                 const parts: string[] = [`${activeGliderCount} active gliders`, `${channel.statistics.positionsSent}/${channel.statistics.totalPackets} positions sent`];
                 if (channel.statistics.outOfOrderPackets) {
@@ -877,7 +893,9 @@ async function main() {
                     parts.push(
                         `${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
                             channel.statistics.interactingListeners / channel.statistics.statsCycles
-                        ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing)`
+                        ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, +${channel.statistics.connects}/-${channel.statistics.closed}/-${
+                            channel.statistics.notAlive
+                        }, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing)`
                     );
                 }
                 console.log(`${channelName}: ${parts.join(', ')}`);
@@ -886,6 +904,9 @@ async function main() {
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'activeListeners', channel.statistics.activeListeners / channel.statistics.listenerCycles, channel.statistics.listenerCycles);
+            trackAggregatedMetric(channel.className, 'listeners.connects', channel.statistics.connects);
+            trackAggregatedMetric(channel.className, 'listeners.closed', channel.statistics.closed);
+            trackAggregatedMetric(channel.className, 'listeners.notAlive', channel.statistics.notAlive);
 
             trackAggregatedMetric(channel.className, 'ogn.outOfOrderPackets', channel.statistics.outOfOrderPackets);
             trackAggregatedMetric(channel.className, 'ogn.insertedPackets', channel.statistics.insertedPackets);
@@ -894,6 +915,9 @@ async function main() {
             channel.statistics.positionsSent =
                 channel.statistics.positionsSentCycles =
                 channel.statistics.bytesSent =
+                channel.statistics.connects =
+                channel.statistics.closed =
+                channel.statistics.notAlive =
                 channel.statistics.activeListeners =
                 channel.statistics.interactingListeners =
                 channel.statistics.listenerCycles =
@@ -1553,6 +1577,9 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                     interactingListeners: 0,
                     visibleListeners: 0,
                     peakListeners: 0,
+                    connects: 0,
+                    closed: 0,
+                    notAlive: 0,
                     totalViewingTime: 0,
                     bytesSent: 0
                 },
@@ -3955,6 +3982,7 @@ function setupWebSocketServer(server) {
             return undefined;
         };
         channel.clients.push(ws);
+        channel.statistics.connects++;
 
         // Send vario etc for all gliders we are tracking
         sendCurrentState(ws);
