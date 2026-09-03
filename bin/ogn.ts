@@ -201,6 +201,7 @@ interface Statistics {
     notAlive: number; // removed because they stopped answering the keepalive ping
 
     totalViewingTime: number;
+    totalViewers: number; // sessions banked into totalViewingTime, ie the divisor for the average
 }
 
 interface ChannelTask {}
@@ -857,17 +858,24 @@ async function main() {
             channel.statistics.closed += closed.length;
             channel.statistics.notAlive += notAlive.length;
 
-            if (notAlive.length || notValid.length) {
-                let viewTime = 0;
-                [...notAlive, ...closed].forEach((client: OgnWebSocket) => {
-                    channel.statistics.totalViewingTime += now - client.connectedAt;
-                    viewTime += now - client.connectedAt;
-                    client.terminate();
-                });
-                notValid.forEach((client: OgnWebSocket) => {
-                    client.terminate();
-                });
-                console.log(`${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`);
+            // Bank the viewing time of everyone who has gone, unconditionally:
+            // they are no longer in channel.clients, so if it isn't added to
+            // totalViewingTime here it is lost from the reported total. A cycle
+            // that removes only cleanly-closed clients is the common case.
+            const departed = [...notAlive, ...closed];
+            let viewTime = 0;
+            channel.statistics.totalViewers += departed.length;
+            departed.forEach((client: OgnWebSocket) => {
+                channel.statistics.totalViewingTime += now - client.connectedAt;
+                viewTime += now - client.connectedAt;
+                client.terminate();
+            });
+            notValid.forEach((client: OgnWebSocket) => {
+                client.terminate();
+            });
+
+            if (departed.length || notValid.length) {
+                console.log(`${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${departed.length ? viewTime / departed.length : '-'}s avg, ${notValid.length} notValid`);
             }
 
             // Send keep alive and reset the stats/status
@@ -905,12 +913,21 @@ async function main() {
                     parts.push(`${channel.statistics.outOfOrderPackets} ooo`);
                 }
                 if (hasListenerActivity) {
+                    // Average session length: finished sessions / sessions still
+                    // running / both together. The current figure only counts
+                    // time viewed so far, so it reads low while people are
+                    // still watching and pulls the combined figure down with it.
+                    const avgMinutes = (total: number, count: number) => (count ? (total / count / 60).toFixed(1) : '-');
+                    const avgViewing = `${avgMinutes(channel.statistics.totalViewingTime, channel.statistics.totalViewers)}/${avgMinutes(viewTime, channel.clients.length)}/${avgMinutes(
+                        channel.statistics.totalViewingTime + viewTime,
+                        channel.statistics.totalViewers + channel.clients.length
+                    )}m avg`;
                     parts.push(
                         `${avgListeners.toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
                             channel.statistics.interactingListeners / channel.statistics.statsCycles
                         ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, +${channel.statistics.connects}/-${channel.statistics.closed}/-${
                             channel.statistics.notAlive
-                        }, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing)`
+                        }, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing, ${avgViewing})`
                     );
                 }
                 console.log(`${channelName}: ${parts.join(', ')}`);
@@ -1598,6 +1615,7 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                     closed: 0,
                     notAlive: 0,
                     totalViewingTime: 0,
+                    totalViewers: 0,
                     bytesSent: 0
                 },
                 heightStatistics: new Stats(),
@@ -3938,6 +3956,9 @@ function setupWebSocketServer(server) {
         ws.isValid = true;
         ws.isClosed = false;
         ws.isInteracting = false;
+        // Set by the client's visibility report, which it sends on connect —
+        // until that arrives the client isn't counted as watching.
+        ws.isVisible = false;
 
         // Reserved /all channel: landing-page listener gets a CompetitionsList
         // snapshot and is added to the dedicated competitionsListeners array.
@@ -3991,7 +4012,13 @@ function setupWebSocketServer(server) {
                         ws.isInteracting = false;
                     }
                 } else if ('compno' in msg) {
-                    ws.isInteracting = true;
+                    // Every client sends its settings once on connect to record
+                    // the defaults; only the client's own `changed` flag marks a
+                    // send that followed a click, so that's what counts as
+                    // interaction. Always logged either way.
+                    if (msg.changed) {
+                        ws.isInteracting = true;
+                    }
                     userLogStream?.write(new Date().toISOString() + ':' + channelName + ':' + cx.toString() + '\n');
                 }
             } catch (e) {
