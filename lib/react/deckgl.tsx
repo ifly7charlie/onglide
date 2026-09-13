@@ -3,18 +3,29 @@
 import {useCallback, useMemo, useRef, useEffect, useState} from 'react';
 import {useRouter} from 'next/router';
 import {useTranslation} from 'next-i18next/pages';
-import {MapboxOverlay, MapboxOverlayProps} from '@deck.gl/mapbox';
+import {MapLibreOverlay, MapLibreOverlayProps} from '@deck.gl/maplibre';
 
 import Map, {Source, Layer, useControl, NavigationControl, ScaleControl, MapRef} from 'react-map-gl/maplibre';
-import maplibregl from 'maplibre-gl';
+import {addProtocol, setWorkerUrl} from 'maplibre-gl';
 import {Protocol as PMTilesProtocol} from 'pmtiles';
 
 import {buildMapStyle, prefersDarkMode} from './mapStyle';
 
-// Register the pmtiles:// protocol once, client-side only
-if (typeof window !== 'undefined' && !(maplibregl as any).__onglidePmtilesRegistered) {
-    maplibregl.addProtocol('pmtiles', new PMTilesProtocol().tile);
-    (maplibregl as any).__onglidePmtilesRegistered = true;
+// maplibre-gl v6 is ESM-only and loads its worker from a separate file at
+// runtime rather than an inlined blob, so the URL has to be handed to it
+// before the first Map is constructed - otherwise the request falls through
+// to Next's 404 HTML page and the worker dies on `Unexpected token '<'`
+// with no tiles rendered. Letting the bundler emit the worker doesn't work
+// either: it is emitted verbatim, and its own runtime import of the sibling
+// `maplibre-gl-shared.mjs` then 404s. Both files are therefore served as
+// static assets from public/maplibre - `yarn maplibre:worker` copies them
+// out of node_modules and must be re-run when maplibre-gl is upgraded.
+// This module is the only one that renders a <Map>, so module init here is
+// early enough.
+if (typeof window !== 'undefined' && !(window as any).__onglideMaplibreRegistered) {
+    setWorkerUrl('/maplibre/maplibre-gl-worker.mjs');
+    addProtocol('pmtiles', new PMTilesProtocol().tile);
+    (window as any).__onglideMaplibreRegistered = true;
 }
 
 const ONGLIDE_MAP_STYLE = buildMapStyle();
@@ -50,13 +61,13 @@ import {assembleHullLine} from './hullLine';
 import {useOptimalGridLayers, OptimalGridSources} from './optimalGridLayers';
 
 function DeckGLOverlay(
-    props: MapboxOverlayProps & {
+    props: MapLibreOverlayProps & {
         interleaved?: boolean;
-        overlayRef?: React.MutableRefObject<MapboxOverlay | null>;
+        overlayRef?: React.MutableRefObject<MapLibreOverlay | null>;
     }
 ) {
     const {overlayRef, ...overlayProps} = props;
-    const overlay = useControl<MapboxOverlay>(() => new MapboxOverlay(overlayProps));
+    const overlay = useControl<MapLibreOverlay>(() => new MapLibreOverlay(overlayProps));
     overlay.setProps(overlayProps);
     // Expose the overlay to the parent so the RAF cursor loop can call
     // overlay.setProps imperatively without going through React render.
@@ -91,7 +102,7 @@ const TICK_INTERVAL_MS = 1000 / DISPLAY_CURSOR_TICK_HZ;
 // with new currentTime / data, leaves the rest as same-reference (deck.gl
 // reconciliation early-outs on identical refs). Called from a RAF callback —
 // no React reconciliation happens.
-function applyCursorAnimation(overlay: MapboxOverlay, state: RootState, liveNow: Epoch, fullPaths: any, selectedCompno: Compno, hoveredCompno: Compno | null, comparePilots: boolean, grandPrix: boolean, units: any, labels: CompareLabels, task: CompareTask | undefined) {
+function applyCursorAnimation(overlay: MapLibreOverlay, state: RootState, liveNow: Epoch, fullPaths: any, selectedCompno: Compno, hoveredCompno: Compno | null, comparePilots: boolean, grandPrix: boolean, units: any, labels: CompareLabels, task: CompareTask | undefined) {
     const props = (overlay as any).props;
     const layers = props?.layers;
     if (!Array.isArray(layers) || layers.length === 0) return;
@@ -196,7 +207,7 @@ export default function MApp(props: {
     // Imperative cursor state. Updated by the RAF effect below (no React
     // re-render); read here at render time so any layer rebuild caused by
     // real data changes starts from the current cursor position.
-    const overlayRef = useRef<MapboxOverlay | null>(null);
+    const overlayRef = useRef<MapLibreOverlay | null>(null);
     const store = useStore<RootState>();
     const liveStateRef = useRef<{display: number; lastWallMs: number; target: number}>({display: 0, lastWallMs: 0, target: 0});
 
@@ -299,12 +310,12 @@ export default function MApp(props: {
     compareRef.current = {comparePilots, grandPrix, units: options.units, labels: compareLabels, task};
 
     // Unmount the deck overlay around any route change. The deck.gl
-    // MapboxOverlay/MapLibre teardown is racy: when the route changes (e.g.
+    // MapLibreOverlay/MapLibre teardown is racy: when the route changes (e.g.
     // back to the globe landing page) MapLibre can finalize a frame after
     // the deck instance has been disposed, dereferencing a null viewport
     // (`TypeError: null is not an object (evaluating 'viewport.id')`).
     // Flipping this flag on `routeChangeStart` lets React commit the overlay
-    // unmount — which calls `MapboxOverlay.onRemove` and deregisters the
+    // unmount — which calls `MapLibreOverlay.onRemove` and deregisters the
     // deck custom layer from the painter — before MapLibre itself is torn
     // down by the page unmount.
     //

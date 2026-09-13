@@ -128,3 +128,7 @@ keys/*
 db
 mariadb
 next-env.d.ts
+
+# maplibre-gl v6 worker + its sibling, copied out of node_modules by
+# `yarn maplibre:worker` (run as part of `yarn build:next`)
+public/maplibre/
