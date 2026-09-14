@@ -32,7 +32,7 @@ type _OgnTripsLayerProps<DataT = unknown> = {
 
 const startUniforms = {
     name: 'starts',
-    fs: `uniform startsUniforms {
+    fs: `layout(std140) uniform startsUniforms {
   float startTime;
 } starts;`,
     uniformTypes: {
@@ -50,7 +50,12 @@ export class OgnTripsLayer extends TripsLayer<OgnTripsData, _OgnTripsLayerProps>
     getShaders() {
         const shaders = super.getShaders();
         shaders.modules = [...(shaders.modules || []), startUniforms];
-        shaders.inject['fs:#main-start'] += `
+        // TripsLayer no longer injects into 'fs:#main-start' (deck 9.4 moved its
+        // trail logic into DECKGL_FILTER_COLOR), so the hook may be absent - `+=`
+        // on an undefined entry stringifies to 'undefined' and the shader fails
+        // to compile.
+        shaders.inject = shaders.inject || {};
+        shaders.inject['fs:#main-start'] = (shaders.inject['fs:#main-start'] || '') + `
 if(vTime < starts.startTime) {
 discard;
 }`;
