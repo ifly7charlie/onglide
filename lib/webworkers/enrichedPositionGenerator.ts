@@ -194,7 +194,8 @@ export const enrichedPositionGenerator = async function* (
             // Don't save if we are not moving except if the status changes
             // Also ensure we yield the point if it's the end of the replay packets
             // otherwise we may never generate the initial score
-            if (!stationary || previousPoint.ps != point.ps || point._ != previousPoint._) {
+            // A PEV-flagged point always goes through — dropping it would lose the event
+            if (!stationary || point.pev || previousPoint.ps != point.ps || point._ != previousPoint._) {
                 nextArg = yield point;
                 previousPoint = point;
             }

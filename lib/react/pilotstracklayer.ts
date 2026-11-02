@@ -96,6 +96,9 @@ export function pilotsTrackLayer(
                 v: s.climbRate,
                 g: s.agl,
                 p: s.positions,
+                // Per-vertex source anchor; lets picking tell a real fix from a
+                // Hermite inner vertex (undefined on the raw fallback = all real).
+                anchorIndex: p.smoothed?.anchorIndex,
                 attributes: {
                     getPath: {value: s.positions, size: 3},
                     getTimestamps: {value: track.deckAdditional.tr, size: 1},

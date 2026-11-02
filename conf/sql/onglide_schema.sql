@@ -58,6 +58,7 @@ CREATE TABLE `competition` (
   `lt` float DEFAULT NULL COMMENT 'launch/landing location',
   `lg` float DEFAULT NULL COMMENT 'launch/landing location',
   `flightstats` char(1) DEFAULT 'N' COMMENT 'Compute per-flight statistics (thermals, wind, etc.) - Y/N',
+  `cylinderstarts` char(1) DEFAULT 'N' COMMENT 'Y = competition supports IGC cylinder (PEV) starts; ssscrape auto-enables tasks.pevstart for a >=10km full start cylinder and converts a smaller full cylinder to a line',
   `trackingconsent` char(1) DEFAULT 'N' COMMENT 'Y = comp has obtained explicit livetracking consent from pilots; bypass DDB tracked=N block',
   `delayseconds` int(11) DEFAULT NULL COMMENT 'official tracking delay in seconds; NULL = inherit NEXT_PUBLIC_COMPETITION_DELAY env (default 10)',
   `pushnotifications` char(1) DEFAULT 'N' COMMENT 'Y = Web Push status notifications enabled for this competition',
@@ -349,6 +350,7 @@ CREATE TABLE `tasks` (
 
   `duration` time DEFAULT NULL COMMENT 'AAT time',
   `nostart` time DEFAULT NULL COMMENT 'Earliest possible start, starts before this are ignored',
+  `pevstart` enum('Y','N') DEFAULT 'N' COMMENT 'Y = IGC cylinder (PEV) start: estimate start from track behaviour inside the start cylinder',
 
   `hash` TEXT COMMENT 'hash of value from soaring spot to prevent redownloading',
   
@@ -387,8 +389,8 @@ CREATE TABLE `trackerhistory` (
   `method` enum('none','startline','pilot','ognddb','igcfile','tltimes','robocontrol','grandprix','soaringspot','ogn-blocked','flarmnet-blocked','ddb-blocked','startmatch','evidence','startmatch-swap','uncorrelated','sgp','displaced') DEFAULT 'none',
   `class` char(15) DEFAULT NULL,
   `datecode` char(3) DEFAULT NULL,
-  `delta_start` smallint DEFAULT NULL,
-  `delta_finish` smallint DEFAULT NULL,
+  `delta_start` int DEFAULT NULL,
+  `delta_finish` int DEFAULT NULL,
   `dist_at_start` float DEFAULT NULL,
   `gap_around_start` float DEFAULT NULL,
   `dist_at_finish` float DEFAULT NULL,

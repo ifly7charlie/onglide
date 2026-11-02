@@ -34,7 +34,7 @@ import mysql from 'serverless-mysql';
 import {mergePoint, initialiseDeck} from '../lib/flightprocessing/incremental';
 
 // Figure out what the task is and make GeoJSONs of it
-import {calculateTask, taskGeoJSON} from '../lib/flightprocessing/taskhelper';
+import {calculateTask, taskGeoJSON, assembleTask, TaskDetailsRow} from '../lib/flightprocessing/taskhelper';
 import {taskBbox, unionBboxes, expandBbox, accumulateCompBbox, buildAprsFilter, Bbox} from '../lib/flightprocessing/taskBbox';
 
 // Datecode helpers
@@ -46,6 +46,9 @@ import {classDisplayStatus, type CompetitionDisplayStatus} from '../lib/competit
 // Web Push notifications for competition status changes (daemon-only module).
 import {initPushNotifications, notifyCompetitionDelta, sweepDeferredStarts, sweepExpiredSubscriptions} from './lib/pushNotifications';
 
+// Built-in ACME certificate management for the websocket TLS listener (daemon-only module).
+import {acmeConfigFromEnv, startAcmeManager, getAcmeChallengeResponse, type AcmeManager} from './lib/acme';
+
 // Reserved channel name for the global "all competitions" feed used by the
 // landing page. Lowercase so it cannot collide with a real `{className}{datecode}`
 // channel (those are upper-cased alphanumeric — see channelName()).
@@ -55,7 +58,7 @@ const COMPETITIONS_CHANNEL = 'all';
 import {loadMergedDDB, isBlocked, blockedMethod, gliderEquivalent, DDBEntry as SharedDDBEntry} from '../lib/ddb';
 
 // Message passed from the AprsContest Listener
-import {PositionMessage, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow, DistanceKM, FLEW_STATES, CompStatus} from '../lib/types';
+import {PositionMessage, TaskLegsTableRow, FLEW_STATES, CompStatus} from '../lib/types';
 const dev = process.env.NODE_ENV == 'development';
 console.log('dev mode', dev);
 
@@ -190,11 +193,15 @@ interface Statistics {
     listenerCycles: number; // trackpoint sent cycles
     statsCycles: number; // statistics reported cycles
     visibleListeners: number; // how many have page visible in browser
-    interactingListeners: number; // how many have update options
+    interactingListeners: number; // how many have changed options/pilot and are still visible
     activeListeners: number; // how many have received points
     peakListeners: number;
+    connects: number; // websockets subscribed to this channel in the period
+    closed: number; // removed after a close frame from the client
+    notAlive: number; // removed because they stopped answering the keepalive ping
 
     totalViewingTime: number;
+    totalViewers: number; // sessions banked into totalViewingTime, ie the divisor for the average
 }
 
 interface ChannelTask {}
@@ -308,6 +315,10 @@ let shuttingDown = false;
 // freshly-started daemon (sharing the port via SO_REUSEPORT) becomes the sole
 // listener before we hand the live client sockets over.
 const httpServers: (http.Server | https.Server)[] = [];
+
+// ACME certificate renewal loop, when ACME_ENABLED is set. Renewed certs are
+// hot-swapped into the running TLS listener - no restart, no client drops.
+let acmeManager: AcmeManager | null = null;
 
 // Maintained set of current per-comp CompetitionSummary objects, keyed by
 // compid. broadcastCompetitionsDelta rebuilds an entry whenever a comp
@@ -612,32 +623,52 @@ async function main() {
         console.log('PM2/DOCKER: starting http(s) listener');
     }
 
-    const hasSSL = (
-        await Promise.all(
-            [process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL].map(async (host) => {
-                if (!host) return false;
-                let options;
-                try {
-                    options = {
-                        key: readFileSync(`keys/${host}.key.pem`),
-                        cert: readFileSync(`keys/${host}.cert.pem`)
-                    };
-                } catch (e) {
-                    console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
-                    return false;
-                }
-                if (!options.key || !options.cert) return false;
-                console.log('initialising SSL');
-                const sslPort = parseInt(process.env.WEBSOCKET_PORT!) + 1000;
-                const server = https.createServer(options, setupOgnWebServer);
-                await listenWithRetry(server, sslPort, `SSL ${host}`);
-                httpServers.push(server);
-                setupWebSocketServer(server);
-                console.log(`listening on [SSL] ${sslPort} ssh key for ${host}`);
-                return true;
-            })
-        )
-    ).some(Boolean);
+    // Resolved before the listeners so the block below can tell a missing cert
+    // in manual mode (an error) from the pre-first-issuance state under ACME
+    // (expected). The manager itself starts after the plain HTTP listener is
+    // bound - its challenge route must be live before the first order.
+    const acmeConfig = acmeConfigFromEnv(process.env);
+
+    const sslPort = parseInt(process.env.WEBSOCKET_PORT || '8080') + 1000;
+    const startTlsServer = async (host: string, options: {key: Buffer; cert: Buffer}): Promise<https.Server> => {
+        const server = https.createServer(options, setupOgnWebServer);
+        await listenWithRetry(server, sslPort, `SSL ${host}`);
+        httpServers.push(server);
+        setupWebSocketServer(server);
+        console.log(`listening on [SSL] ${sslPort} ssl key for ${host}`);
+        return server;
+    };
+
+    // The websocket host's server is retained so an ACME-renewed certificate
+    // can be hot-swapped into it (setSecureContext) without dropping clients.
+    let websocketTlsServer: https.Server | null = null;
+    let hasSSL = false;
+
+    // Set() dedupes SITEURL == WEBSOCKET_HOST so the pair shares one listener
+    // instead of opening two on the same port.
+    for (const host of new Set([process.env.NEXT_PUBLIC_WEBSOCKET_HOST, process.env.NEXT_PUBLIC_SITEURL])) {
+        if (!host) continue;
+        let options;
+        try {
+            options = {
+                key: readFileSync(`keys/${host}.key.pem`),
+                cert: readFileSync(`keys/${host}.cert.pem`)
+            };
+        } catch (e) {
+            if (acmeConfig && host == acmeConfig.host) {
+                console.log(`No certificate for ${host} yet - ACME is enabled, TLS listener will start after first issuance`);
+            } else {
+                console.log(`Unable to initialise SSL "keys/${host}.key.pem"`, e);
+            }
+            continue;
+        }
+        console.log('initialising SSL');
+        const server = await startTlsServer(host, options);
+        hasSSL = true;
+        if (host == process.env.NEXT_PUBLIC_WEBSOCKET_HOST) {
+            websocketTlsServer = server;
+        }
+    }
 
     if (!hasSSL) {
         console.log(`SSL not initialised`);
@@ -653,6 +684,23 @@ async function main() {
     httpServers.push(server);
     setupWebSocketServer(server);
     console.log(`Onglide startup ${gitVersion()} listening on ${port}`);
+
+    // ACME renewal loop - started only now that the HTTP listener above is
+    // serving the http-01 challenge route. A renewed cert is applied to the
+    // running TLS listener in place; the first-ever cert starts it.
+    if (acmeConfig) {
+        acmeManager = startAcmeManager({
+            ...acmeConfig,
+            onCertificate: async (key, cert) => {
+                if (websocketTlsServer) {
+                    websocketTlsServer.setSecureContext({key, cert});
+                    console.log(`acme: new certificate applied to the running TLS listener for ${acmeConfig.host}`);
+                } else {
+                    websocketTlsServer = await startTlsServer(acmeConfig.host, {key, cert});
+                }
+            }
+        });
+    }
 
     //
     // This function is to send updated flight tracks for the gliders that have reported since the last
@@ -773,9 +821,20 @@ async function main() {
         //
         // We need to purge unused channels
         const now = getNow();
+
+        // sendKeepalive (below) clears activeGliders, so the aggregate loop
+        // that follows can't read it — snapshot the count per channel here.
+        const activeGliderCounts: Record<string, number> = {};
+
         for (const channelName in channels) {
             const channel = channels[channelName];
 
+            activeGliderCounts[channelName] = channel.activeGliders.size;
+
+            // Sampled once per reporting cycle, immediately before sendKeepalive
+            // clears isVisible — so this is "how many were interacting/visible
+            // during the last cycle", and statsCycles (reset with them) is the
+            // matching divisor.
             channel.statistics.interactingListeners += channel.clients.reduce((count, c) => count + (c.isInteracting ? 1 : 0), 0);
             channel.statistics.visibleListeners += channel.clients.reduce((count, c) => count + (c.isVisible ? 1 : 0), 0);
 
@@ -793,17 +852,30 @@ async function main() {
                 return client.isAlive === false;
             });
 
-            if (notAlive.length || notValid.length) {
-                let viewTime = 0;
-                [...notAlive, ...closed].forEach((client: OgnWebSocket) => {
-                    channel.statistics.totalViewingTime += now - client.connectedAt;
-                    viewTime += now - client.connectedAt;
-                    client.terminate();
-                });
-                notValid.forEach((client: OgnWebSocket) => {
-                    client.terminate();
-                });
-                console.log(`${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${notAlive.length ? viewTime / notAlive.length : '-'}s avg, ${notValid.length} notValid`);
+            // Each client is caught by exactly one filter above (closed runs
+            // before notAlive, and a closed socket sets both flags) so a clean
+            // close is never also counted as a keepalive timeout.
+            channel.statistics.closed += closed.length;
+            channel.statistics.notAlive += notAlive.length;
+
+            // Bank the viewing time of everyone who has gone, unconditionally:
+            // they are no longer in channel.clients, so if it isn't added to
+            // totalViewingTime here it is lost from the reported total. A cycle
+            // that removes only cleanly-closed clients is the common case.
+            const departed = [...notAlive, ...closed];
+            let viewTime = 0;
+            channel.statistics.totalViewers += departed.length;
+            departed.forEach((client: OgnWebSocket) => {
+                channel.statistics.totalViewingTime += now - client.connectedAt;
+                viewTime += now - client.connectedAt;
+                client.terminate();
+            });
+            notValid.forEach((client: OgnWebSocket) => {
+                client.terminate();
+            });
+
+            if (departed.length || notValid.length) {
+                console.log(`${channel.className}: ${notAlive.length} inactive, ${closed.length} closed += ${viewTime}s viewing time, ${departed.length ? viewTime / departed.length : '-'}s avg, ${notValid.length} notValid`);
             }
 
             // Send keep alive and reset the stats/status
@@ -816,24 +888,46 @@ async function main() {
             const channel = channels[channelName as ChannelName];
 
             channel.statistics.statsCycles++;
-            channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, channel.statistics.activeListeners / channel.statistics.listenerCycles);
+            // listenerCycles is 0 for a channel created between a position tick
+            // and this report; 0/0 would be NaN, and Math.max would latch that
+            // into peakListeners permanently (it isn't reset per period).
+            const avgListeners = channel.statistics.listenerCycles ? channel.statistics.activeListeners / channel.statistics.listenerCycles : 0;
+            channel.statistics.peakListeners = Math.max(channel.statistics.peakListeners, avgListeners);
 
             // We need to accumulate how much time we have had
             const viewTime = channel.clients.reduce((total, client) => total + (now - client.connectedAt), 0);
 
-            const activeGliderCount = channel.activeGliders.size;
+            const activeGliderCount = activeGliderCounts[channelName] ?? 0;
             const hasPackets = channel.statistics.totalPackets > 0;
-            const hasListenerActivity = channel.statistics.activeListeners > 0 || channel.statistics.peakListeners > 0 || channel.statistics.totalViewingTime > 0 || viewTime > 0;
+            const hasListenerActivity =
+                channel.statistics.activeListeners > 0 ||
+                channel.statistics.peakListeners > 0 ||
+                channel.statistics.totalViewingTime > 0 ||
+                viewTime > 0 ||
+                channel.statistics.connects > 0 ||
+                channel.statistics.closed > 0 ||
+                channel.statistics.notAlive > 0;
             if (activeGliderCount > 0 || hasPackets || hasListenerActivity) {
                 const parts: string[] = [`${activeGliderCount} active gliders`, `${channel.statistics.positionsSent}/${channel.statistics.totalPackets} positions sent`];
                 if (channel.statistics.outOfOrderPackets) {
                     parts.push(`${channel.statistics.outOfOrderPackets} ooo`);
                 }
                 if (hasListenerActivity) {
+                    // Average session length: finished sessions / sessions still
+                    // running / both together. The current figure only counts
+                    // time viewed so far, so it reads low while people are
+                    // still watching and pulls the combined figure down with it.
+                    const avgMinutes = (total: number, count: number) => (count ? (total / count / 60).toFixed(1) : '-');
+                    const avgViewing = `${avgMinutes(channel.statistics.totalViewingTime, channel.statistics.totalViewers)}/${avgMinutes(viewTime, channel.clients.length)}/${avgMinutes(
+                        channel.statistics.totalViewingTime + viewTime,
+                        channel.statistics.totalViewers + channel.clients.length
+                    )}m avg`;
                     parts.push(
-                        `${(channel.statistics.activeListeners / channel.statistics.listenerCycles).toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
+                        `${avgListeners.toFixed(1)} avg listeners (peak ${channel.statistics.peakListeners.toFixed(0)}, interacting ${(
                             channel.statistics.interactingListeners / channel.statistics.statsCycles
-                        ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing)`
+                        ).toFixed(1)}, visible ${(channel.statistics.visibleListeners / channel.statistics.statsCycles).toFixed(1)}, +${channel.statistics.connects}/-${channel.statistics.closed}/-${
+                            channel.statistics.notAlive
+                        }, ${Math.round((channel.statistics.totalViewingTime + viewTime) / 60)}m viewing, ${avgViewing})`
                     );
                 }
                 console.log(`${channelName}: ${parts.join(', ')}`);
@@ -841,7 +935,10 @@ async function main() {
 
             trackAggregatedMetric(channel.className, 'positions.sent', channel.statistics.positionsSent, channel.statistics.positionsSentCycles);
             trackAggregatedMetric(channel.className, 'positions.bytesSent', channel.statistics.bytesSent, channel.statistics.positionsSentCycles);
-            trackAggregatedMetric(channel.className, 'activeListeners', channel.statistics.activeListeners / channel.statistics.listenerCycles, channel.statistics.listenerCycles);
+            trackAggregatedMetric(channel.className, 'activeListeners', avgListeners, channel.statistics.listenerCycles);
+            trackAggregatedMetric(channel.className, 'listeners.connects', channel.statistics.connects);
+            trackAggregatedMetric(channel.className, 'listeners.closed', channel.statistics.closed);
+            trackAggregatedMetric(channel.className, 'listeners.notAlive', channel.statistics.notAlive);
 
             trackAggregatedMetric(channel.className, 'ogn.outOfOrderPackets', channel.statistics.outOfOrderPackets);
             trackAggregatedMetric(channel.className, 'ogn.insertedPackets', channel.statistics.insertedPackets);
@@ -850,8 +947,13 @@ async function main() {
             channel.statistics.positionsSent =
                 channel.statistics.positionsSentCycles =
                 channel.statistics.bytesSent =
+                channel.statistics.connects =
+                channel.statistics.closed =
+                channel.statistics.notAlive =
                 channel.statistics.activeListeners =
                 channel.statistics.interactingListeners =
+                channel.statistics.visibleListeners =
+                channel.statistics.statsCycles =
                 channel.statistics.listenerCycles =
                 channel.statistics.outOfOrderPackets =
                 channel.statistics.insertedPackets =
@@ -896,6 +998,17 @@ process.on('SIGHUP', handleExit);
 process.on('SIGQUIT', handleExit);
 process.on('SIGTERM', handleExit);
 
+// Force an immediate ACME certificate check - handy for testing a renewal
+// without waiting for the timer. (SIGUSR1 is left alone: it is Node's
+// debugger-activation signal, and ssscrape uses it for its state dump.)
+process.on('SIGUSR2', () => {
+    if (acmeManager) {
+        acmeManager.forceCheck('SIGUSR2');
+    } else {
+        console.log('SIGUSR2: ACME certificate management not enabled');
+    }
+});
+
 // Tell every connected client to reconnect — they land on the incoming daemon
 // (the sole listener once handleExit has closed our servers). The signal is the
 // bare WS_MOVE sentinel; each client picks its own random delay < CLIENT_MOVE_
@@ -938,6 +1051,14 @@ async function handleExit(signal: string) {
         } catch (e) {
             console.error('server.close during exit:', e);
         }
+    }
+
+    // Stop the renewal timer; its setTimeouts are unref()ed so this is about
+    // not starting a fresh order mid-shutdown, not about hanging the exit.
+    try {
+        acmeManager?.stop();
+    } catch (e) {
+        console.error('acme stop during exit:', e);
     }
 
     // Ask every live client to migrate, then give them the full move window to
@@ -1490,7 +1611,11 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
                     interactingListeners: 0,
                     visibleListeners: 0,
                     peakListeners: 0,
+                    connects: 0,
+                    closed: 0,
+                    notAlive: 0,
                     totalViewingTime: 0,
+                    totalViewers: 0,
                     bytesSent: 0
                 },
                 heightStatistics: new Stats(),
@@ -1598,12 +1723,17 @@ async function updateClasses(competition: CompetitionContext, datecode: Datecode
     }
 }
 
+// getTask runs per channel on every tick — latch the pevstart misconfiguration
+// warning so it logs once per channel, re-arming if the task is fixed
+const pevStartWarned = new Set<string>();
+
 async function updateTasks(competition: CompetitionContext): Promise<void> {
     // Get the details for the task
     const getTask = async (channel: Channel, maxHandicap: number) => {
         const className = channel.className;
         const datecode = channel.datecode;
-        const taskdetails = ((await db.query<(TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow)[]>(escape`
+        // This SQL is mirrored in pages/api/[className]/task.ts — keep them in step
+        const taskdetails = ((await db.query<TaskDetailsRow[]>(escape`
             SELECT
                 tasks.*,
                 time_to_sec (tasks.duration) durationsecs,
@@ -1659,20 +1789,17 @@ async function updateTasks(competition: CompetitionContext): Promise<void> {
             return null;
         }
 
-        let task: Task = {
-            rules: {
-                grandprixstart: taskdetails.grandprixstart == 'Y',
-                nostartutc: taskdetails.nostartutc,
-                aat: taskdetails.type == 'A',
-                dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
-                dm: taskdetails.Dm ?? undefined,
-                handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
-                maxHandicap
-            },
-            details: taskdetails,
-            legs: tasklegs
-        };
+        let task: Task = assembleTask(taskdetails, tasklegs, maxHandicap);
         calculateTask(task);
+        // calculateTask clears rules.pevStart when the start leg isn't a cylinder
+        if (taskdetails.pevstart == 'Y' && !task.rules.pevStart) {
+            if (!pevStartWarned.has(`${className}${datecode}`)) {
+                pevStartWarned.add(`${className}${datecode}`);
+                console.log(`${className}: tasks.pevstart is set but the start leg is not a cylinder (type=${task.legs[0].type}, a1=${task.legs[0].a1}) - normal start detection will be used`);
+            }
+        } else {
+            pevStartWarned.delete(`${className}${datecode}`);
+        }
         return task;
     };
 
@@ -3314,7 +3441,12 @@ async function sendKeepalive(channel: Channel) {
             client.send(channel.lastKeepAliveMsg, {binary: true});
         }
         client.isAlive = false;
-        client.isInteracting = false;
+        // isVisible is re-asserted by the client's own 10s heartbeat so it can
+        // be sampled per cycle. isInteracting is NOT cleared here — the client
+        // only sends a compno message when the user actually changes something,
+        // so clearing it per cycle would turn it into an event rate. It latches
+        // for the life of the connection, cleared only when the client reports
+        // itself hidden (see the message handler).
         client.isVisible = false;
         client.ping(function () {});
     });
@@ -3824,6 +3956,9 @@ function setupWebSocketServer(server) {
         ws.isValid = true;
         ws.isClosed = false;
         ws.isInteracting = false;
+        // Set by the client's visibility report, which it sends on connect —
+        // until that arrives the client isn't counted as watching.
+        ws.isVisible = false;
 
         // Reserved /all channel: landing-page listener gets a CompetitionsList
         // snapshot and is added to the dedicated competitionsListeners array.
@@ -3871,8 +4006,19 @@ function setupWebSocketServer(server) {
                 const msg = JSON.parse(cx.toString());
                 if ('v' in msg) {
                     ws.isVisible = !!msg.v;
+                    // Backgrounding the tab ends the interaction; it latches
+                    // again the next time they touch the controls.
+                    if (!ws.isVisible) {
+                        ws.isInteracting = false;
+                    }
                 } else if ('compno' in msg) {
-                    ws.isInteracting = true;
+                    // Every client sends its settings once on connect to record
+                    // the defaults; only the client's own `changed` flag marks a
+                    // send that followed a click, so that's what counts as
+                    // interaction. Always logged either way.
+                    if (msg.changed) {
+                        ws.isInteracting = true;
+                    }
                     userLogStream?.write(new Date().toISOString() + ':' + channelName + ':' + cx.toString() + '\n');
                 }
             } catch (e) {
@@ -3890,6 +4036,7 @@ function setupWebSocketServer(server) {
             return undefined;
         };
         channel.clients.push(ws);
+        channel.statistics.connects++;
 
         // Send vario etc for all gliders we are tracking
         sendCurrentState(ws);
@@ -3938,6 +4085,17 @@ function setupOgnWebServer(req, res) {
     if (req.method === 'OPTIONS') {
         res.writeHead(204, headers);
         res.end();
+        return;
+    }
+
+    // ACME http-01 challenge responses. Also reachable through an operator's
+    // forward of the prefix to this port when the daemon cannot bind :80
+    // itself. Deliberately not the default headers - challenges are one-shot
+    // and must never be cached. Unknown tokens fall through to the 404 below.
+    const acmeResponse = getAcmeChallengeResponse(req?.url);
+    if (acmeResponse !== null) {
+        res.writeHead(200, {'Content-Type': 'text/plain', 'Cache-Control': 'no-store'});
+        res.end(acmeResponse);
         return;
     }
 
@@ -3998,7 +4156,7 @@ function setupOgnWebServer(req, res) {
         };
 
         const unknownTrackers = Object.values(contexts).reduce((acc, c) => Object.assign(acc, c.unknownTrackers), {} as Record<string, UnknownTracker>);
-        res.end(JSON.stringify({channels: channels, gliders, unknownTrackers}, replacer));
+        res.end(JSON.stringify({channels: channels, gliders, unknownTrackers, acme: acmeManager?.status()}, replacer));
         return;
     }
 

@@ -126,6 +126,9 @@ interface CompState {
     raw: Record<string, any>;
     tz: string;
     countrycode: string | null;
+    // competition.cylinderstarts — mirrored each heartbeat, surfaced on SourceCtx
+    // so the task-install path can gate IGC cylinder (PEV) start detection.
+    cylinderStarts: boolean;
     metadataLoaded: boolean;
     // Earliest epoch ms at which we'll fire the metadata probe. For
     // brand-new comps (no DB row yet) this is set to "now + jittered
@@ -880,10 +883,11 @@ async function processCompetition(
         st = await initState(db, src, log);
         state.set(src.compid, st);
     } else {
-        // Refresh tz/countrycode from DB in case they were updated by a previous fetch.
+        // Refresh tz/countrycode/cylinderstarts from DB in case they were updated by a previous fetch.
         const fields = await readCompetitionFields(db, src.compid);
         st.tz = fields.tz ?? st.tz;
         st.countrycode = fields.countrycode ?? st.countrycode;
+        st.cylinderStarts = fields.cylinderstarts ?? st.cylinderStarts;
     }
 
     const ctx: SourceCtx = {
@@ -891,6 +895,7 @@ async function processCompetition(
         url: src.url,
         tz: st.tz,
         countrycode: st.countrycode,
+        cylinderstarts: st.cylinderStarts,
         db,
         log: (msg: string, ...args: unknown[]) => log(`[${src.compid}/${src.type}] ${msg}`, ...args),
         raw: src
@@ -910,8 +915,10 @@ async function processCompetition(
         if (existing.name && existing.sitename) {
             st.tz = existing.tz ?? st.tz;
             st.countrycode = existing.countrycode ?? st.countrycode;
+            st.cylinderStarts = existing.cylinderstarts ?? st.cylinderStarts;
             ctx.tz = st.tz;
             ctx.countrycode = st.countrycode;
+            ctx.cylinderstarts = st.cylinderStarts;
             st.metadataLoaded = true;
         } else {
             if (Date.now() < st.metadataDueAt) {
@@ -923,8 +930,10 @@ async function processCompetition(
             const fields = await readCompetitionFields(db, src.compid);
             st.tz = fields.tz ?? st.tz;
             st.countrycode = fields.countrycode ?? st.countrycode;
+            st.cylinderStarts = fields.cylinderstarts ?? st.cylinderStarts;
             ctx.tz = st.tz;
             ctx.countrycode = st.countrycode;
+            ctx.cylinderstarts = st.cylinderStarts;
             st.metadataLoaded = true;
         }
     }
@@ -1139,6 +1148,7 @@ async function initState(
         raw: src,
         tz,
         countrycode: fields.countrycode,
+        cylinderStarts: fields.cylinderstarts ?? false,
         metadataLoaded: false,
         metadataDueAt,
         competitionStart: null,
@@ -1182,21 +1192,24 @@ function initSourceState(tz: string, localNow: LocalTime): SourceState {
     };
 }
 
-async function readCompetitionFields(db: any, compid: string): Promise<{tz: string | null; countrycode: string | null; name: string | null; sitename: string | null}> {
+async function readCompetitionFields(db: any, compid: string): Promise<{tz: string | null; countrycode: string | null; cylinderstarts: boolean | null; name: string | null; sitename: string | null}> {
     try {
         const row = (
             await db.query(escape`
-                SELECT tz, countrycode, name, sitename FROM competition WHERE compid = ${compid}
+                SELECT tz, countrycode, cylinderstarts, name, sitename FROM competition WHERE compid = ${compid}
             `)
         )?.[0];
         return {
             tz: row?.tz ?? null,
             countrycode: row?.countrycode ?? null,
+            // null (not false) when the row is absent so callers can preserve the
+            // prior value via ?? rather than flipping the flag off on a blip.
+            cylinderstarts: row ? row.cylinderstarts == 'Y' : null,
             name: row?.name ?? null,
             sitename: row?.sitename ?? null
         };
     } catch {
-        return {tz: null, countrycode: null, name: null, sitename: null};
+        return {tz: null, countrycode: null, cylinderstarts: null, name: null, sitename: null};
     }
 }
 

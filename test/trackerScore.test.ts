@@ -11,7 +11,13 @@ import {
     inBboxRatio,
     passesCandidateFilter,
     physicalMatchScore,
-    type Signals
+    ognSignalsFrom,
+    ognRawSupport,
+    ognMatchCount,
+    ognCoverageFactor,
+    OGN_SIGNALS_NONE,
+    type Signals,
+    type OgnDaemonPilot
 } from '../lib/scoring/shared/trackerScore';
 import {
     DEFAULT_TOLERANCE_SEC,
@@ -23,7 +29,16 @@ import {
     MAX_TOTAL_PRIOR_NATS,
     PRIOR_PROTECT_NATS,
     TRACKER_SCORE_WEIGHTS,
-    WRONG_CROSS_SCALE
+    WRONG_CROSS_SCALE,
+    OGN_CHECK_TIME_TOLERANCE_SEC,
+    OGN_CHECK_NEG_ONSET_SEC,
+    OGN_CHECK_NEG_SCALE,
+    OGN_CHECK_DIST_ABS_KM,
+    OGN_CHECK_DIST_REL,
+    OGN_CHECK_CROSS_FACTOR,
+    OGN_CHECK_CROSS_MATCH_FLOOR,
+    OGN_CHECK_COVERAGE_GOOD_GAP_SEC,
+    OGN_CHECK_COVERAGE_BAD_GAP_SEC
 } from '../lib/constants';
 
 const baseSignals = (over: Partial<Signals> = {}): Signals => ({
@@ -40,6 +55,11 @@ const baseSignals = (over: Partial<Signals> = {}): Signals => ({
     ddbCnMatch: false,
     ddbGliderMatch: false,
     baselineMatch: false,
+    ognDeltaStart: null,
+    ognDeltaFinish: null,
+    ognTaskDistKm: null,
+    officialDistKm: null,
+    ognAvgGapSec: null,
     priorNats: 0,
     xcNats: 0,
     ...over
@@ -373,6 +393,223 @@ describe('physicalMatchScore', () => {
         // strictly less than the inflated total (which includes ddb/baseline/prior/xc)
         expect(physicalMatchScore(b)).toBeLessThan(b.total);
     });
+
+    test('ogn cross-check fields are excluded', () => {
+        const b = scoreSignals(baseSignals({ognDeltaStart: 0, ognDeltaFinish: 0, ognTaskDistKm: 300, officialDistKm: 300, ognAvgGapSec: 5}));
+        expect(b.total).toBeGreaterThan(0);
+        expect(physicalMatchScore(b)).toBe(0);
+    });
+});
+
+describe('ogn daemon cross-check in scoreSignals', () => {
+    // Good coverage (below the GOOD knee) so covFactor = 1 unless a test says otherwise.
+    const goodCov = {ognAvgGapSec: 5};
+
+    test('all-null ogn fields are a no-op', () => {
+        const b = scoreSignals(baseSignals());
+        expect(b.ognStart).toBe(0);
+        expect(b.ognFinish).toBe(0);
+        expect(b.ognDist).toBe(0);
+        expect(b.total).toBe(0);
+    });
+
+    test('full agreement on both times and distance', () => {
+        const b = scoreSignals(baseSignals({...goodCov, ognDeltaStart: 0, ognDeltaFinish: 0, ognTaskDistKm: 300, officialDistKm: 300}));
+        expect(b.ognStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime, 6);
+        expect(b.ognFinish).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime, 6);
+        expect(b.ognDist).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognDist, 6);
+        expect(b.total).toBeCloseTo(2 * TRACKER_SCORE_WEIGHTS.ognTime + TRACKER_SCORE_WEIGHTS.ognDist, 6);
+    });
+
+    test('positive time knee: half support at half the knee, zero at the knee, sign-symmetric', () => {
+        const half = OGN_CHECK_TIME_TOLERANCE_SEC / 2;
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: half})).ognStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime * 0.5, 6);
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: -half})).ognStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime * 0.5, 6);
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: OGN_CHECK_TIME_TOLERANCE_SEC})).ognStart).toBe(0);
+    });
+
+    test('dead zone between the positive knee and the negative onset scores exactly 0', () => {
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: 100})).ognStart).toBe(0);
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: OGN_CHECK_NEG_ONSET_SEC})).ognStart).toBe(0);
+    });
+
+    test('negative path: ramps past the onset, saturates, clamps beyond', () => {
+        const w = TRACKER_SCORE_WEIGHTS.ognTime;
+        const satPoint = (1 + OGN_CHECK_NEG_SCALE) * OGN_CHECK_NEG_ONSET_SEC;
+        const mid = (OGN_CHECK_NEG_ONSET_SEC + satPoint) / 2;
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: mid})).ognStart).toBeCloseTo(-w * 0.5, 6);
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: satPoint})).ognStart).toBeCloseTo(-w, 6);
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaStart: satPoint * 10})).ognStart).toBeCloseTo(-w, 6);
+        expect(scoreSignals(baseSignals({...goodCov, ognDeltaFinish: satPoint})).ognFinish).toBeCloseTo(-w, 6);
+    });
+
+    test('within-tolerance replay crossing suppresses the daemon signal on that side, both directions', () => {
+        // agreement suppressed (would double-count the crossing)
+        const agree = scoreSignals(baseSignals({...goodCov, deltaStart: 0, ognDeltaStart: 0}));
+        expect(agree.deltaStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.deltaStart, 6);
+        expect(agree.ognStart).toBe(0);
+        // disagreement suppressed (can only be a scoring-algorithm difference)
+        const disagree = scoreSignals(baseSignals({...goodCov, deltaStart: 0, ognDeltaStart: 1000}));
+        expect(disagree.ognStart).toBe(0);
+        // an OUT-of-tolerance crossing does not suppress
+        const outOfTol = scoreSignals(baseSignals({...goodCov, deltaStart: DEFAULT_TOLERANCE_SEC + 5, ognDeltaStart: 0}));
+        expect(outOfTol.ognStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime, 6);
+        // per-side: a start crossing does not affect the finish side
+        const finishSide = scoreSignals(baseSignals({...goodCov, deltaStart: 0, ognDeltaFinish: 0}));
+        expect(finishSide.ognFinish).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime, 6);
+    });
+
+    test('distance knee: relative above the absolute floor, floor below it, never negative', () => {
+        // official 300 km -> knee = max(5, 15) = 15
+        const rel = scoreSignals(baseSignals({...goodCov, ognTaskDistKm: 310, officialDistKm: 300}));
+        expect(rel.ognDist).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognDist * (1 - 10 / (OGN_CHECK_DIST_REL * 300)), 6);
+        // official 40 km -> knee = max(5, 2) = 5 (absolute floor)
+        const abs = scoreSignals(baseSignals({...goodCov, ognTaskDistKm: 43, officialDistKm: 40}));
+        expect(abs.ognDist).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognDist * (1 - 3 / OGN_CHECK_DIST_ABS_KM), 6);
+        // gross disagreement scores 0, never negative
+        const far = scoreSignals(baseSignals({...goodCov, ognTaskDistKm: 100, officialDistKm: 300}));
+        expect(far.ognDist).toBe(0);
+    });
+
+    test('landout: both-no-finish contributes nothing on the finish side, distance still scores', () => {
+        const b = scoreSignals(baseSignals({...goodCov, ognDeltaFinish: null, ognTaskDistKm: 123, officialDistKm: 123}));
+        expect(b.ognFinish).toBe(0);
+        expect(b.ognDist).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognDist, 6);
+    });
+
+    test('cross pairs are positive-only and scaled by the cross factor', () => {
+        // a huge delta never goes negative on a cross pair
+        const neg = scoreSignals(baseSignals({...goodCov, ognIsCross: true, ognDeltaStart: 10000}));
+        expect(neg.ognStart).toBe(0);
+        // agreement earns the cross-scaled support
+        const pos = scoreSignals(baseSignals({...goodCov, ognIsCross: true, ognDeltaStart: 0, ognTaskDistKm: 300, officialDistKm: 300}));
+        expect(pos.ognStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime * OGN_CHECK_CROSS_FACTOR, 6);
+        expect(pos.ognDist).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognDist * OGN_CHECK_CROSS_FACTOR, 6);
+    });
+
+    test('cross-pair support is diluted by the ambiguity divisor k; k is ignored on assigned pairs', () => {
+        const diluted = scoreSignals(baseSignals({...goodCov, ognIsCross: true, ognMatchCount: 4, ognDeltaStart: 0}));
+        expect(diluted.ognStart).toBeCloseTo((TRACKER_SCORE_WEIGHTS.ognTime * OGN_CHECK_CROSS_FACTOR) / 4, 6);
+        const assigned = scoreSignals(baseSignals({...goodCov, ognMatchCount: 4, ognDeltaStart: 0}));
+        expect(assigned.ognStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime, 6);
+    });
+});
+
+describe('ognCoverageFactor', () => {
+    test('shape: 1 at or below GOOD, linear between, 0 at or above BAD, 0 at null', () => {
+        expect(ognCoverageFactor(null)).toBe(0);
+        expect(ognCoverageFactor(0)).toBe(1);
+        expect(ognCoverageFactor(OGN_CHECK_COVERAGE_GOOD_GAP_SEC)).toBe(1);
+        const mid = (OGN_CHECK_COVERAGE_GOOD_GAP_SEC + OGN_CHECK_COVERAGE_BAD_GAP_SEC) / 2;
+        expect(ognCoverageFactor(mid)).toBeCloseTo(0.5, 6);
+        expect(ognCoverageFactor(OGN_CHECK_COVERAGE_BAD_GAP_SEC)).toBe(0);
+        expect(ognCoverageFactor(OGN_CHECK_COVERAGE_BAD_GAP_SEC * 5)).toBe(0);
+    });
+
+    test('scales the ogn supports on both signs; replay signals are unaffected', () => {
+        const mid = (OGN_CHECK_COVERAGE_GOOD_GAP_SEC + OGN_CHECK_COVERAGE_BAD_GAP_SEC) / 2;
+        const pos = scoreSignals(baseSignals({ognAvgGapSec: mid, ognDeltaStart: 0}));
+        expect(pos.ognStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.ognTime * 0.5, 6);
+        const satPoint = (1 + OGN_CHECK_NEG_SCALE) * OGN_CHECK_NEG_ONSET_SEC;
+        const neg = scoreSignals(baseSignals({ognAvgGapSec: mid, ognDeltaStart: satPoint}));
+        expect(neg.ognStart).toBeCloseTo(-TRACKER_SCORE_WEIGHTS.ognTime * 0.5, 6);
+        // no measurable track -> no ogn evidence even with perfect agreement
+        const none = scoreSignals(baseSignals({ognAvgGapSec: null, ognDeltaStart: 0, ognTaskDistKm: 300, officialDistKm: 300}));
+        expect(none.ognStart).toBe(0);
+        expect(none.ognDist).toBe(0);
+        // the replay crossing signal does not depend on ognAvgGapSec
+        const replay = scoreSignals(baseSignals({ognAvgGapSec: null, deltaStart: 0}));
+        expect(replay.deltaStart).toBeCloseTo(TRACKER_SCORE_WEIGHTS.deltaStart, 6);
+    });
+});
+
+describe('ognSignalsFrom', () => {
+    const daemon: OgnDaemonPilot = {utcStart: 1000, utcFinish: 5000, taskDistanceKm: 300};
+    const official = {startUtc: 990, finishUtc: 5020, distanceKm: 305};
+
+    test('missing daemon or official -> all null', () => {
+        expect(ognSignalsFrom(undefined, official, false)).toEqual(OGN_SIGNALS_NONE);
+        expect(ognSignalsFrom(null, official, false)).toEqual(OGN_SIGNALS_NONE);
+        expect(ognSignalsFrom(daemon, undefined, false)).toEqual(OGN_SIGNALS_NONE);
+    });
+
+    test('signed deltas, daemon minus official', () => {
+        const f = ognSignalsFrom(daemon, official, false);
+        expect(f.ognDeltaStart).toBe(10);
+        expect(f.ognDeltaFinish).toBe(-20);
+        expect(f.ognTaskDistKm).toBe(300);
+        expect(f.officialDistKm).toBe(305);
+    });
+
+    test('landout both-no-finish: finish delta null, distance kept', () => {
+        const f = ognSignalsFrom({utcStart: 1000, utcFinish: null, taskDistanceKm: 123}, {startUtc: 990, finishUtc: null, distanceKm: 123}, false);
+        expect(f.ognDeltaStart).toBe(10);
+        expect(f.ognDeltaFinish).toBeNull();
+        expect(f.ognTaskDistKm).toBe(123);
+        expect(f.officialDistKm).toBe(123);
+    });
+
+    test('one-sided finish -> null, both directions', () => {
+        expect(ognSignalsFrom(daemon, {...official, finishUtc: null}, false).ognDeltaFinish).toBeNull();
+        expect(ognSignalsFrom({...daemon, utcFinish: null}, official, false).ognDeltaFinish).toBeNull();
+    });
+
+    test('commonStart (grandprix) nulls the start delta only', () => {
+        const f = ognSignalsFrom(daemon, official, true);
+        expect(f.ognDeltaStart).toBeNull();
+        expect(f.ognDeltaFinish).toBe(-20);
+        expect(f.ognTaskDistKm).toBe(300);
+    });
+
+    test('unset daemon start and non-positive official distance -> null', () => {
+        expect(ognSignalsFrom({...daemon, utcStart: null}, official, false).ognDeltaStart).toBeNull();
+        expect(ognSignalsFrom(daemon, {...official, distanceKm: 0}, false).officialDistKm).toBeNull();
+        expect(ognSignalsFrom(daemon, {...official, distanceKm: null}, false).officialDistKm).toBeNull();
+    });
+});
+
+describe('ognRawSupport / ognMatchCount', () => {
+    test('gaggle: a start-only triple matches every pilot sharing the start time', () => {
+        const daemon: OgnDaemonPilot = {utcStart: 1000, utcFinish: 5000, taskDistanceKm: null};
+        // 10 pilots share the start within the knee; finishes are all far from the daemon's
+        const officials = Array.from({length: 10}, (_, i) => ({startUtc: 1000, finishUtc: 20000 + i * 1000, distanceKm: null}));
+        expect(ognMatchCount(daemon, officials, false)).toBe(10);
+    });
+
+    test('finish+distance agreement is discriminating: exactly one match -> k=1', () => {
+        const daemon: OgnDaemonPilot = {utcStart: 1000, utcFinish: 5000, taskDistanceKm: 300};
+        const officials = [
+            {startUtc: 1000, finishUtc: 5000, distanceKm: 300},
+            {startUtc: 1000, finishUtc: 9000, distanceKm: 100},
+            {startUtc: 1000, finishUtc: 12000, distanceKm: 150}
+        ];
+        // all three share the start, but only the first clears the floor on finish+distance too
+        expect(ognMatchCount(daemon, officials, true)).toBe(1); // commonStart drops the shared start
+    });
+
+    test('unique landout distance-only match -> k=1', () => {
+        const daemon: OgnDaemonPilot = {utcStart: 1000, utcFinish: null, taskDistanceKm: 123};
+        const officials = [
+            {startUtc: 90000, finishUtc: null, distanceKm: 123},
+            {startUtc: 90000, finishUtc: null, distanceKm: 400}
+        ];
+        expect(ognMatchCount(daemon, officials, false)).toBe(1);
+    });
+
+    test('floor boundary on the raw support', () => {
+        const daemon: OgnDaemonPilot = {utcStart: 1000, utcFinish: null, taskDistanceKm: null};
+        // support 0.5 at half the knee (counts), just under at one second more (does not)
+        const atFloor = {startUtc: 1000 - OGN_CHECK_TIME_TOLERANCE_SEC / 2, finishUtc: null, distanceKm: null};
+        const underFloor = {startUtc: 1000 - OGN_CHECK_TIME_TOLERANCE_SEC / 2 - 1, finishUtc: null, distanceKm: null};
+        expect(ognRawSupport(ognSignalsFrom(daemon, atFloor, false))).toBeCloseTo(OGN_CHECK_CROSS_MATCH_FLOOR, 6);
+        expect(ognMatchCount(daemon, [{startUtc: 1000, finishUtc: null, distanceKm: null}, atFloor], false)).toBe(2);
+        expect(ognMatchCount(daemon, [{startUtc: 1000, finishUtc: null, distanceKm: null}, underFloor], false)).toBe(1);
+    });
+
+    test('no matches still returns k=1', () => {
+        const daemon: OgnDaemonPilot = {utcStart: 1000, utcFinish: null, taskDistanceKm: null};
+        expect(ognMatchCount(daemon, [{startUtc: 90000, finishUtc: null, distanceKm: null}], false)).toBe(1);
+    });
 });
 
 describe('computeMargins', () => {
@@ -394,7 +631,6 @@ describe('computeMargins', () => {
         expect(m.margin).toBe(-0.5);
     });
 });
-
 
 describe('inBboxRatio / passesCandidateFilter', () => {
     test('zero packets → ratio 0, fails filter', () => {

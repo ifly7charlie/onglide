@@ -2,8 +2,9 @@
 // "Compare" mode for the options toolbar. Compares the selected glider (A) with a
 // target glider (B), where B is:
 //   1. the hovered glider (map icon or pilot list), when one is hovered, or
-//   2. (Sailplane Grand Prix only) the leaderboard leader (auto sort) — or, when
-//      the selection IS the leader, the glider directly behind it.
+//   2. (Sailplane Grand Prix only) the leaderboard leader (auto sort) among gliders
+//      that have not yet finished — or, when the selection IS the leader, the
+//      glider directly behind it.
 //
 // The comparison is about *scored* progress, not raw GPS separation, so each
 // glider is drawn as an arc of equal progress rather than connected by a straight
@@ -119,6 +120,8 @@ export function computeCompare(
     const sel = posByCompno.get(selectedCompno);
     if (!sel?.position) return null;
 
+    const scores = selectAllScores(state, scoreT) ?? {};
+
     // Pick the target: the hovered glider wins (when it isn't the selection and is
     // on the map) for any task type. With nothing hovered, fall back to the
     // leaderboard leader (or next-behind when we lead) only for a Sailplane Grand
@@ -133,6 +136,7 @@ export function computeCompare(
         for (const r of ranking) {
             if (r.compno === selectedCompno) continue; // skip self → "directly behind" when we lead
             if (!posByCompno.has(r.compno)) continue; // need a position to draw to
+            if (scores[r.compno]?.utcFinish) continue; // only compare against gliders still on course
             tgtCompno = r.compno;
             break;
         }
@@ -143,8 +147,6 @@ export function computeCompare(
 
     const source = sel.position as [number, number, number];
     const target = tgt.position as [number, number, number];
-
-    const scores = selectAllScores(state, scoreT) ?? {};
     const selScore = scores[selectedCompno] as CompareScore | undefined;
     const tgtScore = scores[tgtCompno] as CompareScore | undefined;
 

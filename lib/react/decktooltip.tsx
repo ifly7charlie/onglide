@@ -109,9 +109,13 @@ export function deckTooltip({
                 const segment = pilotStats[compno].find((c) => c.start <= time && time <= c.end);
                 if (segment) object.stats = segment;
             }
-            // Figure out what the local language is for international date strings
+            // Figure out what the local language is for international date strings.
+            // A '~' marks a Hermite inner vertex (interpolated between two real
+            // fixes) rather than a logged point-log fix, so the time/height/climb
+            // shown are approximate, not sampled.
             const dt = new Date(time * 1000);
-            response += `✈️ ${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
+            const approx = object.interpolated ? '~' : '';
+            response += `✈️ ${approx}${dt.toLocaleTimeString(lang, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit'})}<br/>`;
         }
 
         if (process.env.NODE_ENV == 'development') {

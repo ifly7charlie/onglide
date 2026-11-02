@@ -10,7 +10,7 @@ import {coordReduce} from '@turf/meta';
 import {} from '@turf/helpers';
 
 import type {FeatureCollection} from 'geojson';
-import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage, NearestSectorPoint, EnrichedPosition} from '../types';
+import {DistanceKM, As, Task, TaskLeg, Bearing, BasePositionMessage, NearestSectorPoint, EnrichedPosition, Epoch, TasksTableRow, TaskLegsTableRow, ClassesTableRow, ContestDayTableRow} from '../types';
 
 import {PreparedTurnpoint} from './preparedTurnpoint';
 
@@ -53,7 +53,15 @@ export function calculateTask(task: Task) {
         leg.coordinates = deduped;
     }
 
-    task.details.distance = calculateTaskLength(task.legs);
+    // A PEV (cylinder) start needs a cylinder start leg (post-normalisation:
+    // sector with a1=180) and a TP1 to glide toward. Clear the flag here —
+    // the single validation point — so every consumer (task position, racing
+    // and AAT scoring, the browser via the rules passthrough) can trust it.
+    if (task.rules?.pevStart && !(task.legs[0].type === 'sector' && task.legs[0].a1 === 180 && task.legs.length > 1)) {
+        task.rules.pevStart = false;
+    }
+
+    task.details.distance = calculateTaskLength(task.legs, task.rules?.pevStart);
 }
 
 export function taskGeoJSON(task: Task) {
@@ -100,9 +108,11 @@ export function taskGeoJSON(task: Task) {
 }
 
 // Between LEGS, less finish/start rings!
-export function calculateTaskLength(legs: TaskLeg[]): DistanceKM {
+// A PEV (cylinder) start is measured from the credited start point inside the
+// cylinder, not the ring edge, so the start-ring radius is not subtracted.
+export function calculateTaskLength(legs: TaskLeg[], pevStart?: boolean): DistanceKM {
     const first = legs[0];
-    if (first.type == 'sector' && first.a1 == 180) {
+    if (first.type == 'sector' && first.a1 == 180 && !pevStart) {
         first.legDistanceAdjust = first.r1;
         first.length = (first.length - first.legDistanceAdjust) as DistanceKM;
     }
@@ -117,6 +127,31 @@ export function calculateTaskLength(legs: TaskLeg[]): DistanceKM {
 
     // Return the length of the task
     return (Math.round(legs.reduce((s, l) => s + (l.length ?? 0), 0) * 10) / 10) as DistanceKM;
+}
+
+// Row shape produced by the tasks×classes×contestday×competition query — the
+// SQL lives in both bin/ogn.ts (updateTasks/getTask) and
+// pages/api/[className]/task.ts and must stay in step.
+export type TaskDetailsRow = TasksTableRow & {nostartutc: Epoch; durationsecs: number; distance: DistanceKM} & ClassesTableRow & ContestDayTableRow;
+
+// Assemble the in-memory Task from the DB row shapes. Callers run
+// calculateTask() themselves — it mutates leg lengths destructively so it must
+// run exactly once per task object.
+export function assembleTask(taskdetails: TaskDetailsRow, tasklegs: TaskLegsTableRow[], maxHandicap: number): Task {
+    return {
+        rules: {
+            grandprixstart: taskdetails.grandprixstart == 'Y',
+            nostartutc: taskdetails.nostartutc,
+            aat: taskdetails.type == 'A',
+            dh: taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+            dm: taskdetails.Dm ?? undefined,
+            pevStart: taskdetails.pevstart == 'Y',
+            handicapped: taskdetails.handicapped == 'Y' || taskdetails.type == 'D' || taskdetails.handicapped == 'D',
+            maxHandicap
+        },
+        details: taskdetails,
+        legs: tasklegs
+    };
 }
 
 export function preprocessSector(tp: TaskLeg) {

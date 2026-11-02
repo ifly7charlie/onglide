@@ -5,7 +5,7 @@ import {memo, useMemo} from 'react';
 import {useTranslation} from 'next-i18next/pages';
 import {FontAwesomeIcon} from '@fortawesome/react-fontawesome';
 
-import {faMagnifyingGlassLocation, faCaretUp, faCaretDown, faHourglassStart, faClockRotateLeft} from '@fortawesome/free-solid-svg-icons';
+import {faMagnifyingGlassLocation, faCaretUp, faCaretDown, faHourglassStart, faClockRotateLeft, faArrowUpRightFromSquare} from '@fortawesome/free-solid-svg-icons';
 
 import {useState, useEffect} from 'react';
 import {Spinner} from './loaders';
@@ -121,17 +121,22 @@ export const TaskDetails = memo(function TaskDetails({
             {showPreviousDayNote ? <p className="task-previous-day-note">{t('task.previous_day_note')}</p> : null}
             {open ? (
                 <div id="task-collapse">
-                    {task?.details?.nostart != '00:00:00' ? (
-                        <p>
-                            {t('task.start_open', {time: task.details.nostart.substring(0, 5)})}
-                            {(summary.officialDelay ?? 0) > 10 ? (
-                                <span title={t('pilot.view_delayed_official')}>
-                                    {' '}
-                                    <FontAwesomeIcon icon={faClockRotateLeft} /> {OptionalDurationMM('', summary.officialDelay as Epoch, 'm')}
-                                </span>
-                            ) : null}
-                        </p>
-                    ) : null}
+                    <p className="task-collapse-topline">
+                        {task?.details?.nostart != '00:00:00' ? (
+                            <span>
+                                {t('task.start_open', {time: task.details.nostart.substring(0, 5)})}
+                                {(summary.officialDelay ?? 0) > 10 ? (
+                                    <span title={t('pilot.view_delayed_official')}>
+                                        {' '}
+                                        <FontAwesomeIcon icon={faClockRotateLeft} /> {OptionalDurationMM('', summary.officialDelay as Epoch, 'm')}
+                                    </span>
+                                ) : null}
+                            </span>
+                        ) : null}
+                        <a href={`/viewer?className=${encodeURIComponent(vc)}`} target="_blank" rel="noopener noreferrer" title={t('task.open_in_viewer')}>
+                            <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
+                        </a>
+                    </p>
                     <Tasklegs legs={task.legs} onSelect={zoomToTurnpoint} />
 
                     {task.details.info && (

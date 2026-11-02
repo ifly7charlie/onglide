@@ -667,7 +667,7 @@ export class SoaringSpotApiSource implements ScoringSource {
                             if (turnpoints.length >= 2) {
                                 const day = reshapeTaskForUpsert(taskDetails, latestTask, turnpoints);
                                 try {
-                                    await upsertTaskAndLegs(ctx.db, ctx.log, classid, displayName, day);
+                                    await upsertTaskAndLegs(ctx.db, ctx.log, classid, displayName, day, ctx.cylinderstarts);
                                 } catch (e) {
                                     ctx.log(`task install failed for ${classid} ${dateISO}:`, e);
                                 }

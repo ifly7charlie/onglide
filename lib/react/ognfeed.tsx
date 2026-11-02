@@ -6,7 +6,7 @@
 // It will also expose the helper functions required to update the screen
 //
 
-import {useState, useMemo, useCallback, useEffect, memo} from 'react';
+import {useState, useMemo, useCallback, useEffect, useRef, memo} from 'react';
 import {useRouter} from 'next/router';
 import Link from 'next/link';
 import {useTranslation} from 'next-i18next/pages';
@@ -272,9 +272,36 @@ export const OgnFeed = memo(
         // Send the options to the server so we can keep an eye on what settings are
         // used by default, we don't record any identifiers. This is to try and work
         // around safari terminating websocket so frequently
+        //
+        // `changed` tells the daemon whether this was a user action: the first
+        // send of a given payload is the mount (or a resend after reconnect),
+        // which records the defaults but isn't an interaction. Every setOptions
+        // caller in this file is driven by a click, so a differing payload is.
+        const lastSettingsSent = useRef<string | null>(null);
         useEffect(() => {
-            sendMessage(JSON.stringify({compno: effectiveSelectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime}));
+            const settings = {compno: effectiveSelectedCompno ?? 'none', ...options, zoomTask: false, options2d: undefined, options3d: undefined, replay: !!replayTime};
+            const payload = JSON.stringify(settings);
+            const changed = lastSettingsSent.current !== null && lastSettingsSent.current !== payload;
+            lastSettingsSent.current = payload;
+            sendMessage(JSON.stringify({...settings, changed}));
         }, [JSON.stringify({...options, zoomTask: false, options2d: undefined, options3d: undefined}), !!replayTime, effectiveSelectedCompno, sendMessage]); //
+
+        // Report page visibility to the daemon so it can count how many of its
+        // listeners are actually watching. Sent explicitly rather than relying
+        // on the websocket library's heartbeat: on mount, on every
+        // visibilitychange, and every 30s. The daemon clears the flag once a
+        // minute, so a tab that stops reporting (closed, throttled in the
+        // background) correctly drops out of the count.
+        useEffect(() => {
+            const report = () => sendMessage(JSON.stringify({v: document.hidden ? 0 : 1}));
+            report();
+            const timer = setInterval(report, 30000);
+            document.addEventListener('visibilitychange', report);
+            return () => {
+                clearInterval(timer);
+                document.removeEventListener('visibilitychange', report);
+            };
+        }, [sendMessage]);
 
         const onClassChange = useCallback(
             (nextClass: string) => {

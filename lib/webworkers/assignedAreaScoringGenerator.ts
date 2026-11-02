@@ -89,6 +89,13 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
     // And the min graph is the same structure but different weight function
     const minGraph = maxGraph.clone(distHaversine);
 
+    // PEV (cylinder) start: distances are measured from the credited start fix
+    // inside the cylinder, so it replaces the centre sentinel as graph group 0
+    // (and again whenever the estimate changes — later candidate or retro pass).
+    // calculateTask clears the flag when the start leg isn't a cylinder.
+    const pevMode = !!task.rules.pevStart;
+    let creditedStartT = 0;
+
     // Used to track if leg has changed since last calculation
     function legFingerPrint(leg: TaskLegStatus): string {
         return String(leg.entryTimeStamp || '-') + ',' + (leg.exitTimeStamp || '-') + ',' + ((leg?.points?.length ?? 0) * 10000 + leg.penaltyPoints?.length || 'np');
@@ -135,6 +142,16 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
 
             aatLegStatus[0].convexHull = taskStatus.legs[0]?.points || [];
             scoredStatus.legs[0].point = taskStatus.legs[0]?.points[0];
+
+            // Re-seed graph group 0 with the credited start fix when it changes
+            if (pevMode) {
+                const credited = taskStatus.legs[0]?.points?.[0];
+                if (credited && credited.t !== creditedStartT) {
+                    creditedStartT = credited.t;
+                    maxGraph.replaceGroup(0, [{...credited}]);
+                    minGraph.replaceGroup(0, [{...credited}]);
+                }
+            }
 
             scoredStatus.inSector = current.inSector;
             scoredStatus.inPenalty = current.inPenalty;
@@ -210,6 +227,7 @@ export const assignedAreaScoringGenerator = async function* (task: Task, taskSta
             // correct. Forced ticks still fall through so time-based heartbeats keep firing.
             const newScoredKey = [
                 ...aatLegStatus.map((l) => l.fingerPrint),
+                creditedStartT,
                 taskStatus.currentLeg,
                 taskStatus.inSector ? '1' : '0',
                 taskStatus.inPenalty ? '1' : '0',

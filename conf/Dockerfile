@@ -34,7 +34,7 @@ COPY ./public ./public
 COPY --exclude=webworkers --exclude=dijkstras.ts --exclude=launchlanding.ts --exclude=".#*" ./lib ./lib
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN yarn next build
+RUN yarn maplibre:worker && yarn next build
 
 FROM buildbase AS ognbuildimage
 WORKDIR /onglide

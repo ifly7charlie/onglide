@@ -91,6 +91,7 @@ message TaskRules {
 	optional bool handicapped = 5;
 	optional uint32 dm = 6;          // minimum distance for non-AAT speed tasks
 	uint32 maxHandicap = 7; // ×10; highest handicap in the class (may be fractional, e.g. Polish handicaps); absent if class has no handicaps
+	optional bool pevStart = 8;      // IGC cylinder (PEV) start - start estimated from track behaviour inside the cylinder
 }
 
 message TaskDetails {

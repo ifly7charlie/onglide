@@ -43,6 +43,8 @@ export interface OfficialResult {
     trackerid: string; // current value in tracker.trackerid (or '')
     startUtc: Epoch;
     finishUtc: Epoch | null; // null for landout pilots (no recorded finish time)
+    /** Official scored distance, km (pilotresult.distance). null when the scorer has not recorded one (or recorded <= 0). Consumed only by the ogn-daemon cross-check. */
+    distanceKm: number | null;
     glidertype: string; // pilots.glidertype, '' when unset; used for the weak DDB aircraft_model match
     // Identity facets for cross-comp evidence (collection + scoring). Defaults
     // ('' / 0) when unset; the identity layer treats those as absent.
@@ -139,6 +141,15 @@ export interface FindTrackersOptions {
     maxGapSec?: number;
     /** Per-flarmid sliding reorder buffer (and stale-latency threshold). Default 20s. */
     reorderWindowSec?: number;
+    /**
+     * pev cylinder-start days: the scored start is credited inside the
+     * cylinder, so ring-edge crossing times carry no start information.
+     * When set, start crossings are excluded from candidate generation and
+     * from the withinTolerance/ambiguous classification (finish-anchored
+     * only); the start scan still runs so its packet stats feed the
+     * presence/coverage diagnostics.
+     */
+    excludeStartCrossings?: boolean;
     excludeFlarmids?: Set<FlarmID>;
     log?: (msg: string) => void;
     /**
@@ -201,12 +212,15 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     // each other can't be told apart on times alone — any flarmid matching
     // one will match the others within tolerance. Surface those groups up
     // front so the operator knows the ambiguity flags downstream are
-    // structural, not a tracker-quality issue.
-    const concurrentGroups = findConcurrentPilots(results, tolerance);
+    // structural, not a tracker-quality issue. With start crossings excluded
+    // (pev cylinder start) pilots are only distinguishable by finish, so
+    // finish proximity alone makes a group concurrent.
+    const excludeStartCrossings = opts.excludeStartCrossings ?? false;
+    const concurrentGroups = findConcurrentPilots(results, tolerance, excludeStartCrossings);
     const concurrentCompnos = new Set<Compno>();
     for (const group of concurrentGroups) {
         const labels = group.map((r) => String(r.compno)).join(', ');
-        log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on start and finish) — matches will be ambiguous: ${labels}`);
+        log(`⚠ ${group.length} pilots have identical official times (within ±${tolerance}s on ${excludeStartCrossings ? 'finish' : 'start and finish'}) — matches will be ambiguous: ${labels}`);
         for (const r of group) concurrentCompnos.add(r.compno);
     }
 
@@ -225,7 +239,7 @@ export async function findTrackerMatches(opts: FindTrackersOptions): Promise<Tra
     log(`finish scan: window ${Math.round((maxFinish - minFinish) / 60 + (2 * slack) / 60)} min`);
     const finishScan = await scanLine(finishTP, minFinish - slack, maxFinish + slack, 'finish', excludeFlarmids, log, debugFlarmids, finishWatch, maxGapSec, reorderWindowSec, expandedBbox);
 
-    return matchCrossings(results, startScan, finishScan, tolerance, concurrentCompnos);
+    return matchCrossings(results, startScan, finishScan, tolerance, concurrentCompnos, excludeStartCrossings);
 }
 
 interface FlarmState {
@@ -743,8 +757,13 @@ function bestPair(sList: Epoch[], fList: Epoch[], startUtc: Epoch, finishUtc: Ep
     return {ds: bestDS, df: bestDF, score: bestScore};
 }
 
-function matchCrossings(results: OfficialResult[], startScan: ScanResult, finishScan: ScanResult, tolerance: number, concurrentCompnos: Set<Compno>): TrackerMatch[] {
-    const startCrossings = startScan.crossings;
+function matchCrossings(results: OfficialResult[], startScan: ScanResult, finishScan: ScanResult, tolerance: number, concurrentCompnos: Set<Compno>, excludeStartCrossings = false): TrackerMatch[] {
+    // pev cylinder start: ring-edge crossing times carry no start
+    // information, so matching sees an empty start-crossing map - phase 1
+    // produces nothing and every finish crosser routes through the
+    // finish-only branch of phase 1.5. buildDiag still reads the start
+    // scan's packet stats, so presence/coverage diagnostics are unaffected.
+    const startCrossings: CrossingMap = excludeStartCrossings ? new Map() : startScan.crossings;
     const finishCrossings = finishScan.crossings;
     const flarmidsWithBoth: FlarmID[] = [];
     for (const f of startCrossings.keys()) {
@@ -788,10 +807,22 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
     }
 
     // Ambiguity is only meaningful for within-tolerance candidates.
-    // Computed BEFORE Phase 1.5 / Phase 2 so single-sided/assigned-only rows
-    // don't artificially mark a clean two-sided match as ambiguous.
-    for (const arr of perPilot.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
-    for (const arr of perFlarm.values()) if (arr.length > 1) arr.forEach((m) => (m.ambiguous = true));
+    // Normally computed BEFORE Phase 1.5 / Phase 2 so single-sided /
+    // assigned-only rows don't artificially mark a clean two-sided match as
+    // ambiguous. With start crossings excluded (pev cylinder start) the
+    // finish-anchored phase-1.5 rows ARE the candidate set, so the marking
+    // runs after phase 1.5 instead - still over withinTolerance rows only.
+    const markAmbiguity = () => {
+        for (const arr of perPilot.values()) {
+            const wt = arr.filter((m) => m.withinTolerance);
+            if (wt.length > 1) wt.forEach((m) => (m.ambiguous = true));
+        }
+        for (const arr of perFlarm.values()) {
+            const wt = arr.filter((m) => m.withinTolerance);
+            if (wt.length > 1) wt.forEach((m) => (m.ambiguous = true));
+        }
+    };
+    if (!excludeStartCrossings) markAmbiguity();
 
     // Phase 1.5 — single-sided matches: flarmids that crossed only start
     // (or only finish) within tolerance of a pilot's official time. Surfaces
@@ -804,6 +835,9 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
     // the within-tolerance auto-apply gate. Phase 2 below skips ids
     // already present here, so assigned single-sided cases route through
     // this phase rather than getting a confidence=null Phase 2 row.
+    // Exception: with start crossings excluded (pev cylinder start) a
+    // finish-anchored match IS the full available crossing evidence, so
+    // the finish-only branch marks those rows withinTolerance=true.
     const startOnlyFlarmids: FlarmID[] = [];
     const finishOnlyFlarmids: FlarmID[] = [];
     for (const f of startCrossings.keys()) if (!finishCrossings.has(f)) startOnlyFlarmids.push(f);
@@ -859,7 +893,7 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
                 confidence: Math.abs(df),
                 currentTrackerid: r.trackerid,
                 assigned: assignedIds.has(f),
-                withinTolerance: false,
+                withinTolerance: excludeStartCrossings,
                 ambiguous: false,
                 skipped: false,
                 bboxOnly: false,
@@ -869,6 +903,7 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
             listAppend(perFlarm, f, m);
         }
     }
+    if (excludeStartCrossings) markAmbiguity();
 
     // Phase 2 — for every pilot with a recorded trackerid, ensure there's a
     // row for each assigned id even if it falls outside tolerance (or has no
@@ -986,7 +1021,7 @@ function matchCrossings(results: OfficialResult[], startScan: ScanResult, finish
 // Group pilots whose (startUtc, finishUtc) are pairwise within 2×tolerance
 // on BOTH axes. Union-find over the "could-not-be-distinguished" relation;
 // returns groups of size ≥ 2.
-function findConcurrentPilots(results: OfficialResult[], tolerance: number): OfficialResult[][] {
+function findConcurrentPilots(results: OfficialResult[], tolerance: number, finishOnly = false): OfficialResult[][] {
     const n = results.length;
     if (n < 2) return [];
     const parent = Array.from({length: n}, (_, i) => i);
@@ -999,7 +1034,10 @@ function findConcurrentPilots(results: OfficialResult[], tolerance: number): Off
             // Landout pilots have null finishUtc — they can't be in a
             // structurally-concurrent group (no finish time to compare).
             if (a.finishUtc === null || b.finishUtc === null) continue;
-            if (Math.abs(a.startUtc - b.startUtc) <= limit && Math.abs(a.finishUtc - b.finishUtc) <= limit) {
+            // finishOnly (pev cylinder start - start crossings excluded):
+            // pilots are only distinguishable by finish, so finish proximity
+            // alone makes them concurrent.
+            if ((finishOnly || Math.abs(a.startUtc - b.startUtc) <= limit) && Math.abs(a.finishUtc - b.finishUtc) <= limit) {
                 parent[find(i)] = find(j);
             }
         }

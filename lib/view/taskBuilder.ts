@@ -14,7 +14,14 @@ const styleToDirection: Record<number, TaskLeg['direction']> = {
     3: 'pp'
 };
 
-export function buildTask(igcData: IGCData): {task: Task; geoJSON: ReturnType<typeof taskGeoJSON>} | null {
+export interface BuildTaskOptions {
+    /** Rebuild the start as an IGC PEV cylinder (SC3 Annex A 7.4.4) so the estimator can be exercised on any trace. */
+    forceCylinderStart?: boolean;
+    /** Start cylinder radius when forcing (km). Default 10. */
+    cylinderRadiusKm?: number;
+}
+
+export function buildTask(igcData: IGCData, options: BuildTaskOptions = {}): {task: Task; geoJSON: ReturnType<typeof taskGeoJSON>} | null {
     const {taskDeclaration, ozParams, taskParams, date} = igcData;
 
     if (!taskDeclaration || taskDeclaration.length < 2) {
@@ -81,6 +88,15 @@ export function buildTask(igcData: IGCData): {task: Task; geoJSON: ReturnType<ty
             length = turfDistance(from, to); // km
         }
 
+        if (isStart && options.forceCylinderStart) {
+            type = 'sector';
+            r1 = Math.max(r1, options.cylinderRadiusKm ?? 10);
+            a1 = 180;
+            r2 = 0;
+            a2 = 0;
+            direction = 'symmetrical';
+        }
+
         const trigraph = tp.name.substring(0, 3).toUpperCase() || `T${index}`;
 
         return {
@@ -125,6 +141,7 @@ export function buildTask(igcData: IGCData): {task: Task; geoJSON: ReturnType<ty
             nostartutc,
             aat: isAAT,
             dh: false,
+            pevStart: options.forceCylinderStart || undefined,
             handicapped: false,
             dm: undefined,
             maxHandicap: 100

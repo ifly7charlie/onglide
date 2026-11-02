@@ -208,7 +208,7 @@ async function installSgpTask(ctx: SourceCtx, classid: ClassId, task: any): Prom
         task_points: taskPoints
     };
 
-    const installed = await upsertTaskAndLegs(ctx.db, ctx.log, classid, SGP_CLASS_LABEL, day);
+    const installed = await upsertTaskAndLegs(ctx.db, ctx.log, classid, SGP_CLASS_LABEL, day, ctx.cylinderstarts);
     if (!installed) return;
 
     // The helper's contestday upsert leaves `script` empty. Legacy SGP

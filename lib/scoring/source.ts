@@ -32,6 +32,7 @@ export interface SourceCtx {
     url: string;
     tz: string; // IANA timezone, mirrored from competition.tz
     countrycode: string | null; // ISO alpha-2, mirrored from competition.countrycode
+    cylinderstarts: boolean; // mirrored from competition.cylinderstarts (Y = supports IGC cylinder/PEV starts)
     db: any; // serverless-mysql instance
     log: (msg: string, ...args: unknown[]) => void;
     // Per-source row from `scoringsource` — adapters may pluck extra fields

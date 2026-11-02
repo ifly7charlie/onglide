@@ -30,11 +30,16 @@ import type {API_ClassName_Pilots, API_ClassName_Pilots_PilotDetail} from '../li
 
 import {parseIGC, type IGCData} from '../lib/view/igcParser';
 import {buildTask} from '../lib/view/taskBuilder';
+import {rebaseTaskStart, type PreparedTask} from '../lib/view/apiTask';
+import {useApiTask} from '../lib/react/useApiTask';
 import {scoreIGCFlight} from '../lib/view/clientScoringPipeline';
+import {distHaversine} from '../lib/flightprocessing/taskhelper';
+import type {PilotScore} from '../lib/protobuf/onglide';
 import {dispatchClass, dispatchTask, dispatchTrack, dispatchScores, dispatchPilotStats, dispatchTimeRange} from '../lib/view/populateStore';
 import {setReferenceDate} from '../lib/flightprocessing/referenceDate';
 
 import {PilotList, Details} from '../lib/react/pilotlist';
+import {Sorting} from '../lib/react/sorting';
 import {getValidSortOrder} from '../lib/react/pilot-sorting';
 
 import * as React from 'react';
@@ -70,6 +75,62 @@ interface LoadedFlight {
     fileName: string;
     fixes: number;
     igcData: IGCData;
+}
+
+// Validation aid for the cylinder-start estimator: a PEV task with recorded
+// presses is scored from those presses, so to compare the estimator against
+// reality run a second pass with the presses stripped and log both starts.
+// Each press is also diagnosed (distance from the start point, gate, whether
+// TP1 was already turned) so a rejected press is explainable from the console.
+async function logPevEstimateComparison(task: any, igcData: IGCData, compno: Compno, handicap: number, finalScore: PilotScore | undefined) {
+    if (!task?.rules?.pevStart || !igcData.pevTimes.length) {
+        return;
+    }
+    const fmt = (t?: number) => (t ? new Date(t * 1000).toISOString().substring(11, 19) + ' UTC' : 'none');
+    const scoredStart = finalScore?.utcStart;
+    const tp1Time = finalScore?.legs?.[2]?.time;
+    const startLeg = task.legs[0];
+    // Same insideness primitive the scorer uses — a haversine-vs-radius check
+    // can disagree with the prepared sector near the boundary
+    const startPrepared = task.preparedLegs?.[0];
+    const insideStart = (p: {lat: number; lng: number}) => (startPrepared ? startPrepared.fromSector(p) === undefined : distHaversine(p, {lat: startLeg.nlat, lng: startLeg.nlng}) < startLeg.r1);
+    let pressScored = false;
+    for (const pevT of igcData.pevTimes) {
+        // The parser stamps pev on the credited fix — prefer it so the note
+        // describes the fix the scorer actually used
+        const fix = igcData.fixes.find((f) => f.pev && f.t >= pevT) ?? igcData.fixes.find((f) => f.t >= pevT);
+        const notes: string[] = [];
+        if (fix) {
+            const d = distHaversine(fix, {lat: startLeg.nlat, lng: startLeg.nlng});
+            notes.push(`${d.toFixed(1)}km from start point${insideStart(fix) ? '' : ` — outside the ${startLeg.r1}km cylinder, ignored`}`);
+        } else {
+            notes.push('no fix at press time');
+        }
+        if (pevT < task.rules.nostartutc) {
+            notes.push('before the gate, ignored');
+        }
+        if (tp1Time && pevT >= tp1Time) {
+            notes.push(`after TP1 (${fmt(tp1Time)}) — start already locked`);
+        }
+        if (fix && scoredStart && Math.abs(fix.t - scoredStart) <= 1) {
+            notes.push('THIS press is the scored start');
+            pressScored = true;
+        }
+        console.log(`  ${compno} PEV press ${fmt(pevT)}: ${notes.join('; ')}`);
+    }
+    try {
+        const stripped = igcData.fixes.map((f) => (f.pev ? {...f, pev: undefined} : f));
+        const {scores} = await scoreIGCFlight(task, stripped, compno, handicap, 0 as Epoch);
+        const estimatorScore = scores[scores.length - 1];
+        const estimated = estimatorScore?.utcStart;
+        const delta = (a?: number, b?: number, unit = '') => (a != null && b != null ? `${a} vs ${b}${unit} (delta ${Math.round((a - b) * 10) / 10}${unit})` : 'n/a');
+        console.log(
+            `${compno}: PEV scored start ${fmt(scoredStart)}${pressScored ? ' (recorded press)' : ' (NO press accepted — estimator/exit start)'}; estimator alone says ${fmt(estimated)}${estimated && scoredStart ? ` (delta ${estimated - scoredStart}s)` : ''}\n` +
+                `  distance: ${delta(finalScore?.actual?.taskDistance, estimatorScore?.actual?.taskDistance, 'km')}; speed: ${delta(finalScore?.actual?.taskSpeed, estimatorScore?.actual?.taskSpeed, 'kph')}`
+        );
+    } catch (e) {
+        console.log(`${compno}: PEV estimator comparison failed`, e);
+    }
 }
 
 function createViewStore() {
@@ -204,6 +265,22 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const [selectedCompno, setSelectedCompno] = useState<Compno | undefined>(undefined);
     const [replayTime, setReplayTime] = useState<Epoch | undefined>(undefined);
     const [taskOpen, setTaskOpen] = useState(false);
+    // Force the declared task's start into an IGC PEV cylinder so the start
+    // estimator can be eyeballed against any trace
+    const [cylinderStart, setCylinderStart] = useState(false);
+    const cylinderStartRef = useRef(cylinderStart);
+
+    // Task carried over from the live page (/viewer?className=X): fetched by
+    // the hook and seeded into taskRef below, so it is used instead of the
+    // IGC files' declared tasks
+    const apiTask = useApiTask();
+    const [taskSource, setTaskSource] = useState<'api' | 'igc' | null>(null);
+    const taskSourceRef = useRef(taskSource);
+    // geoJSON of the seeded API task — re-dispatched after the start-gate rebase
+    const apiTaskGeoJSONRef = useRef<PreparedTask['geoJSON'] | null>(null);
+    // epochBase of the first file processed (0 = none yet) — anchors the deck.gl
+    // time baseline and is the day a carried-over task's start gate is rebased to
+    const referenceEpochBaseRef = useRef<Epoch>(0 as Epoch);
 
     // Handicaps stored in localStorage, keyed by compno
     const [handicaps, setHandicaps] = useState<Record<string, number>>(() => {
@@ -236,6 +313,39 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
     const task = useSelector((state) => selectTask(state, VC));
 
     const taskRef = useRef<any>(null);
+
+    // Seed the carried-over task once fetched. Pre-seeding taskRef makes
+    // processFiles skip the C-record task build, so every loaded file scores
+    // against this task. Skipped if a dropped file built one while the fetch
+    // was in flight.
+    useEffect(() => {
+        if (!apiTask.seed || taskRef.current) {
+            return;
+        }
+        const {task, geoJSON} = apiTask.seed();
+        // Files dropped before the fetch resolved already anchored the
+        // reference date — bring the gate onto their day now
+        if (referenceEpochBaseRef.current) {
+            rebaseTaskStart(task, referenceEpochBaseRef.current);
+        }
+        apiTaskGeoJSONRef.current = geoJSON;
+        taskRef.current = task;
+        setTaskBuilt(true);
+        setTaskSource('api');
+        taskSourceRef.current = 'api';
+
+        dispatchClass(dispatch, Infinity as Epoch, 0 as Epoch);
+        dispatchTask(dispatch, task, geoJSON);
+
+        setViewport((v) => ({
+            ...v,
+            latitude: task.legs[0].nlat,
+            longitude: task.legs[0].nlng
+        }));
+        if (setOptions && options) {
+            setOptions({...options, zoomTask: true});
+        }
+    }, [apiTask.seed, dispatch, options, setOptions]);
 
     // Build synthetic pilots data for PilotList
     const pilots: API_ClassName_Pilots = useMemo(() => {
@@ -286,11 +396,33 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         fix.c = compno;
                     }
 
+                    // PEV presses from the flight recorder — the reference the
+                    // cylinder-start estimate is validated against
+                    if (igcData.pevTimes.length) {
+                        console.log(`${compno} (${file.name}): ${igcData.pevTimes.length} PEV event(s) at ${igcData.pevTimes.map((pt) => new Date(pt * 1000).toISOString().substring(11, 19)).join(', ')} UTC`, igcData.pevTimes);
+                    } else {
+                        console.log(`${compno} (${file.name}): no PEV events in IGC file`);
+                    }
+
+                    // Anchor deck.gl's Float32 time baseline to the first file
+                    // regardless of where the task came from, and move a
+                    // carried-over task's start gate onto that file's day —
+                    // both must happen before this file is scored/dispatched
+                    if (!referenceEpochBaseRef.current) {
+                        referenceEpochBaseRef.current = igcData.date.epochBase;
+                        setReferenceDate(igcData.date.epochBase);
+                        if (taskSourceRef.current === 'api' && taskRef.current) {
+                            rebaseTaskStart(taskRef.current, igcData.date.epochBase);
+                            dispatchTask(dispatch, taskRef.current, apiTaskGeoJSONRef.current);
+                        }
+                    }
+
                     if (!taskBuilt && !taskRef.current && igcData.taskDeclaration) {
-                        const result = buildTask(igcData);
+                        const result = buildTask(igcData, {forceCylinderStart: cylinderStartRef.current});
                         if (result) {
                             taskRef.current = result.task;
-                            setReferenceDate(igcData.date.epochBase);
+                            setTaskSource('igc');
+                            taskSourceRef.current = 'igc';
 
                             const earliest = igcData.fixes[0].t;
                             const latest = igcData.fixes[igcData.fixes.length - 1].t;
@@ -334,6 +466,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                             dispatchScores(dispatch, allScores);
                         }
                         dispatchPilotStats(dispatch, compno, stats);
+
+                        await logPevEstimateComparison(taskRef.current, igcData, compno, h, allScores[allScores.length - 1]);
 
                         // Use full fix range (not clipped) for the time slider
                         runningEarliest = Math.min(runningEarliest, igcData.fixes[0].t) as Epoch;
@@ -406,8 +540,19 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         setSelectedCompno(undefined);
         setReplayTime(undefined);
         setError(null);
+        referenceEpochBaseRef.current = 0 as Epoch;
         dispatchClass(dispatch, Infinity as Epoch, 0 as Epoch, true);
-    }, [dispatch]);
+        // A carried-over task survives reset — the URL means "viewer for this
+        // class's task". seed() prepares a fresh copy from the pristine raw
+        // JSON; the old working copy was mutated by the rebase and (re)scoring.
+        if (apiTask.seed) {
+            const {task, geoJSON} = apiTask.seed();
+            apiTaskGeoJSONRef.current = geoJSON;
+            taskRef.current = task;
+            setTaskBuilt(true);
+            dispatchTask(dispatch, task, geoJSON);
+        }
+    }, [dispatch, apiTask.seed]);
 
     const handleRescore = useCallback(async () => {
         if (!taskRef.current || flights.length === 0) return;
@@ -429,6 +574,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                     dispatchScores(dispatch, scores);
                 }
                 dispatchPilotStats(dispatch, flight.compno, stats);
+
+                await logPevEstimateComparison(taskRef.current, flight.igcData, flight.compno, h, scores[scores.length - 1]);
             }
         } catch (e) {
             setError(e instanceof Error ? e.message : t('viewer.error_rescoring'));
@@ -466,14 +613,46 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
         handleRescore();
     }, [handicaps, handleRescore]);
 
+    // Rebuild the task with/without the forced PEV cylinder start and rescore.
+    // The task must be rebuilt from the declaration — calculateTask mutates leg
+    // lengths destructively, so the existing task object can't be re-derived.
+    const handleCylinderStartToggle = useCallback(
+        (enabled: boolean) => {
+            setCylinderStart(enabled);
+            cylinderStartRef.current = enabled;
+            const declared = flights.find((f) => (f.igcData.taskDeclaration?.length ?? 0) >= 2);
+            if (!declared) {
+                return;
+            }
+            const result = buildTask(declared.igcData, {forceCylinderStart: enabled});
+            if (result) {
+                taskRef.current = result.task;
+                dispatchTask(dispatch, result.task, result.geoJSON);
+                handleRescore();
+            }
+        },
+        [dispatch, flights, handleRescore]
+    );
+
     const fitBounds = useCallback(() => {
         if (options) {
             setOptions({...options, zoomTask: true});
         }
     }, [options, setOptions]);
 
+    const setSort = useCallback(
+        (key: any) => {
+            setOptions({...options, sortKey: key});
+        },
+        [options, setOptions]
+    );
+
     const hasFlights = flights.length > 0;
     const hasPilots = Object.keys(pilots).length > 0;
+    // Handicapping is implicit in the viewer: it's on as soon as the user
+    // assigns any non-100 handicap, which also selects the handicapped sort keys.
+    const handicapped = Object.keys(handicaps).length > 0;
+    const sortOrder = getValidSortOrder(viewOptions?.sortKey ?? 'auto', handicapped);
 
     if (!options) {
         return (
@@ -497,6 +676,10 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                 >
                     <FontAwesomeIcon icon={faFileArrowUp} size="3x" style={{opacity: 0.3, marginBottom: 16}} />
                     <p style={{fontSize: '1.2rem', opacity: 0.6}}>{t('viewer.drop_or_browse')}</p>
+                    {apiTask.state === 'loading' ? <p style={{opacity: 0.6}}>{t('viewer.task_loading')}</p> : null}
+                    {apiTask.state === 'loaded' && task ? <p style={{opacity: 0.8}}>{t('viewer.task_loaded', {classname: task.details.classname, distance: task.details.distance})}</p> : null}
+                    {apiTask.state === 'none' ? <p style={{opacity: 0.6}}>{t('viewer.task_none', {classname: apiTask.className})}</p> : null}
+                    {apiTask.state === 'error' ? <p style={{color: 'red'}}>{t('viewer.task_fetch_failed', {classname: apiTask.className})}</p> : null}
                     {processing && <p>{t('viewer.processing')}</p>}
                     {error && <p style={{color: 'red'}}>{error}</p>}
                 </div>
@@ -554,6 +737,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                             <FontAwesomeIcon icon={taskOpen ? faCaretUp : faCaretDown} />
                                         </button>
                                     </h5>
+                                    {taskSource === 'api' ? <p style={{fontSize: '0.8em', opacity: 0.7, margin: '0.25em 0'}}>{t('viewer.task_from_live', {classname: task.details.classname})}</p> : null}
                                     {taskOpen ? (
                                         <div id="view-task-collapse">
                                             <table className="legs-mini" style={{marginBottom: 0}}>
@@ -579,6 +763,11 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                                     ))}
                                                 </tbody>
                                             </table>
+                                            {taskSource !== 'api' ? (
+                                                <label style={{display: 'block', marginTop: '0.5em'}} title={t('viewer.cylinder_start_hint')}>
+                                                    <input type="checkbox" checked={cylinderStart} onChange={(e) => handleCylinderStartToggle(e.target.checked)} /> {t('viewer.cylinder_start')}
+                                                </label>
+                                            ) : null}
                                         </div>
                                     ) : null}
                                 </div>
@@ -587,6 +776,7 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                         <div className="sidepanel-body">
                             {hasPilots && (
                                 <div className="sidepanel-section">
+                                    <Sorting setSort={setSort} sortOrder={sortOrder} handicapped={handicapped} />
                                     <PilotList
                                         key="pilotList"
                                         pilots={pilots}
@@ -596,7 +786,8 @@ function ViewPageInner({options, setOptions}: {options: OptionsType; setOptions:
                                         live={false}
                                         tz={TZ_DEFAULT}
                                         options={viewOptions}
-                                        sortOrder={getValidSortOrder(viewOptions.sortKey ?? 'auto', Object.keys(handicaps).length > 0)}
+                                        sortOrder={sortOrder}
+                                        vertical
                                     />
                                 </div>
                             )}
