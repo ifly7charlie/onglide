@@ -16,7 +16,7 @@ yarn build              # protobuf + tsc for daemons (run before bin/* scripts)
 yarn build:protobuf     # only the .proto -> ts regen
 yarn dev                # next dev (webpack mode)
 yarn ogn                # OGN/APRS daemon (frontends connect via its websocket)
-yarn ssscrape           # data sync daemon: drives SoaringSpot OAuth API, HTML scrape, SGP, and RST sources
+yarn ssscrape           # data sync daemon: drives SoaringSpot OAuth API, HTML scrape, SGP, sgpaero, and RST sources
 yarn ogn:dev            # tsc-watch + node --inspect (auto-restarts on rebuild)
 yarn ssscrape:dev       # same pattern for the scoring scraper
 yarn test               # vitest run (test/**/*.test.ts)
@@ -49,7 +49,7 @@ Both the CLI and the test share `bin/checktranslations.js` (ESM, dependency-free
 This is a soaring-competition tracking platform. The repo runs as **two cooperating processes** that share a MySQL DB:
 
 1. **`bin/ogn.ts`** — long-running daemon that subscribes to the OGN APRS feed, scores every pilot in real time, and exposes a websocket (`ws://…:8080`) to browsers. Owns all scoring state in-process.
-2. **`bin/ssscrape.ts`** — the scoring scraper daemon. Runs the scheduler in `lib/scoring/scheduler.ts`, which drives every registered `ScoringSource` adapter: SoaringSpot OAuth API, SoaringSpot HTML scrape, SGP, RST (rst-online.se HTML scrape), and robocontrol (tracker-only). The choice of primary upstream is per-competition via a row in `scoringsource`; robocontrol rows are orthogonal and coexist with the primary.
+2. **`bin/ssscrape.ts`** — the scoring scraper daemon. Runs the scheduler in `lib/scoring/scheduler.ts`, which drives every registered `ScoringSource` adapter: SoaringSpot OAuth API, SoaringSpot HTML scrape, SGP (legacy glidertracking.fai.org JSON), sgpaero (crosscountry.aero REST API), RST (rst-online.se HTML scrape), and robocontrol (tracker-only). The choice of primary upstream is per-competition via a row in `scoringsource`; robocontrol rows are orthogonal and coexist with the primary.
 3. **Next.js (`pages/`)** — front-end. Reads competition metadata via `getServerSideProps` (direct DB), then connects to the OGN daemon's websocket for live tracks + scores. Almost no API routes; live state flows over the websocket, not REST.
 
 ### Front-end → daemon channel
@@ -71,14 +71,14 @@ Tracks are not streamed per-position. They're bulk-broadcast via `generateRecent
 - `_live` handler in `sendScore` — channel scoring transitions to live
 - `finaliseTracksBroadcast` — after `updateTrackers` when new pilots were configured this tick
 
-`generateRecentPilotTracks` first calls `generateHistoricalTracks`, which (every ~5 min, or whenever `channel.webPathBaseTime` is 0) freezes the prior window into `channel.webPathData[now]` and bumps `webPathBaseTime = now`. The frozen snapshot is served from RAM at `/tracks/{CLASS}{DATECODE}.{baseTime}.bin` (`Cache-Control: immutable max-age=300`). The websocket message carries only the delta past the snapshot plus the current `baseTime`.
+`generateRecentPilotTracks` first calls `generateHistoricalTracks`, which (every ~5 min, or whenever `channel.webPathBaseTime` is 0) freezes the prior window into `channel.webPathData[now]` and bumps `webPathBaseTime = now`. The frozen snapshot is served from RAM at `/tracks/{CLASS}{DATECODE}.{baseTime}/{scoreId}.bin` (`Cache-Control: public, max-age=300, immutable, stale-while-revalidate=30`); the `{scoreId}` segment is a client-side cache-buster — the server route ignores it (see `oldTracksUrl` in `lib/react/fixupUrls.ts`). The websocket message carries only the delta past the snapshot plus the current `baseTime`.
 
 Client reconciliation (`lib/redux/tracksSlice.ts`):
 - `baseTime === 0` in the message → erase existing decks, apply residual inline (no HTTP fetch).
 - `baseTime > 0` → fetch the snapshot URL (its internal `baseTime: 0` triggers erase), then apply the residual delta.
-- `trackVersion` (random uint32 stamped on each `initialiseDeck`) is the *per-pilot* equivalent: mismatch triggers a per-pilot deck rebuild regardless of `baseTime`. Only changes when the deck is rebuilt from scratch — first pilot setup (`ogn.ts:1961`) or a `message.t == 0` reset from the scoring worker (`ogn.ts:2964`). It does **not** change on rescore, `_live`, or `utcStart` changes.
+- `trackVersion` (random uint32 stamped on each `initialiseDeck`) is the *per-pilot* equivalent: mismatch triggers a per-pilot deck rebuild regardless of `baseTime`. Only changes when the deck is rebuilt from scratch — first pilot setup (`initialiseDeck` in the new-glider branch of `updateTrackers`) or a `message.t == 0` reset from the scoring worker (both in `bin/ogn.ts`). It does **not** change on rescore, `_live`, or `utcStart` changes.
 
-`primeAndBroadcast(channel, label)` wraps `generateRecentPilotTracks` for all-clients broadcasts: before sending, it fires a self-GET via `NEXT_PUBLIC_HISTORY_HOST || NEXT_PUBLIC_SITEURL` (1s timeout, best-effort) to warm the upstream proxy/CDN cache so concurrent client fetches hit warm. Single-client sends skip the prime.
+`primeAndBroadcast(channel, label)` wraps `generateRecentPilotTracks` for all-clients broadcasts: before sending, it fires a self-GET via `NEXT_PUBLIC_HISTORY_HOST || NEXT_PUBLIC_SITEURL` (1s timeout, best-effort) against the tracks snapshot URL — and the `/stats/` snapshot when one is frozen — to warm the upstream proxy/CDN cache so concurrent client fetches hit warm. Single-client sends skip the prime.
 
 Convention: deferred channel-level work uses a `*Required` boolean on `Channel`, consumed by a `finalise*` function called from `tickCompetitionTrackersAndTasks` — see `scoreIdUpdateRequired`/`finaliseScoreId` and `tracksBroadcastRequired`/`finaliseTracksBroadcast`.
 
@@ -98,7 +98,7 @@ APRS (broadcast channel, per ClassName_Compno)
   → taskpositiongenerator    (which leg / sector / start / finish)
   → racingScoringGenerator | assignedAreaScoringGenerator
   → taskScoresGenerator
-  → scoreCollector (everysooftengenerator throttles fan-out)
+  → scoreCollector (posts only changed scores — scoreChanged dedupe)
   → broadcast channel (per ClassName) → websocket clients
 ```
 
@@ -108,14 +108,14 @@ Generators in `lib/webworkers/` receive a `log` parameter; **use it, not `consol
 
 ### Scoring sources (data-sync adapters)
 
-`lib/scoring/scheduler.ts` runs a 60-second heartbeat in competition-local time and decides what's due to fetch. Each upstream — SoaringSpot OAuth, SoaringSpot scrape, SGP, RST, and robocontrol — implements the `ScoringSource` interface in `lib/scoring/source.ts` and hands parsed records to the shared helpers in `lib/scoring/shared/` (pilots, tasks, classes, airfield, trackers). The adapter knows nothing about timing; the scheduler knows nothing about HTTP. RST (`lib/scoring/sources/rst.ts`) is a full pilots+tasks+results adapter with no live tracker feed; it configures via a `scoringsource` row of `type='rst'` with `url` + `contest_name` (the contest_name is a case-insensitive regex selecting the page's tabbed panel, its first capture group naming the class). Adding a new upstream = new file under `lib/scoring/sources/` registered in `bin/ssscrape.ts`.
+`lib/scoring/scheduler.ts` runs a 60-second heartbeat in competition-local time and decides what's due to fetch. Each upstream — SoaringSpot OAuth, SoaringSpot scrape, SGP, sgpaero, RST, and robocontrol — implements the `ScoringSource` interface in `lib/scoring/source.ts` and hands parsed records to the shared helpers in `lib/scoring/shared/` (pilots, tasks, classes, airfield, trackers). The adapter knows nothing about timing; the scheduler knows nothing about HTTP. RST (`lib/scoring/sources/rst.ts`) is a full pilots+tasks+results adapter with no live tracker feed; it configures via a `scoringsource` row of `type='rst'` with `url` + `contest_name` (the contest_name is a case-insensitive regex selecting the page's tabbed panel, its first capture group naming the class). Adding a new upstream = new file under `lib/scoring/sources/` registered in `bin/ssscrape.ts`.
 
 **Four independent streams per heartbeat.** The scheduler dispatches pilots, tasks, results, and trackers separately, each on its own cadence and gate:
 
 - **pilots** — daily 10:00 local gate, plus urgent path when the comp is active but the DB is empty.
-- **tasks** — per-class cadence via `desiredTaskCadence`: FAST (10 min) while pre-task or status='L'; SLOW (30 min) for briefed-pre-launch or post-start; stops once every today-class is F/H/Z or past its `30m + 1m × pilotsInClass` post-launch window. Stop at 22:00 local. An adapter may set `activeTasksCadenceMs` to override the L/S cadence — SGP uses 60 s because its task+tracks JSON is cheap and the L→S `nostart` rewrite (start-line time) needs to land in seconds. The "fast"/"slow" reason labels were replaced by `formatCadence` (e.g. `1m`, `10m`, `30m`).
+- **tasks** — per-class cadence via `desiredTaskCadence`: FAST (10 min) while pre-task or status='L'; SLOW (30 min) for briefed-pre-launch or post-start; stops once every today-class is F/H/Z or past its `30m + 1m × pilotsInClass` post-launch window. Stop at 22:00 local. An adapter may set `activeTasksCadenceMs` to override the L/S cadence — SGP and sgpaero use 60 s because their task+tracks JSON is cheap and the L→S `nostart` rewrite (start-line time) needs to land in seconds. The "fast"/"slow" reason labels were replaced by `formatCadence` (e.g. `1m`, `10m`, `30m`).
 - **results** — gated on the sticky `everFOrHToday` (any class today has hit `'F'` or `'H'`) OR `localNow >= 18:00`. SLOW (30 min) cadence until 22:00.
-- **trackers** — per-adapter `trackerIntervalMs` (SGP 5 min, OAuth/robocontrol 15 min) between 10:00 and 22:00; drops to hourly once every non-`'Z'` today-class is `'F'` or `'H'`. Adapters that don't expose `fetchTrackers` are skipped. SGP's `fetchTrackers` installs the task from the same JSON payload it already pulls for pilots/trackers — so the 5-min trackers cadence picks up tasks for free, and the separate tasks-cadence GET is only the extra polling above that.
+- **trackers** — per-adapter `trackerIntervalMs` (SGP/sgpaero 5 min, OAuth/robocontrol 15 min) between 10:00 and 22:00; drops to hourly once every non-`'Z'` today-class is `'F'` or `'H'`. Adapters that don't expose `fetchTrackers` are skipped. SGP's and sgpaero's `fetchTrackers` install the task from the same JSON payload they already pull for pilots/trackers — so the 5-min trackers cadence picks up tasks for free, and the separate tasks-cadence GET is only the extra polling above that.
 
 On daemon startup `initSourceState` jitters the first per-stream fetch over `STARTUP_JITTER_MS` (5 min). The 30-min `oneSidedJitter` is reserved for "tomorrow at HH:MM local" parking — using it for first-fetch would swallow the entire FAST tasks cadence on a restart during launch.
 
@@ -129,9 +129,9 @@ Each `ClassObservation` carries `laststatuschange` (UTC epoch ms, from `compstat
 
 ### Task geometry
 
-`lib/flightprocessing/taskhelper.ts` (`calculateTask`) builds the in-memory `Task` (turnpoints with prepared line/sector geometry). `PreparedTurnpoint.hasCrossed(prev, pos)` is the line-crossing primitive used everywhere — including `findtrackers`, scoring, and the AAT max-distance graph. `taskBbox` produces the APRS pre-filter bbox.
+`lib/flightprocessing/taskhelper.ts` (`calculateTask`) builds the in-memory `Task` (turnpoints with prepared line/sector geometry). `PreparedTurnpoint.hasCrossed(prev, pos)` is the line-crossing primitive used everywhere — including `findtrackers`, scoring, and the AAT max-distance graph. `taskBbox` (`lib/flightprocessing/taskBbox.ts`) produces the APRS pre-filter bbox.
 
-AAT (Assigned Area Task) optimal-distance computation uses a Dijkstra-style graph in `lib/flightprocessing/dijkstras.ts` + `computeOptimalGrid.ts` and is visualised through `lib/react/optimalDirection.ts` / `optimalGridLayers.tsx`. Active refactor in flight on the `all_of_it` branch (see memory).
+AAT (Assigned Area Task) optimal-distance computation uses a Dijkstra-style graph in `lib/flightprocessing/dijkstras.ts` + `computeOptimalGrid.ts` and is visualised through `lib/react/optimalDirection.ts` / `optimalGridLayers.tsx`.
 
 ### findtrackers / matchtrackers
 
@@ -145,7 +145,7 @@ Vector basemap is a single self-hosted `.pmtiles` file served over HTTP range re
 
 - `dist/` is the build output for daemons — don't edit it. `nextdest/` is similar for the front-end type-check pass.
 - Emacs leaves `*~` and `#…#` backup files alongside their real counterparts; `.gitignore` excludes them so they never make it into commits.
-- `.aprs` files at the repo root are recorded APRS logs used for replay/testing (large — `476.aprs` is ~230 MB).
+- `.aprs` files at the repo root are recorded APRS logs used for replay/testing. They are gitignored (`*aprs`) and local-only — which ones exist (and their size, sometimes hundreds of MB) varies by machine.
 - The Next.js version pinned here **is not safe to expose directly** — always run behind Apache/Cloudflare (see `readme.md`).
 - `readme.md` (lowercase) is the operator's deployment guide. It documents env vars (`NEXT_PUBLIC_PMTILES_URL`, `MYSQL_PASSWORD`, `SOARINGSPOT_*`, `ROBOCONTROL_URL`, etc.), Planetiler invocations for pmtiles, and the docker-compose topology (`mysql`, `soaringspot`, `ogn`, `next`, `apache`).
 
