@@ -464,6 +464,19 @@ async function listenWithRetry(server: http.Server | https.Server, port: number,
     }
 }
 
+// Open the append-mode user-interaction log, shared across all comps for the
+// lifetime of the process. Filename uses the first active comp's datecode for
+// continuity with the old single-comp layout. No-op once open, and while the
+// database holds only upcoming comps there is nothing to name it after - the
+// first reconcile tick that starts a context opens it.
+async function ensureUserLogStream() {
+    if (userLogStream) return;
+    const first = Object.values(contexts)[0];
+    if (!first) return;
+    const datecode = await getDCode(first);
+    userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${first.internalName}-${datecode}.txt`, {flags: 'a'});
+}
+
 async function main() {
     if (error) {
         console.log('New install: no configuration found, or script not being run in the root directory');
@@ -535,12 +548,16 @@ async function main() {
     aprsController = new AprsController({airfields: []});
     aprsController.onWorkerEvent = handleAprsWorkerEvent;
 
-    // Wait until we can see at least one competition before we start the
-    // web server. After that the discovery loop runs on the 60s tick and
-    // adds or removes comps as the DB changes.
-    while (Object.keys(contexts).length === 0) {
+    // Wait until we can see at least one competition - active OR upcoming -
+    // before we start the web server. An upcoming-only database is still a
+    // serviceable /all feed (the landing page shows those comps with
+    // displayStatus='upcoming'), so it must not hold the listener closed.
+    // After that the discovery loop runs on the 60s tick and adds or removes
+    // comps as the DB changes.
+    const nothingDiscovered = () => Object.keys(contexts).length === 0 && Object.keys(upcomingComps).length === 0;
+    while (nothingDiscovered()) {
         await reconcileContexts();
-        if (Object.keys(contexts).length === 0) {
+        if (nothingDiscovered()) {
             console.log('waiting for an eligible competition to appear in the database');
             await setTimeoutPromise(60000);
         }
@@ -559,14 +576,7 @@ async function main() {
     }
     rebuildAprsFilter();
 
-    // Open an append-mode log shared across all comps for the lifetime of
-    // the process. Filename uses the first active comp's datecode for
-    // continuity with the old single-comp layout.
-    {
-        const first = Object.values(contexts)[0];
-        const datecode = await getDCode(first);
-        userLogStream = createWriteStream(`${process.env.DB_PATH ?? './db/'}user-log.${first.internalName}-${datecode}.txt`, {flags: 'a'});
-    }
+    await ensureUserLogStream();
 
     // Phase 3: load trackers + tasks per comp, then rebuild the APRS
     // filter so it picks up task bboxes. The rebuild's lastAprsFilter
@@ -980,6 +990,9 @@ async function main() {
     // the APRS filter once across all comps.
     setInterval(async function () {
         await reconcileContexts();
+        // Covers the upcoming-only startup case: the log can only be named
+        // once a context exists.
+        await ensureUserLogStream();
         for (const competition of Object.values(contexts)) {
             try {
                 await tickCompetition(competition);
