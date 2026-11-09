@@ -15,7 +15,12 @@ export const SATELLITE_ATTRIBUTION = 'Sentinel-2 cloudless 2024 by <a href="http
 const HAS_SPLIT_LABELS = PMTILES_LABELS_URL && PMTILES_LABELS_URL !== PMTILES_URL;
 export const LABELS_SOURCE = HAS_SPLIT_LABELS ? 'openmaptiles_labels' : 'openmaptiles';
 // Self-hosted glyph atlases (SDF PBFs) for Atkinson Hyperlegible Next — the same UI typeface.
-// See README "Map fonts" for the one-time generation step with font-maker.
+// See README "Map fonts" for the one-time generation step with fontnik. The font
+// itself only covers 347 codepoints; the rest of the Latin letters the labels
+// need are composited from its own bases and marks by "yarn glyphs:fill"
+// (bin/checkglyphs.js). Labels prefer OpenMapTiles' name:latin over the raw OSM
+// name where it exists -- a selection among existing name tags, not a
+// transliteration, so it is a no-op for names that are already latin.
 const GLYPHS_URL = process.env.NEXT_PUBLIC_GLYPHS_URL || '/fonts/glyphs/{fontstack}/{range}.pbf';
 
 const FONT_REGULAR = ['Atkinson Hyperlegible Next Regular'];
@@ -411,7 +416,7 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['in', 'class', 'motorway', 'trunk', 'primary'],
                 layout: {
                     'symbol-placement': 'line',
-                    'text-field': ['coalesce', ['get', 'ref'], ['get', 'name']],
+                    'text-field': ['coalesce', ['get', 'ref'], ['get', 'name:latin'], ['get', 'name']],
                     'text-size': 11,
                     'text-font': FONT_REGULAR
                 },
@@ -425,7 +430,7 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['==', ['geometry-type'], 'LineString'],
                 minzoom: 8,
                 layout: {
-                    'text-field': ['get', 'name'],
+                    'text-field': ['coalesce', ['get', 'name:latin'], ['get', 'name']],
                     'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 13],
                     'text-font': FONT_ITALIC,
                     'symbol-placement': 'line'
@@ -440,7 +445,7 @@ export function buildMapStyle(): StyleSpecification {
                 filter: ['==', ['geometry-type'], 'Point'],
                 minzoom: 8,
                 layout: {
-                    'text-field': ['get', 'name'],
+                    'text-field': ['coalesce', ['get', 'name:latin'], ['get', 'name']],
                     'text-size': ['interpolate', ['linear'], ['zoom'], 8, 10, 14, 13],
                     'text-font': FONT_ITALIC,
                     'symbol-placement': 'point'
@@ -457,7 +462,7 @@ export function buildMapStyle(): StyleSpecification {
                     'icon-image': 'airport',
                     'icon-anchor': 'bottom',
                     'icon-allow-overlap': true,
-                    'text-field': ['case', ['has', 'icao'], ['concat', ['get', 'name'], ' (', ['get', 'icao'], ')'], ['get', 'name']],
+                    'text-field': ['case', ['has', 'icao'], ['concat', ['coalesce', ['get', 'name:latin'], ['get', 'name']], ' (', ['get', 'icao'], ')'], ['coalesce', ['get', 'name:latin'], ['get', 'name']]],
                     'text-size': 11,
                     'text-anchor': 'top',
                     'text-offset': [0, 0.4],
@@ -477,11 +482,11 @@ export function buildMapStyle(): StyleSpecification {
                     'icon-allow-overlap': false,
                     'text-field': [
                         'case',
-                        ['all', ['has', 'ele'], ['!=', ['coalesce', ['get', 'name'], ''], '']],
-                        ['concat', ['get', 'name'], '\n', ['get', 'ele'], 'm'],
+                        ['all', ['has', 'ele'], ['!=', ['coalesce', ['get', 'name:latin'], ['get', 'name'], ''], '']],
+                        ['concat', ['coalesce', ['get', 'name:latin'], ['get', 'name']], '\n', ['get', 'ele'], 'm'],
                         ['has', 'ele'],
                         ['concat', ['get', 'ele'], 'm'],
-                        ['coalesce', ['get', 'name'], '']
+                        ['coalesce', ['get', 'name:latin'], ['get', 'name'], '']
                     ],
                     'text-size': 10,
                     'text-anchor': 'top',
@@ -497,7 +502,7 @@ export function buildMapStyle(): StyleSpecification {
                 'source-layer': 'place',
                 filter: ['in', 'class', 'city', 'town'],
                 layout: {
-                    'text-field': '{name}',
+                    'text-field': ['coalesce', ['get', 'name:latin'], ['get', 'name']],
                     'text-size': ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 16],
                     'text-anchor': 'center',
                     'text-font': FONT_BOLD
@@ -512,7 +517,7 @@ export function buildMapStyle(): StyleSpecification {
                 minzoom: 10,
                 filter: ['in', 'class', 'village', 'suburb', 'hamlet'],
                 layout: {
-                    'text-field': '{name}',
+                    'text-field': ['coalesce', ['get', 'name:latin'], ['get', 'name']],
                     'text-size': ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 13],
                     'text-anchor': 'center',
                     'text-font': FONT_REGULAR
@@ -538,7 +543,7 @@ export function buildMapStyle(): StyleSpecification {
                     'icon-size': ['interpolate', ['linear'], ['zoom'], 10, ['match', ['get', 'class'], 'wind_turbine', 0.7, 0.5], 16, ['match', ['get', 'class'], 'wind_turbine', 1.4, 1]],
                     'icon-anchor': 'bottom',
                     'icon-allow-overlap': false,
-                    'text-field': ['step', ['zoom'], '', 12, ['get', 'name']],
+                    'text-field': ['step', ['zoom'], '', 12, ['coalesce', ['get', 'name:latin'], ['get', 'name']]],
                     'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 16, 13],
                     'text-font': FONT_REGULAR,
                     'text-anchor': 'top',

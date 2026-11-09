@@ -200,7 +200,7 @@ docker run --rm \
   ghcr.io/onthegomap/planetiler:latest \
   --download --area=europe \
   --exclude-layers=poi,housenumber \
-  --languages=en,de,fr,es,it,pl,cs,nl,sv,fi \
+  --languages=cs,da,de,en,es,fi,fr,hu,it,nb,nl,pl,sk,sl,sv \
   --output=/data/europe.pmtiles
 ```
 
@@ -261,7 +261,7 @@ docker run --rm \
   ghcr.io/onthegomap/planetiler:latest \
   --download --area=europe \
   --exclude-layers=poi,housenumber,place,water_name,transportation_name,aerodrome_label,mountain_peak \
-  --languages=en,de,fr,es,it,pl,cs,nl,sv,fi \
+  --languages=cs,da,de,en,es,fi,fr,hu,it,nb,nl,pl,sk,sl,sv \
   --output=/data/europe-base.pmtiles
 
 # Labels only — ~1-2 GB for Europe
@@ -271,7 +271,7 @@ docker run --rm \
   ghcr.io/onthegomap/planetiler:latest \
   --download --area=europe \
   --exclude-layers=poi,housenumber,water,waterway,landcover,landuse,park,aeroway,building,transportation,boundary \
-  --languages=en,de,fr,es,it,pl,cs,nl,sv,fi \
+  --languages=cs,da,de,en,es,fi,fr,hu,it,nb,nl,pl,sk,sl,sv \
   --output=/data/europe-labels.pmtiles
 ```
 
@@ -312,6 +312,36 @@ in `text-font`; it must exactly match the names in the `FONT_REGULAR`, `FONT_BOL
 Atkinson Hyperlegible Next OTFs are a free download from Braille Institute, or from
 the [Google Fonts repo](https://github.com/googlefonts/atkinson-hyperlegible-next).
 The `.woff2` files in `public/fonts/` are for the UI (CSS only) and not usable here.
+
+**Run `yarn glyphs:fill` after any `build-glyphs` run.** The Atkinson OTFs only
+contain **347 codepoints** - Western and Central European Latin. They are missing 37
+of the 128 Latin Extended-A letters, including U+014C / U+014D (O with macron, needed
+for Māori place names such as Ōpunake and Taupō), U+0156 / U+0157 (Latvian) and
+U+014A / U+0166 (Sami). MapLibre cannot fall back per glyph: with a `glyphs` URL set,
+`text-font` is joined into a single fontstack name, and the ranges the font does not
+cover are still served as valid-but-empty protobufs, so a missing letter renders as
+blank space with no error in the console.
+
+`yarn glyphs:fill` (`bin/checkglyphs.js`) closes that gap without adding a second
+font. Every target codepoint whose Unicode NFD decomposition is a base letter plus
+combining marks the font already has is composited from those pieces, so the result
+stays in the one typeface under the one licence. Placement is measured from the
+composites the font already ships rather than assumed, and a rule is only used if
+replaying it reproduces those shipped glyphs - `yarn glyphs:check` reports the worst
+residual, and `test/glyphs.test.ts` fails the build if a required codepoint goes
+missing or a rule stops reproducing. Marks the designer drew as a special form rather
+than a plain overlay (the ring of U+00C5, the caron of U+013D) are reported and left
+alone.
+
+This reaches extended Latin only. **Greek and Cyrillic are deliberately not covered**
+- they decompose into bases this font does not have, so no amount of compositing
+reaches them. Non-Latin place names fall back to OpenMapTiles' `name:latin` where OSM
+happens to carry a Latin name tag, and otherwise still render blank. Covering them
+would mean adding a second, wider font stack.
+
+Note the deck.gl text layers (gaggle counts, thermal pills, globe competition labels)
+do not use these atlases at all - they build their own glyphs from a browser canvas
+with `characterSet: 'auto'`, so they are unaffected by any of the above.
 
 SoaringSpot OAuth API credentials no longer come from `.env` — they live
 in the `scoringsource` table per competition. Insert one row of

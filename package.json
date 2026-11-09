@@ -26,7 +26,9 @@
         "test:watch": "vitest",
         "maplibre:worker": "mkdir -p public/maplibre && cp node_modules/maplibre-gl/dist/maplibre-gl-worker.mjs node_modules/maplibre-gl/dist/maplibre-gl-shared.mjs public/maplibre/",
         "i18n:check": "node bin/checktranslations.js",
-        "i18n:fill": "node bin/checktranslations.js --fill"
+        "i18n:fill": "node bin/checktranslations.js --fill",
+        "glyphs:check": "node bin/checkglyphs.js",
+        "glyphs:fill": "node bin/checkglyphs.js --fill"
     },
     "dependencies": {
         "@mapbox/tilebelt": ">=1.0.1",
